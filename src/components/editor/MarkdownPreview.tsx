@@ -1,20 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 interface MarkdownPreviewProps {
   markdown: string;
+  scrollRatio?: number;
   className?: string;
 }
 
 export default function MarkdownPreview({
   markdown,
+  scrollRatio,
   className,
 }: MarkdownPreviewProps) {
   // 渲染结果，初始为空字符串。
   // 初次挂载时预览区域显示空白，不闪"(empty)"之类的占位文字，
   // 等第一次 renderMarkdown 完成后再显示内容。
   const [renderedHtml, setRenderedHtml] = useState("");
+
+  // 滚动容器的 DOM 引用，用于程序化设置 scrollTop
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // ── 竞态条件（race condition）防御 ────────────────────────────────────
@@ -40,9 +45,21 @@ export default function MarkdownPreview({
     };
   }, [markdown]); // markdown 每次变化都重新渲染
 
+  // 编辑器滚动比例变化、或 HTML 重新渲染后同步预览位置
+  // scrollRatio 为 undefined 时（初次挂载）跳过，避免奇怪跳动
+  // renderedHtml 加入依赖：HTML 渲染完 scrollHeight 才稳定，渲染后需重新对齐
+  useEffect(() => {
+    if (scrollRatio === undefined) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return;
+    el.scrollTop = scrollRatio * max;
+  }, [scrollRatio, renderedHtml]);
+
   return (
     // 外层容器：支持 className 覆盖，负责滚动
-    <div className={cn("h-full w-full overflow-auto", className)}>
+    <div ref={containerRef} className={cn("h-full w-full overflow-auto", className)}>
       {/*
        * dangerouslySetInnerHTML 说明：
        * 这里的 HTML 来自我们自己的 unified 管线（remark → rehype → HTML），

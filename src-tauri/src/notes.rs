@@ -1,3 +1,9 @@
+//! # 前后端字段命名约定
+//!
+//! 所有需要跨 IPC 边界传递的结构体都使用 #[serde(rename_all = "camelCase")]，
+//! 这样 Rust 侧保持 snake_case 风格，前端 TypeScript 侧也能用惯例的 camelCase，
+//! 两边都符合各自语言的代码风格。
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -9,6 +15,7 @@ use serde::Serialize;
 /// 单个笔记文件的元信息。
 /// `Serialize` 使其可以被 Tauri 自动序列化为 JSON 发给前端。
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteFileInfo {
     /// 文件名（不含目录），如 "qpow.md"
     pub name: String,

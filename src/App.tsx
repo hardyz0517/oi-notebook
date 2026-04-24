@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Separator } from "@/components/ui/separator";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
+import FileTree from "@/components/file-tree/FileTree";
+import { listNotes, readNote } from "@/lib/api";
+import type { NoteFileInfo } from "@/types/note";
 
-// 示例 Markdown 放在组件外，避免每次渲染都重新创建字符串常量
+// 欢迎内容：未选中文件时在编辑器和预览里显示
 const INITIAL_MARKDOWN = `# OI Notebook 欢迎使用
 
 ## 这是什么？
@@ -64,7 +67,45 @@ $$
 `;
 
 export default function App() {
+  const [files, setFiles] = useState<NoteFileInfo[]>([]);
+  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  // null 时显示欢迎内容，选中文件后显示文件实际内容
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
+  // undefined 表示未发生过滚动（初次挂载跳过预览同步）
+  const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
+
+  // 挂载时从后端加载笔记列表
+  useEffect(() => {
+    listNotes()
+      .then(setFiles)
+      .catch((e: Error) => console.error("加载笔记列表失败：", e.message));
+  }, []);
+
+  // 当选中文件变化时，从后端读取内容
+  // 使用 cancelled flag 防御 race condition：
+  // 快速连续点击不同文件时，后到的响应可能比先到的早 resolve，
+  // cancelled 确保只有最新一次 readNote 的结果会被 setMarkdown 采用。
+  useEffect(() => {
+    if (currentFilePath === null) {
+      // 无选中文件时恢复欢迎内容
+      setMarkdown(INITIAL_MARKDOWN);
+      return;
+    }
+
+    let cancelled = false;
+
+    readNote(currentFilePath)
+      .then((content) => {
+        if (!cancelled) setMarkdown(content);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) console.error("读取笔记失败：", e.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentFilePath]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -76,11 +117,17 @@ export default function App() {
       {/* Three-column body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: File tree (fixed 240px) */}
-        <aside className="flex w-60 shrink-0 flex-col gap-2 p-3">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            文件树
-          </span>
-          <span className="text-xs text-muted-foreground">（Coming soon）</span>
+        <aside className="flex w-60 shrink-0 flex-col overflow-hidden">
+          <div className="flex h-8 shrink-0 items-center px-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              笔记列表
+            </span>
+          </div>
+          <FileTree
+            files={files}
+            activeFilePath={currentFilePath}
+            onSelectFile={setCurrentFilePath}
+          />
         </aside>
 
         <Separator orientation="vertical" />
@@ -90,6 +137,7 @@ export default function App() {
           <MarkdownEditor
             value={markdown}
             onChange={setMarkdown}
+            onScroll={(r) => setScrollRatio(r)}
             className="h-full w-full"
           />
         </main>
@@ -100,6 +148,7 @@ export default function App() {
         <aside className="flex flex-1 overflow-hidden">
           <MarkdownPreview
             markdown={markdown}
+            scrollRatio={scrollRatio}
             className="h-full w-full"
           />
         </aside>
