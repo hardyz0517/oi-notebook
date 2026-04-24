@@ -108,3 +108,34 @@ content here
 - TypeScript is strict: `noUnusedLocals`, `noUnusedParameters` are enabled
 - The Rust crate produces `staticlib + cdylib + rlib` — required for Tauri on Windows to avoid lib name collisions
 - AI provider config lives in `.oinb/config.json`; prompts are templatable Markdown in `.oinb/prompts/*.md`
+
+## Blog Design Direction (for future Astro site)
+
+The desktop editor uses the Lyra shadcn preset — dark, compact, monospace, developer-focused. **The blog site deliberately uses a completely different aesthetic:**
+
+**Reference aesthetic: literary/essay-style personal blog** (think Sinya Lee's essays, Paul Graham's site, Stratechery)
+
+**Key visual properties:**
+- **Light theme**, white background, black text
+- **Serif typography for body** (e.g. Source Serif Pro, Lora, or Noto Serif SC for Chinese); sans-serif for navigation only
+- **Magazine-style three-column card grid** on the index page: each entry is a card with:
+  - Small colored category tag (accent color, restrained)
+  - Date (small, muted)
+  - Large title
+  - Truncated excerpt ending in [...]
+  - "Read more" link (thin underline, no button styling)
+- **Single narrow column** on article pages for reading comfort
+- **Generous whitespace**, low density — opposite of the editor
+- **Minimal top nav** (Home / Posts / About / ...), no sidebar
+- **One accent color** (purple, blue, or muted red), used sparingly for category tags and links
+- **Thin separators**, nothing visually loud
+- **No emoji, no decorative icons** in the theme chrome (user markdown content can contain emoji freely)
+
+**Reference candidate templates**:
+- Astro Paper
+- Astro Cactus
+- Tokyo theme for Astro
+
+**Rationale**: editor is a *working tool* (needs density and focus), blog is a *reading surface* (needs calm and typographic quality). The two should not share a theme.
+
+When the time comes to initialize the Astro subproject (`site/`), start from one of the reference templates above and tune toward the literary/essay aesthetic described here.
