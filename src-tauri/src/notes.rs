@@ -199,3 +199,32 @@ pub fn delete_note(relative_path: String) -> Result<(), String> {
     fs::remove_file(&path)
         .map_err(|e| format!("删除笔记失败（{relative_path}）：{e}"))
 }
+
+/// 重命名笔记文件。原子操作，保留文件创建时间。
+///
+/// `old_relative_path`：原相对路径，如 "qpow.md"
+/// `new_relative_path`：新相对路径，如 "fast-pow.md"
+#[tauri::command]
+pub fn rename_note(old_relative_path: String, new_relative_path: String) -> Result<(), String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir)
+        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+
+    let old_path = safe_note_path(&notes_dir, &old_relative_path)?;
+    let new_path = safe_note_path(&notes_dir, &new_relative_path)?;
+
+    if !old_path.exists() {
+        return Err(format!("原笔记不存在：{old_relative_path}"));
+    }
+    if new_path.exists() {
+        return Err(format!("目标文件名已存在：{new_relative_path}"));
+    }
+
+    if let Some(parent) = new_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建笔记父目录失败：{e}"))?;
+    }
+
+    fs::rename(&old_path, &new_path)
+        .map_err(|e| format!("重命名笔记失败（{old_relative_path} → {new_relative_path}）：{e}"))
+}

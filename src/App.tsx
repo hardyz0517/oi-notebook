@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Plus } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote } from "@/lib/api";
+import { listNotes, readNote, writeNote, deleteNote, renameNote } from "@/lib/api";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -76,6 +81,106 @@ export default function App() {
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
   const [isDirty, setIsDirty] = useState(false);
+  const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
+  const [dialogValue, setDialogValue] = useState("");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+
+  function validateFilename(name: string): string | null {
+    const trimmed = name.trim();
+    if (!trimmed) return "文件名不能为空";
+    if (trimmed.includes("/") || trimmed.includes("\\")) return "文件名不能包含路径分隔符";
+    if (trimmed.includes("..")) return "文件名不能包含 ..";
+    if (trimmed.toLowerCase().endsWith(".md")) return "不需要输入 .md 后缀";
+    return null;
+  }
+
+  const openCreateDialog = () => {
+    setDialogMode("create");
+    setDialogValue("");
+  };
+
+  const openRenameDialog = (path: string) => {
+    const baseName = path.replace(/\.md$/i, "");
+    setDialogMode("rename");
+    setDialogValue(baseName);
+    setRenameTarget(path);
+  };
+
+  const closeDialog = () => {
+    setDialogMode(null);
+    setDialogValue("");
+    setRenameTarget(null);
+  };
+
+  const handleCreate = async () => {
+    const err = validateFilename(dialogValue);
+    if (err) { toast.error(err); return; }
+    const newPath = `${dialogValue.trim()}.md`;
+    if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
+    // dirty 检查必须在创建文件之前——避免用户取消后留下孤儿文件
+    if (isDirty) {
+      const ok = window.confirm("当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。确定吗？");
+      if (!ok) return;
+    }
+    try {
+      await writeNote(newPath, "");
+      const updated = await listNotes();
+      setFiles(updated);
+      closeDialog();
+      setCurrentFilePath(newPath);
+      toast.success("已创建");
+    } catch (e) {
+      toast.error(`创建失败: ${e}`);
+    }
+  };
+
+  const handleRename = async () => {
+    if (!renameTarget) return;
+    const err = validateFilename(dialogValue);
+    if (err) { toast.error(err); return; }
+    const newPath = `${dialogValue.trim()}.md`;
+    if (newPath === renameTarget) { closeDialog(); return; }
+    if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
+    if (renameTarget === currentFilePath && isDirty) {
+      const ok = window.confirm("当前笔记有未保存的改动，重命名前请先保存。确定继续吗？未保存的改动将丢失。");
+      if (!ok) return;
+    }
+    try {
+      await renameNote(renameTarget, newPath);
+      const updated = await listNotes();
+      setFiles(updated);
+      if (renameTarget === currentFilePath) {
+        setCurrentFilePath(newPath);
+        setIsDirty(false);
+      }
+      closeDialog();
+      toast.success("已重命名");
+    } catch (e) {
+      toast.error(`重命名失败: ${e}`);
+    }
+  };
+
+  const handleDelete = async (path: string) => {
+    const ok = window.confirm(`确定删除"${path}"吗？此操作不可撤销。`);
+    if (!ok) return;
+    try {
+      await deleteNote(path);
+      const updated = await listNotes();
+      setFiles(updated);
+      if (path === currentFilePath) {
+        setCurrentFilePath(null);
+        setIsDirty(false);
+      }
+      toast.success("已删除");
+    } catch (e) {
+      toast.error(`删除失败: ${e}`);
+    }
+  };
+
+  const handleDialogConfirm = () => {
+    if (dialogMode === "create") handleCreate();
+    else if (dialogMode === "rename") handleRename();
+  };
 
   const handleEditorChange = (value: string) => {
     setMarkdown(value);
@@ -151,6 +256,38 @@ export default function App() {
   return (
     <>
     <Toaster />
+    <Dialog open={dialogMode !== null} onOpenChange={(open) => !open && closeDialog()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {dialogMode === "create" ? "新建笔记" : "重命名笔记"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-2 py-2">
+          <Label htmlFor="filename">文件名</Label>
+          <Input
+            id="filename"
+            value={dialogValue}
+            onChange={(e) => setDialogValue(e.target.value)}
+            placeholder="不需要输入 .md"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleDialogConfirm();
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">系统会自动加上 .md 后缀</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeDialog}>取消</Button>
+          <Button onClick={handleDialogConfirm}>
+            {dialogMode === "create" ? "创建" : "重命名"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
@@ -175,15 +312,27 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left: File tree (fixed 240px) */}
         <aside className="flex w-60 shrink-0 flex-col overflow-hidden">
-          <div className="flex h-8 shrink-0 items-center px-3">
+          <div className="flex h-8 shrink-0 items-center justify-between px-3">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               笔记列表
             </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={openCreateDialog}
+              title="新建笔记"
+              aria-label="新建笔记"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
           </div>
           <FileTree
             files={files}
             activeFilePath={currentFilePath}
             onSelectFile={handleSelectFile}
+            onDeleteFile={handleDelete}
+            onRenameFile={openRenameDialog}
           />
         </aside>
 

@@ -76,3 +76,24 @@ export async function deleteNote(relativePath: string): Promise<void> {
     throw toError(e);
   }
 }
+
+/**
+ * 重命名笔记文件。原子操作（fs::rename）。
+ * 对应 Rust 命令：rename_note
+ *
+ * @param oldRelativePath - 原相对路径，如 "qpow.md"
+ * @param newRelativePath - 新相对路径，如 "fast-pow.md"
+ */
+export async function renameNote(
+  oldRelativePath: string,
+  newRelativePath: string,
+): Promise<void> {
+  try {
+    await invoke<void>("rename_note", {
+      oldRelativePath,
+      newRelativePath,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
