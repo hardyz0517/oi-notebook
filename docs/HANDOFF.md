@@ -4,7 +4,7 @@
 >
 > **给 Hardy**：把这份文档放到仓库里。下次开新窗口，第一句话只要说"读 docs/HANDOFF.md 和 CLAUDE.md"，新的 Claude 就能 5 分钟进入状态。
 
-**最后更新**：2026-04-24（完成 Phase 1 + 文件系统 IPC 集成 + 滚动同步）
+**最后更新**：2026-04-26（完成 Phase 3：保存 / dirty 追踪 / 笔记 CRUD）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -67,12 +67,14 @@
     ├─ 编辑器 → 预览滚动同步（单向，含 renderedHtml 依赖防时序 bug）
     └─ 视觉打磨：统一背景色、弱化 selection、关闭 activeLine
 
-[ ] Phase 3  保存与新建（下一步要做）
-    ├─ Ctrl+S 触发保存（hotkey）
-    ├─ "新建笔记" 按钮
-    ├─ "删除笔记" 按钮
-    ├─ Header 显示当前文件名 + dirty 指示
-    └─ 切换文件前提示保存未保存改动
+[x] Phase 3  保存与新建                                Phase 3 完成（多个 commit）
+    ├─ Ctrl+S 保存（sonner toast 反馈）
+    ├─ Dirty 状态追踪 + Header 显示文件名 + 圆点指示
+    ├─ 切换文件时 window.confirm 拦截未保存改动
+    ├─ 新建笔记按钮（笔记列表标题旁 + 图标，shadcn Dialog 输入文件名）
+    ├─ 重命名笔记（FileTree 行内铅笔图标）
+    ├─ 删除笔记（FileTree 行内垃圾桶图标）
+    └─ Rust 端新增 rename_note 命令（fs::rename 原子操作）
 
 [ ] Phase 4  全局速记
     └─ Ctrl+Shift+Space 全局快捷键，弹出极简速记窗口
@@ -102,6 +104,7 @@
 | 桌面壳 | **Tauri 2.0**（不是 Electron） | 冷启 < 1s vs Electron 3s+，对"训练间隙快速记录"这个核心诉求决定性 |
 | 前端 | React + TypeScript + Vite | 生态成熟，AI 训练数据丰富 |
 | UI | shadcn/ui + Tailwind v4 | 组件拷到项目里可定制，不被库绑架 |
+| Toast | sonner | shadcn 官方推荐，next-themes 默认配合 |
 | Preset | **Lyra**（不是 Vega/Nova） | 锐角 + 等宽字体，开发者工具气质，配 OI 场景 |
 | Icon | **Lucide**（不是 phosphor） | shadcn 社区事实标准，AI 默认用这个，减少摩擦 |
 | 编辑器 | **CodeMirror 6** 原生 API | 不用 react-codemirror 这种第三方包装，控制力更强；左写 md 右预览（Hardy 习惯洛谷这种模式） |
@@ -184,7 +187,8 @@ Rust 侧的 `safe_note_path` 有两层防御——字符串过滤 + canonicalize
 - **Lyra 深色主题 --accent 和 --muted 颜色相同**（都是 oklch(0.269 0 0)），聚焦/非聚焦 selection 视觉无差异——这是 Lyra 设计意图，不要擅自区分
 - **`get_notes_dir` 用 env!("CARGO_MANIFEST_DIR") 编译期宏**——开发模式可靠，生产分发时要改用 `tauri::Manager::path().app_data_dir()`
 - **`allowDangerousHtml` + 无 rehype-sanitize**——本地应用 XSS 风险可接受，未来引入远程内容时加 sanitize
-- **切换文件时编辑器未保存内容会丢**——Phase 3 做保存功能时处理
+- **sonner toast 主题跟随系统而非强制 dark**——Phase 8 UI 打磨时在 `sonner.tsx` 里把 theme 硬编码为 `'dark'` 即可
+- **Phase 3 期间踩过的 Vite 重载坑**——保存 .md 到 notes/ 会被 Vite 监听器误判触发热重载，state 全丢。修法是 `vite.config.ts` 的 `server.watch.ignored` 加入 `'**/notes/**'`，重启 Vite 才生效。已修，记录在此防止以后被人"清理"掉
 
 ### 🟡 敏感事项
 - Hardy 有个**旧项目 `D:\Dev\Projects\oi-coach`**，里面有一个 `DEEPSEEK_API_KEY.txt`——如果他之前 push 过这个文件到 GitHub，那个 key 已经暴露。当前项目无这个问题（我们一开始就提醒他了）。**新项目里 API key 要走 `.env` + `.gitignore`**
@@ -249,12 +253,14 @@ src/App.tsx                          # 应用主框架，状态管理集中在�
 src/lib/api.ts                       # 前端 → Rust 的 IPC 抽象层
 src/lib/markdown.ts                  # unified 渲染管线，注释完整
 src/lib/datetime.ts                  # 相对时间格式化
+src/components/ui/dialog.tsx, sonner.tsx, input.tsx, label.tsx, button.tsx  # shadcn 组件
 src/components/editor/
   MarkdownEditor.tsx                 # CodeMirror 6 集成（命令式库 → React 的经典模式）
   MarkdownPreview.tsx                # 异步渲染 + 滚动同步（race condition 防御）
 src/components/file-tree/FileTree.tsx  # 简单列表 + 选中态
 src-tauri/src/notes.rs               # 后端文件系统命令 + 路径安全
 src-tauri/src/lib.rs                 # Tauri 构建器，命令注册
+vite.config.ts                       # server.watch.ignored 忽略 notes/，防止保存 .md 触发 Vite 热重载丢 state
 CLAUDE.md                            # 项目简介（Claude Code 自动读取）
 docs/OI-Notebook-PRD-v1.md           # 完整产品需求文档
 docs/HANDOFF.md                      # 本文件
