@@ -4,7 +4,7 @@
 >
 > **给 Hardy**：把这份文档放到仓库里。下次开新窗口，第一句话只要说"读 docs/HANDOFF.md 和 CLAUDE.md"，新的 Claude 就能 5 分钟进入状态。
 
-**最后更新**：2026-04-26（完成 Phase 3：保存 / dirty 追踪 / 笔记 CRUD）
+**最后更新**：2026-04-26（完成 Phase 3 + Phase 4：保存 / CRUD / 速记窗口 / 全局快捷键 / 托盘）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -76,8 +76,14 @@
     ├─ 删除笔记（FileTree 行内垃圾桶图标）
     └─ Rust 端新增 rename_note 命令（fs::rename 原子操作）
 
-[ ] Phase 4  全局速记
-    └─ Ctrl+Shift+Space 全局快捷键，弹出极简速记窗口
+[x] Phase 4  全局速记
+    ├─ 第二个窗口 quick-note 脚手架（tauri.conf.json、Vite 多入口、quick-note.html、src/quick-note/）
+    ├─ QuickNoteApp.tsx 极简 textarea + Ctrl+Enter 保存 + Esc 取消
+    ├─ tauri-plugin-global-shortcut：Ctrl+Alt+Space 召唤/隐藏速记窗口
+    ├─ 速记保存后 emit "notes-changed"，主窗口 listen 后刷新文件列表
+    ├─ 系统托盘：菜单显示主窗口/显示速记/退出，左键 toggle 主窗口
+    ├─ 关闭主窗口时拦截改 hide，保留后台托盘和全局快捷键
+    └─ 实际快捷键是 Ctrl+Alt+Space，不是 PRD 的 Ctrl+Shift+Space（后者被 Windows 中文输入法占用）
 
 [ ] Phase 5  本地博客
     └─ Astro 子项目（读 notes/），Tauri 启动时后台跑 astro dev
@@ -107,6 +113,8 @@
 | Toast | sonner | shadcn 官方推荐，next-themes 默认配合 |
 | Preset | **Lyra**（不是 Vega/Nova） | 锐角 + 等宽字体，开发者工具气质，配 OI 场景 |
 | Icon | **Lucide**（不是 phosphor） | shadcn 社区事实标准，AI 默认用这个，减少摩擦 |
+| Tauri 全局快捷键 | tauri-plugin-global-shortcut 2.x | Tauri 2 官方插件生态，负责 Ctrl+Alt+Space 后台召唤速记窗口 |
+| Tauri 系统托盘 | tauri 内置 tray-icon feature | Windows 托盘常驻，提供显示主窗口/显示速记/退出入口 |
 | 编辑器 | **CodeMirror 6** 原生 API | 不用 react-codemirror 这种第三方包装，控制力更强；左写 md 右预览（Hardy 习惯洛谷这种模式） |
 | Markdown | unified + remark + rehype | 事实标准，插件生态完整 |
 | 数学 | **KaTeX**（不是 MathJax） | 快 10x，洛谷同款 |
@@ -119,6 +127,8 @@
 - **包管理器**：pnpm（已配置 D:\Dev\Env\node-js\pnpm-store）
 - **序列化**：Rust → 前端的结构体一律 `#[serde(rename_all = "camelCase")]`，让两边符合各自语言风格
 - **IPC 抽象**：所有前端 → Rust 调用走 `src/lib/api.ts`，不直接在业务组件里 invoke
+- **多窗口架构**：主窗口 + quick-note 窗口共享 `src/lib/api.ts`。每个窗口有独立 React 入口（`main.tsx`、`quick-note/main.tsx`），但同一个 Vite 项目（多入口构建），同一个 Rust 后端进程
+- **全局快捷键**：选 Ctrl+Alt+Space 而非 PRD 的 Ctrl+Shift+Space——后者被 Windows 中文输入法切换占用
 
 ---
 
@@ -189,6 +199,8 @@ Rust 侧的 `safe_note_path` 有两层防御——字符串过滤 + canonicalize
 - **`allowDangerousHtml` + 无 rehype-sanitize**——本地应用 XSS 风险可接受，未来引入远程内容时加 sanitize
 - **sonner toast 主题跟随系统而非强制 dark**——Phase 8 UI 打磨时在 `sonner.tsx` 里把 theme 硬编码为 `'dark'` 即可
 - **Phase 3 期间踩过的 Vite 重载坑**——保存 .md 到 notes/ 会被 Vite 监听器误判触发热重载，state 全丢。修法是 `vite.config.ts` 的 `server.watch.ignored` 加入 `'**/notes/**'`，重启 Vite 才生效。已修，记录在此防止以后被人"清理"掉
+- **托盘图标在 Windows 上默认进溢出区**，用户需要手动设置常驻显示。这是 Windows 默认行为，不是应用 bug。
+- **QuickNoteApp 保存失败只 console.error，没有 toast 反馈**（速记窗口里没挂 Toaster，单独挂一份会有 next-themes 配置开销）。等到 Phase 8 UI 打磨时统一处理。
 
 ### 🟡 敏感事项
 - Hardy 有个**旧项目 `D:\Dev\Projects\oi-coach`**，里面有一个 `DEEPSEEK_API_KEY.txt`——如果他之前 push 过这个文件到 GitHub，那个 key 已经暴露。当前项目无这个问题（我们一开始就提醒他了）。**新项目里 API key 要走 `.env` + `.gitignore`**
@@ -254,12 +266,15 @@ src/lib/api.ts                       # 前端 → Rust 的 IPC 抽象层
 src/lib/markdown.ts                  # unified 渲染管线，注释完整
 src/lib/datetime.ts                  # 相对时间格式化
 src/components/ui/dialog.tsx, sonner.tsx, input.tsx, label.tsx, button.tsx  # shadcn 组件
+src/quick-note/QuickNoteApp.tsx      # 速记窗口（textarea + Ctrl+Enter 保存 + emit notes-changed）
+src/quick-note/main.tsx              # 速记窗口的 React 入口
+quick-note.html                      # 速记窗口的 HTML 入口
 src/components/editor/
   MarkdownEditor.tsx                 # CodeMirror 6 集成（命令式库 → React 的经典模式）
   MarkdownPreview.tsx                # 异步渲染 + 滚动同步（race condition 防御）
 src/components/file-tree/FileTree.tsx  # 简单列表 + 选中态
 src-tauri/src/notes.rs               # 后端文件系统命令 + 路径安全
-src-tauri/src/lib.rs                 # Tauri 构建器，命令注册
+src-tauri/src/lib.rs                 # Tauri 构建器，命令注册，含全局快捷键注册、系统托盘、关闭拦截
 vite.config.ts                       # server.watch.ignored 忽略 notes/，防止保存 .md 触发 Vite 热重载丢 state
 CLAUDE.md                            # 项目简介（Claude Code 自动读取）
 docs/OI-Notebook-PRD-v1.md           # 完整产品需求文档
