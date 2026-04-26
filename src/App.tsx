@@ -75,6 +75,20 @@ export default function App() {
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
+  const [isDirty, setIsDirty] = useState(false);
+
+  const handleEditorChange = (value: string) => {
+    setMarkdown(value);
+    setIsDirty(true);
+  };
+
+  const handleSelectFile = (path: string) => {
+    if (isDirty) {
+      const ok = window.confirm("当前笔记有未保存的改动，切换将会丢失。确定切换吗？");
+      if (!ok) return;
+    }
+    setCurrentFilePath(path);
+  };
 
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
@@ -88,6 +102,7 @@ export default function App() {
       try {
         await writeNote(currentFilePath, markdown);
         toast.success("已保存");
+        setIsDirty(false);
       } catch (err) {
         toast.error(`保存失败: ${err}`);
       }
@@ -111,6 +126,7 @@ export default function App() {
     if (currentFilePath === null) {
       // 无选中文件时恢复欢迎内容
       setMarkdown(INITIAL_MARKDOWN);
+      setIsDirty(false);
       return;
     }
 
@@ -118,7 +134,10 @@ export default function App() {
 
     readNote(currentFilePath)
       .then((content) => {
-        if (!cancelled) setMarkdown(content);
+        if (!cancelled) {
+          setMarkdown(content);
+          setIsDirty(false);
+        }
       })
       .catch((e: Error) => {
         if (!cancelled) console.error("读取笔记失败：", e.message);
@@ -134,8 +153,22 @@ export default function App() {
     <Toaster />
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="flex h-10 shrink-0 items-center border-b border-border px-4">
+      <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="text-sm font-semibold tracking-wide">OI Notebook</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {currentFilePath && (
+            <>
+              <span>{currentFilePath}</span>
+              {isDirty && (
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-foreground"
+                  aria-label="有未保存的改动"
+                  title="有未保存的改动"
+                />
+              )}
+            </>
+          )}
+        </div>
       </header>
 
       {/* Three-column body */}
@@ -150,7 +183,7 @@ export default function App() {
           <FileTree
             files={files}
             activeFilePath={currentFilePath}
-            onSelectFile={setCurrentFilePath}
+            onSelectFile={handleSelectFile}
           />
         </aside>
 
@@ -160,7 +193,7 @@ export default function App() {
         <main className="flex flex-1 overflow-hidden">
           <MarkdownEditor
             value={markdown}
-            onChange={setMarkdown}
+            onChange={handleEditorChange}
             onScroll={(r) => setScrollRatio(r)}
             className="h-full w-full"
           />

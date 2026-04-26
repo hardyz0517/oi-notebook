@@ -72,9 +72,12 @@ export default function MarkdownEditor({
           EditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) {
               const newValue = update.state.doc.toString();
-              // 先更新 "编辑器自己产生的值"，再调 onChange，
-              // 这样当父组件把新 value 传回来时，下面的 useEffect 能识别出
-              // "这是我自己刚打的字，不需要再 dispatch 一次"。
+              // 区分用户输入 vs 程序 dispatch：
+              // 如果新内容已经等于 editorOwnValue.current，说明这次变化来自
+              // "外部 value 变化" effect 的 dispatch（同步外部值），
+              // 不应触发 onChange 否则会让 isDirty 被误置为 true。
+              // 用户真实输入时，editorOwnValue.current 还是旧值，两者不等。
+              if (newValue === editorOwnValue.current) return;
               editorOwnValue.current = newValue;
               onChangeFn.current(newValue);
             }
