@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/sonner";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote } from "@/lib/api";
+import { listNotes, readNote, writeNote } from "@/lib/api";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -74,6 +76,26 @@ export default function App() {
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
 
+  // Ctrl+S / Cmd+S 保存当前笔记
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (!((e.ctrlKey || e.metaKey) && e.key === "s")) return;
+      e.preventDefault();
+      if (currentFilePath === null) {
+        toast.info("请先打开一个笔记后再保存");
+        return;
+      }
+      try {
+        await writeNote(currentFilePath, markdown);
+        toast.success("已保存");
+      } catch (err) {
+        toast.error(`保存失败: ${err}`);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentFilePath, markdown]);
+
   // 挂载时从后端加载笔记列表
   useEffect(() => {
     listNotes()
@@ -108,6 +130,8 @@ export default function App() {
   }, [currentFilePath]);
 
   return (
+    <>
+    <Toaster />
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-10 shrink-0 items-center border-b border-border px-4">
@@ -154,5 +178,6 @@ export default function App() {
         </aside>
       </div>
     </div>
+    </>
   );
 }
