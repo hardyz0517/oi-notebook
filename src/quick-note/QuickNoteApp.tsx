@@ -1,3 +1,4 @@
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { type KeyboardEvent, useState } from "react";
 import { writeNote } from "@/lib/api";
@@ -25,6 +26,7 @@ export default function QuickNoteApp() {
 
     try {
       await writeNote(makeQuickNoteFilename(), trimmedContent);
+      await emit("notes-changed");
       setContent("");
       await hideWindow();
     } catch (error) {

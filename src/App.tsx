@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
@@ -221,6 +222,37 @@ export default function App() {
     listNotes()
       .then(setFiles)
       .catch((e: Error) => console.error("加载笔记列表失败：", e.message));
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    listen("notes-changed", () => {
+      listNotes()
+        .then((updated) => {
+          if (!cancelled) setFiles(updated);
+        })
+        .catch((e: Error) =>
+          console.error("收到 notes-changed 后刷新列表失败：", e.message),
+        );
+    })
+      .then((fn) => {
+        if (cancelled) {
+          // 组件已卸载，立即取消订阅
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((e: Error) =>
+        console.error("注册 notes-changed 监听失败：", e.message),
+      );
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // 当选中文件变化时，从后端读取内容
