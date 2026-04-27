@@ -201,6 +201,7 @@ Rust 侧的 `safe_note_path` 有两层防御——字符串过滤 + canonicalize
 - **Phase 3 期间踩过的 Vite 重载坑**——保存 .md 到 notes/ 会被 Vite 监听器误判触发热重载，state 全丢。修法是 `vite.config.ts` 的 `server.watch.ignored` 加入 `'**/notes/**'`，重启 Vite 才生效。已修，记录在此防止以后被人"清理"掉
 - **托盘图标在 Windows 上默认进溢出区**，用户需要手动设置常驻显示。这是 Windows 默认行为，不是应用 bug。
 - **QuickNoteApp 保存失败只 console.error，没有 toast 反馈**（速记窗口里没挂 Toaster，单独挂一份会有 next-themes 配置开销）。等到 Phase 8 UI 打磨时统一处理。
+- **FileTree 在窄宽度下 hover 按钮的视觉位置不够精致**：Radix ScrollArea 的 viewport inner div 有 `min-width: 100%` + `display: table` 的硬注入样式，目前用 `[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0` 覆盖（在 `src/components/ui/scroll-area.tsx`），勉强可用但不优雅。Phase 5 之后做 UI 打磨时考虑：(1) 自定义一个不基于 Radix 的极简 ScrollArea；或 (2) hover 按钮浮层放到 li 外、用 portal 定位避开 scrollbar 区域。
 
 ### 🟡 敏感事项
 - Hardy 有个**旧项目 `D:\Dev\Projects\oi-coach`**，里面有一个 `DEEPSEEK_API_KEY.txt`——如果他之前 push 过这个文件到 GitHub，那个 key 已经暴露。当前项目无这个问题（我们一开始就提醒他了）。**新项目里 API key 要走 `.env` + `.gitignore`**

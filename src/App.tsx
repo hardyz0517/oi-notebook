@@ -89,6 +89,7 @@ export default function App() {
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
     if (!trimmed) return "文件名不能为空";
+    // TODO(后续 Phase): 支持跨目录重命名（拖拽或对话框选目标目录）
     if (trimmed.includes("/") || trimmed.includes("\\")) return "文件名不能包含路径分隔符";
     if (trimmed.includes("..")) return "文件名不能包含 ..";
     if (trimmed.toLowerCase().endsWith(".md")) return "不需要输入 .md 后缀";
@@ -101,7 +102,9 @@ export default function App() {
   };
 
   const openRenameDialog = (path: string) => {
-    const baseName = path.replace(/\.md$/i, "");
+    // 提取纯文件名（不含目录前缀），如 "inbox/quick-xxx.md" → "quick-xxx"
+    const filename = path.split("/").pop() ?? path;
+    const baseName = filename.replace(/\.md$/i, "");
     setDialogMode("rename");
     setDialogValue(baseName);
     setRenameTarget(path);
@@ -116,6 +119,7 @@ export default function App() {
   const handleCreate = async () => {
     const err = validateFilename(dialogValue);
     if (err) { toast.error(err); return; }
+    // TODO(Step 6): 增加目录选择，目前默认创建到顶层（"其他"分组）
     const newPath = `${dialogValue.trim()}.md`;
     if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
     // dirty 检查必须在创建文件之前——避免用户取消后留下孤儿文件
@@ -139,7 +143,10 @@ export default function App() {
     if (!renameTarget) return;
     const err = validateFilename(dialogValue);
     if (err) { toast.error(err); return; }
-    const newPath = `${dialogValue.trim()}.md`;
+    // 保留原目录前缀，如 "inbox/quick-xxx.md" → "inbox/new-name.md"
+    const lastSlashIdx = renameTarget.lastIndexOf("/");
+    const dirPrefix = lastSlashIdx === -1 ? "" : renameTarget.slice(0, lastSlashIdx + 1);
+    const newPath = `${dirPrefix}${dialogValue.trim()}.md`;
     if (newPath === renameTarget) { closeDialog(); return; }
     if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
     if (renameTarget === currentFilePath && isDirty) {
@@ -310,7 +317,11 @@ export default function App() {
               }
             }}
           />
-          <p className="text-xs text-muted-foreground">系统会自动加上 .md 后缀</p>
+          <p className="text-xs text-muted-foreground">
+            {dialogMode === "rename" && renameTarget && renameTarget.includes("/")
+              ? `当前位于 ${renameTarget.slice(0, renameTarget.lastIndexOf("/"))}/，目录会保留`
+              : "系统会自动加上 .md 后缀"}
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={closeDialog}>取消</Button>
@@ -359,13 +370,15 @@ export default function App() {
               <Plus className="h-3.5 w-3.5" />
             </Button>
           </div>
-          <FileTree
-            files={files}
-            activeFilePath={currentFilePath}
-            onSelectFile={handleSelectFile}
-            onDeleteFile={handleDelete}
-            onRenameFile={openRenameDialog}
-          />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <FileTree
+              files={files}
+              activeFilePath={currentFilePath}
+              onSelectFile={handleSelectFile}
+              onDeleteFile={handleDelete}
+              onRenameFile={openRenameDialog}
+            />
+          </div>
         </aside>
 
         <Separator orientation="vertical" />
