@@ -13,6 +13,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use walkdir::WalkDir;
 
+use crate::frontmatter;
+
 /// 单个笔记文件的元信息。
 /// `Serialize` 使其可以被 Tauri 自动序列化为 JSON 发给前端。
 #[derive(Debug, Serialize)]
@@ -220,12 +222,17 @@ pub fn read_note(relative_path: String) -> Result<String, String> {
         .map_err(|e| format!("读取笔记失败（{relative_path}）：{e}"))
 }
 
-/// 覆盖写入指定笔记。如果父目录不存在，会自动创建。
+/// 覆盖写入指定笔记，写入前自动补全 frontmatter。如果父目录不存在，会自动创建。
 ///
 /// `relative_path`：相对于 notes/ 的路径，如 `"tricks/qpow.md"`
 /// `content`：要写入的 UTF-8 Markdown 内容（覆盖，不是追加）
+///
+/// 返回值：
+/// - `Ok(None)`：写入成功，frontmatter 处理正常
+/// - `Ok(Some(warning))`：写入成功，但 frontmatter 解析失败（已原样写入）
+/// - `Err(...)`：真正的失败（IO 错误、路径非法等）
 #[tauri::command]
-pub fn write_note(relative_path: String, content: String) -> Result<(), String> {
+pub fn write_note(relative_path: String, content: String) -> Result<Option<String>, String> {
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir)
         .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
@@ -238,8 +245,12 @@ pub fn write_note(relative_path: String, content: String) -> Result<(), String> 
             .map_err(|e| format!("创建笔记父目录失败：{e}"))?;
     }
 
-    fs::write(&path, content.as_bytes())
-        .map_err(|e| format!("写入笔记失败（{relative_path}）：{e}"))
+    let (final_content, warning) = frontmatter::process_for_write(&content, &relative_path);
+
+    fs::write(&path, final_content.as_bytes())
+        .map_err(|e| format!("写入笔记失败（{relative_path}）：{e}"))?;
+
+    Ok(warning)
 }
 
 /// 删除指定笔记文件。若文件不存在，返回明确的错误信息而非静默忽略。

@@ -1,3 +1,4 @@
+mod frontmatter;
 mod notes;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};

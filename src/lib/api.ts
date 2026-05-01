@@ -46,18 +46,19 @@ export async function readNote(relativePath: string): Promise<string> {
 }
 
 /**
- * 覆盖写入指定笔记内容（若文件不存在则创建）。
+ * 覆盖写入指定笔记内容（若文件不存在则创建），写入前自动补全 frontmatter。
  * 对应 Rust 命令：write_note
  *
  * @param relativePath - 相对于 notes/ 的路径，如 "qpow.md"
  * @param content - 要写入的 Markdown 字符串
+ * @returns null 表示正常；string 表示 frontmatter 解析失败时的警告（内容已原样写入）
  */
 export async function writeNote(
   relativePath: string,
   content: string,
-): Promise<void> {
+): Promise<string | null> {
   try {
-    await invoke<void>("write_note", { relativePath, content });
+    return await invoke<string | null>("write_note", { relativePath, content });
   } catch (e) {
     throw toError(e);
   }

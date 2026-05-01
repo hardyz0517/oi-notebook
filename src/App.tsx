@@ -213,8 +213,12 @@ export default function App() {
         return;
       }
       try {
-        await writeNote(currentFilePath, markdown);
-        toast.success("已保存");
+        const warning = await writeNote(currentFilePath, markdown);
+        if (warning) {
+          toast.warning(`已保存（${warning}）`);
+        } else {
+          toast.success("已保存");
+        }
         setIsDirty(false);
       } catch (err) {
         toast.error(`保存失败: ${err}`);
