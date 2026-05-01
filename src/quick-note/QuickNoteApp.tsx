@@ -6,7 +6,7 @@ import { writeNote } from "@/lib/api";
 function makeQuickNoteFilename(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `quick-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.md`;
+  return `inbox/quick-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.md`;
 }
 
 export default function QuickNoteApp() {
@@ -25,7 +25,11 @@ export default function QuickNoteApp() {
     }
 
     try {
-      await writeNote(makeQuickNoteFilename(), trimmedContent);
+      const warning = await writeNote(makeQuickNoteFilename(), trimmedContent);
+      if (warning) {
+        // 速记窗口未挂载 Toaster（见 HANDOFF §6 TODO），等 Phase 8 统一处理
+        console.warn("write_note warning:", warning);
+      }
       await emit("notes-changed");
       setContent("");
       await hideWindow();
