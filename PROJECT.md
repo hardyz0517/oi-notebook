@@ -1,15 +1,15 @@
-# CLAUDE.md
+# PROJECT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides neutral project guidance for coding agents working in this repository.
 
 ## Project Overview
 
 **oi-notebook** is a desktop-first note-taking tool for competitive programmers (OIers), built with Tauri 2 + React + TypeScript. The full product spec is in `docs/OI-Notebook-PRD-v1.md` (Chinese).
 
 The three core user flows:
-1. **Quick-capture** (`Ctrl+Shift+Space`) — popup editor for jotting algorithm tricks mid-session
-2. **Local blog** — Astro site at `localhost:4321` that live-previews notes
-3. **Auto-ingest** — crawler that reads `/* @oinb-insight ... */` comments from accepted Luogu submissions and auto-generates structured Markdown notes
+1. **Quick-capture** (`Ctrl+Alt+Space`) - popup editor for jotting algorithm tricks mid-session
+2. **Local blog** - Astro site at `localhost:4321` that live-previews notes
+3. **Auto-ingest** - crawler that reads `/* @oinb-insight ... */` comments from accepted Luogu submissions and auto-generates structured Markdown notes
 
 All notes are plain `.md` files with YAML frontmatter, committed to git automatically on save.
 
@@ -20,7 +20,7 @@ All notes are plain `.md` files with YAML frontmatter, committed to git automati
 ```bash
 # Frontend only
 pnpm dev          # Vite dev server on port 1420
-pnpm build        # tsc + vite build → dist/
+pnpm build        # tsc + vite build -> dist/
 pnpm preview      # Preview production build
 
 # Full desktop app (preferred)
@@ -28,26 +28,28 @@ pnpm tauri dev    # Starts Vite + Rust with hot reload
 pnpm tauri build  # Full production bundle
 ```
 
-No test framework is configured yet.
+Frontend test framework is not configured yet. Rust unit tests exist under `src-tauri/src/`.
 
 ## Architecture
 
 ```
 oi-notebook/
 ├── src/                    # React + TypeScript frontend
-│   ├── main.tsx            # React entry point → mounts <App />
+│   ├── main.tsx            # React entry point -> mounts <App />
 │   └── App.tsx             # Root component
 ├── src-tauri/
 │   ├── src/
 │   │   ├── lib.rs          # Tauri commands + builder setup (library crate)
-│   │   └── main.rs         # Binary entry point → calls lib::run()
+│   │   ├── notes.rs        # Note filesystem IPC and path safety
+│   │   └── main.rs         # Binary entry point -> calls lib::run()
 │   ├── capabilities/
 │   │   └── default.json    # IPC permissions granted to the main window
 │   ├── tauri.conf.json     # App config: name, identifier, window size, bundles
 │   └── Cargo.toml          # Rust deps
 ├── docs/
 │   └── OI-Notebook-PRD-v1.md  # Authoritative product spec (Chinese)
-├── notes/                  # (planned) Plain .md note files
+├── notes/                  # Plain .md note files
+│   ├── inbox/
 │   ├── tricks/
 │   ├── problems/
 │   └── luogu/              # Auto-generated from crawler
@@ -55,13 +57,13 @@ oi-notebook/
 └── .oinb/                  # (planned, gitignored) Config, SQLite index, AI cache
 ```
 
-**IPC pattern:** Frontend calls Rust commands via `invoke('command_name', { args })`. Commands are defined with `#[tauri::command]` in `lib.rs` and registered in the builder's `invoke_handler`.
+**IPC pattern:** Frontend calls Rust commands through wrappers in `src/lib/api.ts`. Commands are defined with `#[tauri::command]` in Rust and registered in the builder's `invoke_handler`.
 
 **Planned data flow:**
-- User edits in CodeMirror → real-time remark/rehype preview
-- Save → writes `.md` file → `git add && git commit` (message: `note: {title}`)
+- User edits in CodeMirror -> real-time remark/rehype preview
+- Save -> writes `.md` file -> `git add && git commit` (message: `note: {title}`)
 - Astro dev server (spawned by Tauri at startup) hot-reloads `localhost:4321`
-- Every 5 min / on close → `git push` → GitHub Actions → GitHub Pages
+- Every 5 min / on close -> `git push` -> GitHub Actions -> GitHub Pages
 
 ## Planned Tech Stack
 
@@ -71,7 +73,7 @@ When implementing features, use these libraries (per PRD):
 - **UI:** shadcn/ui + Tailwind CSS, Zustand (state)
 - **Search:** SQLite via `tauri-plugin-sql` with FTS5
 - **Blog:** Astro
-- **AI:** `@anthropic-ai/sdk` + OpenAI-compatible SDK
+- **AI:** OpenAI-compatible SDK/providers, with optional OpenRouter-compatible routing for strong models
 
 ## Note Frontmatter Schema
 
@@ -106,14 +108,16 @@ content here
 
 - Vite dev server **must** run on port 1420 (hardcoded in `tauri.conf.json` as `devUrl`)
 - TypeScript is strict: `noUnusedLocals`, `noUnusedParameters` are enabled
-- The Rust crate produces `staticlib + cdylib + rlib` — required for Tauri on Windows to avoid lib name collisions
+- The Rust crate produces `staticlib + cdylib + rlib` - required for Tauri on Windows to avoid lib name collisions
 - AI provider config lives in `.oinb/config.json`; prompts are templatable Markdown in `.oinb/prompts/*.md`
+- All frontend -> Rust calls go through `src/lib/api.ts`
+- Do not simplify the two-layer path safety check in `src-tauri/src/notes.rs`
 
 ## Blog Design Direction (for future Astro site)
 
-The desktop editor uses the Lyra shadcn preset — dark, compact, monospace, developer-focused. **The blog site deliberately uses a completely different aesthetic:**
+The desktop editor uses the Lyra shadcn preset - dark, compact, monospace, developer-focused. **The blog site deliberately uses a completely different aesthetic:**
 
-**Reference aesthetic: literary/essay-style personal blog** (think Sinya Lee's essays, Paul Graham's site, Stratechery)
+**Reference aesthetic: literary/essay-style personal blog** (think Sinya Lee's essays, Paul Graham, Stratechery)
 
 **Key visual properties:**
 - **Light theme**, white background, black text
@@ -125,7 +129,7 @@ The desktop editor uses the Lyra shadcn preset — dark, compact, monospace, dev
   - Truncated excerpt ending in [...]
   - "Read more" link (thin underline, no button styling)
 - **Single narrow column** on article pages for reading comfort
-- **Generous whitespace**, low density — opposite of the editor
+- **Generous whitespace**, low density - opposite of the editor
 - **Minimal top nav** (Home / Posts / About / ...), no sidebar
 - **One accent color** (purple, blue, or muted red), used sparingly for category tags and links
 - **Thin separators**, nothing visually loud

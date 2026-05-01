@@ -1,43 +1,44 @@
 # HANDOFF.md — 新对话窗口交接文档
 
-> **给未来的 Claude（无论哪个会话）**：这份文档是你接手 Hardy 的 OI Notebook 项目时应该读的第一份文档。你不是第一个帮他的 Claude，在你之前有一个我，我们已经走过很长一段路。把这份文档当作"前任架构师留给你的项目笔记"。
->
-> **给 Hardy**：把这份文档放到仓库里。下次开新窗口，第一句话只要说"读 docs/HANDOFF.md 和 CLAUDE.md"，新的 Claude 就能 5 分钟进入状态。
+这份文档是接手 Hardy 的 OI Notebook 项目时的操作手册。它记录当前真实进度、协作规则、技术约定和已知坑。开始任何任务前，请先读：
 
-**最后更新**：2026-04-26（完成 Phase 3 + Phase 4：保存 / CRUD / 速记窗口 / 全局快捷键 / 托盘）
+1. `AGENTS.md`
+2. `PROJECT.md`
+3. `docs/HANDOFF.md`
+4. `docs/OI-Notebook-PRD-v1.md`
+
+**最后更新**：2026-05-02（完成 Phase 5 前置 Step 4 + Step 5）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
 
 ## 1. 一句话介绍
 
-**OI Notebook** 是一个为竞赛选手（OIer）设计的桌面笔记工具，用 Tauri + React 构建，支持实时 Markdown 预览（含 LaTeX 和代码高亮），未来会集成 Astro 本地博客、洛谷爬虫、多 AI 适配。**Hardy 自己一行代码都不会写，全靠 vibe coding**——他下指令，你写代码。
+**OI Notebook** 是一个为竞赛选手（OIer）设计的桌面笔记工具，用 Tauri + React 构建，支持实时 Markdown 预览（含 LaTeX 和代码高亮），未来会集成 Astro 本地博客、洛谷爬虫、多 AI 适配。Hardy 主要通过自然语言协作推进项目：他下指令、review 结果，coding agent 负责实现。
 
 ---
 
 ## 2. Hardy 是谁，他怎么工作
 
 ### 基本信息
+
 - **身份**：OIer（竞赛选手），训练节奏紧凑
-- **技术背景**：写 C++ 代码做算法题没问题，**但前端、Rust、Git 等都是零基础**
+- **技术背景**：写 C++ 代码做算法题没问题，但前端、Rust、Git 等都是零基础
 - **目标**：做一个让自己训练间隙能快速记录 trick 的工具
-- **预算**：每月 $40 软件预算，用 Claude Code Pro + Codex 的组合（他选了 Claude Code 主导）
+- **协作方式**：默认由 Codex 执行具体任务；复杂任务先拆细、审计清楚，再一件一件交给 Codex 落地
 
 ### 他的工作方式（非常重要）
-1. **他不会直接写代码，但判断力极强**。他会看你写的代码、看截图、发现不协调的地方，能指出"中栏发灰"、"没有滚动同步"这种细节
-2. **他已经养成了一个好习惯：要求你把完整代码打印出来让他 review**，不要折叠不要省略。**你必须尊重这个要求**——折叠输出对他而言等于没给
-3. **他愿意等待**。如果某个决策需要研究清楚再定，他会等你搜资料、思考
-4. **他会质疑你的输出**。他说"不太一样"时不是挑刺，是真观察到了差异——要认真听
-5. **他会节制自己不蛮干**。他选了"先功能后 UI"的节奏，不被审美细节卡住主线
+
+1. **他不会直接写项目代码，但判断力很强**。他会看代码、看截图、发现不协调的地方，能指出“中栏发灰”“没有滚动同步”这种细节。
+2. **他要求每次编辑后打印完整真实文件内容**，不要折叠、不要省略、不要只给 diff。
+3. **他愿意等待**。如果某个决策需要研究清楚再定，他会等你搜资料、读真实文件、验证。
+4. **他说“不太一样”时要认真接住**。那通常表示他观察到了具体差异。
+5. **他倾向一次只推进一个明确里程碑**，做到可验证、可提交，再进入下一步。
 
 ### 他的审美
-- **编辑器（桌面应用侧）**：Lyra shadcn preset 深色主题，锐角、等宽字体、紧凑、开发者气质
-- **博客（未来 Astro 侧）**：**完全相反**——文人博客风格，亮色、衬线字体、留白充裕、杂志卡片式排版。参考 Sinya Lee's essays、Paul Graham、Stratechery。细节见 `CLAUDE.md` 末尾的 "Blog Design Direction" 章节
 
-### 他的节奏倾向
-- 一次只推进一个明确的里程碑，到达后 commit + push
-- 每个 Phase 做完先用一下再决定下一步
-- 不追求完美，但要求"真的做对了"
+- **编辑器（桌面应用侧）**：Lyra shadcn preset 深色主题，锐角、等宽字体、紧凑、开发者气质。
+- **博客（未来 Astro 侧）**：完全相反，走文人博客风格：亮色、衬线字体、留白充裕、杂志卡片式排版。细节见 `PROJECT.md` 的 “Blog Design Direction”。
 
 ---
 
@@ -55,35 +56,32 @@
     ├─ unified/remark/rehype 右侧预览管线
     ├─ KaTeX 数学公式渲染
     ├─ @shikijs/rehype 代码语法高亮
-    └─ 编辑器和预览的双向联动（输入 → 预览更新）
+    └─ 编辑器和预览联动（输入 -> 预览更新）
 
 [x] Phase 2  文件系统 IPC + 滚动同步 + 视觉打磨        commit d581c00
-    ├─ Rust: notes.rs 模块，4 个 Tauri 命令
-    │   list_notes / read_note / write_note / delete_note
-    │   含两层路径安全校验（字符串过滤 + canonicalize starts_with）
-    ├─ 前端: lib/api.ts IPC 抽象层
-    ├─ 前端: FileTree 组件（带相对时间、选中态、ScrollArea）
+    ├─ Rust: notes.rs 模块，含 list/read/write/delete
+    ├─ 两层路径安全校验（字符串过滤 + canonicalize starts_with）
+    ├─ 前端: src/lib/api.ts IPC 抽象层
+    ├─ 前端: FileTree 组件
     ├─ App.tsx 接入后端：挂载时列举 + 点击加载
-    ├─ 编辑器 → 预览滚动同步（单向，含 renderedHtml 依赖防时序 bug）
-    └─ 视觉打磨：统一背景色、弱化 selection、关闭 activeLine
+    └─ 编辑器 -> 预览滚动同步
 
-[x] Phase 3  保存与新建                                Phase 3 完成（多个 commit）
+[x] Phase 3  保存与新建
     ├─ Ctrl+S 保存（sonner toast 反馈）
     ├─ Dirty 状态追踪 + Header 显示文件名 + 圆点指示
     ├─ 切换文件时 window.confirm 拦截未保存改动
-    ├─ 新建笔记按钮（笔记列表标题旁 + 图标，shadcn Dialog 输入文件名）
-    ├─ 重命名笔记（FileTree 行内铅笔图标）
-    ├─ 删除笔记（FileTree 行内垃圾桶图标）
-    └─ Rust 端新增 rename_note 命令（fs::rename 原子操作）
+    ├─ 新建笔记按钮与 Dialog
+    ├─ 重命名笔记
+    ├─ 删除笔记
+    └─ Rust 端 rename_note 命令
 
 [x] Phase 4  全局速记
-    ├─ 第二个窗口 quick-note 脚手架（tauri.conf.json、Vite 多入口、quick-note.html、src/quick-note/）
-    ├─ QuickNoteApp.tsx 极简 textarea + Ctrl+Enter 保存 + Esc 取消
+    ├─ 第二个窗口 quick-note 脚手架
+    ├─ QuickNoteApp.tsx textarea + Ctrl+Enter 保存 + Esc 取消
     ├─ tauri-plugin-global-shortcut：Ctrl+Alt+Space 召唤/隐藏速记窗口
-    ├─ 速记保存后 emit "notes-changed"，主窗口 listen 后刷新文件列表
-    ├─ 系统托盘：菜单显示主窗口/显示速记/退出，左键 toggle 主窗口
-    ├─ 关闭主窗口时拦截改 hide，保留后台托盘和全局快捷键
-    └─ 实际快捷键是 Ctrl+Alt+Space，不是 PRD 的 Ctrl+Shift+Space（后者被 Windows 中文输入法占用）
+    ├─ 速记保存后 emit "notes-changed"，主窗口刷新文件列表
+    ├─ 系统托盘：显示主窗口/显示速记/退出
+    └─ 关闭主窗口时 hide，保留后台托盘和全局快捷键
 
 [ ] Phase 5  本地博客
     └─ Astro 子项目（读 notes/），Tauri 启动时后台跑 astro dev
@@ -92,11 +90,11 @@
     └─ @oinb-insight 注释格式，增量抓取提交
 
 [ ] Phase 7  AI 辅助整理
-    └─ OpenAI 兼容层 + Claude 单独适配，支持 DeepSeek/Kimi/Claude
+    └─ OpenAI-compatible providers + OpenRouter-compatible routing
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
-    ├─ 博客模板向 Sinya Lee/文人博客风格调整
+    ├─ 博客模板向文人博客风格调整
     └─ 光标颜色等小细节
 ```
 
@@ -104,120 +102,120 @@
 
 ## 4. 技术栈与关键决策
 
-### 为什么选这些
 | 层 | 选择 | 关键理由 |
 |---|---|---|
-| 桌面壳 | **Tauri 2.0**（不是 Electron） | 冷启 < 1s vs Electron 3s+，对"训练间隙快速记录"这个核心诉求决定性 |
-| 前端 | React + TypeScript + Vite | 生态成熟，AI 训练数据丰富 |
-| UI | shadcn/ui + Tailwind v4 | 组件拷到项目里可定制，不被库绑架 |
-| Toast | sonner | shadcn 官方推荐，next-themes 默认配合 |
-| Preset | **Lyra**（不是 Vega/Nova） | 锐角 + 等宽字体，开发者工具气质，配 OI 场景 |
-| Icon | **Lucide**（不是 phosphor） | shadcn 社区事实标准，AI 默认用这个，减少摩擦 |
-| Tauri 全局快捷键 | tauri-plugin-global-shortcut 2.x | Tauri 2 官方插件生态，负责 Ctrl+Alt+Space 后台召唤速记窗口 |
-| Tauri 系统托盘 | tauri 内置 tray-icon feature | Windows 托盘常驻，提供显示主窗口/显示速记/退出入口 |
-| 编辑器 | **CodeMirror 6** 原生 API | 不用 react-codemirror 这种第三方包装，控制力更强；左写 md 右预览（Hardy 习惯洛谷这种模式） |
+| 桌面壳 | **Tauri 2.0**（不是 Electron） | 冷启快、包体小，适合训练间隙快速记录 |
+| 前端 | React + TypeScript + Vite | 生态成熟 |
+| UI | shadcn/ui + Tailwind v4 | 组件可定制，不被库绑架 |
+| Toast | sonner | shadcn 社区常用方案 |
+| Preset | **Lyra** | 锐角 + 等宽字体，开发者工具气质 |
+| Icon | **Lucide** | shadcn 社区事实标准 |
+| 全局快捷键 | tauri-plugin-global-shortcut 2.x | Tauri 2 官方插件生态 |
+| 系统托盘 | tauri tray-icon feature | Windows 托盘常驻入口 |
+| 编辑器 | **CodeMirror 6** 原生 API | 控制力强，适合左写 md 右预览 |
 | Markdown | unified + remark + rehype | 事实标准，插件生态完整 |
-| 数学 | **KaTeX**（不是 MathJax） | 快 10x，洛谷同款 |
-| 代码高亮 | **@shikijs/rehype**（不是 rehype-shiki） | rehype-shiki 6 年没更新，@shikijs/rehype 是官方维护 |
-| 博客（未做） | **Astro**（不是 VitePress） | Markdown 一等公民，Content Collections 天然支持 frontmatter 类型安全，内容型博客 2026 首选 |
-| AI（未做） | OpenAI 兼容 SDK + Claude 单独 | DeepSeek/Kimi/GLM/通义都兼容 OpenAI 格式，一套适配 + Claude 特殊处理 |
+| 数学 | **KaTeX** | 快，适合实时预览 |
+| 代码高亮 | **@shikijs/rehype** | 官方维护的 Shiki rehype 集成 |
+| 博客（未做） | **Astro** | Markdown 一等公民，适合内容型博客 |
+| AI（未做） | OpenAI-compatible providers | DeepSeek/Kimi/GLM/通义/OpenRouter 等可走统一适配 |
 
-### 其它重要决策
-- **笔记存储位置**：`oi-notebook/notes/`（仓库内），跟着 git 走，未来 Astro 博客直接读
-- **包管理器**：pnpm（已配置 D:\Dev\Env\node-js\pnpm-store）
-- **序列化**：Rust → 前端的结构体一律 `#[serde(rename_all = "camelCase")]`，让两边符合各自语言风格
-- **IPC 抽象**：所有前端 → Rust 调用走 `src/lib/api.ts`，不直接在业务组件里 invoke
-- **多窗口架构**：主窗口 + quick-note 窗口共享 `src/lib/api.ts`。每个窗口有独立 React 入口（`main.tsx`、`quick-note/main.tsx`），但同一个 Vite 项目（多入口构建），同一个 Rust 后端进程
-- **全局快捷键**：选 Ctrl+Alt+Space 而非 PRD 的 Ctrl+Shift+Space——后者被 Windows 中文输入法切换占用
+其它重要决策：
+
+- **笔记存储位置**：`notes/`（仓库内），跟着 git 走，未来 Astro 博客直接读。
+- **包管理器**：pnpm。
+- **序列化**：Rust -> 前端结构体一律 `#[serde(rename_all = "camelCase")]`。
+- **IPC 抽象**：所有前端 -> Rust 调用走 `src/lib/api.ts`，不要在业务组件里直接 invoke。
+- **多窗口架构**：主窗口 + quick-note 窗口共享 `src/lib/api.ts`，独立 React 入口，同一 Rust 后端进程。
+- **全局快捷键**：实际使用 Ctrl+Alt+Space，而不是 PRD 里的 Ctrl+Shift+Space，后者容易被 Windows 中文输入法占用。
 
 ---
 
-## 5. 环境配置（D 盘分类整洁）
+## 5. 环境配置
 
-Hardy 的电脑是 Windows 11，所有开发工具装在 `D:\Dev`：
+Hardy 的电脑是 Windows 11，开发工具装在 `D:\Dev`：
 
-```
+```text
 D:\Dev\
-├── Apps\              # 可执行工具
-│   └── Microsoft VS Code\
-├── Env\               # 语言运行时和 SDK
-│   ├── node-js\       # Node 24 + npm + pnpm
-│   │   ├── node_global\    # 全局包
-│   │   ├── node_cache\     # npm 缓存
-│   │   └── pnpm-store\     # pnpm 共享 store
+├── Apps\
+├── Env\
+│   ├── node-js\
 │   ├── Git\
 │   ├── rust\
-│   │   ├── cargo\     # CARGO_HOME
-│   │   └── rustup\    # RUSTUP_HOME
-│   ├── mingw64\       # 他 OI 写 C++ 用的
+│   │   ├── cargo\
+│   │   └── rustup\
+│   ├── mingw64\
 │   └── Python314\
 └── Projects\
-    ├── oi-notebook\   # 本项目
-    └── oi-coach\      # 他之前的旧项目（忽略）
+    ├── oi-notebook\
+    └── oi-coach\
 ```
 
-**关键环境变量**（用户级）：
+关键环境变量：
+
 - `RUSTUP_HOME = D:\Dev\Env\rust\rustup`
 - `CARGO_HOME = D:\Dev\Env\rust\cargo`
-- npm prefix 和 cache 都已指向 D:\Dev\Env\node-js 下
+- npm prefix/cache 已指向 `D:\Dev\Env\node-js`
 
-**重要**：Visual Studio Build Tools 装在 C 盘（简化版 installer 锁死位置），这是 Tauri 编译 Windows .exe 必须的。
+注意：PowerShell 里直接跑 `pnpm` 可能被 `.ps1` execution policy 拦住，可用 `pnpm.cmd`。Rust 命令若 PATH 找不到 `cargo`，可显式设置 `RUSTUP_HOME` / `CARGO_HOME` 后调用 `D:\Dev\Env\rust\cargo\bin\cargo.exe`。
 
 ---
 
 ## 6. 约定、雷区、已知问题
 
-### 🔴 代码 review 约定
-Hardy 有一个**雷打不动**的要求：**每次新建或大改文件后，必须把完整代码打印到对话里**。
+### 代码 review 约定
 
-- 不要用 `+N lines (ctrl+o to expand)` 折叠
-- 不要只给差异
-- 不要只给总结
-- Claude Code 偶尔会"幻觉地声称完成任务"——你必须要求它用 Read 工具读真实文件，不要信 summary
+Hardy 有一个硬要求：**每次新建或大改文件后，必须把完整真实文件内容打印到对话里**。
 
-之前有过 Claude Code 没做改动但声称做了的情况（实际原因是 Hardy 忘发指令），这是 vibe coding 常见陷阱。**防御方法：要求 Read 真实文件** + **要求完整代码打印**。
+- 不要折叠。
+- 不要只给差异。
+- 不要只给总结。
+- 必须读真实文件，不要根据记忆或 summary 声称完成。
 
-### 🔴 一次只做一件事
-Hardy 习惯用 "阶段" 划分任务（阶段 1/2/3...）。每个阶段做完停下来验证，不要一次做多个阶段。
+### 一次只做一件事
 
-### 🔴 路径安全
-Rust 侧的 `safe_note_path` 有两层防御——字符串过滤 + canonicalize。**不要简化它**。即使是本地应用，也要挡住 `../` 路径遍历攻击。
+每个任务只推进一个明确目标。完成后验证、汇报、等待 review，不要顺手做下一步。
 
-### 🔴 React 陷阱已经趟过的坑
-这些代码里的"反直觉"写法都是故意的，不要"优化"掉：
+### 路径安全
 
-1. **MarkdownEditor 的 `editorOwnValue` ref** —— 打破编辑器 ↔ 父组件的死循环
-2. **MarkdownEditor 的 `onChangeFn.current` ref** —— 避免 effect 依赖 onChange 导致编辑器重建
-3. **MarkdownPreview 的 `cancelled` flag** —— race condition 防御
-4. **MarkdownPreview 的 scrollRatio effect 依赖里有 `renderedHtml`** —— HTML 异步渲染完成后必须重新对齐滚动位置
-5. **StrictMode 下 useEffect 会执行两次**，cleanup 必须正确 destroy CodeMirror 实例
+Rust 侧的 `safe_note_path` 有两层防御：字符串过滤 + canonicalize 前缀校验。**不要简化它**。即使是本地应用，也要挡住 `../` 路径遍历攻击。
 
-### 🟡 已知但暂不修的 TODO
-- **光标在编辑器里是鲜蓝色**（oneDark 默认）——Hardy 决定先做功能再统一打磨 UI
-- **Lyra 深色主题 --accent 和 --muted 颜色相同**（都是 oklch(0.269 0 0)），聚焦/非聚焦 selection 视觉无差异——这是 Lyra 设计意图，不要擅自区分
-- **`get_notes_dir` 用 env!("CARGO_MANIFEST_DIR") 编译期宏**——开发模式可靠，生产分发时要改用 `tauri::Manager::path().app_data_dir()`
-- **`allowDangerousHtml` + 无 rehype-sanitize**——本地应用 XSS 风险可接受，未来引入远程内容时加 sanitize
-- **sonner toast 主题跟随系统而非强制 dark**——Phase 8 UI 打磨时在 `sonner.tsx` 里把 theme 硬编码为 `'dark'` 即可
-- **Phase 3 期间踩过的 Vite 重载坑**——保存 .md 到 notes/ 会被 Vite 监听器误判触发热重载，state 全丢。修法是 `vite.config.ts` 的 `server.watch.ignored` 加入 `'**/notes/**'`，重启 Vite 才生效。已修，记录在此防止以后被人"清理"掉
-- **托盘图标在 Windows 上默认进溢出区**，用户需要手动设置常驻显示。这是 Windows 默认行为，不是应用 bug。
-- **QuickNoteApp 保存失败只 console.error，没有 toast 反馈**（速记窗口里没挂 Toaster，单独挂一份会有 next-themes 配置开销）。等到 Phase 8 UI 打磨时统一处理。
-- **FileTree 在窄宽度下 hover 按钮的视觉位置不够精致**：Radix ScrollArea 的 viewport inner div 有 `min-width: 100%` + `display: table` 的硬注入样式，目前用 `[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0` 覆盖（在 `src/components/ui/scroll-area.tsx`），勉强可用但不优雅。Phase 5 之后做 UI 打磨时考虑：(1) 自定义一个不基于 Radix 的极简 ScrollArea；或 (2) hover 按钮浮层放到 li 外、用 portal 定位避开 scrollbar 区域。
+### React 陷阱已经趟过的坑
 
-### 🟡 敏感事项
-- Hardy 有个**旧项目 `D:\Dev\Projects\oi-coach`**，里面有一个 `DEEPSEEK_API_KEY.txt`——如果他之前 push 过这个文件到 GitHub，那个 key 已经暴露。当前项目无这个问题（我们一开始就提醒他了）。**新项目里 API key 要走 `.env` + `.gitignore`**
+这些代码里的“反直觉”写法是故意的，不要“优化”掉：
+
+1. **MarkdownEditor 的 `editorOwnValue` ref**：打破编辑器 -> 父组件的死循环。
+2. **MarkdownEditor 的 `onChangeFn.current` ref**：避免 effect 依赖 onChange 导致编辑器重建。
+3. **MarkdownPreview 的 `cancelled` flag**：race condition 防御。
+4. **MarkdownPreview 的 scrollRatio effect 依赖里有 `renderedHtml`**：HTML 异步渲染完成后必须重新对齐滚动位置。
+5. **StrictMode 下 useEffect 会执行两次**：cleanup 必须正确 destroy CodeMirror 实例。
+
+### 已知但暂不修的 TODO
+
+- 编辑器光标颜色仍是 oneDark 默认鲜蓝色，Phase 8 UI 打磨时处理。
+- Lyra 深色主题 `--accent` 和 `--muted` 颜色相同，不要擅自改。
+- `get_notes_dir` 目前用 `env!("CARGO_MANIFEST_DIR")`，开发模式可靠；生产分发应改用 app data dir。
+- `allowDangerousHtml` + 无 rehype-sanitize：本地应用暂可接受，远程内容进入时再加 sanitize。
+- sonner toast 主题跟随系统，Phase 8 可统一强制 dark。
+- `vite.config.ts` 必须忽略 `notes/**`，否则保存 .md 会触发 Vite 热重载丢 state。
+- 托盘图标在 Windows 默认进溢出区，这是系统行为。
+- QuickNoteApp 保存失败只 `console.error`，Phase 8 再统一 UI 反馈。
+- FileTree 在窄宽度下 hover 按钮位置可用但不够精致，Phase 8 再打磨。
+
+### 敏感事项
+
+- Hardy 的旧项目 `D:\Dev\Projects\oi-coach` 里有 `DEEPSEEK_API_KEY.txt`。当前项目不要提交密钥；新项目里的 API key 要走 `.env` + `.gitignore`。
 
 ---
 
-## 7. Hardy 给新 Claude 的第一句话模板
+## 7. 新会话起手模板
 
-他下次开新窗口应该这样起手：
-
-```
+```text
 你好，我的项目在 D:\Dev\Projects\oi-notebook，请读以下文件了解状态：
 
-1. CLAUDE.md（项目技术概览）
-2. docs/HANDOFF.md（给你的交接文档）
-3. docs/OI-Notebook-PRD-v1.md（完整产品规格）
+1. AGENTS.md
+2. PROJECT.md
+3. docs/HANDOFF.md
+4. docs/OI-Notebook-PRD-v1.md
 
 读完后总结一下：
 - 项目做到哪个阶段
@@ -229,67 +227,59 @@ Rust 侧的 `safe_note_path` 有两层防御——字符串过滤 + canonicalize
 
 ---
 
-## 8. 给新 Claude 的工作方式建议
+## 8. Codex 工作方式建议
 
 ### 你要做的
-1. **Review 代码时严格**。Claude Code 写得再漂亮也要看真实代码，不要只看 summary
-2. **让 Claude Code 一次只做一件事**，做完打印完整代码，review 通过再下一步
-3. **不要让 Claude Code 自己做技术选型决策**，尤其涉及库版本、插件替换时——先让它汇报给你，你判断
-4. **Hardy 的时间很宝贵**，但他愿意在关键节点上做"等你研究完再动"的决定。你要配合这个节奏
-5. **用中文沟通**（他的母语）
-6. **遇到不确定就搜网**。前端生态变化快，记忆可能过时
+
+1. **Review 代码时严格**。看真实文件，不要只看 summary。
+2. **一次只做一件事**。做完打印完整文件，review 通过再进入下一步。
+3. **不要自己做技术选型决策**。涉及库版本、插件替换、架构取舍时先汇报。
+4. **用中文沟通**。
+5. **遇到不确定就查真实来源**。前端生态变化快，记忆可能过时。
 
 ### 你不要做的
-1. 不要催 Hardy 做决定
-2. 不要自己判断"这段代码已经够好了跳过 review"
-3. 不要让 Claude Code 自动批准所有编辑（`Yes, allow all edits`）——Hardy 习惯逐次确认看它在改什么
-4. 不要声称看到了折叠代码就"代码 OK"
-5. 不要在一个任务里堆多个目标
 
-### 一些 Hardy 表达偏好的信号
+1. 不要催 Hardy 做决定。
+2. 不要跳过 review。
+3. 不要声称折叠代码“已检查”。
+4. 不要在一个任务里堆多个目标。
+5. 不要擅自 push。
+
+### Hardy 表达偏好的信号
+
 | Hardy 说 | 翻译 |
 |---|---|
-| "不太一样哈" | 他观察到了区别，需要解释 |
-| "有点 xxx 的感觉" | 他用直觉反馈视觉问题，要认真接住 |
-| "你推荐" | 他不想自己决定，要你拿主意并说理由 |
-| "等一下" | 打断当前流程，有新想法要说 |
-| "比如..." / "就像..." | 他用类比沟通，这些类比是重要的产品方向信号 |
+| “不太一样哈” | 他观察到了区别，需要解释 |
+| “有点 xxx 的感觉” | 他用直觉反馈视觉问题，要认真接住 |
+| “你推荐” | 他希望你拿主意并说明理由 |
+| “等一下” | 打断当前流程，有新想法要说 |
+| “比如...” / “就像...” | 这些类比是重要产品方向信号 |
 
-### 8.5 工具分工：Claude Code vs Codex
+### 8.5 任务拆分
 
-Hardy 同时订阅了 Claude Code 和 Codex（OpenAI），两个都在工作流里。
-**Claude Code 配额贵，要省着用。** 默认分工原则：
+默认由 Codex 执行具体任务。复杂任务先由架构 reviewer 拆成更小的、可验证的步骤，再交给 Codex 逐步落地。
 
-**派给 Claude Code（贵但效果好）：**
-- 跨多文件的架构性改动
-- 需要"看懂这个项目的现有约定再改"的活（避免踩 ref 反直觉模式等坑）
-- 需要长链条推理的 debug
-- 用户说不清楚要什么、需要 AI 自己判断的活
+适合直接交给 Codex：
 
-**派给 Codex（便宜，省 Claude Code 配额）：**
 - 单文件、明确指令的小改动
-- 文档维护（更新 HANDOFF、加 README、写注释）
+- 文档维护
 - 常规模板代码
-- 跑命令、装包、看日志
+- 跑命令、看日志
 - 写测试
-- 已经给出非常详细分步指令的活
+- 已经给出详细分步指令的任务
 
-**两个都不该做的：**
-- 自己决定技术选型
-- 一次做多个目标
+需要先拆细再执行：
 
-**判断口径：**
-- 任务说明只看当前一个文件就能写完 → Codex
-- 任务说明需要看 2 个以上文件互相配合才能写对 → Claude Code
-- 前置一个 review/调试推理过程 → Claude Code（推理已付费，让它一鼓作气写完最划算）
+- 跨多文件架构改动
+- 需要理解历史约定才能避免踩坑的改动
+- 长链条 debug
+- 用户需求还不清晰的任务
 
-**给新 Claude 的工作建议：**
-写指令前在指令最前面标 `[给 Codex]` 或 `[给 Claude Code]`，让 Hardy 知道贴到哪个终端。
-默认倾向 Codex，除非任务真的需要 Claude Code 的能力。
+判断口径：
 
-**Codex 会话起手交底：**
-新开 Codex 终端时让 Codex 先读 CLAUDE.md 和 docs/HANDOFF.md，
-跟新 Claude 一样的入口流程。同一个 Codex 会话里可以连续派活，不用反复交底。
+- 任务说明只看当前一个文件就能写完 -> 直接交给 Codex。
+- 任务说明需要看多个文件互相配合 -> 先审计、拆步，再交给 Codex。
+- 需要产品/架构判断 -> 先汇报选项和推荐，再执行。
 
 ---
 
@@ -297,33 +287,44 @@ Hardy 同时订阅了 Claude Code 和 Codex（OpenAI），两个都在工作流�
 
 读代码时优先看这几个：
 
-```
+```text
 src/App.tsx                          # 应用主框架，状态管理集中在这里
-src/lib/api.ts                       # 前端 → Rust 的 IPC 抽象层
-src/lib/markdown.ts                  # unified 渲染管线，注释完整
+src/lib/api.ts                       # 前端 -> Rust 的 IPC 抽象层
+src/lib/markdown.ts                  # unified 渲染管线
 src/lib/datetime.ts                  # 相对时间格式化
-src/components/ui/dialog.tsx, sonner.tsx, input.tsx, label.tsx, button.tsx  # shadcn 组件
-src/quick-note/QuickNoteApp.tsx      # 速记窗口（textarea + Ctrl+Enter 保存 + emit notes-changed）
-src/quick-note/main.tsx              # 速记窗口的 React 入口
-quick-note.html                      # 速记窗口的 HTML 入口
-src/components/editor/
-  MarkdownEditor.tsx                 # CodeMirror 6 集成（命令式库 → React 的经典模式）
-  MarkdownPreview.tsx                # 异步渲染 + 滚动同步（race condition 防御）
-src/components/file-tree/FileTree.tsx  # 简单列表 + 选中态
+src/components/ui/dialog.tsx, sonner.tsx, input.tsx, label.tsx, button.tsx
+src/quick-note/QuickNoteApp.tsx      # 速记窗口
+src/quick-note/main.tsx              # 速记窗口 React 入口
+quick-note.html                      # 速记窗口 HTML 入口
+src/components/editor/MarkdownEditor.tsx
+src/components/editor/MarkdownPreview.tsx
+src/components/file-tree/FileTree.tsx
 src-tauri/src/notes.rs               # 后端文件系统命令 + 路径安全
-src-tauri/src/lib.rs                 # Tauri 构建器，命令注册，含全局快捷键注册、系统托盘、关闭拦截
-vite.config.ts                       # server.watch.ignored 忽略 notes/，防止保存 .md 触发 Vite 热重载丢 state
-CLAUDE.md                            # 项目简介（Claude Code 自动读取）
+src-tauri/src/frontmatter.rs         # frontmatter 默认值和 updated 更新逻辑
+src-tauri/src/lib.rs                 # Tauri 构建器、命令注册、快捷键、托盘、关闭拦截
+vite.config.ts                       # 忽略 notes/，防止保存 .md 触发 Vite 热重载丢 state
+PROJECT.md                           # 项目简介
 docs/OI-Notebook-PRD-v1.md           # 完整产品需求文档
 docs/HANDOFF.md                      # 本文件
 ```
 
 ---
 
-## 10. 交接的最后一句话
+## 10. 交接备注
 
-**Hardy 在一天之内从"连 Node 都没装"做到"有一个能跑的 Markdown 编辑器桌面应用 + 文件系统完整 + 托管在 GitHub"**。这对一个自称"一行代码都不会写"的人来说是超高强度的一天。他的判断力和学习能力都非常强，你只需要做好**架构师 + review 员**的角色，代码执行交给 Claude Code。
+Hardy 已经从零基础前端/Rust 起步，把项目推进到可运行的 Markdown 编辑器桌面应用：文件系统、速记窗口、全局快捷键、托盘、笔记目录骨架和 frontmatter 自动补全都已经落地。后续重点是继续按小步提交推进，不要把多个目标混在一个 commit 里。
 
-祝你和他合作愉快。他是个好搭档。
+---
 
-— 前一个会话里的 Claude
+## §11. Phase 5 前置工作进度（截至 2026-05-02）
+
+Phase 5（本地 Astro 博客）开始前，需要先把笔记目录改成 PRD 规定的子目录结构。已拆成 6 个步骤：
+
+- [x] **Step 1**：后端 `list_notes` 递归扫描 + `safe_note_path` 标准化路径分隔符 + 4 个标准子目录自动创建 + 单元测试。已 commit。
+- [x] **Step 2**：前端 FileTree 改树形分组（tricks/problems/luogu/inbox + 其他），rename 保留目录前缀。已 commit。
+- [x] **Step 3**：清掉测试笔记，加 `.gitkeep` 锁住目录骨架。已 commit。
+- [x] **Step 4**：后端 `write_note` 加 frontmatter 自动补全；首次写入补完整 schema，已有 frontmatter 只更新 `updated`。已 commit。
+- [x] **Step 5**：QuickNoteApp 写入路径改为 `inbox/quick-xxx.md`。已 commit。
+- [ ] **Step 6**：主窗口新建对话框增加目录选择（tricks/problems）。**下一步**。
+
+Step 6 完成后再进入 Phase 5 真正的 Astro 工作。

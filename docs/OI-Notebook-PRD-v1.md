@@ -329,23 +329,23 @@ int main() {
       "models": ["moonshot-v1-32k"]
     },
     {
-      "id": "claude",
-      "name": "Claude",
-      "baseUrl": "https://api.anthropic.com/v1",
-      "apiKey": "sk-ant-xxx",
-      "models": ["claude-opus-4-7", "claude-haiku-4-5"]
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "sk-or-xxx",
+      "models": ["openai/gpt-4.1", "google/gemini-pro", "qwen/qwen-max"]
     }
   ],
   "tasks": {
     "auto_tag": "deepseek:deepseek-chat",       // 便宜任务用便宜模型
-    "polish": "claude:claude-opus-4-7",          // 润色用强模型
+    "polish": "openrouter:openai/gpt-4.1",       // 润色走强模型路由
     "summarize": "deepseek:deepseek-chat",
     "relate": "deepseek:deepseek-chat"
   }
 }
 ```
 
-**底层实现**：大部分国产模型兼容 OpenAI 格式，用一个 OpenAI SDK 覆盖。Claude 单独适配（用 `@anthropic-ai/sdk`），或者推荐用户走 OpenRouter 一个 Key 用所有模型。
+**底层实现**：优先支持 OpenAI-compatible provider。DeepSeek、Kimi、GLM、通义、OpenRouter 等都可以通过统一的 base URL / API key / model 配置接入。需要强模型润色时，推荐走 OpenRouter 或其它兼容路由，而不是为单个模型供应商写专门适配。
 
 **具体 AI 能力**：
 
@@ -470,7 +470,7 @@ jobs:
 
 ### Phase 5：AI 辅助（1 周）
 - [ ] 多 provider 配置界面
-- [ ] OpenAI SDK + Claude SDK 适配层
+- [ ] OpenAI-compatible SDK/provider 适配层
 - [ ] Prompt 模板系统
 - [ ] 自动打标签 / 摘要 / 润色
 - [ ] 关联推荐
