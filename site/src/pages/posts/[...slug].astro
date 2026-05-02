@@ -72,23 +72,27 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
       }
     </header>
 
-    {
-      tocHeadings.length > 1 && (
-        <nav class="post-toc" aria-label="文章目录">
-          <h2>目录</h2>
-          <ol>
-            {tocHeadings.map((heading) => (
-              <li class={`depth-${heading.depth}`}>
-                <a href={`#${heading.slug}`}>{heading.text}</a>
-              </li>
-            ))}
-          </ol>
-        </nav>
-      )
-    }
+    <div class={`post-layout ${tocHeadings.length > 1 ? "has-toc" : "no-toc"}`}>
+      {
+        tocHeadings.length > 1 && (
+          <nav class="post-toc" aria-label="文章目录">
+            <h2>目录</h2>
+            <ol>
+              {tocHeadings.map((heading) => (
+                <li class={`depth-${heading.depth}`}>
+                  <a href={`#${heading.slug}`}>{heading.text}</a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )
+      }
 
-    <div class="prose">
-      <Content />
+      <div class="post-main">
+        <div class="prose">
+          <Content />
+        </div>
+      </div>
     </div>
   </article>
 </BaseLayout>
