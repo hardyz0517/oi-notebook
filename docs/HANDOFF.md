@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（完成 Phase 5 前置 Step 4 + Step 5）
+**最后更新**：2026-05-02（完成 Phase 5 前置 Step 1-6 + frontmatter 预览修复）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -312,19 +312,23 @@ docs/HANDOFF.md                      # 本文件
 
 ## 10. 交接备注
 
-Hardy 已经从零基础前端/Rust 起步，把项目推进到可运行的 Markdown 编辑器桌面应用：文件系统、速记窗口、全局快捷键、托盘、笔记目录骨架和 frontmatter 自动补全都已经落地。后续重点是继续按小步提交推进，不要把多个目标混在一个 commit 里。
+Hardy 已经从零基础前端/Rust 起步，把项目推进到可运行的 Markdown 编辑器桌面应用：文件系统、速记窗口、全局快捷键、托盘、笔记目录骨架、frontmatter 自动补全、主窗口按目录新建笔记都已经落地。Phase 5 前置工作已经收口，下一步可以正式进入本地 Astro 博客初始化。后续重点是继续按小步提交推进，不要把多个目标混在一个 commit 里。
 
 ---
 
 ## §11. Phase 5 前置工作进度（截至 2026-05-02）
 
-Phase 5（本地 Astro 博客）开始前，需要先把笔记目录改成 PRD 规定的子目录结构。已拆成 6 个步骤：
+Phase 5（本地 Astro 博客）开始前，需要先把笔记目录改成 PRD 规定的子目录结构。前置工作已全部完成，可以进入正式的 Astro 子项目初始化。
 
-- [x] **Step 1**：后端 `list_notes` 递归扫描 + `safe_note_path` 标准化路径分隔符 + 4 个标准子目录自动创建 + 单元测试。已 commit。
-- [x] **Step 2**：前端 FileTree 改树形分组（tricks/problems/luogu/inbox + 其他），rename 保留目录前缀。已 commit。
-- [x] **Step 3**：清掉测试笔记，加 `.gitkeep` 锁住目录骨架。已 commit。
-- [x] **Step 4**：后端 `write_note` 加 frontmatter 自动补全；首次写入补完整 schema，已有 frontmatter 只更新 `updated`。已 commit。
-- [x] **Step 5**：QuickNoteApp 写入路径改为 `inbox/quick-xxx.md`。已 commit。
-- [ ] **Step 6**：主窗口新建对话框增加目录选择（tricks/problems）。**下一步**。
+- [x] **Step 1**：后端 `list_notes` 递归扫描 + `safe_note_path` 标准化路径分隔符 + 4 个标准子目录自动创建 + 单元测试。已完成。
+- [x] **Step 2**：前端 FileTree 改树形分组（tricks/problems/luogu/inbox + 其他），rename 保留目录前缀。已完成。
+- [x] **Step 3**：清掉测试笔记，加 `.gitkeep` 锁住目录骨架。已完成。
+- [x] **Step 4**：后端 `write_note` 已接入 frontmatter 自动补全；首次写入无 frontmatter 的笔记时补完整 schema，已有 frontmatter 时只更新 `updated`，不覆盖用户已有字段。commit：`4356548 feat(phase5-prep): add note frontmatter defaults`。
+- [x] **Step 5**：QuickNoteApp 写入路径已改为 `inbox/quick-xxx.md`，速记保存后仍会通知主窗口刷新。commit：`269d033 feat(phase5-prep): save quick notes to inbox`。
+- [x] **Step 6**：主窗口新建笔记对话框已支持选择 `tricks` / `problems`，创建路径分别为 `tricks/{filename}.md` 和 `problems/{filename}.md`。commit：`8dc655c feat(phase5-prep): choose directory when creating notes`。
 
-Step 6 完成后再进入 Phase 5 真正的 Astro 工作。
+Step 6 UI 最终方案：目录选择使用纵向 radio 选择卡片，整行可点击，选中项有明确 radio 圆点、边框和背景状态；不再使用原生 `select`，也不再使用按钮式 segmented control。相关修复：`67c3672 fix(ui): replace native note directory select`、`12023f1 fix(ui): clarify note directory choice`。
+
+额外修复：右侧 Markdown 预览在渲染前会隐藏文件开头的 YAML frontmatter，避免 `title`、`tags`、`created` 等元数据显示在预览区；左侧编辑器仍显示完整 Markdown 原文。commit：`ac6fe1b fix(markdown): hide frontmatter in preview`。
+
+下一步：正式进入 Phase 5 本地 Astro 博客初始化。
