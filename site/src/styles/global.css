@@ -363,7 +363,7 @@ h3 {
 }
 
 .post {
-  max-width: 1080px;
+  max-width: 1200px;
   margin: 0 auto;
   padding-top: 42px;
 }
@@ -410,10 +410,10 @@ h3 {
 
 .post-layout {
   display: grid;
-  grid-template-columns: minmax(0, 760px) 220px;
+  grid-template-columns: minmax(0, 760px) 200px;
   align-items: start;
   justify-content: center;
-  gap: 48px;
+  gap: 80px;
   margin-top: 34px;
 }
 
