@@ -311,24 +311,52 @@ export default function App() {
         <div className="grid gap-3 py-2">
           {dialogMode === "create" && (
             <div className="grid gap-2">
-              <Label>目录</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={newNoteDirectory === "tricks" ? "secondary" : "outline"}
-                  onClick={() => setNewNoteDirectory("tricks")}
-                  className="justify-center"
+              <Label>保存位置</Label>
+              <div className="grid gap-2">
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
+                    newNoteDirectory === "tricks"
+                      ? "border-ring bg-accent/50"
+                      : "border-border bg-background"
+                  }`}
                 >
-                  tricks - 技巧 / Trick
-                </Button>
-                <Button
-                  type="button"
-                  variant={newNoteDirectory === "problems" ? "secondary" : "outline"}
-                  onClick={() => setNewNoteDirectory("problems")}
-                  className="justify-center"
+                  <input
+                    type="radio"
+                    name="note-directory"
+                    value="tricks"
+                    checked={newNoteDirectory === "tricks"}
+                    onChange={() => setNewNoteDirectory("tricks")}
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium text-foreground">tricks/</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      技巧笔记：算法 trick、模板、结论整理
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
+                    newNoteDirectory === "problems"
+                      ? "border-ring bg-accent/50"
+                      : "border-border bg-background"
+                  }`}
                 >
-                  problems - 题解 / Problem
-                </Button>
+                  <input
+                    type="radio"
+                    name="note-directory"
+                    value="problems"
+                    checked={newNoteDirectory === "problems"}
+                    onChange={() => setNewNoteDirectory("problems")}
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium text-foreground">problems/</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      题解笔记：题目分析、解法记录
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
           )}
