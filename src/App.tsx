@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, deleteNote, renameNote } from "@/lib/api";
+import { listNotes, readNote, writeNote, deleteNote, renameNote, openBlog } from "@/lib/api";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -190,6 +190,14 @@ export default function App() {
   const handleDialogConfirm = () => {
     if (dialogMode === "create") handleCreate();
     else if (dialogMode === "rename") handleRename();
+  };
+
+  const handleOpenBlog = async () => {
+    try {
+      await openBlog();
+    } catch (e) {
+      toast.error(`打开博客失败: ${e}`);
+    }
   };
 
   const handleEditorChange = (value: string) => {
@@ -407,6 +415,15 @@ export default function App() {
               )}
             </>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleOpenBlog}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            打开博客
+          </Button>
         </div>
       </header>
 

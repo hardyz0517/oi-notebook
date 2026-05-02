@@ -138,6 +138,12 @@ fn stop_blog_server_child(child: &mut Child) {
     }
 }
 
+#[tauri::command]
+fn open_blog() -> Result<(), String> {
+    tauri_plugin_opener::open_url("http://localhost:4321", None::<&str>)
+        .map_err(|e| format!("打开本地博客失败：{e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -149,6 +155,7 @@ pub fn run() {
             notes::write_note,
             notes::delete_note,
             notes::rename_note,
+            open_blog,
         ])
         .setup(|app| {
             start_blog_server(&app.state::<BlogServerState>());

@@ -98,3 +98,15 @@ export async function renameNote(
     throw toError(e);
   }
 }
+
+/**
+ * 在默认浏览器中打开本地 Astro 博客。
+ * 对应 Rust 命令：open_blog
+ */
+export async function openBlog(): Promise<void> {
+  try {
+    await invoke<void>("open_blog");
+  } catch (e) {
+    throw toError(e);
+  }
+}
