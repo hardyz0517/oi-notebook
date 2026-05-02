@@ -1,0 +1,65 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const notes = await getCollection("notes");
+
+const sortedNotes = notes.sort((a, b) => {
+  const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+  const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+  return bTime - aTime;
+});
+
+const formatDate = (date?: Date) =>
+  date
+    ? new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date)
+    : "未记录日期";
+
+const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
+---
+
+<BaseLayout title="OI Notebook">
+  <section class="home-hero">
+    <p class="eyebrow">Local Notes Blog</p>
+    <h1>OI Notebook</h1>
+    <p class="lede">把训练间隙写下的 trick、题解和整理稿，直接变成可阅读的本地博客。</p>
+  </section>
+
+  <section class="post-list" aria-label="笔记列表">
+    {
+      sortedNotes.length === 0 ? (
+        <p class="empty-state">还没有 Markdown 笔记。开始在桌面端写一篇，博客会在这里显示。</p>
+      ) : (
+        sortedNotes.map((note) => {
+          const category = categoryOf(note.id);
+          const date = note.data.updated ?? note.data.created;
+
+          return (
+            <article class="post-card">
+              <div class="post-meta">
+                <span class="category">{category}</span>
+                <time datetime={date?.toISOString()}>{formatDate(date)}</time>
+                {note.data.draft && <span class="draft-badge">Draft</span>}
+              </div>
+              <h2>
+                <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
+              </h2>
+              {note.data.summary && <p class="summary">{note.data.summary}</p>}
+              {note.data.tags.length > 0 && (
+                <ul class="tag-list" aria-label="标签">
+                  {note.data.tags.map((tag) => (
+                    <li>{tag}</li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })
+      )
+    }
+  </section>
+</BaseLayout>

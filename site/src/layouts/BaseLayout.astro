@@ -1,0 +1,29 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "OI Notebook" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-title" href="/">OI Notebook</a>
+      <p class="site-subtitle">算法笔记与题解的本地博客</p>
+    </header>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>

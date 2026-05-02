@@ -1,0 +1,78 @@
+---
+import { getCollection, render } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+export async function getStaticPaths() {
+  const notes = await getCollection("notes");
+
+  return notes.map((note) => ({
+    params: { slug: note.id },
+    props: { note },
+  }));
+}
+
+const { note } = Astro.props;
+const { Content } = await render(note);
+
+const formatDate = (date?: Date) =>
+  date
+    ? new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }).format(date)
+    : "未记录";
+
+const category = note.id.split(/[\\/]/)[0] || "notes";
+---
+
+<BaseLayout title={`${note.data.title || note.id} - OI Notebook`} description={note.data.summary || "OI Notebook note"}>
+  <article class="post">
+    <header class="post-header">
+      <div class="post-meta">
+        <span class="category">{category}</span>
+        {note.data.draft && <span class="draft-badge">Draft</span>}
+      </div>
+      <h1>{note.data.title || note.id}</h1>
+      <dl class="frontmatter-list">
+        <div>
+          <dt>Created</dt>
+          <dd>{formatDate(note.data.created)}</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>{formatDate(note.data.updated ?? note.data.created)}</dd>
+        </div>
+        {
+          note.data.difficulty && (
+            <div>
+              <dt>Difficulty</dt>
+              <dd>{note.data.difficulty}</dd>
+            </div>
+          )
+        }
+        {
+          note.data.source && (
+            <div>
+              <dt>Source</dt>
+              <dd>{note.data.source}</dd>
+            </div>
+          )
+        }
+      </dl>
+      {
+        note.data.tags.length > 0 && (
+          <ul class="tag-list" aria-label="标签">
+            {note.data.tags.map((tag) => (
+              <li>{tag}</li>
+            ))}
+          </ul>
+        )
+      }
+    </header>
+
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+</BaseLayout>
