@@ -84,6 +84,7 @@ export default function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
   const [dialogValue, setDialogValue] = useState("");
+  const [newNoteDirectory, setNewNoteDirectory] = useState<"tricks" | "problems">("tricks");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
 
   function validateFilename(name: string): string | null {
@@ -99,6 +100,7 @@ export default function App() {
   const openCreateDialog = () => {
     setDialogMode("create");
     setDialogValue("");
+    setNewNoteDirectory("tricks");
   };
 
   const openRenameDialog = (path: string) => {
@@ -113,14 +115,14 @@ export default function App() {
   const closeDialog = () => {
     setDialogMode(null);
     setDialogValue("");
+    setNewNoteDirectory("tricks");
     setRenameTarget(null);
   };
 
   const handleCreate = async () => {
     const err = validateFilename(dialogValue);
     if (err) { toast.error(err); return; }
-    // TODO(Step 6): 增加目录选择，目前默认创建到顶层（"其他"分组）
-    const newPath = `${dialogValue.trim()}.md`;
+    const newPath = `${newNoteDirectory}/${dialogValue.trim()}.md`;
     if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
     // dirty 检查必须在创建文件之前——避免用户取消后留下孤儿文件
     if (isDirty) {
@@ -306,26 +308,42 @@ export default function App() {
             {dialogMode === "create" ? "新建笔记" : "重命名笔记"}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid gap-2 py-2">
-          <Label htmlFor="filename">文件名</Label>
-          <Input
-            id="filename"
-            value={dialogValue}
-            onChange={(e) => setDialogValue(e.target.value)}
-            placeholder="不需要输入 .md"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                handleDialogConfirm();
-              }
-            }}
-          />
-          <p className="text-xs text-muted-foreground">
-            {dialogMode === "rename" && renameTarget && renameTarget.includes("/")
-              ? `当前位于 ${renameTarget.slice(0, renameTarget.lastIndexOf("/"))}/，目录会保留`
-              : "系统会自动加上 .md 后缀"}
-          </p>
+        <div className="grid gap-3 py-2">
+          {dialogMode === "create" && (
+            <div className="grid gap-2">
+              <Label htmlFor="note-directory">目录</Label>
+              <select
+                id="note-directory"
+                value={newNoteDirectory}
+                onChange={(e) => setNewNoteDirectory(e.target.value as "tricks" | "problems")}
+                className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="tricks">tricks - 技巧 / Trick</option>
+                <option value="problems">problems - 题解 / Problem</option>
+              </select>
+            </div>
+          )}
+          <div className="grid gap-2">
+            <Label htmlFor="filename">文件名</Label>
+            <Input
+              id="filename"
+              value={dialogValue}
+              onChange={(e) => setDialogValue(e.target.value)}
+              placeholder="不需要输入 .md"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleDialogConfirm();
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {dialogMode === "rename" && renameTarget && renameTarget.includes("/")
+                ? `当前位于 ${renameTarget.slice(0, renameTarget.lastIndexOf("/"))}/，目录会保留`
+                : "系统会自动加上 .md 后缀"}
+            </p>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={closeDialog}>取消</Button>
