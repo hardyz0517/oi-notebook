@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（完成 Phase 5 Astro 子项目初始化 + 端到端验证）
+**最后更新**：2026-05-02（完成 Phase 5 Astro 本地博客 Tauri 集成 + Markdown 数学渲染）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -87,7 +87,11 @@
     ├─ Astro 子项目 site/ 已初始化，独立 pnpm install/dev/build
     ├─ 内容集合读取 notes/**/*.md，首页列出笔记，文章页渲染正文
     ├─ Draft 标记已显示，端到端 build 验证已通过
-    └─ 未完成：Tauri 后台启动 astro dev、桌面端打开博客入口、设计打磨、搜索/标签页增强
+    ├─ Tauri 启动时后台启动 Astro dev server，托盘退出时清理进程树
+    ├─ Header 已有“打开博客”入口，打开 http://localhost:4321
+    ├─ Astro dev server 已监听外部 notes/**/*.md 变化并刷新
+    ├─ 博客端 Markdown 已支持数学公式渲染和基础表格样式
+    └─ 未完成：视觉打磨、搜索/标签页/目录/上一篇下一篇、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -315,7 +319,7 @@ docs/HANDOFF.md                      # 本文件
 
 ## 10. 交接备注
 
-Hardy 已经从零基础前端/Rust 起步，把项目推进到可运行的 Markdown 编辑器桌面应用：文件系统、速记窗口、全局快捷键、托盘、笔记目录骨架、frontmatter 自动补全、主窗口按目录新建笔记都已经落地。Phase 5 前置工作已经收口，`site/` Astro 子项目也已完成第一刀初始化并通过端到端验证。后续重点是继续按小步提交推进，不要把多个目标混在一个 commit 里。
+Hardy 已经从零基础前端/Rust 起步，把项目推进到可运行的 Markdown 编辑器桌面应用：文件系统、速记窗口、全局快捷键、托盘、笔记目录骨架、frontmatter 自动补全、主窗口按目录新建笔记都已经落地。Phase 5 前置工作已经收口，`site/` Astro 子项目已完成初始化、端到端验证、Tauri 开发模式集成、外部 notes 刷新和 Markdown 数学渲染。后续重点是继续按小步提交推进，不要把多个目标混在一个 commit 里。
 
 ---
 
@@ -334,13 +338,13 @@ Step 6 UI 最终方案：目录选择使用纵向 radio 选择卡片，整行可
 
 额外修复：右侧 Markdown 预览在渲染前会隐藏文件开头的 YAML frontmatter，避免 `title`、`tags`、`created` 等元数据显示在预览区；左侧编辑器仍显示完整 Markdown 原文。commit：`ac6fe1b fix(markdown): hide frontmatter in preview`。
 
-Phase 5 Astro 子项目初始化已完成。下一步：Tauri 集成 Astro dev，让应用启动时后台启动 `site` dev server，并提供打开 `localhost:4321` 的入口。
+Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口、外部 notes 刷新和 Markdown 数学渲染都已完成。下一步等待 Hardy 决定：继续打磨博客 UI、先做搜索/标签页，或进入部署/生产分发方向。
 
 ---
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 第一刀已经完成：仓库新增独立 `site/` Astro 子项目，先做最小可用的本地博客，不包含 Tauri 后台启动、打开博客按钮、GitHub Actions、搜索、标签页、深色模式切换、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、标签页、文章目录、深色模式切换、洛谷、AI 或 Git 自动同步。
 
 已完成内容：
 
@@ -351,10 +355,22 @@ Phase 5 第一刀已经完成：仓库新增独立 `site/` Astro 子项目，先
 - [x] 文章页使用 `/posts/[...slug]`，能渲染 Markdown 正文，并显示 title、created、updated、tags、difficulty、source。
 - [x] frontmatter 作为 Astro 元数据处理，不会作为正文显示。
 - [x] 样式为最小亮色文学博客风格：留白、衬线正文、窄宽度文章页，不引入 Tailwind 或 UI 库。
+- [x] Tauri 启动时后台启动 `site` 的 Astro dev server。
+- [x] 主窗口关闭只是隐藏，不 kill Astro；托盘“退出”才清理 Astro。
+- [x] Windows 下退出应用时使用 `taskkill /PID <pid> /T /F` 清理 `pnpm.cmd` 进程树，避免 node/astro 残留。
+- [x] Header 已有“打开博客”入口，打开 `http://localhost:4321`。
+- [x] Astro dev server 已 watch 外部 `../notes` 目录，新增/修改/删除 `.md` 时刷新 content layer 并 full reload。
+- [x] 博客端 Markdown 已支持数学公式渲染：`remark-math` + `rehype-katex` + KaTeX CSS。
+- [x] 表格基础样式已补。
 
 相关提交：
 
 - `758e128 feat(site): initialize Astro notes blog`
+- `089b813 feat(site): start Astro dev server with app`
+- `2f1dad8 fix(site): clean up Astro dev process tree`
+- `aab93db feat(site): add open blog action`
+- `456361f fix(site): refresh notes during dev`
+- `2903349 fix(site): render math in blog posts`
 
 端到端验证结果：
 
@@ -366,12 +382,18 @@ Phase 5 第一刀已经完成：仓库新增独立 `site/` Astro 子项目，先
 - `draft: true` 的 problems 测试笔记在首页和文章页都显示 `Draft` badge。
 - build 共生成 3 个页面：首页 + 两篇文章页。
 - 验证后两篇临时测试笔记已删除，没有提交测试笔记。
+- Tauri 运行时验收通过：应用启动后会后台启动 Astro dev server。
+- 主窗口关闭隐藏后，`localhost:4321` 仍可访问；托盘退出后会清理 Astro dev server，`localhost:4321` 不再可访问。
+- Header “打开博客”按钮能打开 `http://localhost:4321`。
+- 桌面端新建/修改 `notes/` 下的 `.md` 笔记后，运行中的 Astro dev server 能刷新内容。
+- 博客端数学公式已接入 `remark-math` + `rehype-katex` + KaTeX CSS；表格基础样式已补。
+- 人工验收用测试笔记已删除，未提交测试笔记。
 
 尚未完成：
 
-- Tauri 启动时后台运行 `site` 的 Astro dev server。
-- 桌面端提供打开本地博客 `localhost:4321` 的入口。
-- 博客视觉继续向文人博客方向打磨。
-- 搜索、标签页、分页、文章导航等后续增强。
+- 博客视觉还只是基础文学博客风格，后续可继续打磨。
+- 还没有搜索、标签页、文章目录、上一篇/下一篇。
+- 还没有 GitHub Pages 部署。
+- 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：Tauri 集成 Astro dev：应用启动时后台启动 `site` dev server，并提供打开 `localhost:4321` 的入口。
+下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做搜索/标签页，或进入 GitHub Pages 部署与生产分发策略。
