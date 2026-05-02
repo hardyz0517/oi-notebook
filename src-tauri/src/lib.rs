@@ -1,14 +1,112 @@
 mod frontmatter;
 mod notes;
 
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+struct BlogServerState {
+    child: Mutex<Option<Child>>,
+}
+
+impl BlogServerState {
+    fn new() -> Self {
+        Self {
+            child: Mutex::new(None),
+        }
+    }
+}
+
+impl Drop for BlogServerState {
+    fn drop(&mut self) {
+        stop_blog_server(self);
+    }
+}
+
+fn site_dir() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent()?;
+    Some(repo_root.join("site"))
+}
+
+fn start_blog_server(state: &BlogServerState) {
+    let Some(site_dir) = site_dir() else {
+        eprintln!("无法定位仓库根目录，跳过启动 Astro dev server");
+        return;
+    };
+
+    if !site_dir.is_dir() {
+        eprintln!(
+            "site 目录不存在，跳过启动 Astro dev server：{}",
+            site_dir.display()
+        );
+        return;
+    }
+
+    let mut child_guard = match state.child.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            eprintln!("无法获取 Astro dev server 状态锁，跳过启动：{e}");
+            return;
+        }
+    };
+
+    if child_guard.is_some() {
+        return;
+    }
+
+    match Command::new("pnpm.cmd")
+        .args(["dev", "--host", "127.0.0.1", "--port", "4321"])
+        .current_dir(&site_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => {
+            *child_guard = Some(child);
+        }
+        Err(e) => {
+            eprintln!("启动 Astro dev server 失败：{e}");
+        }
+    }
+}
+
+fn stop_blog_server(state: &BlogServerState) {
+    let mut child = match state.child.lock() {
+        Ok(mut guard) => guard.take(),
+        Err(e) => {
+            eprintln!("无法获取 Astro dev server 状态锁，跳过清理：{e}");
+            return;
+        }
+    };
+
+    if let Some(child) = child.as_mut() {
+        match child.try_wait() {
+            Ok(Some(_status)) => {}
+            Ok(None) => {
+                if let Err(e) = child.kill() {
+                    eprintln!("停止 Astro dev server 失败：{e}");
+                }
+                if let Err(e) = child.wait() {
+                    eprintln!("等待 Astro dev server 退出失败：{e}");
+                }
+            }
+            Err(e) => {
+                eprintln!("检查 Astro dev server 状态失败：{e}");
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(BlogServerState::new())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             notes::list_notes,
@@ -18,6 +116,8 @@ pub fn run() {
             notes::rename_note,
         ])
         .setup(|app| {
+            start_blog_server(&app.state::<BlogServerState>());
+
             #[cfg(desktop)]
             {
                 let toggle_shortcut = Shortcut::new(
@@ -84,6 +184,7 @@ pub fn run() {
                             }
                         }
                         "quit" => {
+                            stop_blog_server(&app.state::<BlogServerState>());
                             app.exit(0);
                         }
                         _ => {}
