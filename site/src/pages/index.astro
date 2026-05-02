@@ -26,13 +26,12 @@ const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
 ---
 
 <BaseLayout title="OI Notebook">
-  <section class="home-hero">
-    <p class="eyebrow">Local Notes Blog</p>
-    <h1>OI Notebook</h1>
-    <p class="lede">把训练间隙写下的 trick、题解和整理稿，直接变成可阅读的本地博客。</p>
-  </section>
-
   <section class="home-posts" id="posts" aria-label="笔记列表">
+    <header class="section-header">
+      <h1>最新笔记</h1>
+      <p>最近记录的 trick、题解和整理稿</p>
+    </header>
+
     {
       sortedNotes.length === 0 ? (
         <p class="empty-state">还没有 Markdown 笔记。开始在桌面端写一篇，博客会在这里显示。</p>
