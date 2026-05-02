@@ -311,16 +311,25 @@ export default function App() {
         <div className="grid gap-3 py-2">
           {dialogMode === "create" && (
             <div className="grid gap-2">
-              <Label htmlFor="note-directory">目录</Label>
-              <select
-                id="note-directory"
-                value={newNoteDirectory}
-                onChange={(e) => setNewNoteDirectory(e.target.value as "tricks" | "problems")}
-                className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <option value="tricks">tricks - 技巧 / Trick</option>
-                <option value="problems">problems - 题解 / Problem</option>
-              </select>
+              <Label>目录</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={newNoteDirectory === "tricks" ? "secondary" : "outline"}
+                  onClick={() => setNewNoteDirectory("tricks")}
+                  className="justify-center"
+                >
+                  tricks - 技巧 / Trick
+                </Button>
+                <Button
+                  type="button"
+                  variant={newNoteDirectory === "problems" ? "secondary" : "outline"}
+                  onClick={() => setNewNoteDirectory("problems")}
+                  className="justify-center"
+                >
+                  problems - 题解 / Problem
+                </Button>
+              </div>
             </div>
           )}
           <div className="grid gap-2">
