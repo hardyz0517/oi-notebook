@@ -97,8 +97,6 @@ h3 {
 }
 
 .featured-post {
-  max-width: 820px;
-  margin: 0 auto;
   padding: 24px 0 32px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
