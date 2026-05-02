@@ -36,17 +36,17 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
       <h1>{note.data.title || note.id}</h1>
       <dl class="frontmatter-list">
         <div>
-          <dt>Created</dt>
+          <dt>创建</dt>
           <dd>{formatDate(note.data.created)}</dd>
         </div>
         <div>
-          <dt>Updated</dt>
+          <dt>更新</dt>
           <dd>{formatDate(note.data.updated ?? note.data.created)}</dd>
         </div>
         {
           note.data.difficulty && (
             <div>
-              <dt>Difficulty</dt>
+              <dt>难度</dt>
               <dd>{note.data.difficulty}</dd>
             </div>
           )
@@ -54,7 +54,7 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
         {
           note.data.source && (
             <div>
-              <dt>Source</dt>
+              <dt>来源</dt>
               <dd>{note.data.source}</dd>
             </div>
           )
