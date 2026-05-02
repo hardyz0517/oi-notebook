@@ -59,7 +59,38 @@ const processor = unified()
  * @returns 渲染后的 HTML 字符串，可直接用于 dangerouslySetInnerHTML
  */
 export async function renderMarkdown(md: string): Promise<string> {
-  const result = await processor.process(md);
+  const result = await processor.process(stripFrontmatter(md));
   // VFile 实现了 toString()，直接返回序列化后的 HTML 内容
   return String(result);
+}
+
+function stripFrontmatter(markdown: string): string {
+  const openerLength = markdown.startsWith("---\r\n") ? 5 : markdown.startsWith("---\n") ? 4 : -1;
+
+  if (openerLength === -1) {
+    return markdown;
+  }
+
+  let cursor = openerLength;
+
+  while (cursor < markdown.length) {
+    const lineEnd = markdown.indexOf("\n", cursor);
+    let lineContentEnd = lineEnd === -1 ? markdown.length : lineEnd;
+
+    if (lineContentEnd > cursor && markdown[lineContentEnd - 1] === "\r") {
+      lineContentEnd -= 1;
+    }
+
+    if (markdown.slice(cursor, lineContentEnd) === "---") {
+      return markdown.slice(lineEnd === -1 ? markdown.length : lineEnd + 1);
+    }
+
+    if (lineEnd === -1) {
+      break;
+    }
+
+    cursor = lineEnd + 1;
+  }
+
+  return markdown;
 }
