@@ -89,17 +89,52 @@ fn stop_blog_server(state: &BlogServerState) {
         match child.try_wait() {
             Ok(Some(_status)) => {}
             Ok(None) => {
-                if let Err(e) = child.kill() {
-                    eprintln!("停止 Astro dev server 失败：{e}");
-                }
-                if let Err(e) = child.wait() {
-                    eprintln!("等待 Astro dev server 退出失败：{e}");
-                }
+                stop_blog_server_child(child);
             }
             Err(e) => {
                 eprintln!("检查 Astro dev server 状态失败：{e}");
             }
         }
+    }
+}
+
+#[cfg(windows)]
+fn stop_blog_server_child(child: &mut Child) {
+    let pid = child.id().to_string();
+    match Command::new("taskkill")
+        .args(["/PID", &pid, "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("taskkill 清理 Astro dev server 进程树失败，状态码：{status}");
+            if let Err(e) = child.kill() {
+                eprintln!("停止 Astro dev server 失败：{e}");
+            }
+        }
+        Err(e) => {
+            eprintln!("执行 taskkill 清理 Astro dev server 进程树失败：{e}");
+            if let Err(e) = child.kill() {
+                eprintln!("停止 Astro dev server 失败：{e}");
+            }
+        }
+    }
+
+    if let Err(e) = child.wait() {
+        eprintln!("等待 Astro dev server 退出失败：{e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn stop_blog_server_child(child: &mut Child) {
+    if let Err(e) = child.kill() {
+        eprintln!("停止 Astro dev server 失败：{e}");
+    }
+    if let Err(e) = child.wait() {
+        eprintln!("等待 Astro dev server 退出失败：{e}");
     }
 }
 
