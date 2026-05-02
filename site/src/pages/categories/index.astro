@@ -1,0 +1,54 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const categories = [
+  {
+    key: "tricks",
+    name: "技巧笔记",
+    description: "算法 trick、模板、结论和常用写法整理。",
+  },
+  {
+    key: "problems",
+    name: "题解笔记",
+    description: "题目分析、解法记录、反思和复盘。",
+  },
+  {
+    key: "luogu",
+    name: "洛谷沉淀",
+    description: "从洛谷题目和训练中沉淀下来的笔记。",
+  },
+  {
+    key: "inbox",
+    name: "速记草稿",
+    description: "临时想法、待整理片段和快速记录。",
+  },
+] as const;
+
+const notes = await getCollection("notes");
+const countOf = (category: string) =>
+  notes.filter((note) => note.id.split(/[\\/]/)[0] === category).length;
+---
+
+<BaseLayout title="分类 - OI Notebook" description="按 notes 目录浏览 OI Notebook 笔记">
+  <section class="category-page">
+    <header class="page-heading">
+      <p class="page-kicker">Categories</p>
+      <h1>按目录浏览</h1>
+      <p>从笔记的来源和用途进入：技巧、题解、洛谷沉淀，以及尚未整理的速记草稿。</p>
+    </header>
+
+    <div class="category-grid" aria-label="分类列表">
+      {
+        categories.map((category) => (
+          <a class="category-card" href={`/categories/${category.key}`}>
+            <span class="category-name">{category.name}</span>
+            <span class="category-key">{category.key}</span>
+            <p>{category.description}</p>
+            <span class="category-count">{countOf(category.key)} 篇文章</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</BaseLayout>

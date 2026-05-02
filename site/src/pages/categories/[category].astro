@@ -1,0 +1,141 @@
+---
+import { getCollection, type CollectionEntry } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const categories = [
+  {
+    key: "tricks",
+    name: "技巧笔记",
+    description: "算法 trick、模板、结论和常用写法整理。",
+  },
+  {
+    key: "problems",
+    name: "题解笔记",
+    description: "题目分析、解法记录、反思和复盘。",
+  },
+  {
+    key: "luogu",
+    name: "洛谷沉淀",
+    description: "从洛谷题目和训练中沉淀下来的笔记。",
+  },
+  {
+    key: "inbox",
+    name: "速记草稿",
+    description: "临时想法、待整理片段和快速记录。",
+  },
+] as const;
+
+export function getStaticPaths() {
+  const paths = [
+    {
+      key: "tricks",
+      name: "技巧笔记",
+      description: "算法 trick、模板、结论和常用写法整理。",
+    },
+    {
+      key: "problems",
+      name: "题解笔记",
+      description: "题目分析、解法记录、反思和复盘。",
+    },
+    {
+      key: "luogu",
+      name: "洛谷沉淀",
+      description: "从洛谷题目和训练中沉淀下来的笔记。",
+    },
+    {
+      key: "inbox",
+      name: "速记草稿",
+      description: "临时想法、待整理片段和快速记录。",
+    },
+  ];
+
+  return paths.map((category) => ({
+    params: { category: category.key },
+    props: { category },
+  }));
+}
+
+type NoteEntry = CollectionEntry<"notes">;
+
+const { category } = Astro.props;
+const notes = (await getCollection("notes"))
+  .filter((note) => note.id.split(/[\\/]/)[0] === category.key)
+  .sort((a, b) => {
+    const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+    const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+    return bTime - aTime;
+  });
+
+const formatDate = (date?: Date) =>
+  date
+    ? new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date)
+    : "未记录日期";
+
+const excerptOf = (note: NoteEntry) => {
+  if (note.data.summary.trim()) {
+    return note.data.summary.trim();
+  }
+
+  const body = note.body
+    .replace(/^---[\s\S]*?---/, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\$\$?/g, "")
+    .replace(/\\(frac|sum|int|lim|sqrt|cdot|times|leq|geq|neq|infty)\b/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return body.length > 110 ? `${body.slice(0, 110)}...` : body;
+};
+---
+
+<BaseLayout title={`${category.name} - OI Notebook`} description={category.description}>
+  <section class="category-page">
+    <header class="page-heading">
+      <p class="page-kicker">{category.key}</p>
+      <h1>{category.name}</h1>
+      <p>{category.description}</p>
+    </header>
+
+    {
+      notes.length === 0 ? (
+        <p class="empty-state">这个分类还没有笔记。</p>
+      ) : (
+        <div class="category-post-list" aria-label={`${category.name}文章列表`}>
+          {notes.map((note) => {
+            const date = note.data.updated ?? note.data.created;
+            const excerpt = excerptOf(note);
+
+            return (
+              <article class="post-card">
+                <div class="post-meta">
+                  <time datetime={date?.toISOString()}>{formatDate(date)}</time>
+                  {note.data.draft && <span class="draft-badge">Draft</span>}
+                </div>
+                <h2>
+                  <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
+                </h2>
+                {excerpt && <p class="summary">{excerpt}</p>}
+                {note.data.tags.length > 0 && (
+                  <ul class="tag-list" aria-label="标签">
+                    {note.data.tags.map((tag) => (
+                      <li>{tag}</li>
+                    ))}
+                  </ul>
+                )}
+                <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>
+              </article>
+            );
+          })}
+        </div>
+      )
+    }
+  </section>
+</BaseLayout>

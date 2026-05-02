@@ -213,6 +213,20 @@ h3 {
   background: currentColor;
 }
 
+.browse-categories {
+  margin: 42px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.browse-categories a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .empty-state {
   margin: 0;
   padding: 32px;
@@ -220,6 +234,91 @@ h3 {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 4px;
+}
+
+.category-page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-top: 40px;
+}
+
+.page-heading {
+  max-width: 680px;
+  margin-bottom: 34px;
+}
+
+.page-kicker {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.page-heading h1 {
+  font-size: clamp(32px, 4vw, 46px);
+}
+
+.page-heading p:not(.page-kicker) {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Songti SC", serif;
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 28px;
+}
+
+.category-card {
+  display: block;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+}
+
+.category-card:hover .category-name,
+.category-card:hover .category-count {
+  color: var(--accent);
+}
+
+.category-name {
+  display: block;
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Songti SC", serif;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.category-key {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.category-card p {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Songti SC", serif;
+  line-height: 1.7;
+}
+
+.category-count {
+  display: inline-block;
+  margin-top: 18px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.category-post-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 36px 28px;
 }
 
 .post {
@@ -383,7 +482,9 @@ h3 {
 }
 
 @media (max-width: 860px) {
-  .post-list {
+  .post-list,
+  .category-grid,
+  .category-post-list {
     grid-template-columns: 1fr;
   }
 }
