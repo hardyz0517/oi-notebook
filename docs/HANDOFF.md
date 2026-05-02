@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客 UI 打磨进展）
+**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客分类页进展）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -92,7 +92,8 @@
     ├─ Astro dev server 已监听外部 notes/**/*.md 变化并刷新
     ├─ 博客端 Markdown 已支持数学公式渲染、基础表格样式和浅色代码块
     ├─ 首页已调整为文章优先的博客文章流，文章页 metadata 已中文化并弱化
-    └─ 未完成：搜索/标签页/目录/上一篇下一篇、GitHub Pages、生产分发策略
+    ├─ 分类总览页与分类详情页已完成
+    └─ 未完成：搜索/tag 详情页/文章目录/上一篇下一篇、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -363,6 +364,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] Astro dev server 已 watch 外部 `../notes` 目录，新增/修改/删除 `.md` 时刷新 content layer 并 full reload。
 - [x] 博客端 Markdown 已支持数学公式渲染：`remark-math` + `rehype-katex` + KaTeX CSS。
 - [x] 表格基础样式已补。
+- [x] 分类总览页 `/categories` 已新增，显示 `tricks`、`problems`、`luogu`、`inbox` 四个标准目录的说明、文章数量和入口。
+- [x] 分类详情页 `/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox` 已新增，可按 notes 目录浏览文章。
+- [x] 分类详情页沿用文章列表样式，按 `updated ?? created` 倒序；空分类会显示温和空状态提示。
+- [x] 顶部导航已有“分类”，首页底部已有“按目录浏览全部分类”入口。
 
 相关提交：
 
@@ -372,6 +377,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `aab93db feat(site): add open blog action`
 - `456361f fix(site): refresh notes during dev`
 - `2903349 fix(site): render math in blog posts`
+- `90cdd44 feat(site): add category pages`
 
 端到端验证结果：
 
@@ -389,15 +395,20 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - 桌面端新建/修改 `notes/` 下的 `.md` 笔记后，运行中的 Astro dev server 能刷新内容。
 - 博客端数学公式已接入 `remark-math` + `rehype-katex` + KaTeX CSS；表格基础样式已补。
 - 人工验收用测试笔记已删除，未提交测试笔记。
+- 分类页肉眼验收通过：
+  - `/categories` 正常打开。
+  - `/categories/tricks` 能显示 Hardy 本地测试笔记。
+  - 空分类如 `/categories/luogu`、`/categories/inbox` 能显示空状态。
+  - 首页底部“按目录浏览全部分类”入口可用。
 
 尚未完成：
 
-- 博客视觉还只是基础文学博客风格，后续可继续打磨。
-- 还没有搜索、标签页、文章目录、上一篇/下一篇。
+- 博客视觉仍可继续打磨。
+- 还没有搜索、tag 详情页、文章目录、上一篇/下一篇。
 - 还没有 GitHub Pages 部署。
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做搜索/标签页，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做搜索/tag 详情页/文章目录，或进入 GitHub Pages 部署与生产分发策略。
 
 ### 博客 UI 打磨进展
 
@@ -416,6 +427,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 文章页 metadata 已中文化：创建、更新、难度、来源。
 - [x] 文章页 metadata 已弱化为轻量信息区，不再像后台字段表格。
 - [x] 数学公式、表格、代码块基础阅读体验已可用。
+- [x] 分类总览页 `/categories` 已完成，支持按 `tricks`、`problems`、`luogu`、`inbox` 浏览。
+- [x] 分类详情页已完成：`/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox`。
+- [x] 分类详情页沿用文章列表风格，按 `updated ?? created` 倒序，并支持空分类状态。
+- [x] 顶部导航已有“分类”，首页已有“按目录浏览全部分类”入口。
 
 相关提交：
 
@@ -429,6 +444,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `fdb2969 fix(site): use light code block theme`
 - `fca48d3 feat(site): add copy buttons to code blocks`
 - `c2a1923 style(site): soften post metadata`
+- `90cdd44 feat(site): add category pages`
 
 ### 本地测试笔记策略
 
@@ -441,10 +457,17 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - 不要修改。
 - 除非 Hardy 明确要求清理，否则把它们视为正常本地验收素材。
 
+分类页肉眼验收：
+
+- `/categories` 正常打开。
+- `/categories/tricks` 能显示 Hardy 本地测试笔记。
+- 空分类如 `/categories/luogu`、`/categories/inbox` 能显示空状态。
+- 首页底部“按目录浏览全部分类”入口可用。
+
 仍未完成 / 等待 Hardy 决定：
 
 - 搜索。
-- 标签页。
+- tag 详情页。
 - 文章目录。
 - 上一篇/下一篇。
 - GitHub Pages 部署。
