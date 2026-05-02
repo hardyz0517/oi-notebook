@@ -414,26 +414,29 @@ h3 {
 
 .post-layout {
   display: grid;
-  grid-template-columns: minmax(0, 760px) 200px;
+  grid-template-columns: 1fr;
   align-items: start;
-  justify-content: center;
-  gap: 80px;
-  margin-top: 34px;
+  position: relative;
+  width: min(760px, calc(100vw - 48px));
+  margin: 34px auto 0;
+  overflow: visible;
 }
 
 .post-layout.no-toc {
-  grid-template-columns: minmax(0, 760px);
+  grid-template-columns: 1fr;
 }
 
 .post-main {
-  grid-column: 1;
-  grid-row: 1;
+  grid-area: 1 / 1;
   min-width: 0;
 }
 
 .post-toc {
-  grid-column: 2;
-  grid-row: 1;
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-self: start;
+  width: 200px;
+  transform: translateX(calc(100% + 80px));
   position: sticky;
   top: 32px;
   max-height: calc(100vh - 64px);
@@ -594,6 +597,26 @@ h3 {
   color: var(--text);
 }
 
+@media (max-width: 1120px) {
+  .post-layout {
+    gap: 28px;
+  }
+
+  .post-toc,
+  .post-main {
+    grid-area: auto;
+  }
+
+  .post-toc {
+    justify-self: stretch;
+    width: auto;
+    transform: none;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 860px) {
   .post-list,
   .category-grid,
@@ -604,23 +627,6 @@ h3 {
 
   .post {
     max-width: 760px;
-  }
-
-  .post-layout {
-    grid-template-columns: 1fr;
-    gap: 28px;
-  }
-
-  .post-toc,
-  .post-main {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .post-toc {
-    position: static;
-    max-height: none;
-    overflow: visible;
   }
 }
 
