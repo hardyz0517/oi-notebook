@@ -23,15 +23,30 @@ const formatDate = (date?: Date) =>
     : "未记录日期";
 
 const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
+
+const excerptOf = (note: (typeof sortedNotes)[number]) => {
+  if (note.data.summary.trim()) {
+    return note.data.summary.trim();
+  }
+
+  const body = note.body
+    .replace(/^---[\s\S]*?---/, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\$\$?/g, "")
+    .replace(/\\(frac|sum|int|lim|sqrt|cdot|times|leq|geq|neq|infty)\b/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return body.length > 110 ? `${body.slice(0, 110)}...` : body;
+};
 ---
 
 <BaseLayout title="OI Notebook">
   <section class="home-posts" id="posts" aria-label="笔记列表">
-    <header class="section-header">
-      <h1>最新笔记</h1>
-      <p>最近记录的 trick、题解和整理稿</p>
-    </header>
-
     {
       sortedNotes.length === 0 ? (
         <p class="empty-state">还没有 Markdown 笔记。开始在桌面端写一篇，博客会在这里显示。</p>
@@ -48,7 +63,7 @@ const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
             <h2>
               <a href={`/posts/${featuredNote.id}`}>{featuredNote.data.title || featuredNote.id}</a>
             </h2>
-            {featuredNote.data.summary && <p class="summary">{featuredNote.data.summary}</p>}
+            {excerptOf(featuredNote) && <p class="summary">{excerptOf(featuredNote)}</p>}
             {featuredNote.data.tags.length > 0 && (
               <ul class="tag-list" aria-label="标签">
                 {featuredNote.data.tags.map((tag) => (
@@ -63,6 +78,7 @@ const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
             <div class="post-list" aria-label="更多笔记">
               {restNotes.map((note) => {
                 const date = note.data.updated ?? note.data.created;
+                const excerpt = excerptOf(note);
 
                 return (
                   <article class="post-card">
@@ -74,7 +90,7 @@ const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
                     <h2>
                       <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
                     </h2>
-                    {note.data.summary && <p class="summary">{note.data.summary}</p>}
+                    {excerpt && <p class="summary">{excerpt}</p>}
                     {note.data.tags.length > 0 && (
                       <ul class="tag-list" aria-label="标签">
                         {note.data.tags.map((tag) => (
