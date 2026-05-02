@@ -30,5 +30,66 @@ const { title, description = "OI Notebook" } = Astro.props;
     <main>
       <slot />
     </main>
+    <script is:inline>
+      const copyWithFallback = async (text) => {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+
+        try {
+          document.execCommand("copy");
+        } finally {
+          textarea.remove();
+        }
+      };
+
+      const setupCodeCopyButtons = () => {
+        document.querySelectorAll(".prose pre").forEach((pre) => {
+          if (pre.querySelector(".copy-code-button")) return;
+
+          const code = pre.querySelector("code");
+          if (!code?.innerText.trim()) return;
+
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "copy-code-button";
+          button.textContent = "复制";
+          button.setAttribute("aria-label", "复制代码");
+
+          let resetTimer;
+          button.addEventListener("click", async () => {
+            clearTimeout(resetTimer);
+
+            try {
+              await copyWithFallback(code.innerText);
+              button.textContent = "已复制";
+            } catch {
+              button.textContent = "复制失败";
+            }
+
+            resetTimer = window.setTimeout(() => {
+              button.textContent = "复制";
+            }, 1500);
+          });
+
+          pre.appendChild(button);
+        });
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", setupCodeCopyButtons);
+      } else {
+        setupCodeCopyButtons();
+      }
+    </script>
   </body>
 </html>
