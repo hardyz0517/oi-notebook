@@ -12,7 +12,8 @@ export async function getStaticPaths() {
 }
 
 const { note } = Astro.props;
-const { Content } = await render(note);
+const { Content, headings } = await render(note);
+const tocHeadings = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
 
 const formatDate = (date?: Date) =>
   date
@@ -70,6 +71,21 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
         )
       }
     </header>
+
+    {
+      tocHeadings.length > 1 && (
+        <nav class="post-toc" aria-label="文章目录">
+          <h2>目录</h2>
+          <ol>
+            {tocHeadings.map((heading) => (
+              <li class={`depth-${heading.depth}`}>
+                <a href={`#${heading.slug}`}>{heading.text}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )
+    }
 
     <div class="prose">
       <Content />
