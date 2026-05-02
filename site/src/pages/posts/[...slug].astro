@@ -14,6 +14,17 @@ export async function getStaticPaths() {
 const { note } = Astro.props;
 const { Content, headings } = await render(note);
 const tocHeadings = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+const sortedNotes = (await getCollection("notes")).sort((a, b) => {
+  const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+  const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+  return bTime - aTime;
+});
+const currentIndex = sortedNotes.findIndex((entry) => entry.id === note.id);
+const newerNote = currentIndex > 0 ? sortedNotes[currentIndex - 1] : undefined;
+const olderNote =
+  currentIndex >= 0 && currentIndex < sortedNotes.length - 1
+    ? sortedNotes[currentIndex + 1]
+    : undefined;
 
 const formatDate = (date?: Date) =>
   date
@@ -112,6 +123,30 @@ const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
         <div class="prose">
           <Content />
         </div>
+        {
+          sortedNotes.length > 1 && (newerNote || olderNote) && (
+            <nav class="post-nav" aria-label="上一篇和下一篇">
+              {newerNote && (
+                <a class="post-nav-item post-nav-newer" href={`/posts/${newerNote.id}`}>
+                  <span class="post-nav-label">上一篇</span>
+                  <strong>{newerNote.data.title || newerNote.id}</strong>
+                  <time datetime={(newerNote.data.updated ?? newerNote.data.created)?.toISOString()}>
+                    {formatDate(newerNote.data.updated ?? newerNote.data.created)}
+                  </time>
+                </a>
+              )}
+              {olderNote && (
+                <a class="post-nav-item post-nav-older" href={`/posts/${olderNote.id}`}>
+                  <span class="post-nav-label">下一篇</span>
+                  <strong>{olderNote.data.title || olderNote.id}</strong>
+                  <time datetime={(olderNote.data.updated ?? olderNote.data.created)?.toISOString()}>
+                    {formatDate(olderNote.data.updated ?? olderNote.data.created)}
+                  </time>
+                </a>
+              )}
+            </nav>
+          )
+        }
       </div>
     </div>
   </article>
