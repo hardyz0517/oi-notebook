@@ -1,0 +1,49 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const notes = await getCollection("notes");
+const tagCounts = new Map<string, number>();
+
+for (const note of notes) {
+  for (const tag of note.data.tags) {
+    const normalizedTag = tag.trim();
+
+    // Astro rest params use slash as a path separator; keep this step simple and skip those tags for now.
+    if (!normalizedTag || normalizedTag.includes("/")) {
+      continue;
+    }
+
+    tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) ?? 0) + 1);
+  }
+}
+
+const tags = [...tagCounts.entries()]
+  .map(([name, count]) => ({ name, count }))
+  .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
+---
+
+<BaseLayout title="标签 - OI Notebook" description="按 frontmatter tags 浏览 OI Notebook 笔记">
+  <section class="tag-page">
+    <header class="page-heading">
+      <p class="page-kicker">Tags</p>
+      <h1>按标签浏览</h1>
+      <p>从笔记的 frontmatter tags 进入，把同类 trick、题解和模板串起来。</p>
+    </header>
+
+    {
+      tags.length === 0 ? (
+        <p class="empty-state">还没有标签。给笔记 frontmatter 添加 tags 后会显示在这里。</p>
+      ) : (
+        <div class="tag-grid" aria-label="标签列表">
+          {tags.map((tag) => (
+            <a class="tag-card" href={`/tags/${encodeURIComponent(tag.name)}`}>
+              <span class="tag-name">#{tag.name}</span>
+              <span class="tag-count">{tag.count} 篇文章</span>
+            </a>
+          ))}
+        </div>
+      )
+    }
+  </section>
+</BaseLayout>

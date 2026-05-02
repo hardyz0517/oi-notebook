@@ -242,6 +242,12 @@ h3 {
   padding-top: 40px;
 }
 
+.tag-page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-top: 40px;
+}
+
 .page-heading {
   max-width: 680px;
   margin-bottom: 34px;
@@ -319,6 +325,41 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 36px 28px;
+}
+
+.tag-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px 22px;
+}
+
+.tag-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+}
+
+.tag-card:hover .tag-name,
+.tag-card:hover .tag-count {
+  color: var(--accent);
+}
+
+.tag-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Songti SC", serif;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.tag-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .post {
@@ -484,7 +525,8 @@ h3 {
 @media (max-width: 860px) {
   .post-list,
   .category-grid,
-  .category-post-list {
+  .category-post-list,
+  .tag-grid {
     grid-template-columns: 1fr;
   }
 }

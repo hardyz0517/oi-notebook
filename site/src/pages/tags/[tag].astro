@@ -1,0 +1,114 @@
+---
+import { getCollection, type CollectionEntry } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+type NoteEntry = CollectionEntry<"notes">;
+
+export async function getStaticPaths() {
+  const notes = await getCollection("notes");
+  const tags = new Set<string>();
+
+  for (const note of notes) {
+    for (const tag of note.data.tags) {
+      const normalizedTag = tag.trim();
+
+      // Astro rest params use slash as a path separator; keep this step simple and skip those tags for now.
+      if (!normalizedTag || normalizedTag.includes("/")) {
+        continue;
+      }
+
+      tags.add(normalizedTag);
+    }
+  }
+
+  return [...tags].map((tag) => ({
+    params: { tag: encodeURIComponent(tag) },
+    props: { tag },
+  }));
+}
+
+const { tag } = Astro.props;
+const notes = (await getCollection("notes"))
+  .filter((note) => note.data.tags.some((noteTag) => noteTag.trim() === tag))
+  .sort((a, b) => {
+    const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+    const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+    return bTime - aTime;
+  });
+
+const formatDate = (date?: Date) =>
+  date
+    ? new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date)
+    : "未记录日期";
+
+const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
+
+const excerptOf = (note: NoteEntry) => {
+  if (note.data.summary.trim()) {
+    return note.data.summary.trim();
+  }
+
+  const body = note.body
+    .replace(/^---[\s\S]*?---/, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\$\$?/g, "")
+    .replace(/\\(frac|sum|int|lim|sqrt|cdot|times|leq|geq|neq|infty)\b/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return body.length > 110 ? `${body.slice(0, 110)}...` : body;
+};
+---
+
+<BaseLayout title={`#${tag} - OI Notebook`} description={`按 ${tag} 标签浏览 OI Notebook 笔记`}>
+  <section class="tag-page">
+    <header class="page-heading">
+      <p class="page-kicker">Tag</p>
+      <h1>#{tag}</h1>
+      <p>收录所有标记为 {tag} 的笔记。</p>
+    </header>
+
+    {
+      notes.length === 0 ? (
+        <p class="empty-state">这个标签还没有笔记。</p>
+      ) : (
+        <div class="category-post-list" aria-label={`${tag} 标签文章列表`}>
+          {notes.map((note) => {
+            const date = note.data.updated ?? note.data.created;
+            const excerpt = excerptOf(note);
+
+            return (
+              <article class="post-card">
+                <div class="post-meta">
+                  <span class="category">{categoryOf(note.id)}</span>
+                  <time datetime={date?.toISOString()}>{formatDate(date)}</time>
+                  {note.data.draft && <span class="draft-badge">Draft</span>}
+                </div>
+                <h2>
+                  <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
+                </h2>
+                {excerpt && <p class="summary">{excerpt}</p>}
+                {note.data.tags.length > 0 && (
+                  <ul class="tag-list" aria-label="标签">
+                    {note.data.tags.map((noteTag) => (
+                      <li>{noteTag}</li>
+                    ))}
+                  </ul>
+                )}
+                <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>
+              </article>
+            );
+          })}
+        </div>
+      )
+    }
+  </section>
+</BaseLayout>
