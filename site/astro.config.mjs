@@ -1,6 +1,8 @@
 import { defineConfig } from "astro/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import rehypeKatex from "rehype-katex";
+import remarkMath from "remark-math";
 
 function watchExternalNotes() {
   const notesDir = path.resolve(
@@ -56,4 +58,8 @@ function watchExternalNotes() {
 export default defineConfig({
   site: "http://localhost:4321",
   integrations: [watchExternalNotes()],
+  markdown: {
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex],
+  },
 });
