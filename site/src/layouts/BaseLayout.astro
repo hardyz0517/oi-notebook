@@ -5,9 +5,10 @@ import "../styles/global.css";
 interface Props {
   title: string;
   description?: string;
+  mainClass?: string;
 }
 
-const { title, description = "OI Notebook" } = Astro.props;
+const { title, description = "OI Notebook", mainClass } = Astro.props;
 ---
 
 <!doctype html>
@@ -29,7 +30,7 @@ const { title, description = "OI Notebook" } = Astro.props;
         <a href="/tags">标签</a>
       </nav>
     </header>
-    <main>
+    <main class={mainClass}>
       <slot />
     </main>
     <script is:inline>

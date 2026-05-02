@@ -27,7 +27,11 @@ const formatDate = (date?: Date) =>
 const category = note.id.split(/[\\/]/)[0] || "notes";
 ---
 
-<BaseLayout title={`${note.data.title || note.id} - OI Notebook`} description={note.data.summary || "OI Notebook note"}>
+<BaseLayout
+  title={`${note.data.title || note.id} - OI Notebook`}
+  description={note.data.summary || "OI Notebook note"}
+  mainClass="post-main-shell"
+>
   <article class="post">
     <header class="post-header">
       <div class="post-meta">

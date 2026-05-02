@@ -81,6 +81,10 @@ main {
   padding: 0 24px 64px;
 }
 
+main.post-main-shell {
+  max-width: none;
+}
+
 h1,
 h2,
 h3 {
