@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客分类页进展）
+**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客标签页与中文 tag 路由修复）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -93,7 +93,8 @@
     ├─ 博客端 Markdown 已支持数学公式渲染、基础表格样式和浅色代码块
     ├─ 首页已调整为文章优先的博客文章流，文章页 metadata 已中文化并弱化
     ├─ 分类总览页与分类详情页已完成
-    └─ 未完成：搜索/tag 详情页/文章目录/上一篇下一篇、GitHub Pages、生产分发策略
+    ├─ 标签总览页与标签详情页已完成，中文 tag 路由已修复
+    └─ 未完成：搜索、文章目录、上一篇下一篇、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -346,7 +347,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、标签页、文章目录、深色模式切换、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、文章目录、深色模式切换、洛谷、AI 或 Git 自动同步。
 
 已完成内容：
 
@@ -367,7 +368,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 分类总览页 `/categories` 已新增，显示 `tricks`、`problems`、`luogu`、`inbox` 四个标准目录的说明、文章数量和入口。
 - [x] 分类详情页 `/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox` 已新增，可按 notes 目录浏览文章。
 - [x] 分类详情页沿用文章列表样式，按 `updated ?? created` 倒序；空分类会显示温和空状态提示。
-- [x] 顶部导航已有“分类”，首页底部已有“按目录浏览全部分类”入口。
+- [x] 标签总览页 `/tags` 已新增，从所有 notes 的 frontmatter `tags` 收集标签，显示 tag 名称、文章数量和详情入口。
+- [x] 标签详情页 `/tags/[tag]` 已新增，列出包含该 tag 的所有笔记，并按 `updated ?? created` 倒序。
+- [x] 中文 tag 路由已修复：`getStaticPaths()` 使用原始 tag 作为 params，`/tags/测试` 能生成并访问。
+- [x] 顶部导航已有“分类”和“标签”，首页底部已有“按目录浏览全部分类”入口。
 
 相关提交：
 
@@ -378,6 +382,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `456361f fix(site): refresh notes during dev`
 - `2903349 fix(site): render math in blog posts`
 - `90cdd44 feat(site): add category pages`
+- `e617542 feat(site): add tag pages`
+- `3ca8ce7 fix(site): handle unicode tag routes`
 
 端到端验证结果：
 
@@ -400,15 +406,19 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
   - `/categories/tricks` 能显示 Hardy 本地测试笔记。
   - 空分类如 `/categories/luogu`、`/categories/inbox` 能显示空状态。
   - 首页底部“按目录浏览全部分类”入口可用。
+- 标签页 build 验证通过：`cd site && pnpm.cmd build` 成功。
+- 已确认中文 tag 详情页会生成：`/tags/测试/index.html`。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
-- 还没有搜索、tag 详情页、文章目录、上一篇/下一篇。
+- 还没有全文搜索。
+- 还没有文章目录。
+- 还没有上一篇/下一篇。
 - 还没有 GitHub Pages 部署。
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做搜索/tag 详情页/文章目录，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做全文搜索/文章目录，或进入 GitHub Pages 部署与生产分发策略。
 
 ### 博客 UI 打磨进展
 
@@ -430,7 +440,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 分类总览页 `/categories` 已完成，支持按 `tricks`、`problems`、`luogu`、`inbox` 浏览。
 - [x] 分类详情页已完成：`/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox`。
 - [x] 分类详情页沿用文章列表风格，按 `updated ?? created` 倒序，并支持空分类状态。
-- [x] 顶部导航已有“分类”，首页已有“按目录浏览全部分类”入口。
+- [x] 标签总览页 `/tags` 已完成，按 frontmatter `tags` 汇总 tag 名称和文章数量。
+- [x] 标签详情页 `/tags/[tag]` 已完成，沿用文章列表风格，并按 `updated ?? created` 倒序。
+- [x] 中文 tag 路由 404 已修复，`/tags/测试` 可生成并访问。
+- [x] 顶部导航已有“分类”和“标签”，首页已有“按目录浏览全部分类”入口。
 
 相关提交：
 
@@ -445,10 +458,12 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `fca48d3 feat(site): add copy buttons to code blocks`
 - `c2a1923 style(site): soften post metadata`
 - `90cdd44 feat(site): add category pages`
+- `e617542 feat(site): add tag pages`
+- `3ca8ce7 fix(site): handle unicode tag routes`
 
 ### 本地测试笔记策略
 
-`notes/tricks/测试*.md` 这类文件是 Hardy 用于博客 UI 验收的本地素材。它们通常会以未跟踪文件形式留在工作区，用来反复检查首页文章流、文章页排版、代码块、公式、表格和 metadata 显示。
+`notes/tricks/测试*.md` 这类文件是 Hardy 用于博客 UI 验收的本地素材。它们通常会以未跟踪文件形式留在工作区，用来反复检查首页文章流、文章页排版、分类页、标签页、代码块、公式、表格和 metadata 显示。
 
 后续 Codex 看到这类本地测试笔记时：
 
@@ -464,10 +479,16 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - 空分类如 `/categories/luogu`、`/categories/inbox` 能显示空状态。
 - 首页底部“按目录浏览全部分类”入口可用。
 
+标签页验收：
+
+- `/tags` 正常打开。
+- `/tags` 会从 frontmatter `tags` 汇总标签并显示文章数量。
+- `/tags/[tag]` 会按 `updated ?? created` 倒序列出文章。
+- 中文 tag 路由已修复，`/tags/测试` 能生成并访问。
+
 仍未完成 / 等待 Hardy 决定：
 
-- 搜索。
-- tag 详情页。
+- 全文搜索。
 - 文章目录。
 - 上一篇/下一篇。
 - GitHub Pages 部署。
