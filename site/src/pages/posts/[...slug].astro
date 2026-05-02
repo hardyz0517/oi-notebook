@@ -127,7 +127,7 @@ const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
           sortedNotes.length > 1 && (newerNote || olderNote) && (
             <nav class="post-nav" aria-label="上一篇和下一篇">
               {newerNote && (
-                <a class="post-nav-item post-nav-newer" href={`/posts/${newerNote.id}`}>
+                <a class="post-nav-item previous" href={`/posts/${newerNote.id}`}>
                   <span class="post-nav-label">上一篇</span>
                   <strong>{newerNote.data.title || newerNote.id}</strong>
                   <time datetime={(newerNote.data.updated ?? newerNote.data.created)?.toISOString()}>
@@ -136,7 +136,7 @@ const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
                 </a>
               )}
               {olderNote && (
-                <a class="post-nav-item post-nav-older" href={`/posts/${olderNote.id}`}>
+                <a class="post-nav-item next" href={`/posts/${olderNote.id}`}>
                   <span class="post-nav-label">下一篇</span>
                   <strong>{olderNote.data.title || olderNote.id}</strong>
                   <time datetime={(olderNote.data.updated ?? olderNote.data.created)?.toISOString()}>

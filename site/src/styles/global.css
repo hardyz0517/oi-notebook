@@ -517,6 +517,18 @@ h3 {
   color: var(--accent);
 }
 
+.post-nav-item.previous {
+  grid-column: 1;
+  justify-self: start;
+  text-align: left;
+}
+
+.post-nav-item.next {
+  grid-column: 2;
+  justify-self: end;
+  text-align: right;
+}
+
 .post-nav-label {
   color: var(--accent);
   font-size: 12px;
@@ -533,10 +545,6 @@ h3 {
 .post-nav time {
   color: var(--muted);
   font-size: 13px;
-}
-
-.post-nav-older {
-  text-align: right;
 }
 
 .prose {
@@ -690,7 +698,10 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .post-nav-older {
+  .post-nav-item.previous,
+  .post-nav-item.next {
+    grid-column: 1;
+    justify-self: stretch;
     text-align: left;
   }
 }
