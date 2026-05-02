@@ -23,7 +23,9 @@ impl BlogServerState {
 
 impl Drop for BlogServerState {
     fn drop(&mut self) {
-        stop_blog_server(self);
+        if let Err(e) = stop_blog_server(self) {
+            eprintln!("清理 Astro dev server 失败：{e}");
+        }
     }
 }
 
@@ -33,30 +35,25 @@ fn site_dir() -> Option<PathBuf> {
     Some(repo_root.join("site"))
 }
 
-fn start_blog_server(state: &BlogServerState) {
+fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
     let Some(site_dir) = site_dir() else {
-        eprintln!("无法定位仓库根目录，跳过启动 Astro dev server");
-        return;
+        return Err("无法定位仓库根目录，无法启动 Astro dev server".to_string());
     };
 
     if !site_dir.is_dir() {
-        eprintln!(
-            "site 目录不存在，跳过启动 Astro dev server：{}",
+        return Err(format!(
+            "site 目录不存在，无法启动 Astro dev server：{}",
             site_dir.display()
-        );
-        return;
+        ));
     }
 
     let mut child_guard = match state.child.lock() {
         Ok(guard) => guard,
-        Err(e) => {
-            eprintln!("无法获取 Astro dev server 状态锁，跳过启动：{e}");
-            return;
-        }
+        Err(e) => return Err(format!("无法获取 Astro dev server 状态锁：{e}")),
     };
 
     if child_guard.is_some() {
-        return;
+        return Ok(());
     }
 
     match Command::new("pnpm.cmd")
@@ -69,37 +66,33 @@ fn start_blog_server(state: &BlogServerState) {
     {
         Ok(child) => {
             *child_guard = Some(child);
+            Ok(())
         }
-        Err(e) => {
-            eprintln!("启动 Astro dev server 失败：{e}");
-        }
+        Err(e) => Err(format!("启动 Astro dev server 失败：{e}")),
     }
 }
 
-fn stop_blog_server(state: &BlogServerState) {
+fn stop_blog_server(state: &BlogServerState) -> Result<(), String> {
     let mut child = match state.child.lock() {
         Ok(mut guard) => guard.take(),
-        Err(e) => {
-            eprintln!("无法获取 Astro dev server 状态锁，跳过清理：{e}");
-            return;
-        }
+        Err(e) => return Err(format!("无法获取 Astro dev server 状态锁：{e}")),
     };
 
     if let Some(child) = child.as_mut() {
         match child.try_wait() {
             Ok(Some(_status)) => {}
             Ok(None) => {
-                stop_blog_server_child(child);
+                stop_blog_server_child(child)?;
             }
-            Err(e) => {
-                eprintln!("检查 Astro dev server 状态失败：{e}");
-            }
+            Err(e) => return Err(format!("检查 Astro dev server 状态失败：{e}")),
         }
     }
+
+    Ok(())
 }
 
 #[cfg(windows)]
-fn stop_blog_server_child(child: &mut Child) {
+fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
     let pid = child.id().to_string();
     match Command::new("taskkill")
         .args(["/PID", &pid, "/T", "/F"])
@@ -110,38 +103,58 @@ fn stop_blog_server_child(child: &mut Child) {
     {
         Ok(status) if status.success() => {}
         Ok(status) => {
-            eprintln!("taskkill 清理 Astro dev server 进程树失败，状态码：{status}");
-            if let Err(e) = child.kill() {
-                eprintln!("停止 Astro dev server 失败：{e}");
+            if let Err(kill_error) = child.kill() {
+                return Err(format!(
+                    "taskkill 清理 Astro dev server 进程树失败，状态码：{status}；fallback kill 也失败：{kill_error}"
+                ));
             }
+            let _ = child.wait();
+            return Err(format!(
+                "taskkill 清理 Astro dev server 进程树失败，状态码：{status}"
+            ));
         }
-        Err(e) => {
-            eprintln!("执行 taskkill 清理 Astro dev server 进程树失败：{e}");
-            if let Err(e) = child.kill() {
-                eprintln!("停止 Astro dev server 失败：{e}");
+        Err(taskkill_error) => {
+            if let Err(kill_error) = child.kill() {
+                return Err(format!(
+                    "执行 taskkill 清理 Astro dev server 进程树失败：{taskkill_error}；fallback kill 也失败：{kill_error}"
+                ));
             }
+            let _ = child.wait();
+            return Err(format!(
+                "执行 taskkill 清理 Astro dev server 进程树失败：{taskkill_error}"
+            ));
         }
     }
 
     if let Err(e) = child.wait() {
-        eprintln!("等待 Astro dev server 退出失败：{e}");
+        return Err(format!("等待 Astro dev server 退出失败：{e}"));
     }
+
+    Ok(())
 }
 
 #[cfg(not(windows))]
-fn stop_blog_server_child(child: &mut Child) {
+fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
     if let Err(e) = child.kill() {
-        eprintln!("停止 Astro dev server 失败：{e}");
+        return Err(format!("停止 Astro dev server 失败：{e}"));
     }
     if let Err(e) = child.wait() {
-        eprintln!("等待 Astro dev server 退出失败：{e}");
+        return Err(format!("等待 Astro dev server 退出失败：{e}"));
     }
+
+    Ok(())
 }
 
 #[tauri::command]
 fn open_blog() -> Result<(), String> {
     tauri_plugin_opener::open_url("http://localhost:4321", None::<&str>)
         .map_err(|e| format!("打开本地博客失败：{e}"))
+}
+
+#[tauri::command]
+fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<(), String> {
+    stop_blog_server(&state)?;
+    start_blog_server(&state)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -156,9 +169,12 @@ pub fn run() {
             notes::delete_note,
             notes::rename_note,
             open_blog,
+            restart_blog_server,
         ])
         .setup(|app| {
-            start_blog_server(&app.state::<BlogServerState>());
+            if let Err(e) = start_blog_server(&app.state::<BlogServerState>()) {
+                eprintln!("{e}");
+            }
 
             #[cfg(desktop)]
             {
@@ -226,7 +242,9 @@ pub fn run() {
                             }
                         }
                         "quit" => {
-                            stop_blog_server(&app.state::<BlogServerState>());
+                            if let Err(e) = stop_blog_server(&app.state::<BlogServerState>()) {
+                                eprintln!("清理 Astro dev server 失败：{e}");
+                            }
                             app.exit(0);
                         }
                         _ => {}

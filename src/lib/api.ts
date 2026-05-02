@@ -110,3 +110,15 @@ export async function openBlog(): Promise<void> {
     throw toError(e);
   }
 }
+
+/**
+ * 重启后台 Astro dev server。
+ * 对应 Rust 命令：restart_blog_server
+ */
+export async function restartBlogServer(): Promise<void> {
+  try {
+    await invoke<void>("restart_blog_server");
+  } catch (e) {
+    throw toError(e);
+  }
+}
