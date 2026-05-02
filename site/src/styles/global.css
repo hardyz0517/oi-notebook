@@ -160,6 +160,12 @@ h3 {
 .category {
   color: var(--accent);
   background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.category:hover {
+  color: #5f2948;
+  background: #efd9e5;
 }
 
 .draft-badge {
@@ -191,6 +197,15 @@ h3 {
 .tag-list li {
   color: var(--muted);
   font-size: 13px;
+}
+
+.tag-list a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tag-list a:hover {
+  color: var(--accent);
 }
 
 .tag-list li::before {

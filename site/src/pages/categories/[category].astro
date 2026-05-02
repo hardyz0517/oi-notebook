@@ -75,6 +75,8 @@ const formatDate = (date?: Date) =>
       }).format(date)
     : "未记录日期";
 
+const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
+
 const excerptOf = (note: NoteEntry) => {
   if (note.data.summary.trim()) {
     return note.data.summary.trim();
@@ -125,9 +127,23 @@ const excerptOf = (note: NoteEntry) => {
                 {excerpt && <p class="summary">{excerpt}</p>}
                 {note.data.tags.length > 0 && (
                   <ul class="tag-list" aria-label="标签">
-                    {note.data.tags.map((tag) => (
-                      <li>{tag}</li>
-                    ))}
+                    {note.data.tags.map((tag) => {
+                      const normalizedTag = tag.trim();
+
+                      if (!normalizedTag) {
+                        return null;
+                      }
+
+                      return (
+                        <li>
+                          {normalizedTag.includes("/") ? (
+                            normalizedTag
+                          ) : (
+                            <a href={tagHref(normalizedTag)}>{normalizedTag}</a>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>

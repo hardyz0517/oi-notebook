@@ -46,6 +46,8 @@ const formatDate = (date?: Date) =>
     : "未记录日期";
 
 const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
+const categoryHref = (category: string) => `/categories/${category}`;
+const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
 
 const excerptOf = (note: NoteEntry) => {
   if (note.data.summary.trim()) {
@@ -88,7 +90,9 @@ const excerptOf = (note: NoteEntry) => {
             return (
               <article class="post-card">
                 <div class="post-meta">
-                  <span class="category">{categoryOf(note.id)}</span>
+                  <a class="category" href={categoryHref(categoryOf(note.id))}>
+                    {categoryOf(note.id)}
+                  </a>
                   <time datetime={date?.toISOString()}>{formatDate(date)}</time>
                   {note.data.draft && <span class="draft-badge">Draft</span>}
                 </div>
@@ -98,9 +102,23 @@ const excerptOf = (note: NoteEntry) => {
                 {excerpt && <p class="summary">{excerpt}</p>}
                 {note.data.tags.length > 0 && (
                   <ul class="tag-list" aria-label="标签">
-                    {note.data.tags.map((noteTag) => (
-                      <li>{noteTag}</li>
-                    ))}
+                    {note.data.tags.map((noteTag) => {
+                      const normalizedTag = noteTag.trim();
+
+                      if (!normalizedTag) {
+                        return null;
+                      }
+
+                      return (
+                        <li>
+                          {normalizedTag.includes("/") ? (
+                            normalizedTag
+                          ) : (
+                            <a href={tagHref(normalizedTag)}>{normalizedTag}</a>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>

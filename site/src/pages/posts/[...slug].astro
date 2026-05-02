@@ -25,6 +25,8 @@ const formatDate = (date?: Date) =>
     : "未记录";
 
 const category = note.id.split(/[\\/]/)[0] || "notes";
+const categoryHref = (category: string) => `/categories/${category}`;
+const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
 ---
 
 <BaseLayout
@@ -35,7 +37,7 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
   <article class="post">
     <header class="post-header">
       <div class="post-meta">
-        <span class="category">{category}</span>
+        <a class="category" href={categoryHref(category)}>{category}</a>
         {note.data.draft && <span class="draft-badge">Draft</span>}
       </div>
       <h1>{note.data.title || note.id}</h1>
@@ -68,9 +70,23 @@ const category = note.id.split(/[\\/]/)[0] || "notes";
       {
         note.data.tags.length > 0 && (
           <ul class="tag-list" aria-label="标签">
-            {note.data.tags.map((tag) => (
-              <li>{tag}</li>
-            ))}
+            {note.data.tags.map((tag) => {
+              const normalizedTag = tag.trim();
+
+              if (!normalizedTag) {
+                return null;
+              }
+
+              return (
+                <li>
+                  {normalizedTag.includes("/") ? (
+                    normalizedTag
+                  ) : (
+                    <a href={tagHref(normalizedTag)}>{normalizedTag}</a>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )
       }
