@@ -63,7 +63,7 @@ main {
 
 .home-hero {
   max-width: 760px;
-  padding: 56px 0 40px;
+  padding: 42px 0 30px;
 }
 
 .eyebrow {
@@ -85,7 +85,7 @@ h3 {
 }
 
 .home-hero h1 {
-  font-size: clamp(42px, 7vw, 76px);
+  font-size: clamp(36px, 5vw, 58px);
 }
 
 .lede {
@@ -193,7 +193,7 @@ h3 {
 .post {
   max-width: 760px;
   margin: 0 auto;
-  padding-top: 56px;
+  padding-top: 42px;
 }
 
 .post-header {
@@ -203,14 +203,14 @@ h3 {
 
 .post-header h1 {
   margin-top: 18px;
-  font-size: clamp(36px, 6vw, 62px);
+  font-size: clamp(34px, 5vw, 52px);
 }
 
 .frontmatter-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 24px;
-  margin: 24px 0 0;
+  gap: 12px 22px;
+  margin: 20px 0 0;
 }
 
 .frontmatter-list div {
@@ -276,6 +276,12 @@ h3 {
   padding-left: 18px;
   color: var(--muted);
   border-left: 3px solid var(--line);
+}
+
+.prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.35em 0;
 }
 
 .prose table {
