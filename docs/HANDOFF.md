@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客标签页与中文 tag 路由修复）
+**最后更新**：2026-05-02（记录 Phase 5 文章 TOC、TOC 右侧布局修复与重启博客按钮）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -94,7 +94,9 @@
     ├─ 首页已调整为文章优先的博客文章流，文章页 metadata 已中文化并弱化
     ├─ 分类总览页与分类详情页已完成
     ├─ 标签总览页与标签详情页已完成，中文 tag 路由已修复
-    └─ 未完成：搜索、文章目录、上一篇下一篇、GitHub Pages、生产分发策略
+    ├─ 文章页目录 TOC 已完成，桌面端为右侧 sticky，窄屏回到正文上方
+    ├─ Header 已有“打开博客”和“重启博客”入口
+    └─ 未完成：搜索、上一篇下一篇、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -347,7 +349,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、文章目录、深色模式切换、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、深色模式切换、洛谷、AI 或 Git 自动同步。
 
 已完成内容：
 
@@ -362,9 +364,14 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 主窗口关闭只是隐藏，不 kill Astro；托盘“退出”才清理 Astro。
 - [x] Windows 下退出应用时使用 `taskkill /PID <pid> /T /F` 清理 `pnpm.cmd` 进程树，避免 node/astro 残留。
 - [x] Header 已有“打开博客”入口，打开 `http://localhost:4321`。
+- [x] Header 已新增“重启博客”按钮，用于重启后台 Astro dev server，方便 UI/CSS 调试；重启时会先清理现有 pnpm/node/astro 进程树，再重新启动 `site` dev server。
 - [x] Astro dev server 已 watch 外部 `../notes` 目录，新增/修改/删除 `.md` 时刷新 content layer 并 full reload。
 - [x] 博客端 Markdown 已支持数学公式渲染：`remark-math` + `rehype-katex` + KaTeX CSS。
 - [x] 表格基础样式已补。
+- [x] 文章页已支持目录 TOC：使用 Astro `render(note)` 返回的 `headings`，只展示 h2/h3。
+- [x] 桌面端 TOC 为右侧 sticky；窄屏下 TOC 回到正文上方，避免横向溢出。
+- [x] TOC 最终布局已修复为：正文主栏自己居中，TOC 通过 CSS 挂在右侧，不参与正文居中计算。
+- [x] 已修复早期 TOC 布局问题：外层 `main max-width` 限制导致 `.post` 宽度调整不生效，以及“正文 + TOC”整体居中导致正文被 TOC 拖偏。
 - [x] 分类总览页 `/categories` 已新增，显示 `tricks`、`problems`、`luogu`、`inbox` 四个标准目录的说明、文章数量和入口。
 - [x] 分类详情页 `/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox` 已新增，可按 notes 目录浏览文章。
 - [x] 分类详情页沿用文章列表样式，按 `updated ?? created` 倒序；空分类会显示温和空状态提示。
@@ -384,6 +391,12 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `90cdd44 feat(site): add category pages`
 - `e617542 feat(site): add tag pages`
 - `3ca8ce7 fix(site): handle unicode tag routes`
+- `86a5e66 feat(site): add post table of contents`
+- `1f1a25f style(site): move post toc to sidebar`
+- `7594744 style(site): loosen post toc spacing`
+- `9492a4e fix(site): allow wide post layout`
+- `2f7f1f1 fix(site): keep post content centered with toc`
+- `5fb5ab4 feat(site): add restart blog action`
 
 端到端验证结果：
 
@@ -408,17 +421,21 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
   - 首页底部“按目录浏览全部分类”入口可用。
 - 标签页 build 验证通过：`cd site && pnpm.cmd build` 成功。
 - 已确认中文 tag 详情页会生成：`/tags/测试/index.html`。
+- 文章页 TOC 最新布局已肉眼验收通过：
+  - 正文主栏保持居中。
+  - TOC 挂在正文右侧。
+  - TOC 不再参与正文居中计算。
+  - 窄屏下 TOC 回到正文上方普通目录。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
 - 还没有全文搜索。
-- 还没有文章目录。
 - 还没有上一篇/下一篇。
 - 还没有 GitHub Pages 部署。
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做全文搜索/文章目录，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或先做全文搜索/上一篇下一篇，或进入 GitHub Pages 部署与生产分发策略。
 
 ### 博客 UI 打磨进展
 
@@ -437,6 +454,9 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 文章页 metadata 已中文化：创建、更新、难度、来源。
 - [x] 文章页 metadata 已弱化为轻量信息区，不再像后台字段表格。
 - [x] 数学公式、表格、代码块基础阅读体验已可用。
+- [x] 文章页目录 TOC 已完成，只使用 h2/h3 heading。
+- [x] TOC 已从正文顶部改为桌面端右侧 sticky，长文章滚动时仍可见。
+- [x] TOC 布局已修复：正文主栏独立居中，TOC 通过 CSS 挂在正文右侧，不再把正文拖偏；窄屏下 TOC 回到正文上方。
 - [x] 分类总览页 `/categories` 已完成，支持按 `tricks`、`problems`、`luogu`、`inbox` 浏览。
 - [x] 分类详情页已完成：`/categories/tricks`、`/categories/problems`、`/categories/luogu`、`/categories/inbox`。
 - [x] 分类详情页沿用文章列表风格，按 `updated ?? created` 倒序，并支持空分类状态。
@@ -460,6 +480,12 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `90cdd44 feat(site): add category pages`
 - `e617542 feat(site): add tag pages`
 - `3ca8ce7 fix(site): handle unicode tag routes`
+- `86a5e66 feat(site): add post table of contents`
+- `1f1a25f style(site): move post toc to sidebar`
+- `7594744 style(site): loosen post toc spacing`
+- `9492a4e fix(site): allow wide post layout`
+- `2f7f1f1 fix(site): keep post content centered with toc`
+- `5fb5ab4 feat(site): add restart blog action`
 
 ### 本地测试笔记策略
 
@@ -489,7 +515,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 仍未完成 / 等待 Hardy 决定：
 
 - 全文搜索。
-- 文章目录。
 - 上一篇/下一篇。
 - GitHub Pages 部署。
 - 生产分发策略；当前仍是开发模式下启动 Astro dev server。
+- 博客视觉仍可继续打磨。
