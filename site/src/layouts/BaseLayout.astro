@@ -22,6 +22,10 @@ const { title, description = "OI Notebook" } = Astro.props;
     <header class="site-header">
       <a class="site-title" href="/">OI Notebook</a>
       <p class="site-subtitle">算法笔记与题解的本地博客</p>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="/">首页</a>
+        <a href="/#posts">文章</a>
+      </nav>
     </header>
     <main>
       <slot />

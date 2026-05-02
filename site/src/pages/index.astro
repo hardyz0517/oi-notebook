@@ -10,6 +10,9 @@ const sortedNotes = notes.sort((a, b) => {
   return bTime - aTime;
 });
 
+const featuredNote = sortedNotes[0];
+const restNotes = sortedNotes.slice(1);
+
 const formatDate = (date?: Date) =>
   date
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -29,36 +32,64 @@ const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
     <p class="lede">把训练间隙写下的 trick、题解和整理稿，直接变成可阅读的本地博客。</p>
   </section>
 
-  <section class="post-list" aria-label="笔记列表">
+  <section class="home-posts" id="posts" aria-label="笔记列表">
     {
       sortedNotes.length === 0 ? (
         <p class="empty-state">还没有 Markdown 笔记。开始在桌面端写一篇，博客会在这里显示。</p>
       ) : (
-        sortedNotes.map((note) => {
-          const category = categoryOf(note.id);
-          const date = note.data.updated ?? note.data.created;
+        <>
+          <article class="featured-post">
+            <div class="post-meta">
+              <span class="category">{categoryOf(featuredNote.id)}</span>
+              <time datetime={(featuredNote.data.updated ?? featuredNote.data.created)?.toISOString()}>
+                {formatDate(featuredNote.data.updated ?? featuredNote.data.created)}
+              </time>
+              {featuredNote.data.draft && <span class="draft-badge">Draft</span>}
+            </div>
+            <h2>
+              <a href={`/posts/${featuredNote.id}`}>{featuredNote.data.title || featuredNote.id}</a>
+            </h2>
+            {featuredNote.data.summary && <p class="summary">{featuredNote.data.summary}</p>}
+            {featuredNote.data.tags.length > 0 && (
+              <ul class="tag-list" aria-label="标签">
+                {featuredNote.data.tags.map((tag) => (
+                  <li>{tag}</li>
+                ))}
+              </ul>
+            )}
+            <a class="read-more" href={`/posts/${featuredNote.id}`}>阅读更多</a>
+          </article>
 
-          return (
-            <article class="post-card">
-              <div class="post-meta">
-                <span class="category">{category}</span>
-                <time datetime={date?.toISOString()}>{formatDate(date)}</time>
-                {note.data.draft && <span class="draft-badge">Draft</span>}
-              </div>
-              <h2>
-                <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
-              </h2>
-              {note.data.summary && <p class="summary">{note.data.summary}</p>}
-              {note.data.tags.length > 0 && (
-                <ul class="tag-list" aria-label="标签">
-                  {note.data.tags.map((tag) => (
-                    <li>{tag}</li>
-                  ))}
-                </ul>
-              )}
-            </article>
-          );
-        })
+          {restNotes.length > 0 && (
+            <div class="post-list" aria-label="更多笔记">
+              {restNotes.map((note) => {
+                const date = note.data.updated ?? note.data.created;
+
+                return (
+                  <article class="post-card">
+                    <div class="post-meta">
+                      <span class="category">{categoryOf(note.id)}</span>
+                      <time datetime={date?.toISOString()}>{formatDate(date)}</time>
+                      {note.data.draft && <span class="draft-badge">Draft</span>}
+                    </div>
+                    <h2>
+                      <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
+                    </h2>
+                    {note.data.summary && <p class="summary">{note.data.summary}</p>}
+                    {note.data.tags.length > 0 && (
+                      <ul class="tag-list" aria-label="标签">
+                        {note.data.tags.map((tag) => (
+                          <li>{tag}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </>
       )
     }
   </section>
