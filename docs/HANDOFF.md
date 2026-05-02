@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（完成 Phase 5 Astro 本地博客 Tauri 集成 + Markdown 数学渲染）
+**最后更新**：2026-05-02（记录 Phase 5 Astro 本地博客 UI 打磨进展）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -90,8 +90,9 @@
     ├─ Tauri 启动时后台启动 Astro dev server，托盘退出时清理进程树
     ├─ Header 已有“打开博客”入口，打开 http://localhost:4321
     ├─ Astro dev server 已监听外部 notes/**/*.md 变化并刷新
-    ├─ 博客端 Markdown 已支持数学公式渲染和基础表格样式
-    └─ 未完成：视觉打磨、搜索/标签页/目录/上一篇下一篇、GitHub Pages、生产分发策略
+    ├─ 博客端 Markdown 已支持数学公式渲染、基础表格样式和浅色代码块
+    ├─ 首页已调整为文章优先的博客文章流，文章页 metadata 已中文化并弱化
+    └─ 未完成：搜索/标签页/目录/上一篇下一篇、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -397,3 +398,54 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
 下一步建议：等待 Hardy 决定方向，可以继续博客 UI 打磨，或先做搜索/标签页，或进入 GitHub Pages 部署与生产分发策略。
+
+### 博客 UI 打磨进展
+
+最近一轮博客 UI 已按小步提交推进，目标是从“能用的基础博客”逐步转向更自然的亮色文学/杂志式阅读体验。
+
+已完成内容：
+
+- [x] 首页从厚重卡片网格逐步调整为文章优先的博客首页。
+- [x] 首页去掉重复的大号 hero 和 section header，避免出现“站点标题 + 区块标题 + 文章”的层级重复。
+- [x] 第一篇最新笔记作为 featured post，后续文章进入三列文章流。
+- [x] featured post 与后续文章流已对齐到同一版心，不再像单独居中的窄块。
+- [x] 首页 summary 为空时会从正文生成 excerpt，避免测试笔记或未写 summary 的笔记卡片过空。
+- [x] 首页双重分隔线已简化，保留轻分隔感但减少杂乱。
+- [x] 代码块改为浅色 Shiki 主题 `github-light`，更贴近亮色纸感博客。
+- [x] 代码块已有“复制”按钮，成功后短暂显示“已复制”，失败时显示“复制失败”。
+- [x] 文章页 metadata 已中文化：创建、更新、难度、来源。
+- [x] 文章页 metadata 已弱化为轻量信息区，不再像后台字段表格。
+- [x] 数学公式、表格、代码块基础阅读体验已可用。
+
+相关提交：
+
+- `3b2d590 style(site): refine blog reading layout`
+- `11cd096 style(site): reshape blog homepage`
+- `66ac716 style(site): simplify homepage hierarchy`
+- `6eaec52 style(site): make homepage article-first`
+- `7320f07 style(site): align featured post with article grid`
+- `a1deaee style(site): simplify homepage dividers`
+- `4f90137 style(site): soften blog code blocks`
+- `fdb2969 fix(site): use light code block theme`
+- `fca48d3 feat(site): add copy buttons to code blocks`
+- `c2a1923 style(site): soften post metadata`
+
+### 本地测试笔记策略
+
+`notes/tricks/测试*.md` 这类文件是 Hardy 用于博客 UI 验收的本地素材。它们通常会以未跟踪文件形式留在工作区，用来反复检查首页文章流、文章页排版、代码块、公式、表格和 metadata 显示。
+
+后续 Codex 看到这类本地测试笔记时：
+
+- 不要删除。
+- 不要提交。
+- 不要修改。
+- 除非 Hardy 明确要求清理，否则把它们视为正常本地验收素材。
+
+仍未完成 / 等待 Hardy 决定：
+
+- 搜索。
+- 标签页。
+- 文章目录。
+- 上一篇/下一篇。
+- GitHub Pages 部署。
+- 生产分发策略；当前仍是开发模式下启动 Astro dev server。
