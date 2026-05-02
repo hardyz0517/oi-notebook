@@ -292,15 +292,24 @@ h3 {
   font-size: 0.9em;
 }
 
+.prose :not(pre) > code {
+  padding: 0.12em 0.32em;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #f4efe8;
+  color: #453a31;
+}
+
 .prose pre {
   overflow-x: auto;
   padding: 18px;
+  border: 1px solid var(--line);
   border-radius: 4px;
-  background: #1f1f1f;
+  background: #f4efe8;
 }
 
 .prose pre code {
-  color: #f7f7f7;
+  color: #2b2722;
 }
 
 .prose blockquote {
