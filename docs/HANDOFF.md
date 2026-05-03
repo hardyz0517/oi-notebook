@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-03（记录 GitHub Pages 部署验收）
+**最后更新**：2026-05-03（记录自动 Git commit 与手动同步 Git 验收）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -98,8 +98,9 @@
     ├─ category/tag 已可点击跳转，文章页已有上一篇/下一篇导航
     ├─ 搜索页 /search 已完成，顶部导航已有“搜索”入口
     ├─ GitHub Pages project page 已完成部署，线上站 https://hardyz0517.github.io/oi-notebook/ 已验收
-    ├─ Header 已有“打开博客”和“重启博客”入口
-    └─ 未完成：生产分发策略、自动 Git commit/push、洛谷爬取、AI 辅助、博客视觉继续打磨
+    ├─ Header 已有“打开博客”“重启博客”和“同步 Git”入口
+    ├─ 保存笔记后自动 commit 当前保存的单个 notes 文件，手动“同步 Git”按钮执行 git push origin main，均已验收
+    └─ 未完成：生产分发策略、自动定时/退出时 push、删除/重命名笔记自动 Git commit、Frontmatter 编辑器、模板系统、图片粘贴、洛谷爬取、AI 辅助、博客视觉继续打磨
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -352,7 +353,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前仍不包含生产分发策略、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署和当前最小 Git 同步工作流：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”“重启博客”和“同步 Git”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前 Git 工作流是“保存后自动 commit，手动按钮 push”，仍不包含自动定时/退出时 push、删除/重命名笔记自动 commit、生产分发策略、洛谷或 AI。
 
 已完成内容：
 
@@ -399,6 +400,14 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 线上站 URL 为 `https://hardyz0517.github.io/oi-notebook/`，Actions 已成功跑通，线上站验收正常。
 - [x] GitHub Pages project page base `/oi-notebook` 已适配，本地 dev 仍使用无 base 的 `localhost:4321`。
 - [x] 生产构建会过滤 `draft: true` 笔记；本地 dev 仍显示 draft，并保留 Draft badge。
+- [x] 主窗口保存笔记后会自动 commit 当前保存的单个 `notes/{relative_path}` 文件；自动 commit 不 push。
+- [x] 自动 commit 不使用 `git add .` 或 `git add notes/`，只允许提交当前保存的单个 notes pathspec。
+- [x] 自动 commit 前检查暂存区；如果 `git diff --cached --name-only` 非空，则跳过/报错，避免把用户手动 staged 的内容带进自动 commit。
+- [x] 自动 commit message 目前使用 `note: update {relative_path}`，暂不解析 title。
+- [x] Header 已新增“同步 Git”按钮，手动执行 `git push origin main`；不做 pull、rebase 或冲突解决。
+- [x] 手动 push 前同样检查暂存区；暂存区非空会失败，允许工作区保留未跟踪本地测试笔记。
+- [x] tracked draft 测试笔记已创建用于验证自动 commit 和博客 UI；它们均为 `draft: true`，生产构建会过滤。
+- [x] 手动同步 Git 已验收成功：点击按钮后 `git push origin main` 成功，并触发 GitHub Actions / Pages 链路更新。
 
 相关提交：
 
@@ -423,6 +432,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `cb6b958 feat(site): add search page`
 - `16d1623 feat(site): prepare GitHub Pages base`
 - `e96ea1c ci(site): deploy blog to GitHub Pages`
+- `5ddc0e9 feat(git): auto commit saved notes`
+- `fe94a4a test(notes): add tracked draft notes`
+- `c4784a5 note: update tricks/git-auto-commit-test.md`
+- `750e47e feat(git): add manual push action`
 
 端到端验证结果：
 
@@ -470,16 +483,34 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - Actions 已绿色通过，线上站肉眼验收正常。
   - project page base `/oi-notebook` 已处理。
   - 生产 build 会过滤 draft，本地 dev 仍显示 draft。
+- 自动 Git commit 已人工验收通过：
+  - 保存 `tricks/git-auto-commit-test.md` 后生成 `c4784a5 note: update tricks/git-auto-commit-test.md`。
+  - 最新 note commit 只包含当前保存的一个 notes 文件：`notes/tricks/git-auto-commit-test.md`。
+  - 暂存区为空时才会自动 commit；暂存区已有其它内容时会跳过/报错。
+  - 4 个 Hardy 本地 UI 测试笔记仍保持未跟踪，不删除、不提交、不修改。
+- 手动同步 Git 已人工验收通过：
+  - Header “同步 Git”按钮点击后执行 `git push origin main` 成功。
+  - 手动 push 不做 pull、rebase 或冲突解决。
+  - GitHub Actions / Pages 链路被 push 正常触发并更新。
+- tracked draft 测试笔记：
+  - `notes/tricks/git-auto-commit-test.md`
+  - `notes/problems/post-navigation-test.md`
+  - `notes/luogu/tag-search-test.md`
+  - 这些文件用于验证自动 commit 和博客 UI，均设置 `draft: true`，生产构建会过滤。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
-- 还没有自动 Git commit/push。
+- 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
+- 删除/重命名笔记的自动 Git commit 还没做。
+- Frontmatter 编辑器还没做。
+- 模板系统还没做。
+- 图片粘贴还没做。
 - 还没有洛谷爬取。
 - 还没有 AI 辅助。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动 Git 同步、洛谷爬取或 AI 辅助方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、删除/重命名 Git commit、Frontmatter 编辑器、模板系统、图片粘贴、洛谷爬取或 AI 辅助方向。
 
 ### 博客 UI 打磨进展
 
@@ -585,7 +616,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 仍未完成 / 等待 Hardy 决定：
 
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
-- 自动 Git commit/push。
+- 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
+- 删除/重命名笔记的自动 Git commit。
+- Frontmatter 编辑器。
+- 模板系统。
+- 图片粘贴。
 - 洛谷爬取。
 - AI 辅助。
 - 博客视觉仍可继续打磨。
