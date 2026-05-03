@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ExternalLink, Plus, RotateCcw, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
@@ -12,6 +12,8 @@ import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { listNotes, readNote, writeNote, commitNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
+import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
+import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -88,6 +90,7 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
+  const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
 
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
@@ -229,6 +232,28 @@ export default function App() {
   const handleEditorChange = (value: string) => {
     setMarkdown(value);
     setIsDirty(true);
+  };
+
+  const updateFrontmatter = (patch: Partial<FrontmatterFields>) => {
+    if (!currentFilePath) return;
+    if (!frontmatter.canMerge) {
+      toast.warning(frontmatter.warning ?? "当前 frontmatter 暂不能通过表单改写");
+      return;
+    }
+
+    const nextFields = { ...frontmatter.fields, ...patch };
+    const nextMarkdown = mergeFrontmatterFields(markdown, nextFields);
+    if (nextMarkdown === markdown) return;
+    setMarkdown(nextMarkdown);
+    setIsDirty(true);
+  };
+
+  const updateTagsFromInput = (value: string) => {
+    const tags = value
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    updateFrontmatter({ tags });
   };
 
   const handleSelectFile = (path: string) => {
@@ -524,12 +549,86 @@ export default function App() {
         <Separator orientation="vertical" />
 
         {/* Center: Markdown editor */}
-        <main className="flex flex-1 overflow-hidden">
+        <main className="flex flex-1 flex-col overflow-hidden">
+          {currentFilePath && (
+            <details className="shrink-0 border-b border-border bg-background/95">
+              <summary className="flex h-8 cursor-pointer select-none items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
+                <span>Frontmatter</span>
+                {frontmatter.warning && (
+                  <span className="normal-case tracking-normal text-amber-400">
+                    {frontmatter.warning}
+                  </span>
+                )}
+              </summary>
+              <div className="grid gap-3 px-4 py-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="frontmatter-title">title</Label>
+                    <Input
+                      id="frontmatter-title"
+                      value={frontmatter.fields.title}
+                      disabled={!frontmatter.canMerge}
+                      onChange={(e) => updateFrontmatter({ title: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="frontmatter-tags">tags</Label>
+                    <Input
+                      id="frontmatter-tags"
+                      value={frontmatter.fields.tags.join(", ")}
+                      disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
+                      placeholder="DP, 线段树, trick"
+                      onChange={(e) => updateTagsFromInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="frontmatter-difficulty">difficulty</Label>
+                    <Input
+                      id="frontmatter-difficulty"
+                      value={frontmatter.fields.difficulty}
+                      disabled={!frontmatter.canMerge}
+                      onChange={(e) => updateFrontmatter({ difficulty: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="frontmatter-source">source</Label>
+                    <Input
+                      id="frontmatter-source"
+                      value={frontmatter.fields.source}
+                      disabled={!frontmatter.canMerge}
+                      onChange={(e) => updateFrontmatter({ source: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="frontmatter-summary">summary</Label>
+                  <textarea
+                    id="frontmatter-summary"
+                    value={frontmatter.fields.summary}
+                    disabled={!frontmatter.canMerge}
+                    rows={2}
+                    className="min-h-14 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                    onChange={(e) => updateFrontmatter({ summary: e.target.value })}
+                  />
+                </div>
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={frontmatter.fields.draft}
+                    disabled={!frontmatter.canMerge}
+                    className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    onChange={(e) => updateFrontmatter({ draft: e.target.checked })}
+                  />
+                  draft
+                </label>
+              </div>
+            </details>
+          )}
           <MarkdownEditor
             value={markdown}
             onChange={handleEditorChange}
             onScroll={(r) => setScrollRatio(r)}
-            className="h-full w-full"
+            className="min-h-0 flex-1"
           />
         </main>
 
