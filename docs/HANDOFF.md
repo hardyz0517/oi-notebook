@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-03（记录 Phase 5 category/tag 链接与文章上一篇/下一篇导航）
+**最后更新**：2026-05-03（记录 Phase 5 全文搜索页）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -96,8 +96,9 @@
     ├─ 标签总览页与标签详情页已完成，中文 tag 路由已修复
     ├─ 文章页目录 TOC 已完成，桌面端为右侧 sticky，窄屏回到正文上方
     ├─ category/tag 已可点击跳转，文章页已有上一篇/下一篇导航
+    ├─ 搜索页 /search 已完成，顶部导航已有“搜索”入口
     ├─ Header 已有“打开博客”和“重启博客”入口
-    └─ 未完成：搜索、GitHub Pages、生产分发策略
+    └─ 未完成：GitHub Pages、生产分发策略、博客视觉继续打磨
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -350,7 +351,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、搜索、深色模式切换、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、深色模式切换、洛谷、AI 或 Git 自动同步。
 
 已完成内容：
 
@@ -385,7 +386,13 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 文章页底部已新增上一篇/下一篇导航，按 `updated ?? created` 倒序，和首页一致。
 - [x] 第一篇没有上一篇，最后一篇没有下一篇；只有单项时仍保持正确左右对齐。
 - [x] 单个“下一篇”错误落到左列、视觉偏左的问题已修复并肉眼验收通过。
-- [x] 顶部导航已有“分类”和“标签”，首页底部已有“按目录浏览全部分类”入口。
+- [x] 搜索页 `/search` 已完成。
+- [x] 顶部导航已有“分类”“标签”和“搜索”，首页底部已有“按目录浏览全部分类”入口。
+- [x] 搜索数据在 build 时通过 `getCollection("notes")` 生成静态条目。
+- [x] 搜索覆盖 title、summary/excerpt、tags、category 和 body 简化文本。
+- [x] 前端使用原生 JS 对 `data-search` 做 `includes` 实时过滤，不引入依赖，不做复杂分词或高亮。
+- [x] 中文和英文均可基于子串匹配；无结果时有温和空状态。
+- [x] `/search` 已生成并肉眼验收通过。
 
 相关提交：
 
@@ -407,6 +414,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `8e597ed feat(site): link post categories and tags`
 - `fd70ea4 feat(site): add post navigation`
 - `36a736e fix(site): align single post navigation item`
+- `cb6b958 feat(site): add search page`
 
 端到端验证结果：
 
@@ -442,15 +450,19 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
   - 最新文章只有“下一篇”时靠右。
   - 最旧文章只有“上一篇”时靠左。
   - 中间文章上一篇在左侧，下一篇在右侧。
+- 搜索页 `/search` 已生成并肉眼验收通过：
+  - 顶部导航“搜索”入口可用。
+  - 搜索覆盖 title、summary/excerpt、tags、category 和 body 简化文本。
+  - 中文和英文均可基于子串匹配。
+  - 无结果时会显示温和空状态。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
-- 还没有全文搜索。
 - 还没有 GitHub Pages 部署。
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或先做全文搜索，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入 GitHub Pages 部署与生产分发策略。
 
 ### 博客 UI 打磨进展
 
@@ -508,6 +520,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `8e597ed feat(site): link post categories and tags`
 - `fd70ea4 feat(site): add post navigation`
 - `36a736e fix(site): align single post navigation item`
+- `cb6b958 feat(site): add search page`
 
 ### 本地测试笔记策略
 
@@ -545,9 +558,17 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - 最旧文章只有“上一篇”时靠左。
 - 中间文章上一篇在左侧，下一篇在右侧。
 
+搜索页验收：
+
+- `/search` 已生成并肉眼验收通过。
+- 顶部导航已有“搜索”入口。
+- 搜索数据在 build 时通过 `getCollection("notes")` 生成静态条目。
+- 搜索覆盖 title、summary/excerpt、tags、category 和 body 简化文本。
+- 前端原生 JS 对 `data-search` 做 `includes` 实时过滤，中文和英文均可基于子串匹配。
+- 无结果时有温和空状态。
+
 仍未完成 / 等待 Hardy 决定：
 
-- 全文搜索。
 - GitHub Pages 部署。
 - 生产分发策略；当前仍是开发模式下启动 Astro dev server。
 - 博客视觉仍可继续打磨。
