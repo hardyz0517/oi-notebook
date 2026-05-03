@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -226,6 +226,14 @@ export default function App() {
     setCurrentFilePath(path);
   };
 
+  const showSavedToast = (message: string, warning: string | null) => {
+    if (warning) {
+      toast.warning(`${message}（${warning}）`);
+    } else {
+      toast.success(message);
+    }
+  };
+
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
@@ -237,10 +245,20 @@ export default function App() {
       }
       try {
         const warning = await writeNote(currentFilePath, markdown);
-        if (warning) {
-          toast.warning(`已保存（${warning}）`);
-        } else {
-          toast.success("已保存");
+        try {
+          const commitStatus = await commitNote(currentFilePath);
+          if (commitStatus === "committed") {
+            showSavedToast("已保存并提交", warning);
+          } else {
+            showSavedToast("已保存", warning);
+          }
+        } catch (commitError) {
+          const message = `已保存，Git 提交失败：${commitError}`;
+          if (warning) {
+            toast.warning(`${message}（${warning}）`);
+          } else {
+            toast.warning(message);
+          }
         }
         setIsDirty(false);
       } catch (err) {

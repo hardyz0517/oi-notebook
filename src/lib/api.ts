@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteFileInfo } from "@/types/note";
 
+export type CommitNoteStatus = "committed" | "noChanges";
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -59,6 +61,20 @@ export async function writeNote(
 ): Promise<string | null> {
   try {
     return await invoke<string | null>("write_note", { relativePath, content });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+/**
+ * 自动提交刚保存的单个 notes 文件。
+ * 对应 Rust 命令：commit_note
+ *
+ * @param relativePath - 相对于 notes/ 的路径，如 "tricks/qpow.md"
+ */
+export async function commitNote(relativePath: string): Promise<CommitNoteStatus> {
+  try {
+    return await invoke<CommitNoteStatus>("commit_note", { relativePath });
   } catch (e) {
     throw toError(e);
   }

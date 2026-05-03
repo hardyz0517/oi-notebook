@@ -1,4 +1,5 @@
 mod frontmatter;
+mod git;
 mod notes;
 
 use std::path::PathBuf;
@@ -168,6 +169,7 @@ pub fn run() {
             notes::write_note,
             notes::delete_note,
             notes::rename_note,
+            git::commit_note,
             open_blog,
             restart_blog_server,
         ])
