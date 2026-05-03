@@ -49,7 +49,11 @@ fn git_success(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
     if output.status.success() {
         Ok(output)
     } else {
-        Err(format!("git {} 失败：{}", args.join(" "), output_text(&output)))
+        Err(format!(
+            "git {} 失败：{}",
+            args.join(" "),
+            output_text(&output)
+        ))
     }
 }
 
@@ -138,7 +142,10 @@ pub fn commit_note(relative_path: String) -> Result<CommitNoteStatus, String> {
         return Err(error);
     }
 
-    let diff = git_output(&repo_root, &["diff", "--cached", "--quiet", "--", &pathspec])?;
+    let diff = git_output(
+        &repo_root,
+        &["diff", "--cached", "--quiet", "--", &pathspec],
+    )?;
     match diff.status.code() {
         Some(0) => Ok(CommitNoteStatus::NoChanges),
         Some(1) => {
@@ -157,10 +164,7 @@ pub fn commit_note(relative_path: String) -> Result<CommitNoteStatus, String> {
             }
         }
         _ => {
-            let diff_error = format!(
-                "git diff --cached --quiet 失败：{}",
-                output_text(&diff)
-            );
+            let diff_error = format!("git diff --cached --quiet 失败：{}", output_text(&diff));
             let reset_result = reset_path(&repo_root, &pathspec);
             if let Err(reset_error) = reset_result {
                 return Err(format!("{diff_error}；并且清理本次暂存失败：{reset_error}"));
@@ -168,6 +172,25 @@ pub fn commit_note(relative_path: String) -> Result<CommitNoteStatus, String> {
             Err(diff_error)
         }
     }
+}
+
+/// 手动同步 Git 到远端 main 分支。
+///
+/// 只执行 `git push origin main`。push 前要求暂存区为空，避免用户手动 staged
+/// 的内容处于未处理状态时继续同步远端。
+#[tauri::command]
+pub fn push_git() -> Result<(), String> {
+    let repo_root = repo_root()?;
+
+    let staged_names = cached_names(&repo_root)?;
+    if !staged_names.is_empty() {
+        return Err(format!(
+            "暂存区已有内容，已跳过 Git 同步：{}",
+            staged_names.join(", ")
+        ));
+    }
+
+    git_success(&repo_root, &["push", "origin", "main"]).map(|_| ())
 }
 
 #[cfg(test)]

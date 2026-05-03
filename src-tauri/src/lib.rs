@@ -170,6 +170,7 @@ pub fn run() {
             notes::delete_note,
             notes::rename_note,
             git::commit_note,
+            git::push_git,
             open_blog,
             restart_blog_server,
         ])
@@ -180,10 +181,8 @@ pub fn run() {
 
             #[cfg(desktop)]
             {
-                let toggle_shortcut = Shortcut::new(
-                    Some(Modifiers::CONTROL | Modifiers::ALT),
-                    Code::Space,
-                );
+                let toggle_shortcut =
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
                 let toggle_shortcut_clone = toggle_shortcut;
 
                 app.handle().plugin(
@@ -217,8 +216,10 @@ pub fn run() {
                 let _ = app.global_shortcut().unregister(toggle_shortcut);
                 app.global_shortcut().register(toggle_shortcut)?;
 
-                let show_main = MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>)?;
-                let show_quick = MenuItem::with_id(app, "show-quick", "显示速记", true, None::<&str>)?;
+                let show_main =
+                    MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>)?;
+                let show_quick =
+                    MenuItem::with_id(app, "show-quick", "显示速记", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
                 let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
@@ -226,7 +227,11 @@ pub fn run() {
 
                 let _tray = TrayIconBuilder::with_id("main-tray")
                     .tooltip("OI Notebook")
-                    .icon(app.default_window_icon().cloned().expect("default window icon should be present"))
+                    .icon(
+                        app.default_window_icon()
+                            .cloned()
+                            .expect("default window icon should be present"),
+                    )
                     .menu(&menu)
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "show-main" => {

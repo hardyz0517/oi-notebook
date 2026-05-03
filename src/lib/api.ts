@@ -81,6 +81,18 @@ export async function commitNote(relativePath: string): Promise<CommitNoteStatus
 }
 
 /**
+ * 手动执行 git push origin main。
+ * 对应 Rust 命令：push_git
+ */
+export async function pushGit(): Promise<void> {
+  try {
+    await invoke<void>("push_git");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+/**
  * 删除指定笔记文件。
  * 对应 Rust 命令：delete_note
  *

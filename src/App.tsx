@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ExternalLink, Plus, RotateCcw } from "lucide-react";
+import { ExternalLink, Plus, RotateCcw, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -87,6 +87,7 @@ export default function App() {
   const [newNoteDirectory, setNewNoteDirectory] = useState<"tricks" | "problems">("tricks");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
+  const [isPushingGit, setIsPushingGit] = useState(false);
 
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
@@ -210,6 +211,18 @@ export default function App() {
       toast.error(`重启博客失败: ${e}`);
     } finally {
       setIsRestartingBlog(false);
+    }
+  };
+
+  const handlePushGit = async () => {
+    setIsPushingGit(true);
+    try {
+      await pushGit();
+      toast.success("Git 已同步");
+    } catch (e) {
+      toast.error(`Git 同步失败：${e}`);
+    } finally {
+      setIsPushingGit(false);
     }
   };
 
@@ -464,6 +477,16 @@ export default function App() {
           >
             <RotateCcw className="h-3.5 w-3.5" />
             重启博客
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handlePushGit}
+            disabled={isPushingGit}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            同步 Git
           </Button>
         </div>
       </header>
