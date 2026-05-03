@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-03（记录自动 Git commit 与手动同步 Git 验收）
+**最后更新**：2026-05-03（记录 Frontmatter 表单验收）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -100,7 +100,8 @@
     ├─ GitHub Pages project page 已完成部署，线上站 https://hardyz0517.github.io/oi-notebook/ 已验收
     ├─ Header 已有“打开博客”“重启博客”和“同步 Git”入口
     ├─ 保存笔记后自动 commit 当前保存的单个 notes 文件，手动“同步 Git”按钮执行 git push origin main，均已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、删除/重命名笔记自动 Git commit、Frontmatter 编辑器、模板系统、图片粘贴、洛谷爬取、AI 辅助、博客视觉继续打磨
+    ├─ 主窗口已有 Frontmatter 折叠表单，支持 title/tags/summary/draft/difficulty/source，已验收
+    └─ 未完成：生产分发策略、自动定时/退出时 push、删除/重命名笔记自动 Git commit、模板系统、图片粘贴、洛谷爬取、AI 辅助、博客视觉继续打磨
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -404,6 +405,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 自动 commit 不使用 `git add .` 或 `git add notes/`，只允许提交当前保存的单个 notes pathspec。
 - [x] 自动 commit 前检查暂存区；如果 `git diff --cached --name-only` 非空，则跳过/报错，避免把用户手动 staged 的内容带进自动 commit。
 - [x] 自动 commit message 目前使用 `note: update {relative_path}`，暂不解析 title。
+- [x] 主窗口已有 Frontmatter 折叠表单，放在 Markdown 编辑区上方，已由 Hardy 肉眼验收通过。
+- [x] Frontmatter 表单第一版支持 `title`、`tags`、`summary`、`draft`、`difficulty`、`source`；不提供 `created` / `updated` 编辑，这两个字段仍由系统维护。
+- [x] `tags` 第一版使用逗号分隔输入，不做 chip 或 autocomplete。
+- [x] 前端 frontmatter 合并采用保守文本策略：只处理文件开头 frontmatter，正文原样保留，未知字段保留；frontmatter 缺少闭合 `---` 或 tags 为复杂 YAML 时不强行改写原文。
+- [x] Frontmatter 表单改写只更新当前 Markdown state，保存链路仍保持 `writeNote` -> 自动 commit，frontmatter warning toast 和自动 commit toast 继续按原逻辑执行。
 - [x] Header 已新增“同步 Git”按钮，手动执行 `git push origin main`；不做 pull、rebase 或冲突解决。
 - [x] 手动 push 前同样检查暂存区；暂存区非空会失败，允许工作区保留未跟踪本地测试笔记。
 - [x] tracked draft 测试笔记已创建用于验证自动 commit 和博客 UI；它们均为 `draft: true`，生产构建会过滤。
@@ -436,6 +442,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `fe94a4a test(notes): add tracked draft notes`
 - `c4784a5 note: update tricks/git-auto-commit-test.md`
 - `750e47e feat(git): add manual push action`
+- `d7e44d8 feat(editor): add frontmatter form`
 
 端到端验证结果：
 
@@ -504,13 +511,12 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
 - 删除/重命名笔记的自动 Git commit 还没做。
-- Frontmatter 编辑器还没做。
 - 模板系统还没做。
 - 图片粘贴还没做。
 - 还没有洛谷爬取。
 - 还没有 AI 辅助。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、删除/重命名 Git commit、Frontmatter 编辑器、模板系统、图片粘贴、洛谷爬取或 AI 辅助方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、删除/重命名 Git commit、模板系统、图片粘贴、洛谷爬取或 AI 辅助方向。
 
 ### 博客 UI 打磨进展
 
@@ -618,7 +624,6 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
 - 删除/重命名笔记的自动 Git commit。
-- Frontmatter 编辑器。
 - 模板系统。
 - 图片粘贴。
 - 洛谷爬取。
