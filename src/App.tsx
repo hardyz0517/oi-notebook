@@ -76,6 +76,30 @@ $$
 > 刷题不在多，在精。每道题都要弄懂为什么对、为什么错，而不是只追 AC 数量。
 `;
 
+type NewNoteDirectory = "tricks" | "problems";
+type NoteTemplateId = "blank" | "trick" | "solution";
+
+function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTemplateId {
+  return directory === "tricks" ? "trick" : "solution";
+}
+
+function quoteYamlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
+  if (templateId === "blank") return "";
+
+  const quotedTitle = quoteYamlString(title);
+  const frontmatter = `---\ntitle: ${quotedTitle}\ntags: []\ndifficulty: ""\nsource: ""\nsummary: ""\ndraft: false\n---`;
+
+  if (templateId === "trick") {
+    return `${frontmatter}\n\n## 结论\n\n\n## 适用条件\n\n\n## 例子\n\n\n## 代码\n\n\`\`\`cpp\n\n\`\`\`\n`;
+  }
+
+  return `${frontmatter}\n\n## 题意\n\n\n## 思路\n\n\n## 证明\n\n\n## 代码\n\n\`\`\`cpp\n\n\`\`\`\n\n## 复杂度\n\n\n`;
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -86,7 +110,8 @@ export default function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
   const [dialogValue, setDialogValue] = useState("");
-  const [newNoteDirectory, setNewNoteDirectory] = useState<"tricks" | "problems">("tricks");
+  const [newNoteDirectory, setNewNoteDirectory] = useState<NewNoteDirectory>("tricks");
+  const [newNoteTemplate, setNewNoteTemplate] = useState<NoteTemplateId>("trick");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
@@ -106,6 +131,7 @@ export default function App() {
     setDialogMode("create");
     setDialogValue("");
     setNewNoteDirectory("tricks");
+    setNewNoteTemplate(getDefaultTemplateForDirectory("tricks"));
   };
 
   const openRenameDialog = (path: string) => {
@@ -121,7 +147,13 @@ export default function App() {
     setDialogMode(null);
     setDialogValue("");
     setNewNoteDirectory("tricks");
+    setNewNoteTemplate(getDefaultTemplateForDirectory("tricks"));
     setRenameTarget(null);
+  };
+
+  const updateNewNoteDirectory = (directory: NewNoteDirectory) => {
+    setNewNoteDirectory(directory);
+    setNewNoteTemplate(getDefaultTemplateForDirectory(directory));
   };
 
   const handleCreate = async () => {
@@ -135,7 +167,8 @@ export default function App() {
       if (!ok) return;
     }
     try {
-      await writeNote(newPath, "");
+      const templateMarkdown = buildNoteTemplate(newNoteTemplate, dialogValue.trim());
+      await writeNote(newPath, templateMarkdown);
       const updated = await listNotes();
       setFiles(updated);
       closeDialog();
@@ -402,7 +435,7 @@ export default function App() {
                     name="note-directory"
                     value="tricks"
                     checked={newNoteDirectory === "tricks"}
-                    onChange={() => setNewNoteDirectory("tricks")}
+                    onChange={() => updateNewNoteDirectory("tricks")}
                     className="mt-0.5 h-4 w-4 accent-primary"
                   />
                   <span className="grid gap-1">
@@ -424,13 +457,86 @@ export default function App() {
                     name="note-directory"
                     value="problems"
                     checked={newNoteDirectory === "problems"}
-                    onChange={() => setNewNoteDirectory("problems")}
+                    onChange={() => updateNewNoteDirectory("problems")}
                     className="mt-0.5 h-4 w-4 accent-primary"
                   />
                   <span className="grid gap-1">
                     <span className="font-medium text-foreground">problems/</span>
                     <span className="text-xs leading-5 text-muted-foreground">
                       题解笔记：题目分析、解法记录
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+          {dialogMode === "create" && (
+            <div className="grid gap-2">
+              <Label>模板</Label>
+              <div className="grid gap-2">
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
+                    newNoteTemplate === "blank"
+                      ? "border-ring bg-accent/50"
+                      : "border-border bg-background"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="note-template"
+                    value="blank"
+                    checked={newNoteTemplate === "blank"}
+                    onChange={() => setNewNoteTemplate("blank")}
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium text-foreground">空白</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      创建空 Markdown，由保存流程补全基础 frontmatter
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
+                    newNoteTemplate === "trick"
+                      ? "border-ring bg-accent/50"
+                      : "border-border bg-background"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="note-template"
+                    value="trick"
+                    checked={newNoteTemplate === "trick"}
+                    onChange={() => setNewNoteTemplate("trick")}
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium text-foreground">Trick 模板</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      结论、适用条件、例子、代码
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
+                    newNoteTemplate === "solution"
+                      ? "border-ring bg-accent/50"
+                      : "border-border bg-background"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="note-template"
+                    value="solution"
+                    checked={newNoteTemplate === "solution"}
+                    onChange={() => setNewNoteTemplate("solution")}
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium text-foreground">题解模板</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      题意、思路、证明、代码、复杂度
                     </span>
                   </span>
                 </label>
