@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 
+const isGithubPages = process.env.GITHUB_PAGES === "true";
+
 function watchExternalNotes() {
   const notesDir = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -56,7 +58,8 @@ function watchExternalNotes() {
 }
 
 export default defineConfig({
-  site: "http://localhost:4321",
+  site: isGithubPages ? "https://hardyz0517.github.io" : "http://localhost:4321",
+  ...(isGithubPages ? { base: "/oi-notebook" } : {}),
   integrations: [watchExternalNotes()],
   markdown: {
     remarkPlugins: [remarkMath],

@@ -4,11 +4,20 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 type NoteEntry = CollectionEntry<"notes">;
 
-const notes = (await getCollection("notes")).sort((a, b) => {
-  const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
-  const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
-  return bTime - aTime;
-});
+const showDrafts = !import.meta.env.PROD;
+const withBase = (path: string) => {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+
+  return cleanPath ? `${base}/${cleanPath}` : `${base}/`;
+};
+const notes = (await getCollection("notes"))
+  .filter((note) => showDrafts || !note.data.draft)
+  .sort((a, b) => {
+    const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+    const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+    return bTime - aTime;
+  });
 
 const formatDate = (date?: Date) =>
   date
@@ -20,8 +29,9 @@ const formatDate = (date?: Date) =>
     : "未记录日期";
 
 const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
-const categoryHref = (category: string) => `/categories/${category}`;
-const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
+const postHref = (id: string) => withBase(`/posts/${id}`);
+const categoryHref = (category: string) => withBase(`/categories/${category}`);
+const tagHref = (tag: string) => withBase(`/tags/${encodeURIComponent(tag.trim())}`);
 
 const plainTextOf = (text: string) =>
   text
@@ -59,7 +69,7 @@ const searchItems = notes.map((note) => {
 
   return {
     title,
-    url: `/posts/${note.id}`,
+    url: postHref(note.id),
     category,
     date,
     dateText: formatDate(date),

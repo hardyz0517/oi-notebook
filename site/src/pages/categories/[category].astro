@@ -58,7 +58,15 @@ export function getStaticPaths() {
 type NoteEntry = CollectionEntry<"notes">;
 
 const { category } = Astro.props;
+const showDrafts = !import.meta.env.PROD;
+const withBase = (path: string) => {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+
+  return cleanPath ? `${base}/${cleanPath}` : `${base}/`;
+};
 const notes = (await getCollection("notes"))
+  .filter((note) => showDrafts || !note.data.draft)
   .filter((note) => note.id.split(/[\\/]/)[0] === category.key)
   .sort((a, b) => {
     const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
@@ -75,7 +83,8 @@ const formatDate = (date?: Date) =>
       }).format(date)
     : "未记录日期";
 
-const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
+const postHref = (id: string) => withBase(`/posts/${id}`);
+const tagHref = (tag: string) => withBase(`/tags/${encodeURIComponent(tag.trim())}`);
 
 const excerptOf = (note: NoteEntry) => {
   if (note.data.summary.trim()) {
@@ -122,7 +131,7 @@ const excerptOf = (note: NoteEntry) => {
                   {note.data.draft && <span class="draft-badge">Draft</span>}
                 </div>
                 <h2>
-                  <a href={`/posts/${note.id}`}>{note.data.title || note.id}</a>
+                  <a href={postHref(note.id)}>{note.data.title || note.id}</a>
                 </h2>
                 {excerpt && <p class="summary">{excerpt}</p>}
                 {note.data.tags.length > 0 && (
@@ -146,7 +155,7 @@ const excerptOf = (note: NoteEntry) => {
                     })}
                   </ul>
                 )}
-                <a class="read-more" href={`/posts/${note.id}`}>阅读更多</a>
+                <a class="read-more" href={postHref(note.id)}>阅读更多</a>
               </article>
             );
           })}

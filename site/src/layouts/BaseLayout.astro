@@ -9,6 +9,12 @@ interface Props {
 }
 
 const { title, description = "OI Notebook", mainClass } = Astro.props;
+const withBase = (path: string) => {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+
+  return cleanPath ? `${base}/${cleanPath}` : `${base}/`;
+};
 ---
 
 <!doctype html>
@@ -21,14 +27,14 @@ const { title, description = "OI Notebook", mainClass } = Astro.props;
   </head>
   <body>
     <header class="site-header">
-      <a class="site-title" href="/">OI Notebook</a>
+      <a class="site-title" href={withBase("/")}>OI Notebook</a>
       <p class="site-subtitle">算法笔记与题解的本地博客</p>
       <nav class="site-nav" aria-label="主导航">
-        <a href="/">首页</a>
-        <a href="/#posts">文章</a>
-        <a href="/categories">分类</a>
-        <a href="/tags">标签</a>
-        <a href="/search">搜索</a>
+        <a href={withBase("/")}>首页</a>
+        <a href={withBase("#posts")}>文章</a>
+        <a href={withBase("/categories")}>分类</a>
+        <a href={withBase("/tags")}>标签</a>
+        <a href={withBase("/search")}>搜索</a>
       </nav>
     </header>
     <main class={mainClass}>

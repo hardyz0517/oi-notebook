@@ -2,7 +2,14 @@
 import { getCollection } from "astro:content";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 
-const notes = await getCollection("notes");
+const showDrafts = !import.meta.env.PROD;
+const withBase = (path: string) => {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+
+  return cleanPath ? `${base}/${cleanPath}` : `${base}/`;
+};
+const notes = (await getCollection("notes")).filter((note) => showDrafts || !note.data.draft);
 const tagCounts = new Map<string, number>();
 
 for (const note of notes) {
@@ -37,7 +44,7 @@ const tags = [...tagCounts.entries()]
       ) : (
         <div class="tag-grid" aria-label="标签列表">
           {tags.map((tag) => (
-            <a class="tag-card" href={`/tags/${encodeURIComponent(tag.name)}`}>
+            <a class="tag-card" href={withBase(`/tags/${encodeURIComponent(tag.name)}`)}>
               <span class="tag-name">#{tag.name}</span>
               <span class="tag-count">{tag.count} 篇文章</span>
             </a>
