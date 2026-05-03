@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-02（记录 Phase 5 文章 TOC、TOC 右侧布局修复与重启博客按钮）
+**最后更新**：2026-05-03（记录 Phase 5 category/tag 链接与文章上一篇/下一篇导航）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -95,8 +95,9 @@
     ├─ 分类总览页与分类详情页已完成
     ├─ 标签总览页与标签详情页已完成，中文 tag 路由已修复
     ├─ 文章页目录 TOC 已完成，桌面端为右侧 sticky，窄屏回到正文上方
+    ├─ category/tag 已可点击跳转，文章页已有上一篇/下一篇导航
     ├─ Header 已有“打开博客”和“重启博客”入口
-    └─ 未完成：搜索、上一篇下一篇、GitHub Pages、生产分发策略
+    └─ 未完成：搜索、GitHub Pages、生产分发策略
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -378,6 +379,12 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 标签总览页 `/tags` 已新增，从所有 notes 的 frontmatter `tags` 收集标签，显示 tag 名称、文章数量和详情入口。
 - [x] 标签详情页 `/tags/[tag]` 已新增，列出包含该 tag 的所有笔记，并按 `updated ?? created` 倒序。
 - [x] 中文 tag 路由已修复：`getStaticPaths()` 使用原始 tag 作为 params，`/tags/测试` 能生成并访问。
+- [x] 首页、文章页、分类详情页、标签详情页中的 category / tags 已可点击。
+- [x] category badge 会跳到 `/categories/{category}`；tag 链接会跳到 `/tags/{encodedTag}`，中文 tag 已支持。
+- [x] 含 `/` 的 tag 暂时显示为纯文本，不生成链接，避免破坏当前 `/tags/[tag]` 路由。
+- [x] 文章页底部已新增上一篇/下一篇导航，按 `updated ?? created` 倒序，和首页一致。
+- [x] 第一篇没有上一篇，最后一篇没有下一篇；只有单项时仍保持正确左右对齐。
+- [x] 单个“下一篇”错误落到左列、视觉偏左的问题已修复并肉眼验收通过。
 - [x] 顶部导航已有“分类”和“标签”，首页底部已有“按目录浏览全部分类”入口。
 
 相关提交：
@@ -397,6 +404,9 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `9492a4e fix(site): allow wide post layout`
 - `2f7f1f1 fix(site): keep post content centered with toc`
 - `5fb5ab4 feat(site): add restart blog action`
+- `8e597ed feat(site): link post categories and tags`
+- `fd70ea4 feat(site): add post navigation`
+- `36a736e fix(site): align single post navigation item`
 
 端到端验证结果：
 
@@ -426,16 +436,21 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
   - TOC 挂在正文右侧。
   - TOC 不再参与正文居中计算。
   - 窄屏下 TOC 回到正文上方普通目录。
+- category/tag 链接与文章上一篇/下一篇导航已肉眼验收通过：
+  - category badge 能跳到对应 `/categories/{category}`。
+  - tag 能跳到对应 `/tags/{encodedTag}`，中文 tag 可用。
+  - 最新文章只有“下一篇”时靠右。
+  - 最旧文章只有“上一篇”时靠左。
+  - 中间文章上一篇在左侧，下一篇在右侧。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
 - 还没有全文搜索。
-- 还没有上一篇/下一篇。
 - 还没有 GitHub Pages 部署。
 - 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或先做全文搜索/上一篇下一篇，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或先做全文搜索，或进入 GitHub Pages 部署与生产分发策略。
 
 ### 博客 UI 打磨进展
 
@@ -463,6 +478,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 标签总览页 `/tags` 已完成，按 frontmatter `tags` 汇总 tag 名称和文章数量。
 - [x] 标签详情页 `/tags/[tag]` 已完成，沿用文章列表风格，并按 `updated ?? created` 倒序。
 - [x] 中文 tag 路由 404 已修复，`/tags/测试` 可生成并访问。
+- [x] 首页、文章页、分类详情页、标签详情页中的 category / tags 已可点击，category 跳到 `/categories/{category}`，tag 跳到 `/tags/{encodedTag}`。
+- [x] 含 `/` 的 tag 暂时显示纯文本，不生成链接，避免破坏当前 tag 路由。
+- [x] 文章页底部上一篇/下一篇导航已完成，按 `updated ?? created` 倒序；单项导航对齐已修复。
+- [x] 上一篇/下一篇肉眼验收通过：最新文章只有“下一篇”时靠右，最旧文章只有“上一篇”时靠左，中间文章左右分列。
 - [x] 顶部导航已有“分类”和“标签”，首页已有“按目录浏览全部分类”入口。
 
 相关提交：
@@ -486,8 +505,13 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `9492a4e fix(site): allow wide post layout`
 - `2f7f1f1 fix(site): keep post content centered with toc`
 - `5fb5ab4 feat(site): add restart blog action`
+- `8e597ed feat(site): link post categories and tags`
+- `fd70ea4 feat(site): add post navigation`
+- `36a736e fix(site): align single post navigation item`
 
 ### 本地测试笔记策略
+
+当前工作区注意事项：`docs/OI-Notebook-PRD-v1.md` 有 Hardy 手动修改。后续 Codex 任务不要修改、回滚或提交它，除非 Hardy 明确要求。
 
 `notes/tricks/测试*.md` 这类文件是 Hardy 用于博客 UI 验收的本地素材。它们通常会以未跟踪文件形式留在工作区，用来反复检查首页文章流、文章页排版、分类页、标签页、代码块、公式、表格和 metadata 显示。
 
@@ -511,11 +535,19 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `/tags` 会从 frontmatter `tags` 汇总标签并显示文章数量。
 - `/tags/[tag]` 会按 `updated ?? created` 倒序列出文章。
 - 中文 tag 路由已修复，`/tags/测试` 能生成并访问。
+- 首页、文章页、分类详情页、标签详情页里的 tags 已可点击；中文 tag 链接可用。
+- 含 `/` 的 tag 暂时保留纯文本。
+
+文章上一篇/下一篇验收：
+
+- 导航按 `updated ?? created` 倒序，和首页一致。
+- 最新文章只有“下一篇”时靠右。
+- 最旧文章只有“上一篇”时靠左。
+- 中间文章上一篇在左侧，下一篇在右侧。
 
 仍未完成 / 等待 Hardy 决定：
 
 - 全文搜索。
-- 上一篇/下一篇。
 - GitHub Pages 部署。
 - 生产分发策略；当前仍是开发模式下启动 Astro dev server。
 - 博客视觉仍可继续打磨。
