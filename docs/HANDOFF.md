@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-03（记录 Phase 5 全文搜索页）
+**最后更新**：2026-05-03（记录 GitHub Pages 部署验收）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -97,8 +97,9 @@
     ├─ 文章页目录 TOC 已完成，桌面端为右侧 sticky，窄屏回到正文上方
     ├─ category/tag 已可点击跳转，文章页已有上一篇/下一篇导航
     ├─ 搜索页 /search 已完成，顶部导航已有“搜索”入口
+    ├─ GitHub Pages project page 已完成部署，线上站 https://hardyz0517.github.io/oi-notebook/ 已验收
     ├─ Header 已有“打开博客”和“重启博客”入口
-    └─ 未完成：GitHub Pages、生产分发策略、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动 Git commit/push、洛谷爬取、AI 辅助、博客视觉继续打磨
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -351,7 +352,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口。当前仍是开发模式集成，不包含 GitHub Actions、深色模式切换、洛谷、AI 或 Git 自动同步。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”和“重启博客”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前仍不包含生产分发策略、洛谷、AI 或 Git 自动同步。
 
 已完成内容：
 
@@ -393,6 +394,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - [x] 前端使用原生 JS 对 `data-search` 做 `includes` 实时过滤，不引入依赖，不做复杂分词或高亮。
 - [x] 中文和英文均可基于子串匹配；无结果时有温和空状态。
 - [x] `/search` 已生成并肉眼验收通过。
+- [x] GitHub Pages 部署 workflow 已新增，使用 GitHub Actions 官方 Pages 链路。
+- [x] workflow 在 push 到 `main` 且命中 `notes/**`、`site/**` 或 `.github/workflows/deploy.yml` 时触发，也支持 `workflow_dispatch` 手动触发。
+- [x] 线上站 URL 为 `https://hardyz0517.github.io/oi-notebook/`，Actions 已成功跑通，线上站验收正常。
+- [x] GitHub Pages project page base `/oi-notebook` 已适配，本地 dev 仍使用无 base 的 `localhost:4321`。
+- [x] 生产构建会过滤 `draft: true` 笔记；本地 dev 仍显示 draft，并保留 Draft badge。
 
 相关提交：
 
@@ -415,6 +421,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 - `fd70ea4 feat(site): add post navigation`
 - `36a736e fix(site): align single post navigation item`
 - `cb6b958 feat(site): add search page`
+- `16d1623 feat(site): prepare GitHub Pages base`
+- `e96ea1c ci(site): deploy blog to GitHub Pages`
 
 端到端验证结果：
 
@@ -455,14 +463,23 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
   - 搜索覆盖 title、summary/excerpt、tags、category 和 body 简化文本。
   - 中文和英文均可基于子串匹配。
   - 无结果时会显示温和空状态。
+- GitHub Pages 部署已验收通过：
+  - workflow 使用 GitHub Actions 官方 Pages artifact/deploy-pages 链路。
+  - push 到 `main` 且命中 `notes/**`、`site/**` 或 `.github/workflows/deploy.yml` 时会触发，也支持 `workflow_dispatch`。
+  - 线上站 URL 为 `https://hardyz0517.github.io/oi-notebook/`。
+  - Actions 已绿色通过，线上站肉眼验收正常。
+  - project page base `/oi-notebook` 已处理。
+  - 生产 build 会过滤 draft，本地 dev 仍显示 draft。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
-- 还没有 GitHub Pages 部署。
-- 还没有生产分发策略；当前是开发模式下启动 Astro dev server。
+- 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
+- 还没有自动 Git commit/push。
+- 还没有洛谷爬取。
+- 还没有 AI 辅助。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入 GitHub Pages 部署与生产分发策略。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动 Git 同步、洛谷爬取或 AI 辅助方向。
 
 ### 博客 UI 打磨进展
 
@@ -524,8 +541,6 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 
 ### 本地测试笔记策略
 
-当前工作区注意事项：`docs/OI-Notebook-PRD-v1.md` 有 Hardy 手动修改。后续 Codex 任务不要修改、回滚或提交它，除非 Hardy 明确要求。
-
 `notes/tricks/测试*.md` 这类文件是 Hardy 用于博客 UI 验收的本地素材。它们通常会以未跟踪文件形式留在工作区，用来反复检查首页文章流、文章页排版、分类页、标签页、代码块、公式、表格和 metadata 显示。
 
 后续 Codex 看到这类本地测试笔记时：
@@ -569,6 +584,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环：仓库新增
 
 仍未完成 / 等待 Hardy 决定：
 
-- GitHub Pages 部署。
-- 生产分发策略；当前仍是开发模式下启动 Astro dev server。
+- 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
+- 自动 Git commit/push。
+- 洛谷爬取。
+- AI 辅助。
 - 博客视觉仍可继续打磨。
