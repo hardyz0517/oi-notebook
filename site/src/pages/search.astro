@@ -1,0 +1,172 @@
+---
+import { getCollection, type CollectionEntry } from "astro:content";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+type NoteEntry = CollectionEntry<"notes">;
+
+const notes = (await getCollection("notes")).sort((a, b) => {
+  const aTime = (a.data.updated ?? a.data.created)?.getTime() ?? 0;
+  const bTime = (b.data.updated ?? b.data.created)?.getTime() ?? 0;
+  return bTime - aTime;
+});
+
+const formatDate = (date?: Date) =>
+  date
+    ? new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date)
+    : "未记录日期";
+
+const categoryOf = (id: string) => id.split(/[\\/]/)[0] || "notes";
+const categoryHref = (category: string) => `/categories/${category}`;
+const tagHref = (tag: string) => `/tags/${encodeURIComponent(tag.trim())}`;
+
+const plainTextOf = (text: string) =>
+  text
+    .replace(/^---[\s\S]*?---/, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[[^\]]+\]\([^)]+\)/g, " ")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\$\$?/g, "")
+    .replace(/\\(frac|sum|int|lim|sqrt|cdot|times|leq|geq|neq|infty)\b/g, "$1")
+    .replace(/[*_~|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const excerptOf = (note: NoteEntry) => {
+  if (note.data.summary.trim()) {
+    return note.data.summary.trim();
+  }
+
+  const body = plainTextOf(note.body);
+
+  return body.length > 110 ? `${body.slice(0, 110)}...` : body;
+};
+
+const searchItems = notes.map((note) => {
+  const category = categoryOf(note.id);
+  const date = note.data.updated ?? note.data.created;
+  const title = note.data.title || note.id;
+  const summary = excerptOf(note);
+  const tags = note.data.tags.map((tag) => tag.trim()).filter(Boolean);
+  const bodyText = plainTextOf(note.body);
+
+  return {
+    title,
+    url: `/posts/${note.id}`,
+    category,
+    date,
+    dateText: formatDate(date),
+    tags,
+    summary,
+    searchText: [title, summary, tags.join(" "), category, bodyText].join(" ").toLowerCase(),
+    draft: note.data.draft,
+  };
+});
+---
+
+<BaseLayout title="搜索 - OI Notebook" description="搜索 OI Notebook 笔记">
+  <section class="search-page">
+    <header class="page-heading">
+      <p class="page-kicker">Search</p>
+      <h1>搜索</h1>
+      <p>按标题、摘要、正文、分类或标签查找笔记。</p>
+    </header>
+
+    <div class="search-box">
+      <label class="search-label" for="search-input">关键词</label>
+      <input
+        id="search-input"
+        class="search-input"
+        type="search"
+        placeholder="输入中文、英文、标签或分类"
+        autocomplete="off"
+      />
+      <p class="search-count" id="search-count">
+        共 {searchItems.length} 篇笔记
+      </p>
+    </div>
+
+    {
+      searchItems.length === 0 ? (
+        <p class="empty-state">还没有可以搜索的笔记。</p>
+      ) : (
+        <>
+          <div class="search-results" id="search-results" aria-live="polite">
+            {searchItems.map((item) => (
+              <article class="search-result" data-search={item.searchText}>
+                <div class="post-meta">
+                  <a class="category" href={categoryHref(item.category)}>
+                    {item.category}
+                  </a>
+                  <time datetime={item.date?.toISOString()}>{item.dateText}</time>
+                  {item.draft && <span class="draft-badge">Draft</span>}
+                </div>
+                <h2>
+                  <a href={item.url}>{item.title}</a>
+                </h2>
+                {item.summary && <p class="summary">{item.summary}</p>}
+                {item.tags.length > 0 && (
+                  <ul class="tag-list" aria-label="标签">
+                    {item.tags.map((tag) => (
+                      <li>
+                        {tag.includes("/") ? tag : <a href={tagHref(tag)}>{tag}</a>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <a class="read-more" href={item.url}>阅读更多</a>
+              </article>
+            ))}
+          </div>
+          <p class="empty-state search-empty" id="search-empty" hidden>
+            没有找到匹配的笔记。换个关键词试试。
+          </p>
+        </>
+      )
+    }
+  </section>
+
+  <script>
+    const input = document.querySelector("#search-input");
+    const results = [...document.querySelectorAll(".search-result")];
+    const count = document.querySelector("#search-count");
+    const empty = document.querySelector("#search-empty");
+
+    const updateResults = () => {
+      if (!(input instanceof HTMLInputElement)) return;
+
+      const query = input.value.trim().toLowerCase();
+      let visibleCount = 0;
+
+      for (const result of results) {
+        const searchableText = result.getAttribute("data-search") ?? "";
+        const isVisible = !query || searchableText.includes(query);
+        result.hidden = !isVisible;
+
+        if (isVisible) {
+          visibleCount += 1;
+        }
+      }
+
+      if (count) {
+        count.textContent = query
+          ? `找到 ${visibleCount} 篇笔记`
+          : `共 ${results.length} 篇笔记`;
+      }
+
+      if (empty) {
+        empty.hidden = visibleCount !== 0;
+      }
+    };
+
+    input?.addEventListener("input", updateResults);
+    updateResults();
+  </script>
+</BaseLayout>

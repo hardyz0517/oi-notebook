@@ -267,6 +267,12 @@ h3 {
   padding-top: 40px;
 }
 
+.search-page {
+  max-width: 840px;
+  margin: 0 auto;
+  padding-top: 40px;
+}
+
 .page-heading {
   max-width: 680px;
   margin-bottom: 34px;
@@ -379,6 +385,69 @@ h3 {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 13px;
+}
+
+.search-box {
+  margin-bottom: 34px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.search-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--paper);
+  font: inherit;
+}
+
+.search-input:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.search-count {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.search-results {
+  display: grid;
+  gap: 30px;
+}
+
+.search-result {
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.search-result h2 {
+  margin-top: 14px;
+  font-size: 26px;
+}
+
+.search-result h2 a {
+  text-decoration: none;
+}
+
+.search-result h2 a:hover {
+  color: var(--accent);
+}
+
+.search-empty {
+  margin-top: 28px;
 }
 
 .post {
