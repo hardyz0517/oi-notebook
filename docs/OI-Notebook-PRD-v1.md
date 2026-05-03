@@ -510,13 +510,3 @@ jobs:
 - AI 主动建议（定期扫描 inbox 归档）
 - 刷题进度统计看板
 
----
-
-## 9. 下一步
-
-PRD 定稿后：
-1. 我生成 Phase 0 的完整脚手架（Tauri + React + Tailwind + shadcn 起步工程）
-2. 一起过一遍目录结构和初始配置
-3. 开始 Phase 1：CodeMirror 编辑器集成
-
-**任何 Phase 都可以随时暂停或调整优先级。推荐按顺序来，因为后面的 Phase 依赖前面的基础。**
