@@ -18,7 +18,7 @@ fn repo_root() -> Result<PathBuf, String> {
     manifest_dir
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| "无法从 CARGO_MANIFEST_DIR 获取项目根目录".to_string())
+        .ok_or_else(|| "Cannot resolve repo root from CARGO_MANIFEST_DIR".to_string())
 }
 
 fn notes_dir(repo_root: &Path) -> PathBuf {
@@ -30,7 +30,7 @@ fn git_output(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
         .args(args)
         .current_dir(repo_root)
         .output()
-        .map_err(|e| format!("执行 git 命令失败（git {}）：{e}", args.join(" ")))
+        .map_err(|e| format!("Failed to run git {}: {e}", args.join(" ")))
 }
 
 fn output_text(output: &Output) -> String {
@@ -41,7 +41,7 @@ fn output_text(output: &Output) -> String {
         (false, false) => format!("{stdout}\n{stderr}"),
         (false, true) => stdout,
         (true, false) => stderr,
-        (true, true) => "无输出".to_string(),
+        (true, true) => "no output".to_string(),
     }
 }
 
@@ -51,48 +51,82 @@ fn git_success(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
         Ok(output)
     } else {
         Err(format!(
-            "git {} 失败：{}",
+            "git {} failed: {}",
             args.join(" "),
             output_text(&output)
         ))
     }
 }
 
-fn safe_note_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, String> {
+fn normalize_note_relative_path(relative_path: &str) -> Result<String, String> {
     let normalized = relative_path.replace('\\', "/");
 
     if normalized.is_empty() {
-        return Err("Git 提交失败：笔记路径不能为空".to_string());
+        return Err("Git commit failed: note path cannot be empty".to_string());
     }
 
     if Path::new(&normalized).is_absolute()
         || normalized.starts_with('/')
         || relative_path.starts_with('\\')
     {
-        return Err(format!("Git 提交失败：非法笔记路径 '{relative_path}'"));
+        return Err(format!(
+            "Git commit failed: illegal note path '{relative_path}'"
+        ));
     }
 
     for segment in normalized.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
-            return Err(format!("Git 提交失败：非法笔记路径 '{relative_path}'"));
+            return Err(format!(
+                "Git commit failed: illegal note path '{relative_path}'"
+            ));
         }
     }
 
+    Ok(normalized)
+}
+
+fn safe_note_pathspec_allow_missing(
+    repo_root: &Path,
+    relative_path: &str,
+) -> Result<String, String> {
+    let normalized = normalize_note_relative_path(relative_path)?;
     let canonical_notes = notes_dir(repo_root)
         .canonicalize()
-        .map_err(|e| format!("Git 提交失败：无法解析 notes 目录路径：{e}"))?;
+        .map_err(|e| format!("Git commit failed: cannot resolve notes directory: {e}"))?;
     let target = canonical_notes.join(&normalized);
-    let canonical_target = target
-        .canonicalize()
-        .map_err(|e| format!("Git 提交失败：无法解析笔记路径 '{relative_path}'：{e}"))?;
 
-    if !canonical_target.starts_with(&canonical_notes) {
+    if !target.starts_with(&canonical_notes) {
         return Err(format!(
-            "Git 提交失败：笔记路径 '{relative_path}' 越界到 notes 目录之外"
+            "Git commit failed: note path '{relative_path}' escapes notes directory"
         ));
     }
 
     Ok(format!("notes/{normalized}"))
+}
+
+fn safe_note_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, String> {
+    let pathspec = safe_note_pathspec_allow_missing(repo_root, relative_path)?;
+    let normalized = pathspec
+        .strip_prefix("notes/")
+        .ok_or_else(|| format!("Git commit failed: illegal note path '{relative_path}'"))?;
+
+    let canonical_notes = notes_dir(repo_root)
+        .canonicalize()
+        .map_err(|e| format!("Git commit failed: cannot resolve notes directory: {e}"))?;
+    let canonical_target = canonical_notes
+        .join(normalized)
+        .canonicalize()
+        .map_err(|e| {
+            format!("Git commit failed: cannot resolve note path '{relative_path}': {e}")
+        })?;
+
+    if !canonical_target.starts_with(&canonical_notes) {
+        return Err(format!(
+            "Git commit failed: note path '{relative_path}' escapes notes directory"
+        ));
+    }
+
+    Ok(pathspec)
 }
 
 fn safe_asset_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, String> {
@@ -100,7 +134,7 @@ fn safe_asset_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, 
 
     if !normalized.starts_with("assets/") {
         return Err(format!(
-            "Git 提交失败：自动提交的图片必须位于 notes/assets/ 下：'{relative_path}'"
+            "Git commit failed: auto-committed image must be under notes/assets/: '{relative_path}'"
         ));
     }
 
@@ -125,10 +159,107 @@ fn cached_names(repo_root: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// 自动提交刚保存的单个 notes 文件，以及本轮粘贴生成的 notes/assets 图片。
+fn ensure_staging_area_empty(repo_root: &Path, action: &str) -> Result<(), String> {
+    let staged_names = cached_names(repo_root)?;
+    if !staged_names.is_empty() {
+        return Err(format!(
+            "Staging area is not empty; skipped {action}: {}",
+            staged_names.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
+fn stage_allowed_pathspecs(
+    repo_root: &Path,
+    pathspecs: &[String],
+    context: &str,
+) -> Result<(), String> {
+    let mut add_args = vec!["add", "--"];
+    for pathspec in pathspecs {
+        add_args.push(pathspec.as_str());
+    }
+
+    if let Err(add_error) = git_success(repo_root, &add_args) {
+        if let Err(reset_error) = reset_paths(repo_root, pathspecs) {
+            return Err(format!(
+                "{add_error}; also failed to clean this auto-staged change: {reset_error}"
+            ));
+        }
+        return Err(add_error);
+    }
+
+    let staged_after_add = cached_names(repo_root)?;
+    let allowed_staged: BTreeSet<&str> = pathspecs.iter().map(String::as_str).collect();
+    let staged_allowed = staged_after_add
+        .iter()
+        .all(|name| allowed_staged.contains(name.as_str()));
+
+    if !staged_allowed {
+        let error = format!(
+            "{context} may only stage the requested pathspecs, but staging area contains: {}",
+            staged_after_add.join(", ")
+        );
+        if let Err(reset_error) = reset_paths(repo_root, pathspecs) {
+            return Err(format!(
+                "{error}; also failed to clean this auto-staged change: {reset_error}"
+            ));
+        }
+        return Err(error);
+    }
+
+    Ok(())
+}
+
+fn commit_staged_pathspecs(
+    repo_root: &Path,
+    pathspecs: &[String],
+    message: &str,
+) -> Result<(), String> {
+    let mut diff_args = vec!["diff", "--cached", "--quiet", "--"];
+    for pathspec in pathspecs {
+        diff_args.push(pathspec.as_str());
+    }
+    let diff = git_output(repo_root, &diff_args)?;
+
+    match diff.status.code() {
+        Some(0) => {
+            if let Err(reset_error) = reset_paths(repo_root, pathspecs) {
+                return Err(format!(
+                    "Git commit failed: no staged changes for requested pathspecs; also failed to clean this auto-staged change: {reset_error}"
+                ));
+            }
+            Err("Git commit failed: no staged changes for requested pathspecs".to_string())
+        }
+        Some(1) => match git_success(repo_root, &["commit", "-m", message]) {
+            Ok(_) => Ok(()),
+            Err(commit_error) => {
+                if let Err(reset_error) = reset_paths(repo_root, pathspecs) {
+                    return Err(format!(
+                        "{commit_error}; also failed to clean this auto-staged change: {reset_error}"
+                    ));
+                }
+                Err(commit_error)
+            }
+        },
+        _ => {
+            let diff_error = format!("git diff --cached --quiet failed: {}", output_text(&diff));
+            if let Err(reset_error) = reset_paths(repo_root, pathspecs) {
+                return Err(format!(
+                    "{diff_error}; also failed to clean this auto-staged change: {reset_error}"
+                ));
+            }
+            Err(diff_error)
+        }
+    }
+}
+
+/// Auto-commit the just-saved note and optional pasted image assets.
 ///
-/// 只允许 add `notes/{relative_path}` 和显式传入的 `notes/assets/...` pathspec。
-/// 如果暂存区已有内容，会直接拒绝，避免把用户手动 staged 的内容带进自动 commit。
+/// This only stages explicit `notes/{relative_path}` and `notes/assets/...`
+/// pathspecs. If anything is already staged, it refuses to commit so user
+/// staged changes are never swept into an automatic commit.
 #[tauri::command]
 pub fn commit_note(
     relative_path: String,
@@ -145,43 +276,8 @@ pub fn commit_note(
 
     let pathspecs: Vec<String> = allowed_pathspecs.into_iter().collect();
 
-    let staged_names = cached_names(&repo_root)?;
-    if !staged_names.is_empty() {
-        return Err(format!(
-            "暂存区已有内容，已跳过自动提交：{}",
-            staged_names.join(", ")
-        ));
-    }
-
-    let mut add_args = vec!["add", "--"];
-    for pathspec in &pathspecs {
-        add_args.push(pathspec.as_str());
-    }
-    if let Err(add_error) = git_success(&repo_root, &add_args) {
-        let reset_result = reset_paths(&repo_root, &pathspecs);
-        if let Err(reset_error) = reset_result {
-            return Err(format!("{add_error}；并且清理本次暂存失败：{reset_error}"));
-        }
-        return Err(add_error);
-    }
-
-    let staged_after_add = cached_names(&repo_root)?;
-    let allowed_staged: BTreeSet<&str> = pathspecs.iter().map(String::as_str).collect();
-    let staged_allowed = staged_after_add
-        .iter()
-        .all(|name| allowed_staged.contains(name.as_str()));
-
-    if !staged_allowed {
-        let reset_result = reset_paths(&repo_root, &pathspecs);
-        let error = format!(
-            "自动提交只允许暂存本次保存的笔记和本轮粘贴图片，但当前暂存区包含：{}",
-            staged_after_add.join(", ")
-        );
-        if let Err(reset_error) = reset_result {
-            return Err(format!("{error}；并且清理本次暂存失败：{reset_error}"));
-        }
-        return Err(error);
-    }
+    ensure_staging_area_empty(&repo_root, "auto note commit")?;
+    stage_allowed_pathspecs(&repo_root, &pathspecs, "Auto note commit")?;
 
     let mut diff_args = vec!["diff", "--cached", "--quiet", "--"];
     for pathspec in &pathspecs {
@@ -196,10 +292,9 @@ pub fn commit_note(
             match git_success(&repo_root, &["commit", "-m", &message]) {
                 Ok(_) => Ok(CommitNoteStatus::Committed),
                 Err(commit_error) => {
-                    let reset_result = reset_paths(&repo_root, &pathspecs);
-                    if let Err(reset_error) = reset_result {
+                    if let Err(reset_error) = reset_paths(&repo_root, &pathspecs) {
                         return Err(format!(
-                            "{commit_error}；并且清理本次暂存失败：{reset_error}"
+                            "{commit_error}; also failed to clean this auto-staged change: {reset_error}"
                         ));
                     }
                     Err(commit_error)
@@ -207,31 +302,54 @@ pub fn commit_note(
             }
         }
         _ => {
-            let diff_error = format!("git diff --cached --quiet 失败：{}", output_text(&diff));
-            let reset_result = reset_paths(&repo_root, &pathspecs);
-            if let Err(reset_error) = reset_result {
-                return Err(format!("{diff_error}；并且清理本次暂存失败：{reset_error}"));
+            let diff_error = format!("git diff --cached --quiet failed: {}", output_text(&diff));
+            if let Err(reset_error) = reset_paths(&repo_root, &pathspecs) {
+                return Err(format!(
+                    "{diff_error}; also failed to clean this auto-staged change: {reset_error}"
+                ));
             }
             Err(diff_error)
         }
     }
 }
 
-/// 手动同步 Git 到远端 main 分支。
+#[tauri::command]
+pub fn commit_deleted_note(relative_path: String) -> Result<(), String> {
+    let repo_root = repo_root()?;
+    let pathspecs = vec![safe_note_pathspec_allow_missing(
+        &repo_root,
+        &relative_path,
+    )?];
+    let message = format!("note: delete {relative_path}");
+
+    ensure_staging_area_empty(&repo_root, "auto delete note commit")?;
+    stage_allowed_pathspecs(&repo_root, &pathspecs, "Auto delete note commit")?;
+    commit_staged_pathspecs(&repo_root, &pathspecs, &message)
+}
+
+#[tauri::command]
+pub fn commit_renamed_note(old_path: String, new_path: String) -> Result<(), String> {
+    let repo_root = repo_root()?;
+    let pathspecs = vec![
+        safe_note_pathspec_allow_missing(&repo_root, &old_path)?,
+        safe_note_pathspec(&repo_root, &new_path)?,
+    ];
+    let message = format!("note: rename {old_path} to {new_path}");
+
+    ensure_staging_area_empty(&repo_root, "auto rename note commit")?;
+    stage_allowed_pathspecs(&repo_root, &pathspecs, "Auto rename note commit")?;
+    commit_staged_pathspecs(&repo_root, &pathspecs, &message)
+}
+
+/// Manually push the current main branch to origin.
 ///
-/// 只执行 `git push origin main`。push 前要求暂存区为空，避免用户手动 staged
-/// 的内容处于未处理状态时继续同步远端。
+/// This only runs `git push origin main`. It refuses to push while the staging
+/// area is non-empty, but it allows unrelated untracked files to remain local.
 #[tauri::command]
 pub fn push_git() -> Result<(), String> {
     let repo_root = repo_root()?;
 
-    let staged_names = cached_names(&repo_root)?;
-    if !staged_names.is_empty() {
-        return Err(format!(
-            "暂存区已有内容，已跳过 Git 同步：{}",
-            staged_names.join(", ")
-        ));
-    }
+    ensure_staging_area_empty(&repo_root, "Git push")?;
 
     git_success(&repo_root, &["push", "origin", "main"]).map(|_| ())
 }
@@ -286,6 +404,23 @@ mod tests {
     fn pathspec_rejects_absolute_path() {
         let (dir, _) = temp_repo_with_note("tricks/qpow.md");
         assert!(safe_note_pathspec(dir.path(), "/tmp/note.md").is_err());
+    }
+
+    #[test]
+    fn missing_pathspec_accepts_deleted_note() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("notes").join("tricks")).unwrap();
+        assert_eq!(
+            safe_note_pathspec_allow_missing(dir.path(), "tricks/deleted.md").unwrap(),
+            "notes/tricks/deleted.md"
+        );
+    }
+
+    #[test]
+    fn missing_pathspec_rejects_parent_traversal() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("notes")).unwrap();
+        assert!(safe_note_pathspec_allow_missing(dir.path(), "../README.md").is_err());
     }
 
     #[test]

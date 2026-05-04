@@ -89,6 +89,33 @@ export async function commitNote(
 }
 
 /**
+ * 自动提交已经删除的单个 notes 文件。
+ * 对应 Rust 命令：commit_deleted_note
+ */
+export async function commitDeletedNote(relativePath: string): Promise<void> {
+  try {
+    await invoke<void>("commit_deleted_note", { relativePath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+/**
+ * 自动提交已经重命名的单个 notes 文件。
+ * 对应 Rust 命令：commit_renamed_note
+ */
+export async function commitRenamedNote(
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  try {
+    await invoke<void>("commit_renamed_note", { oldPath, newPath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+/**
  * 保存粘贴图片到 notes/assets/，并返回当前笔记可用的 Markdown 链接路径。
  * 对应 Rust 命令：save_note_asset
  */

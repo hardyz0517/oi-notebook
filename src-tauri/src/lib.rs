@@ -172,6 +172,8 @@ pub fn run() {
             notes::delete_note,
             notes::rename_note,
             git::commit_note,
+            git::commit_deleted_note,
+            git::commit_renamed_note,
             git::push_git,
             open_blog,
             restart_blog_server,

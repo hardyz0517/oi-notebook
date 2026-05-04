@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -196,6 +196,12 @@ export default function App() {
     }
     try {
       await renameNote(renameTarget, newPath);
+      try {
+        await commitRenamedNote(renameTarget, newPath);
+        toast.success("已重命名并提交");
+      } catch (commitError) {
+        toast.warning(`重命名成功，Git 提交失败：${commitError}`);
+      }
       const updated = await listNotes();
       setFiles(updated);
       if (renameTarget === currentFilePath) {
@@ -203,7 +209,6 @@ export default function App() {
         setIsDirty(false);
       }
       closeDialog();
-      toast.success("已重命名");
     } catch (e) {
       toast.error(`重命名失败: ${e}`);
     }
@@ -214,13 +219,18 @@ export default function App() {
     if (!ok) return;
     try {
       await deleteNote(path);
+      try {
+        await commitDeletedNote(path);
+        toast.success("已删除并提交");
+      } catch (commitError) {
+        toast.warning(`删除成功，Git 提交失败：${commitError}`);
+      }
       const updated = await listNotes();
       setFiles(updated);
       if (path === currentFilePath) {
         setCurrentFilePath(null);
         setIsDirty(false);
       }
-      toast.success("已删除");
     } catch (e) {
       toast.error(`删除失败: ${e}`);
     }
