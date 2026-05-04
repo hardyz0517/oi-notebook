@@ -497,6 +497,75 @@ fn extract_oinb_insight(source_code: &str) -> Result<String, String> {
     Ok(rest[..end].trim().to_string())
 }
 
+#[allow(dead_code)]
+fn clean_block_comment_content(content: &str) -> String {
+    content
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(|line| line.trim().trim_start_matches('*').trim())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+#[allow(dead_code)]
+fn has_ai_candidate_keyword(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    content.contains("启示")
+        || content.contains("坑点")
+        || content.contains("思路")
+        || content.contains("总结")
+        || lower.contains("trick")
+        || lower.contains("idea")
+}
+
+#[allow(dead_code)]
+fn has_enough_ai_candidate_content(content: &str) -> bool {
+    content.chars().filter(|ch| !ch.is_whitespace()).count() >= 10
+}
+
+#[allow(dead_code)]
+fn extract_ai_candidate_comment(source_code: &str) -> Option<String> {
+    if source_code.contains("/* @oinb-insight") {
+        return None;
+    }
+
+    let tail_start = source_code.len() * 7 / 10;
+    let mut search_from = 0;
+    let mut candidate = None;
+
+    while let Some(relative_start) = source_code[search_from..].find("/*") {
+        let start = search_from + relative_start;
+        let content_start = start + "/*".len();
+        let Some(relative_end) = source_code[content_start..].find("*/") else {
+            break;
+        };
+        let end = content_start + relative_end;
+        search_from = end + "*/".len();
+
+        if end < tail_start {
+            continue;
+        }
+
+        let content = clean_block_comment_content(&source_code[content_start..end]);
+        if content.contains("@oinb-insight") {
+            continue;
+        }
+        if !has_ai_candidate_keyword(&content) {
+            continue;
+        }
+        if !has_enough_ai_candidate_content(&content) {
+            continue;
+        }
+
+        candidate = Some(content);
+    }
+
+    candidate
+}
+
 fn yaml_string(mapping: &Mapping, key: &str) -> Option<String> {
     mapping
         .get(YamlValue::String(key.to_string()))
@@ -956,6 +1025,100 @@ Use a difference array.
     #[test]
     fn missing_insight_block_returns_error() {
         assert!(extract_oinb_insight("int main() {}").is_err());
+    }
+
+    #[test]
+    fn extracts_tail_ai_candidate_comment_with_chinese_keywords() {
+        let source = r#"
+#include <bits/stdc++.h>
+using namespace std;
+
+int main() {
+    cout << 1 << "\n";
+    return 0;
+}
+
+/*
+启示：
+状态转移之前先把边界条件想清楚。
+坑点：
+初始化不能漏掉空集合。
+*/
+"#;
+
+        let comment = extract_ai_candidate_comment(source).unwrap();
+
+        assert!(comment.contains("启示："));
+        assert!(comment.contains("坑点："));
+        assert!(!comment.contains("/*"));
+        assert!(!comment.contains("*/"));
+    }
+
+    #[test]
+    fn does_not_extract_middle_block_comment() {
+        let source = format!(
+            "{}\n/*\n启示：这个注释在源码中间，不应该作为 AI 候选。\n*/\n{}",
+            "int a;\n".repeat(80),
+            "int b;\n".repeat(80),
+        );
+
+        assert_eq!(extract_ai_candidate_comment(&source), None);
+    }
+
+    #[test]
+    fn does_not_extract_comment_without_candidate_keyword() {
+        let source = r#"
+int main() {
+    return 0;
+}
+
+/*
+这里记录的是普通说明，内容很长但是没有触发词。
+*/
+"#;
+
+        assert_eq!(extract_ai_candidate_comment(source), None);
+    }
+
+    #[test]
+    fn does_not_extract_too_short_candidate_comment() {
+        let source = r#"
+int main() {
+    return 0;
+}
+
+/*
+启示：短
+*/
+"#;
+
+        assert_eq!(extract_ai_candidate_comment(source), None);
+    }
+
+    #[test]
+    fn does_not_treat_oinb_insight_as_ai_candidate_comment() {
+        assert_eq!(extract_ai_candidate_comment(&sample_source()), None);
+    }
+
+    #[test]
+    fn extracts_tail_ai_candidate_comment_with_english_keywords() {
+        let source = r#"
+int main() {
+    return 0;
+}
+
+/*
+Idea:
+Compress the state before running the transition.
+Trick:
+Keep one sentinel item to avoid special casing.
+*/
+"#;
+
+        let comment = extract_ai_candidate_comment(source).unwrap();
+
+        assert!(comment.contains("Idea:"));
+        assert!(comment.contains("Trick:"));
     }
 
     #[test]
