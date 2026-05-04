@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-04（记录图片粘贴与桌面预览图片验收）
+**最后更新**：2026-05-04（记录删除/重命名笔记自动 Git commit 验收）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -99,12 +99,12 @@
     ├─ 搜索页 /search 已完成，顶部导航已有“搜索”入口
     ├─ GitHub Pages project page 已完成部署，线上站 https://hardyz0517.github.io/oi-notebook/ 已验收
     ├─ Header 已有“打开博客”“重启博客”和“同步 Git”入口
-    ├─ 保存笔记后自动 commit 当前保存的单个 notes 文件，手动“同步 Git”按钮执行 git push origin main，均已验收
+    ├─ 保存、图片 assets、删除和重命名笔记均已有对应自动 commit；手动“同步 Git”按钮执行 git push origin main，均已验收
     ├─ 主窗口已有 Frontmatter 折叠表单，支持 title/tags/summary/draft/difficulty/source，已验收
     ├─ 主窗口新建笔记已有模板选择，支持空白/Trick 模板/题解模板，已验收
     ├─ 主窗口 CodeMirror 已支持粘贴图片到 notes/assets，保存时当前 note 和本轮 assets 一起自动 commit，已验收
     ├─ 右侧 MarkdownPreview 已支持显示 notes/assets 图片，已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、删除/重命名笔记自动 Git commit、洛谷爬取、AI 辅助、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动定时/退出时 push、洛谷爬取、AI 辅助、博客视觉继续打磨
 
 [ ] Phase 6  洛谷爬虫
     └─ @oinb-insight 注释格式，增量抓取提交
@@ -357,7 +357,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署和当前最小 Git 同步工作流：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”“重启博客”和“同步 Git”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前 Git 工作流是“保存后自动 commit，手动按钮 push”，图片粘贴已能保存到 `notes/assets` 并随当前 note 一起自动 commit，桌面右侧预览也已能显示 `notes/assets` 图片；仍不包含自动定时/退出时 push、删除/重命名笔记自动 commit、生产分发策略、洛谷或 AI。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署和当前最小 Git 同步工作流：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”“重启博客”和“同步 Git”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前 Git 工作流是“保存/图片 assets/删除/重命名后自动 commit，手动按钮 push”，图片粘贴已能保存到 `notes/assets` 并随当前 note 一起自动 commit，删除和重命名笔记也已生成对应 note commit；仍不包含自动定时/退出时 push、生产分发策略、洛谷或 AI。
 
 已完成内容：
 
@@ -423,6 +423,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 右侧 MarkdownPreview 已支持显示 `notes/assets` 图片；相对图片路径会按当前 note 所在目录安全解析，最终文件必须位于 `notes/assets/` 下。
 - [x] 桌面预览端使用 `data:image/...;base64,...` URL 显示本地图片，不影响博客 `site/` 的构建和图片路径。
 - [x] 图片粘贴与桌面预览图片显示均已由 Hardy 肉眼验收通过。
+- [x] 删除笔记后会自动 commit，commit message 为 `note: delete {path}`，不自动 push。
+- [x] 重命名笔记后会自动 commit，commit message 为 `note: rename {old} to {new}`，不自动 push。
+- [x] 删除/重命名自动 commit 仍使用精确 pathspec，不使用 `git add .` 或 `git add notes/`。
+- [x] Git 端 commit 前检查暂存区为空，`git add -- <pathspec>` 后复查 staged 文件必须只属于本次允许集合；commit 失败会 reset 本次 pathspec。
+- [x] 删除/重命名笔记自动 Git commit 已由 Hardy 人工验收通过。
 - [x] Header 已新增“同步 Git”按钮，手动执行 `git push origin main`；不做 pull、rebase 或冲突解决。
 - [x] 手动 push 前同样检查暂存区；暂存区非空会失败，允许工作区保留未跟踪本地测试笔记。
 - [x] tracked draft 测试笔记已创建用于验证自动 commit 和博客 UI；它们均为 `draft: true`，生产构建会过滤。
@@ -459,6 +464,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `9d5dbbf feat(editor): add note templates`
 - `5e2c2af feat(editor): paste images into notes assets`
 - `8f4c5df fix(editor): preview pasted note images`
+- `c0752c8 feat(git): commit note delete and rename`
 
 端到端验证结果：
 
@@ -526,17 +532,24 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - Ctrl+S 保存成功后，当前 note 和本轮 pending assets 会一起进入自动 commit。
   - 右侧 MarkdownPreview 会按当前 note 位置安全解析 `../assets/...`、`../../assets/...` 或 `assets/...`，最终文件必须位于 `notes/assets/`。
   - 桌面预览使用 `data:image/...` URL 显示本地图片，不影响博客 `site/`。
+- 删除/重命名笔记自动 Git commit 已人工验收通过：
+  - 实现提交为 `c0752c8 feat(git): commit note delete and rename`。
+  - 删除笔记后会生成 `note: delete {path}`，只 stage `notes/{path}` 的删除。
+  - 重命名笔记后会生成 `note: rename {old} to {new}`，只 stage `notes/{old}` 和 `notes/{new}`。
+  - 验收中已看到 `ebd878c note: delete tricks/testrename.md`，只包含 `D notes/tricks/testrename.md`。
+  - 验收中已看到 `4206920 note: rename tricks/test01.md to tricks/test0123.md`，只包含 `R100 notes/tricks/test01.md notes/tricks/test0123.md`。
+  - 删除/重命名 commit 不自动 push，仍由 Header “同步 Git”按钮手动执行 `git push origin main`。
+  - Git 端保持误提交防护：commit 前检查暂存区为空；只使用精确 pathspec；add 后复查 staged 文件只属于本次允许集合；不使用 `git add .` 或 `git add notes/`。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
-- 删除/重命名笔记的自动 Git commit 还没做。
 - 还没有洛谷爬取。
 - 还没有 AI 辅助。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、删除/重命名 Git commit、洛谷爬取或 AI 辅助方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、洛谷爬取或 AI 辅助方向。
 
 ### 博客 UI 打磨进展
 
@@ -649,7 +662,6 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
-- 删除/重命名笔记的自动 Git commit。
 - 洛谷爬取。
 - AI 辅助。
 - 博客视觉仍可继续打磨。
