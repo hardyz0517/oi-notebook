@@ -34,12 +34,14 @@ export interface TestLuoguConnectionResult {
 }
 
 export interface SyncLuoguInsightsResult {
+  scannedPages: number;
   scannedCount: number;
   acCount: number;
   importedCount: number;
   skippedNoInsight: number;
   skippedExisting: number;
   failedCount: number;
+  reachedLastSubmissionId: boolean;
   updatedLastSubmissionId: number | null;
   importedPaths: string[];
   message: string;

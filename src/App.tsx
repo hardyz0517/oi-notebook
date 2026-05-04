@@ -382,7 +382,8 @@ export default function App() {
         }
       }
 
-      const syncSummary = `扫描 ${result.scannedCount} 条，AC ${result.acCount} 条，导入 ${result.importedCount} 篇，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，失败 ${result.failedCount} 条，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
+      const reachedLastText = result.reachedLastSubmissionId ? "已触达 last_submission_id" : "未触达 last_submission_id";
+      const syncSummary = `扫描 ${result.scannedPages} 页 / ${result.scannedCount} 条，AC ${result.acCount} 条，导入 ${result.importedCount} 篇，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，失败 ${result.failedCount} 条，${reachedLastText}，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
       if (result.failedCount > 0) {
         toast.warning(`洛谷同步完成，但有失败：${syncSummary}`);
       } else if (result.importedCount > 0) {
@@ -874,11 +875,14 @@ export default function App() {
           {luoguSyncResult && (
             <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
               <div className="font-medium text-foreground">
-                洛谷同步：扫描 {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，导入 {luoguSyncResult.importedCount} 篇
+                洛谷同步：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，导入 {luoguSyncResult.importedCount} 篇
               </div>
               <div className="grid gap-1 text-muted-foreground">
                 <div>
                   跳过无 insight {luoguSyncResult.skippedNoInsight} 条，已存在 {luoguSyncResult.skippedExisting} 条，失败 {luoguSyncResult.failedCount} 条
+                </div>
+                <div>
+                  {luoguSyncResult.reachedLastSubmissionId ? "已触达 last_submission_id" : "未触达 last_submission_id"}
                 </div>
                 <div>
                   last_submission_id: {luoguSyncResult.updatedLastSubmissionId ?? "未更新"}

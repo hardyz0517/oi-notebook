@@ -11,8 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
-use crate::git::{commit_note, CommitNoteStatus};
 use crate::frontmatter;
+use crate::git::{commit_note, CommitNoteStatus};
+
+const LUOGU_SYNC_MAX_PAGES: u32 = 5;
+const LUOGU_SYNC_PAGE_INTERVAL: Duration = Duration::from_secs(1);
+const LUOGU_SYNC_DETAIL_INTERVAL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LuoguConfig {
@@ -52,12 +56,14 @@ pub struct TestLuoguConnectionResult {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncLuoguInsightsResult {
+    pub scanned_pages: usize,
     pub scanned_count: usize,
     pub ac_count: usize,
     pub imported_count: usize,
     pub skipped_no_insight: usize,
     pub skipped_existing: usize,
     pub failed_count: usize,
+    pub reached_last_submission_id: bool,
     pub updated_last_submission_id: Option<u64>,
     pub imported_paths: Vec<String>,
     pub message: String,
@@ -286,13 +292,14 @@ fn luogu_cookie(uid: &str, client_id: &str) -> String {
 fn fetch_luogu_submission_records(
     uid: &str,
     client_id: &str,
+    page: u32,
 ) -> Result<Vec<LuoguSubmissionRecord>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .user_agent("oi-notebook/0.1")
         .build()
         .map_err(|e| format!("Luogu connection failed: cannot create HTTP client: {e}"))?;
-    let url = format!("https://www.luogu.com.cn/record/list?user={uid}&page=1&_contentOnly=1");
+    let url = format!("https://www.luogu.com.cn/record/list?user={uid}&page={page}&_contentOnly=1");
     let cookie = luogu_cookie(uid, client_id);
 
     let response = client
@@ -329,7 +336,7 @@ fn fetch_luogu_submission_list(
     uid: &str,
     client_id: &str,
 ) -> Result<TestLuoguConnectionResult, String> {
-    let records = fetch_luogu_submission_records(uid, client_id)?;
+    let records = fetch_luogu_submission_records(uid, client_id, 1)?;
     Ok(TestLuoguConnectionResult {
         fetched_count: records.len(),
         submissions: records.iter().take(5).map(submission_preview).collect(),
@@ -372,7 +379,9 @@ fn extract_source_code_from_detail(value: &JsonValue) -> Result<String, String> 
         ],
     )
     .map(ToOwned::to_owned)
-    .ok_or_else(|| "Luogu sync skipped submission: detail JSON does not contain source code".to_string())
+    .ok_or_else(|| {
+        "Luogu sync skipped submission: detail JSON does not contain source code".to_string()
+    })
 }
 
 fn fetch_luogu_submission_source(
@@ -406,9 +415,9 @@ fn fetch_luogu_submission_source(
         ));
     }
 
-    let json = response
-        .json::<JsonValue>()
-        .map_err(|e| format!("Luogu sync failed: cannot parse submission {submission_id} JSON: {e}"))?;
+    let json = response.json::<JsonValue>().map_err(|e| {
+        format!("Luogu sync failed: cannot parse submission {submission_id} JSON: {e}")
+    })?;
     extract_source_code_from_detail(&json)
 }
 
@@ -727,22 +736,58 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
     let config_path = config_path_for_repo(&repo_root);
     let mut config = read_luogu_config_from_path(&config_path)?;
     let (uid, client_id) = require_luogu_config(&config)?;
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
     let last_submission_id = config.luogu.last_submission_id;
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir)
         .map_err(|e| format!("Luogu sync failed: cannot create notes directory: {e}"))?;
 
-    let records = fetch_luogu_submission_records(&uid, &client_id)?;
-    let scanned_count = records.len();
-    let max_seen_submission_id = records.iter().map(|record| record.submission_id).max();
-    let mut candidates = records
-        .into_iter()
-        .filter(|record| {
+    let mut candidates = Vec::new();
+    let mut scanned_pages = 0usize;
+    let mut scanned_count = 0usize;
+    let mut reached_last_submission_id = false;
+    let mut max_seen_submission_id = last_submission_id;
+
+    for page in 1..=LUOGU_SYNC_MAX_PAGES {
+        if page > 1 {
+            sleep(LUOGU_SYNC_PAGE_INTERVAL);
+        }
+
+        let records = fetch_luogu_submission_records(&uid, &client_id, page)?;
+        scanned_pages += 1;
+        scanned_count += records.len();
+
+        if let Some(page_max_submission_id) =
+            records.iter().map(|record| record.submission_id).max()
+        {
+            max_seen_submission_id = Some(
+                max_seen_submission_id
+                    .map(|current| current.max(page_max_submission_id))
+                    .unwrap_or(page_max_submission_id),
+            );
+        }
+
+        if records.is_empty() {
+            break;
+        }
+
+        let page_reached_last = last_submission_id
+            .map(|last_id| records.iter().any(|record| record.submission_id <= last_id))
+            .unwrap_or(false);
+
+        candidates.extend(records.into_iter().filter(|record| {
             last_submission_id
                 .map(|last_id| record.submission_id > last_id)
                 .unwrap_or(true)
-        })
-        .collect::<Vec<_>>();
+        }));
+
+        if page_reached_last {
+            reached_last_submission_id = true;
+            break;
+        }
+    }
+
     candidates.sort_by_key(|record| record.submission_id);
 
     let client = luogu_http_client()?;
@@ -762,7 +807,7 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
         ac_count += 1;
 
         if detail_requests > 0 {
-            sleep(Duration::from_secs(3));
+            sleep(LUOGU_SYNC_DETAIL_INTERVAL);
         }
         detail_requests += 1;
 
@@ -856,12 +901,14 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
     };
 
     Ok(SyncLuoguInsightsResult {
+        scanned_pages,
         scanned_count,
         ac_count,
         imported_count,
         skipped_no_insight,
         skipped_existing,
         failed_count,
+        reached_last_submission_id,
         updated_last_submission_id,
         imported_paths,
         message,
