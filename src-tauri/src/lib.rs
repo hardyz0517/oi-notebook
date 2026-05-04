@@ -1,3 +1,4 @@
+mod ai;
 mod frontmatter;
 mod git;
 mod luogu;
@@ -181,6 +182,9 @@ pub fn run() {
             luogu::save_luogu_config,
             luogu::test_luogu_connection,
             luogu::sync_luogu_insights,
+            ai::get_ai_config,
+            ai::save_ai_config,
+            ai::test_ai_connection,
             open_blog,
             restart_blog_server,
         ])

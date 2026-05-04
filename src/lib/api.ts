@@ -18,6 +18,13 @@ export interface LuoguConfig {
     client_id: string;
     last_submission_id: number | null;
   };
+  ai: AiConfig;
+}
+
+export interface AiConfig {
+  base_url: string;
+  api_key: string;
+  model: string;
 }
 
 export interface LuoguSubmissionPreview {
@@ -31,6 +38,11 @@ export interface LuoguSubmissionPreview {
 export interface TestLuoguConnectionResult {
   fetchedCount: number;
   submissions: LuoguSubmissionPreview[];
+}
+
+export interface TestAiConnectionResult {
+  model: string;
+  ok: boolean;
 }
 
 export interface SyncLuoguInsightsResult {
@@ -215,7 +227,7 @@ export async function getLuoguConfig(): Promise<LuoguConfig> {
   }
 }
 
-export async function saveLuoguConfig(config: LuoguConfig): Promise<void> {
+export async function saveLuoguConfig(config: Pick<LuoguConfig, "luogu">): Promise<void> {
   try {
     await invoke<void>("save_luogu_config", { config });
   } catch (e) {
@@ -234,6 +246,30 @@ export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> 
 export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
   try {
     return await invoke<SyncLuoguInsightsResult>("sync_luogu_insights");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getAiConfig(): Promise<AiConfig> {
+  try {
+    return await invoke<AiConfig>("get_ai_config");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function saveAiConfig(config: AiConfig): Promise<void> {
+  try {
+    await invoke<void>("save_ai_config", { config });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function testAiConnection(): Promise<TestAiConnectionResult> {
+  try {
+    return await invoke<TestAiConnectionResult>("test_ai_connection");
   } catch (e) {
     throw toError(e);
   }

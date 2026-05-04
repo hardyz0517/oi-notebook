@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights } from "@/lib/api";
-import type { SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection } from "@/lib/api";
+import type { SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -131,6 +131,14 @@ export default function App() {
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
+  const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
+  const [isTestingAiConnection, setIsTestingAiConnection] = useState(false);
+  const [aiConnectionResult, setAiConnectionResult] = useState<TestAiConnectionResult | null>(null);
+  const [aiConfigBaseUrl, setAiConfigBaseUrl] = useState("");
+  const [aiConfigApiKey, setAiConfigApiKey] = useState("");
+  const [aiConfigModel, setAiConfigModel] = useState("");
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
@@ -361,6 +369,58 @@ export default function App() {
       toast.error(`洛谷连接测试失败：${getErrorMessage(e)}`);
     } finally {
       setIsTestingLuoguConnection(false);
+    }
+  };
+
+  const openAiSettings = async () => {
+    setIsAiSettingsOpen(true);
+    setIsLoadingAiConfig(true);
+    setAiConnectionResult(null);
+    try {
+      const config = await getAiConfig();
+      setAiConfigBaseUrl(config.base_url);
+      setAiConfigApiKey(config.api_key);
+      setAiConfigModel(config.model);
+    } catch (e) {
+      toast.error(`AI 配置读取失败：${e}`);
+    } finally {
+      setIsLoadingAiConfig(false);
+    }
+  };
+
+  const closeAiSettings = () => {
+    if (isSavingAiConfig || isTestingAiConnection) return;
+    setIsAiSettingsOpen(false);
+  };
+
+  const handleSaveAiConfig = async () => {
+    setIsSavingAiConfig(true);
+    try {
+      await saveAiConfig({
+        base_url: aiConfigBaseUrl.trim(),
+        api_key: aiConfigApiKey.trim(),
+        model: aiConfigModel.trim(),
+      });
+      toast.success("AI 配置已保存");
+      setIsAiSettingsOpen(false);
+    } catch (e) {
+      toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsSavingAiConfig(false);
+    }
+  };
+
+  const handleTestAiConnection = async () => {
+    setIsTestingAiConnection(true);
+    setAiConnectionResult(null);
+    try {
+      const result = await testAiConnection();
+      setAiConnectionResult(result);
+      toast.success(`AI 连接正常：${result.model}`);
+    } catch (e) {
+      toast.error(`AI 连接测试失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsTestingAiConnection(false);
     }
   };
 
@@ -933,6 +993,76 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={isAiSettingsOpen} onOpenChange={(open) => !open && closeAiSettings()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>AI 设置</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+            <div>使用 OpenAI-compatible Chat Completions 接口。</div>
+            <div>API Key 会保存在本地 .oinb/config.json，不要提交到 Git。</div>
+            <div>测试连接会请求模型返回 {"{\"ok\": true}"}。</div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ai-config-base-url">Base URL</Label>
+            <Input
+              id="ai-config-base-url"
+              value={aiConfigBaseUrl}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+              placeholder="https://api.example.com/v1"
+              onChange={(e) => setAiConfigBaseUrl(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ai-config-model">Model</Label>
+            <Input
+              id="ai-config-model"
+              value={aiConfigModel}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+              placeholder="deepseek-chat"
+              onChange={(e) => setAiConfigModel(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ai-config-api-key">API Key</Label>
+            <Input
+              id="ai-config-api-key"
+              value={aiConfigApiKey}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+              placeholder="sk-..."
+              type="password"
+              onChange={(e) => setAiConfigApiKey(e.target.value)}
+            />
+          </div>
+          {aiConnectionResult && (
+            <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">AI 连接正常</div>
+              <div>model: {aiConnectionResult.model}</div>
+              <div>ok: {String(aiConnectionResult.ok)}</div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeAiSettings} disabled={isSavingAiConfig || isTestingAiConnection}>
+            取消
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleTestAiConnection}
+            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+          >
+            测试连接
+          </Button>
+          <Button
+            onClick={handleSaveAiConfig}
+            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+          >
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -1049,6 +1179,16 @@ export default function App() {
           >
             <Settings className="h-3.5 w-3.5" />
             洛谷设置
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={openAiSettings}
+            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+          >
+            <Bot className="h-3.5 w-3.5" />
+            AI 设置
           </Button>
           <Button
             variant="outline"

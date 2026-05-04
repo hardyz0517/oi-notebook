@@ -23,6 +23,8 @@ const LUOGU_COOKIE_EXPIRED_MESSAGE: &str =
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LuoguConfig {
     pub luogu: LuoguConfigFields,
+    #[serde(default)]
+    pub ai: AiConfigFields,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -30,6 +32,13 @@ pub struct LuoguConfigFields {
     pub uid: String,
     pub client_id: String,
     pub last_submission_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AiConfigFields {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,7 +105,7 @@ struct InsightBlock {
     body: String,
 }
 
-fn repo_root() -> Result<PathBuf, String> {
+pub(crate) fn repo_root() -> Result<PathBuf, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
@@ -120,11 +129,12 @@ impl Default for LuoguConfig {
                 client_id: String::new(),
                 last_submission_id: None,
             },
+            ai: AiConfigFields::default(),
         }
     }
 }
 
-fn read_luogu_config_from_path(config_path: &Path) -> Result<LuoguConfig, String> {
+pub(crate) fn read_luogu_config_from_path(config_path: &Path) -> Result<LuoguConfig, String> {
     if !config_path.exists() {
         return Ok(LuoguConfig::default());
     }
@@ -134,7 +144,10 @@ fn read_luogu_config_from_path(config_path: &Path) -> Result<LuoguConfig, String
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse Luogu config file: {e}"))
 }
 
-fn write_luogu_config_to_path(config_path: &Path, config: &LuoguConfig) -> Result<(), String> {
+pub(crate) fn write_luogu_config_to_path(
+    config_path: &Path,
+    config: &LuoguConfig,
+) -> Result<(), String> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create .oinb config directory: {e}"))?;
@@ -144,6 +157,14 @@ fn write_luogu_config_to_path(config_path: &Path, config: &LuoguConfig) -> Resul
         .map_err(|e| format!("Failed to serialize Luogu config: {e}"))?;
     fs::write(config_path, format!("{content}\n"))
         .map_err(|e| format!("Failed to write Luogu config file: {e}"))
+}
+
+pub(crate) fn read_config() -> Result<LuoguConfig, String> {
+    read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))
+}
+
+pub(crate) fn write_config(config: &LuoguConfig) -> Result<(), String> {
+    write_luogu_config_to_path(&config_path_for_repo(&repo_root()?), config)
 }
 
 fn require_luogu_config(config: &LuoguConfig) -> Result<(&str, &str), String> {
@@ -403,10 +424,7 @@ fn fetch_luogu_submission_source(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .map_err(|e| {
-            luogu_request_error(
-                &format!("Luogu sync failed: submission {submission_id}"),
-                e,
-            )
+            luogu_request_error(&format!("Luogu sync failed: submission {submission_id}"), e)
         })?;
 
     let status = response.status();
@@ -785,17 +803,19 @@ pub fn import_luogu_insight(
 
 #[tauri::command]
 pub fn get_luogu_config() -> Result<LuoguConfig, String> {
-    read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))
+    read_config()
 }
 
 #[tauri::command]
 pub fn save_luogu_config(config: LuoguConfig) -> Result<(), String> {
-    write_luogu_config_to_path(&config_path_for_repo(&repo_root()?), &config)
+    let mut app_config = read_config()?;
+    app_config.luogu = config.luogu;
+    write_config(&app_config)
 }
 
 #[tauri::command]
 pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
-    let config = read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))?;
+    let config = read_config()?;
     let (uid, client_id) = require_luogu_config(&config)?;
     let uid = uid.to_string();
     let client_id = client_id.to_string();
@@ -1192,6 +1212,11 @@ Keep one sentinel item to avoid special casing.
                 client_id: "client-secret".to_string(),
                 last_submission_id: Some(987654),
             },
+            ai: AiConfigFields {
+                base_url: "https://api.example.com/v1".to_string(),
+                api_key: "ai-secret".to_string(),
+                model: "example-model".to_string(),
+            },
         };
 
         write_luogu_config_to_path(&config_path, &config).unwrap();
@@ -1200,7 +1225,34 @@ Keep one sentinel item to avoid special casing.
 
         assert!(raw.contains("\"client_id\""));
         assert!(raw.contains("\"last_submission_id\""));
+        assert!(raw.contains("\"base_url\""));
+        assert!(raw.contains("\"api_key\""));
+        assert!(raw.contains("\"model\""));
         assert_eq!(parsed, config);
+    }
+
+    #[test]
+    fn reads_old_luogu_only_config_with_default_ai_fields() {
+        let dir = tempdir().unwrap();
+        let config_path = config_path_for_repo(dir.path());
+        fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        fs::write(
+            &config_path,
+            r#"{
+  "luogu": {
+    "uid": "12345",
+    "client_id": "client-secret",
+    "last_submission_id": 987654
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let parsed = read_luogu_config_from_path(&config_path).unwrap();
+
+        assert_eq!(parsed.ai, AiConfigFields::default());
+        assert_eq!(parsed.luogu.uid, "12345");
     }
 
     #[test]
