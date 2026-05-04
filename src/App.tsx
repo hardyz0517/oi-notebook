@@ -382,12 +382,13 @@ export default function App() {
         }
       }
 
+      const syncSummary = `扫描 ${result.scannedCount} 条，AC ${result.acCount} 条，导入 ${result.importedCount} 篇，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，失败 ${result.failedCount} 条，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
       if (result.failedCount > 0) {
-        toast.warning(`洛谷同步完成，但有 ${result.failedCount} 条失败`);
+        toast.warning(`洛谷同步完成，但有失败：${syncSummary}`);
       } else if (result.importedCount > 0) {
-        toast.success(`洛谷同步完成，导入 ${result.importedCount} 篇笔记`);
+        toast.success(`洛谷同步完成：${syncSummary}`);
       } else {
-        toast.success("洛谷同步完成，没有新笔记");
+        toast.success(`洛谷同步完成，没有新笔记：${syncSummary}`);
       }
     } catch (e) {
       toast.error(`洛谷同步失败：${e}`);
