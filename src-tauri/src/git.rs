@@ -149,14 +149,17 @@ fn reset_paths(repo_root: &Path, pathspecs: &[String]) -> Result<(), String> {
     git_success(repo_root, &args).map(|_| ())
 }
 
+fn parse_nul_separated_paths(bytes: &[u8]) -> Vec<String> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect()
+}
+
 fn cached_names(repo_root: &Path) -> Result<Vec<String>, String> {
-    let staged = git_success(repo_root, &["diff", "--cached", "--name-only"])?;
-    Ok(String::from_utf8_lossy(&staged.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect())
+    let staged = git_success(repo_root, &["diff", "--cached", "--name-only", "-z"])?;
+    Ok(parse_nul_separated_paths(&staged.stdout))
 }
 
 fn ensure_staging_area_empty(repo_root: &Path, action: &str) -> Result<(), String> {
@@ -374,6 +377,19 @@ mod tests {
         fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
         fs::write(&asset_path, "image").unwrap();
         (dir, asset_path)
+    }
+
+    #[test]
+    fn parses_nul_separated_unicode_paths() {
+        let bytes = b"notes/luogu/P1234-\xe5\x8c\xba\xe9\x97\xb4.md\0notes/assets/a.png\0";
+
+        assert_eq!(
+            parse_nul_separated_paths(bytes),
+            vec![
+                "notes/luogu/P1234-区间.md".to_string(),
+                "notes/assets/a.png".to_string(),
+            ]
+        );
     }
 
     #[test]
