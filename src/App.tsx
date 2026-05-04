@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ExternalLink, Plus, RotateCcw, Upload } from "lucide-react";
+import { Download, ExternalLink, Plus, RotateCcw, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -115,6 +115,12 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
+  const [isLuoguDialogOpen, setIsLuoguDialogOpen] = useState(false);
+  const [isImportingLuogu, setIsImportingLuogu] = useState(false);
+  const [luoguProblemId, setLuoguProblemId] = useState("");
+  const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
+  const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
+  const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
 
@@ -270,6 +276,77 @@ export default function App() {
       toast.error(`Git 同步失败：${e}`);
     } finally {
       setIsPushingGit(false);
+    }
+  };
+
+  const openLuoguDialog = () => {
+    setIsLuoguDialogOpen(true);
+  };
+
+  const closeLuoguDialog = () => {
+    if (isImportingLuogu) return;
+    setIsLuoguDialogOpen(false);
+    setLuoguProblemId("");
+    setLuoguProblemTitle("");
+    setLuoguSubmissionId("");
+    setLuoguSourceCode("");
+  };
+
+  const handleImportLuogu = async () => {
+    if (!luoguProblemId.trim()) {
+      toast.error("题号不能为空");
+      return;
+    }
+    if (!luoguProblemTitle.trim()) {
+      toast.error("题目标题不能为空");
+      return;
+    }
+    if (!luoguSubmissionId.trim()) {
+      toast.error("提交 ID 不能为空");
+      return;
+    }
+    if (!luoguSourceCode.trim()) {
+      toast.error("源码不能为空");
+      return;
+    }
+    if (isDirty) {
+      const ok = window.confirm("当前笔记有未保存的改动，导入后会切换到新笔记。确定继续吗？未保存的改动将丢失。");
+      if (!ok) return;
+    }
+
+    setIsImportingLuogu(true);
+    try {
+      const imported = await importLuoguInsight(
+        luoguProblemId,
+        luoguProblemTitle,
+        luoguSubmissionId,
+        luoguSourceCode,
+      );
+
+      let commitSucceeded = true;
+      try {
+        await commitNote(imported.relativePath);
+      } catch (commitError) {
+        commitSucceeded = false;
+        toast.warning(`洛谷笔记已导入，Git 提交失败：${commitError}`);
+      }
+
+      const updated = await listNotes();
+      setFiles(updated);
+      setCurrentFilePath(imported.relativePath);
+      setIsDirty(false);
+      setIsLuoguDialogOpen(false);
+      setLuoguProblemId("");
+      setLuoguProblemTitle("");
+      setLuoguSubmissionId("");
+      setLuoguSourceCode("");
+      if (commitSucceeded) {
+        toast.success("洛谷笔记已导入并提交");
+      }
+    } catch (e) {
+      toast.error(`洛谷导入失败：${e}`);
+    } finally {
+      setIsImportingLuogu(false);
     }
   };
 
@@ -620,6 +697,67 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>导入洛谷</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="luogu-problem-id">problem id</Label>
+              <Input
+                id="luogu-problem-id"
+                value={luoguProblemId}
+                placeholder="P1234 或 1234"
+                disabled={isImportingLuogu}
+                onChange={(e) => setLuoguProblemId(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="luogu-submission-id">submission id</Label>
+              <Input
+                id="luogu-submission-id"
+                value={luoguSubmissionId}
+                placeholder="12345678"
+                disabled={isImportingLuogu}
+                onChange={(e) => setLuoguSubmissionId(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="luogu-problem-title">problem title</Label>
+              <Input
+                id="luogu-problem-title"
+                value={luoguProblemTitle}
+                placeholder="题目标题"
+                disabled={isImportingLuogu}
+                onChange={(e) => setLuoguProblemTitle(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="luogu-source-code">source code</Label>
+            <textarea
+              id="luogu-source-code"
+              value={luoguSourceCode}
+              disabled={isImportingLuogu}
+              rows={14}
+              className="min-h-64 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+              placeholder={`/* @oinb-insight\n---\ntitle: 区间覆盖差分\ntags: [差分, 构造]\n---\n\n## 启示\n\n...\n*/`}
+              onChange={(e) => setLuoguSourceCode(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeLuoguDialog} disabled={isImportingLuogu}>
+            取消
+          </Button>
+          <Button onClick={handleImportLuogu} disabled={isImportingLuogu}>
+            导入
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
@@ -637,6 +775,15 @@ export default function App() {
               )}
             </>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={openLuoguDialog}
+          >
+            <Download className="h-3.5 w-3.5" />
+            导入洛谷
+          </Button>
           <Button
             variant="outline"
             size="sm"

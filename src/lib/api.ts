@@ -8,6 +8,10 @@ export interface SaveNoteAssetResult {
   assetRelativePath: string;
 }
 
+export interface ImportLuoguInsightResult {
+  relativePath: string;
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -143,6 +147,24 @@ export async function resolveNoteAssetUrl(
     return await invoke<string>("resolve_note_asset_url", {
       noteRelativePath,
       imageSrc,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function importLuoguInsight(
+  problemId: string,
+  problemTitle: string,
+  submissionId: string,
+  sourceCode: string,
+): Promise<ImportLuoguInsightResult> {
+  try {
+    return await invoke<ImportLuoguInsightResult>("import_luogu_insight", {
+      problemId,
+      problemTitle,
+      submissionId,
+      sourceCode,
     });
   } catch (e) {
     throw toError(e);

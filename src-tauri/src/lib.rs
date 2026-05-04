@@ -1,5 +1,6 @@
 mod frontmatter;
 mod git;
+mod luogu;
 mod notes;
 
 use std::path::PathBuf;
@@ -175,6 +176,7 @@ pub fn run() {
             git::commit_deleted_note,
             git::commit_renamed_note,
             git::push_git,
+            luogu::import_luogu_insight,
             open_blog,
             restart_blog_server,
         ])
