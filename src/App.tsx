@@ -101,6 +101,10 @@ function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
   return `${frontmatter}\n\n## 题意\n\n\n## 思路\n\n\n## 证明\n\n\n## 代码\n\n\`\`\`cpp\n\n\`\`\`\n\n## 复杂度\n\n\n`;
 }
 
+function getErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -354,7 +358,7 @@ export default function App() {
       setLuoguConnectionResult(result);
       toast.success(`洛谷连接正常，拉到 ${result.fetchedCount} 条提交`);
     } catch (e) {
-      toast.error(`洛谷连接测试失败：${e}`);
+      toast.error(`洛谷连接测试失败：${getErrorMessage(e)}`);
     } finally {
       setIsTestingLuoguConnection(false);
     }
@@ -392,7 +396,7 @@ export default function App() {
         toast.success(`洛谷同步完成，没有新笔记：${syncSummary}`);
       }
     } catch (e) {
-      toast.error(`洛谷同步失败：${e}`);
+      toast.error(`洛谷同步失败：${getErrorMessage(e)}`);
     } finally {
       setIsSyncingLuogu(false);
     }
@@ -822,6 +826,11 @@ export default function App() {
           <DialogTitle>洛谷设置</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 py-2">
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+            <div>需要从浏览器洛谷 Cookie 中复制 _uid 和 __client_id。</div>
+            <div>路径：F12 - Application/应用 - Cookies - https://www.luogu.com.cn。</div>
+            <div>不要把 __client_id 发给别人，也不要提交到 Git。</div>
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="luogu-config-uid">UID</Label>
             <Input

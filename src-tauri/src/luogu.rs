@@ -17,6 +17,8 @@ use crate::git::{commit_note, CommitNoteStatus};
 const LUOGU_SYNC_MAX_PAGES: u32 = 5;
 const LUOGU_SYNC_PAGE_INTERVAL: Duration = Duration::from_secs(1);
 const LUOGU_SYNC_DETAIL_INTERVAL: Duration = Duration::from_secs(3);
+const LUOGU_COOKIE_EXPIRED_MESSAGE: &str =
+    "洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LuoguConfig {
@@ -289,6 +291,22 @@ fn luogu_cookie(uid: &str, client_id: &str) -> String {
     format!("_uid={uid}; __client_id={client_id}")
 }
 
+fn luogu_status_error(scope: &str, status: StatusCode) -> String {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return format!("{scope}: {LUOGU_COOKIE_EXPIRED_MESSAGE}");
+    }
+
+    format!("{scope}: server returned HTTP {}", status.as_u16())
+}
+
+fn luogu_request_error(scope: &str, error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        format!("{scope}: 请求超时")
+    } else {
+        format!("{scope}: 网络失败")
+    }
+}
+
 fn fetch_luogu_submission_records(
     uid: &str,
     client_id: &str,
@@ -307,28 +325,16 @@ fn fetch_luogu_submission_records(
         .header(reqwest::header::COOKIE, cookie)
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
-        .map_err(|e| {
-            if e.is_timeout() {
-                "Luogu connection failed: request timed out".to_string()
-            } else {
-                format!("Luogu connection failed: network error: {e}")
-            }
-        })?;
+        .map_err(|e| luogu_request_error("Luogu connection failed", e))?;
 
     let status = response.status();
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-        return Err("Luogu connection failed: Cookie may be invalid or expired".to_string());
-    }
     if !status.is_success() {
-        return Err(format!(
-            "Luogu connection failed: server returned HTTP {}",
-            status.as_u16()
-        ));
+        return Err(luogu_status_error("Luogu connection failed", status));
     }
 
     let json = response
         .json::<JsonValue>()
-        .map_err(|e| format!("Luogu connection failed: cannot parse response JSON: {e}"))?;
+        .map_err(|_| "Luogu connection failed: 返回格式异常".to_string())?;
     parse_luogu_submission_records(&json)
 }
 
@@ -397,26 +403,23 @@ fn fetch_luogu_submission_source(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .map_err(|e| {
-            if e.is_timeout() {
-                format!("Luogu sync failed: request for submission {submission_id} timed out")
-            } else {
-                format!("Luogu sync failed: network error for submission {submission_id}: {e}")
-            }
+            luogu_request_error(
+                &format!("Luogu sync failed: submission {submission_id}"),
+                e,
+            )
         })?;
 
     let status = response.status();
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-        return Err("Luogu sync failed: Cookie may be invalid or expired".to_string());
-    }
     if !status.is_success() {
-        return Err(format!(
-            "Luogu sync failed: submission {submission_id} returned HTTP {}",
-            status.as_u16()
+        return Err(luogu_status_error(
+            &format!("Luogu sync failed: submission {submission_id}"),
+            status,
         ));
     }
 
     let json = response.json::<JsonValue>().map_err(|e| {
-        format!("Luogu sync failed: cannot parse submission {submission_id} JSON: {e}")
+        let _ = e;
+        format!("Luogu sync failed: submission {submission_id}: 返回格式异常")
     })?;
     extract_source_code_from_detail(&json)
 }
@@ -1142,5 +1145,25 @@ Use a difference array.
         assert!(parse_luogu_submission_list(&json)
             .unwrap_err()
             .contains("unexpected submissions JSON structure"));
+    }
+
+    #[test]
+    fn luogu_status_error_explains_expired_cookie() {
+        assert_eq!(
+            luogu_status_error("Luogu connection failed", StatusCode::UNAUTHORIZED),
+            "Luogu connection failed: 洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。"
+        );
+        assert_eq!(
+            luogu_status_error("Luogu sync failed", StatusCode::FORBIDDEN),
+            "Luogu sync failed: 洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。"
+        );
+    }
+
+    #[test]
+    fn luogu_status_error_keeps_other_http_status_short() {
+        assert_eq!(
+            luogu_status_error("Luogu connection failed", StatusCode::BAD_GATEWAY),
+            "Luogu connection failed: server returned HTTP 502"
+        );
     }
 }
