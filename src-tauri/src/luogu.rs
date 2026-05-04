@@ -2,6 +2,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    thread::sleep,
     time::Duration,
 };
 
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
+use crate::git::{commit_note, CommitNoteStatus};
 use crate::frontmatter;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -45,6 +47,30 @@ pub struct LuoguSubmissionPreview {
 pub struct TestLuoguConnectionResult {
     pub fetched_count: usize,
     pub submissions: Vec<LuoguSubmissionPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncLuoguInsightsResult {
+    pub scanned_count: usize,
+    pub ac_count: usize,
+    pub imported_count: usize,
+    pub skipped_no_insight: usize,
+    pub skipped_existing: usize,
+    pub failed_count: usize,
+    pub updated_last_submission_id: Option<u64>,
+    pub imported_paths: Vec<String>,
+    pub message: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LuoguSubmissionRecord {
+    submission_id: u64,
+    problem_id: String,
+    problem_title: String,
+    status: String,
+    submit_time: String,
 }
 
 #[derive(Debug, Default)]
@@ -165,11 +191,14 @@ fn value_to_string(value: &JsonValue) -> Option<String> {
     None
 }
 
-fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionPreview, String> {
-    let submission_id = record
+fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionRecord, String> {
+    let submission_id_text = record
         .get("id")
         .and_then(value_to_string)
         .ok_or_else(|| "Luogu connection failed: submission record is missing id".to_string())?;
+    let submission_id = submission_id_text.parse::<u64>().map_err(|_| {
+        format!("Luogu connection failed: submission id is not numeric: {submission_id_text}")
+    })?;
 
     let problem = record.get("problem").ok_or_else(|| {
         "Luogu connection failed: submission record is missing problem".to_string()
@@ -198,7 +227,7 @@ fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionPr
         .and_then(value_to_string)
         .unwrap_or_else(|| "".to_string());
 
-    Ok(LuoguSubmissionPreview {
+    Ok(LuoguSubmissionRecord {
         submission_id,
         problem_id,
         problem_title,
@@ -207,7 +236,7 @@ fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionPr
     })
 }
 
-fn parse_luogu_submission_list(value: &JsonValue) -> Result<TestLuoguConnectionResult, String> {
+fn parse_luogu_submission_records(value: &JsonValue) -> Result<Vec<LuoguSubmissionRecord>, String> {
     let records = value
         .pointer("/currentData/records/result")
         .or_else(|| value.pointer("/currentData/submissions/result"))
@@ -218,11 +247,23 @@ fn parse_luogu_submission_list(value: &JsonValue) -> Result<TestLuoguConnectionR
             "Luogu connection failed: unexpected submissions JSON structure".to_string()
         })?;
 
-    let submissions = records
-        .iter()
-        .take(5)
-        .map(parse_luogu_submission_record)
-        .collect::<Result<Vec<_>, _>>()?;
+    records.iter().map(parse_luogu_submission_record).collect()
+}
+
+fn submission_preview(record: &LuoguSubmissionRecord) -> LuoguSubmissionPreview {
+    LuoguSubmissionPreview {
+        submission_id: record.submission_id.to_string(),
+        problem_id: record.problem_id.clone(),
+        problem_title: record.problem_title.clone(),
+        status: record.status.clone(),
+        submit_time: record.submit_time.clone(),
+    }
+}
+
+#[cfg(test)]
+fn parse_luogu_submission_list(value: &JsonValue) -> Result<TestLuoguConnectionResult, String> {
+    let records = parse_luogu_submission_records(value)?;
+    let submissions = records.iter().take(5).map(submission_preview).collect();
 
     Ok(TestLuoguConnectionResult {
         fetched_count: records.len(),
@@ -230,17 +271,29 @@ fn parse_luogu_submission_list(value: &JsonValue) -> Result<TestLuoguConnectionR
     })
 }
 
-fn fetch_luogu_submission_list(
+fn luogu_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("Luogu connection failed: cannot create HTTP client: {e}"))
+}
+
+fn luogu_cookie(uid: &str, client_id: &str) -> String {
+    format!("_uid={uid}; __client_id={client_id}")
+}
+
+fn fetch_luogu_submission_records(
     uid: &str,
     client_id: &str,
-) -> Result<TestLuoguConnectionResult, String> {
+) -> Result<Vec<LuoguSubmissionRecord>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .user_agent("oi-notebook/0.1")
         .build()
         .map_err(|e| format!("Luogu connection failed: cannot create HTTP client: {e}"))?;
     let url = format!("https://www.luogu.com.cn/record/list?user={uid}&page=1&_contentOnly=1");
-    let cookie = format!("_uid={uid}; __client_id={client_id}");
+    let cookie = luogu_cookie(uid, client_id);
 
     let response = client
         .get(url)
@@ -269,7 +322,94 @@ fn fetch_luogu_submission_list(
     let json = response
         .json::<JsonValue>()
         .map_err(|e| format!("Luogu connection failed: cannot parse response JSON: {e}"))?;
-    parse_luogu_submission_list(&json)
+    parse_luogu_submission_records(&json)
+}
+
+fn fetch_luogu_submission_list(
+    uid: &str,
+    client_id: &str,
+) -> Result<TestLuoguConnectionResult, String> {
+    let records = fetch_luogu_submission_records(uid, client_id)?;
+    Ok(TestLuoguConnectionResult {
+        fetched_count: records.len(),
+        submissions: records.iter().take(5).map(submission_preview).collect(),
+    })
+}
+
+fn is_ac_status(status: &str) -> bool {
+    let normalized = status.trim().to_ascii_lowercase();
+    matches!(normalized.as_str(), "12" | "accepted" | "ac")
+}
+
+fn json_string_at<'a>(value: &'a JsonValue, pointers: &[&str]) -> Option<&'a str> {
+    pointers
+        .iter()
+        .find_map(|pointer| value.pointer(pointer).and_then(JsonValue::as_str))
+}
+
+fn extract_source_code_from_detail(value: &JsonValue) -> Result<String, String> {
+    json_string_at(
+        value,
+        &[
+            "/currentData/record/sourceCode",
+            "/currentData/record/source",
+            "/currentData/record/code",
+            "/currentData/submission/sourceCode",
+            "/currentData/submission/source",
+            "/currentData/submission/code",
+            "/currentData/sourceCode",
+            "/currentData/source",
+            "/currentData/code",
+            "/data/record/sourceCode",
+            "/data/record/source",
+            "/data/record/code",
+            "/data/submission/sourceCode",
+            "/data/submission/source",
+            "/data/submission/code",
+            "/data/sourceCode",
+            "/data/source",
+            "/data/code",
+        ],
+    )
+    .map(ToOwned::to_owned)
+    .ok_or_else(|| "Luogu sync skipped submission: detail JSON does not contain source code".to_string())
+}
+
+fn fetch_luogu_submission_source(
+    client: &reqwest::blocking::Client,
+    uid: &str,
+    client_id: &str,
+    submission_id: u64,
+) -> Result<String, String> {
+    let url = format!("https://www.luogu.com.cn/record/{submission_id}?_contentOnly=1");
+    let response = client
+        .get(url)
+        .header(reqwest::header::COOKIE, luogu_cookie(uid, client_id))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("Luogu sync failed: request for submission {submission_id} timed out")
+            } else {
+                format!("Luogu sync failed: network error for submission {submission_id}: {e}")
+            }
+        })?;
+
+    let status = response.status();
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Err("Luogu sync failed: Cookie may be invalid or expired".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "Luogu sync failed: submission {submission_id} returned HTTP {}",
+            status.as_u16()
+        ));
+    }
+
+    let json = response
+        .json::<JsonValue>()
+        .map_err(|e| format!("Luogu sync failed: cannot parse submission {submission_id} JSON: {e}"))?;
+    extract_source_code_from_detail(&json)
 }
 
 fn normalize_problem_id(problem_id: &str) -> Result<String, String> {
@@ -576,7 +716,157 @@ pub fn save_luogu_config(config: LuoguConfig) -> Result<(), String> {
 pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
     let config = read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))?;
     let (uid, client_id) = require_luogu_config(&config)?;
-    fetch_luogu_submission_list(uid, client_id)
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
+    fetch_luogu_submission_list(&uid, &client_id)
+}
+
+#[tauri::command]
+pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
+    let repo_root = repo_root()?;
+    let config_path = config_path_for_repo(&repo_root);
+    let mut config = read_luogu_config_from_path(&config_path)?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    let last_submission_id = config.luogu.last_submission_id;
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir)
+        .map_err(|e| format!("Luogu sync failed: cannot create notes directory: {e}"))?;
+
+    let records = fetch_luogu_submission_records(&uid, &client_id)?;
+    let scanned_count = records.len();
+    let max_seen_submission_id = records.iter().map(|record| record.submission_id).max();
+    let mut candidates = records
+        .into_iter()
+        .filter(|record| {
+            last_submission_id
+                .map(|last_id| record.submission_id > last_id)
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|record| record.submission_id);
+
+    let client = luogu_http_client()?;
+    let mut ac_count = 0;
+    let mut imported_count = 0;
+    let mut skipped_no_insight = 0;
+    let mut skipped_existing = 0;
+    let mut failed_count = 0;
+    let mut imported_paths = Vec::new();
+    let mut warnings = Vec::new();
+    let mut detail_requests = 0usize;
+
+    for record in candidates {
+        if !is_ac_status(&record.status) {
+            continue;
+        }
+        ac_count += 1;
+
+        if detail_requests > 0 {
+            sleep(Duration::from_secs(3));
+        }
+        detail_requests += 1;
+
+        let source_code =
+            match fetch_luogu_submission_source(&client, &uid, &client_id, record.submission_id) {
+                Ok(source_code) => source_code,
+                Err(error) => {
+                    failed_count += 1;
+                    warnings.push(error);
+                    continue;
+                }
+            };
+
+        if extract_oinb_insight(&source_code).is_err() {
+            skipped_no_insight += 1;
+            continue;
+        }
+
+        let imported = match import_luogu_insight_to_notes_dir(
+            &notes_dir,
+            &record.problem_id,
+            &record.problem_title,
+            &record.submission_id.to_string(),
+            &source_code,
+        ) {
+            Ok(imported) => imported,
+            Err(error) if error.contains("already exists") => {
+                skipped_existing += 1;
+                warnings.push(error);
+                continue;
+            }
+            Err(error) => {
+                failed_count += 1;
+                warnings.push(error);
+                continue;
+            }
+        };
+
+        match commit_note(imported.relative_path.clone(), None) {
+            Ok(CommitNoteStatus::Committed) => {}
+            Ok(CommitNoteStatus::NoChanges) => {
+                warnings.push(format!(
+                    "Luogu sync warning: generated note had no Git diff: {}",
+                    imported.relative_path
+                ));
+            }
+            Err(error) => {
+                failed_count += 1;
+                warnings.push(format!(
+                    "Luogu sync failed: Git commit failed for {}: {error}",
+                    imported.relative_path
+                ));
+                imported_paths.push(imported.relative_path);
+                continue;
+            }
+        }
+
+        imported_count += 1;
+        imported_paths.push(imported.relative_path);
+    }
+
+    let updated_last_submission_id = if failed_count == 0 {
+        let next_last_submission_id = match (last_submission_id, max_seen_submission_id) {
+            (Some(previous), Some(seen)) => Some(previous.max(seen)),
+            (None, Some(seen)) => Some(seen),
+            (previous, None) => previous,
+        };
+
+        if next_last_submission_id != last_submission_id {
+            config.luogu.last_submission_id = next_last_submission_id;
+            write_luogu_config_to_path(&config_path, &config)?;
+        }
+
+        next_last_submission_id
+    } else {
+        warnings.push(
+            "Luogu sync warning: last_submission_id was not updated because some submissions failed"
+                .to_string(),
+        );
+        last_submission_id
+    };
+
+    let message = if failed_count == 0 {
+        format!(
+            "Luogu sync completed: imported {imported_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
+        )
+    } else {
+        format!(
+            "Luogu sync completed with {failed_count} failure(s): imported {imported_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
+        )
+    };
+
+    Ok(SyncLuoguInsightsResult {
+        scanned_count,
+        ac_count,
+        imported_count,
+        skipped_no_insight,
+        skipped_existing,
+        failed_count,
+        updated_last_submission_id,
+        imported_paths,
+        message,
+        warnings,
+    })
 }
 
 #[cfg(test)]
@@ -746,6 +1036,56 @@ Use a difference array.
             }
         );
         assert_eq!(result.submissions[1].status, "Accepted");
+    }
+
+    #[test]
+    fn parses_submission_records_for_sync() {
+        let json = serde_json::json!({
+            "currentData": {
+                "records": {
+                    "result": [
+                        {
+                            "id": "123456",
+                            "problem": { "pid": "P1000", "title": "A+B Problem" },
+                            "status": 12,
+                            "submitTime": 1777777777
+                        }
+                    ]
+                }
+            }
+        });
+
+        let records = parse_luogu_submission_records(&json).unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].submission_id, 123456);
+        assert_eq!(records[0].problem_id, "P1000");
+        assert!(is_ac_status(&records[0].status));
+    }
+
+    #[test]
+    fn extracts_source_code_from_submission_detail_shapes() {
+        let json = serde_json::json!({
+            "currentData": {
+                "record": {
+                    "sourceCode": "int main() { return 0; }"
+                }
+            }
+        });
+
+        assert_eq!(
+            extract_source_code_from_detail(&json).unwrap(),
+            "int main() { return 0; }"
+        );
+    }
+
+    #[test]
+    fn rejects_detail_without_source_code() {
+        let json = serde_json::json!({ "currentData": { "record": {} } });
+
+        assert!(extract_source_code_from_detail(&json)
+            .unwrap_err()
+            .contains("does not contain source code"));
     }
 
     #[test]

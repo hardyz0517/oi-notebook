@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, ExternalLink, PlugZap, Plus, RotateCcw, Settings, Upload } from "lucide-react";
+import { Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection } from "@/lib/api";
-import type { TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights } from "@/lib/api";
+import type { SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -122,6 +122,8 @@ export default function App() {
   const [isSavingLuoguConfig, setIsSavingLuoguConfig] = useState(false);
   const [isTestingLuoguConnection, setIsTestingLuoguConnection] = useState(false);
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
+  const [isSyncingLuogu, setIsSyncingLuogu] = useState(false);
+  const [luoguSyncResult, setLuoguSyncResult] = useState<SyncLuoguInsightsResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
@@ -355,6 +357,42 @@ export default function App() {
       toast.error(`洛谷连接测试失败：${e}`);
     } finally {
       setIsTestingLuoguConnection(false);
+    }
+  };
+
+  const handleSyncLuoguInsights = async () => {
+    if (isDirty) {
+      const ok = window.confirm("当前笔记有未保存的改动，同步洛谷后可能会切换到新导入的笔记。确定继续吗？未保存的改动将丢失。");
+      if (!ok) return;
+    }
+
+    setIsSyncingLuogu(true);
+    setLuoguSyncResult(null);
+    try {
+      const result = await syncLuoguInsights();
+      setLuoguSyncResult(result);
+
+      if (result.importedCount > 0) {
+        const updated = await listNotes();
+        setFiles(updated);
+        const lastImportedPath = result.importedPaths[result.importedPaths.length - 1];
+        if (lastImportedPath) {
+          setCurrentFilePath(lastImportedPath);
+          setIsDirty(false);
+        }
+      }
+
+      if (result.failedCount > 0) {
+        toast.warning(`洛谷同步完成，但有 ${result.failedCount} 条失败`);
+      } else if (result.importedCount > 0) {
+        toast.success(`洛谷同步完成，导入 ${result.importedCount} 篇笔记`);
+      } else {
+        toast.success("洛谷同步完成，没有新笔记");
+      }
+    } catch (e) {
+      toast.error(`洛谷同步失败：${e}`);
+    } finally {
+      setIsSyncingLuogu(false);
     }
   };
 
@@ -832,21 +870,49 @@ export default function App() {
               </div>
             </div>
           )}
+          {luoguSyncResult && (
+            <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
+              <div className="font-medium text-foreground">
+                洛谷同步：扫描 {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，导入 {luoguSyncResult.importedCount} 篇
+              </div>
+              <div className="grid gap-1 text-muted-foreground">
+                <div>
+                  跳过无 insight {luoguSyncResult.skippedNoInsight} 条，已存在 {luoguSyncResult.skippedExisting} 条，失败 {luoguSyncResult.failedCount} 条
+                </div>
+                <div>
+                  last_submission_id: {luoguSyncResult.updatedLastSubmissionId ?? "未更新"}
+                </div>
+                {luoguSyncResult.importedPaths.map((path) => (
+                  <div key={path} className="font-mono">{path}</div>
+                ))}
+                {luoguSyncResult.warnings.slice(0, 3).map((warning) => (
+                  <div key={warning} className="text-amber-400">{warning}</div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={closeLuoguSettings} disabled={isSavingLuoguConfig}>
+          <Button variant="outline" onClick={closeLuoguSettings} disabled={isSavingLuoguConfig || isSyncingLuogu}>
             取消
           </Button>
           <Button
             variant="outline"
             onClick={handleTestLuoguConnection}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
           >
             测试连接
           </Button>
           <Button
+            variant="outline"
+            onClick={handleSyncLuoguInsights}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
+          >
+            同步洛谷
+          </Button>
+          <Button
             onClick={handleSaveLuoguConfig}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
           >
             保存
           </Button>
@@ -954,8 +1020,18 @@ export default function App() {
             variant="outline"
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleSyncLuoguInsights}
+            disabled={isTestingLuoguConnection || isSyncingLuogu}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            同步洛谷
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
             onClick={openLuoguSettings}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
           >
             <Settings className="h-3.5 w-3.5" />
             洛谷设置

@@ -180,6 +180,7 @@ pub fn run() {
             luogu::get_luogu_config,
             luogu::save_luogu_config,
             luogu::test_luogu_connection,
+            luogu::sync_luogu_insights,
             open_blog,
             restart_blog_server,
         ])

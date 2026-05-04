@@ -33,6 +33,19 @@ export interface TestLuoguConnectionResult {
   submissions: LuoguSubmissionPreview[];
 }
 
+export interface SyncLuoguInsightsResult {
+  scannedCount: number;
+  acCount: number;
+  importedCount: number;
+  skippedNoInsight: number;
+  skippedExisting: number;
+  failedCount: number;
+  updatedLastSubmissionId: number | null;
+  importedPaths: string[];
+  message: string;
+  warnings: string[];
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -211,6 +224,14 @@ export async function saveLuoguConfig(config: LuoguConfig): Promise<void> {
 export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> {
   try {
     return await invoke<TestLuoguConnectionResult>("test_luogu_connection");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
+  try {
+    return await invoke<SyncLuoguInsightsResult>("sync_luogu_insights");
   } catch (e) {
     throw toError(e);
   }
