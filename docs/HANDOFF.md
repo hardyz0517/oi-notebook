@@ -104,10 +104,12 @@
     ├─ 主窗口新建笔记已有模板选择，支持空白/Trick 模板/题解模板，已验收
     ├─ 主窗口 CodeMirror 已支持粘贴图片到 notes/assets，保存时当前 note 和本轮 assets 一起自动 commit，已验收
     ├─ 右侧 MarkdownPreview 已支持显示 notes/assets 图片，已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、洛谷爬取、AI 辅助、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动定时/退出时 push、洛谷网络爬取、AI 辅助、博客视觉继续打磨
 
-[ ] Phase 6  洛谷爬虫
-    └─ @oinb-insight 注释格式，增量抓取提交
+[~] Phase 6  洛谷爬虫
+    ├─ @oinb-insight 本地导入 MVP 已完成
+    ├─ 洛谷配置存储 MVP 已完成：`.oinb/config.json`
+    └─ 未完成：网络请求、Cookie 验证、增量抓取提交
 
 [ ] Phase 7  AI 辅助整理
     └─ OpenAI-compatible providers + OpenRouter-compatible routing
@@ -432,6 +434,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 手动 push 前同样检查暂存区；暂存区非空会失败，允许工作区保留未跟踪本地测试笔记。
 - [x] tracked draft 测试笔记已创建用于验证自动 commit 和博客 UI；它们均为 `draft: true`，生产构建会过滤。
 - [x] 手动同步 Git 已验收成功：点击按钮后 `git push origin main` 成功，并触发 GitHub Actions / Pages 链路更新。
+- [x] 洛谷配置存储 MVP 已完成：本地配置写入仓库根目录 `.oinb/config.json`，字段包含 `luogu.uid`、`luogu.client_id`、`luogu.last_submission_id`；当前只做本地保存，不做网络请求、不验证 Cookie、不同步提交；`.oinb/config.json` 已加入 `.gitignore`，避免提交敏感配置。
 
 相关提交：
 
@@ -465,6 +468,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `5e2c2af feat(editor): paste images into notes assets`
 - `8f4c5df fix(editor): preview pasted note images`
 - `c0752c8 feat(git): commit note delete and rename`
+- `a3dc6c6 feat(luogu): save local config`
 
 端到端验证结果：
 
@@ -546,7 +550,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 博客视觉仍可继续打磨。
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
-- 还没有洛谷爬取。
+- 洛谷配置存储 MVP 已完成，但还没有网络请求、Cookie 验证或增量爬取。
 - 还没有 AI 辅助。
 
 下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、洛谷爬取或 AI 辅助方向。
@@ -662,6 +666,6 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
-- 洛谷爬取。
+- 洛谷配置存储 MVP 已完成，但还没有网络请求、Cookie 验证或增量爬取。
 - AI 辅助。
 - 博客视觉仍可继续打磨。
