@@ -12,6 +12,14 @@ export interface ImportLuoguInsightResult {
   relativePath: string;
 }
 
+export interface LuoguConfig {
+  luogu: {
+    uid: string;
+    client_id: string;
+    last_submission_id: number | null;
+  };
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -166,6 +174,22 @@ export async function importLuoguInsight(
       submissionId,
       sourceCode,
     });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getLuoguConfig(): Promise<LuoguConfig> {
+  try {
+    return await invoke<LuoguConfig>("get_luogu_config");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function saveLuoguConfig(config: LuoguConfig): Promise<void> {
+  try {
+    await invoke<void>("save_luogu_config", { config });
   } catch (e) {
     throw toError(e);
   }

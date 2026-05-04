@@ -177,6 +177,8 @@ pub fn run() {
             git::commit_renamed_note,
             git::push_git,
             luogu::import_luogu_insight,
+            luogu::get_luogu_config,
+            luogu::save_luogu_config,
             open_blog,
             restart_blog_server,
         ])

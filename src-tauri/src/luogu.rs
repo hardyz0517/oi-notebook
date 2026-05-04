@@ -4,10 +4,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
 use crate::frontmatter;
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LuoguConfig {
+    pub luogu: LuoguConfigFields,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LuoguConfigFields {
+    pub uid: String,
+    pub client_id: String,
+    pub last_submission_id: Option<u64>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +52,44 @@ fn repo_root() -> Result<PathBuf, String> {
 
 fn get_notes_dir() -> Result<PathBuf, String> {
     Ok(repo_root()?.join("notes"))
+}
+
+fn config_path_for_repo(repo_root: &Path) -> PathBuf {
+    repo_root.join(".oinb").join("config.json")
+}
+
+impl Default for LuoguConfig {
+    fn default() -> Self {
+        Self {
+            luogu: LuoguConfigFields {
+                uid: String::new(),
+                client_id: String::new(),
+                last_submission_id: None,
+            },
+        }
+    }
+}
+
+fn read_luogu_config_from_path(config_path: &Path) -> Result<LuoguConfig, String> {
+    if !config_path.exists() {
+        return Ok(LuoguConfig::default());
+    }
+
+    let content = fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read Luogu config file: {e}"))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse Luogu config file: {e}"))
+}
+
+fn write_luogu_config_to_path(config_path: &Path, config: &LuoguConfig) -> Result<(), String> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create .oinb config directory: {e}"))?;
+    }
+
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize Luogu config: {e}"))?;
+    fs::write(config_path, format!("{content}\n"))
+        .map_err(|e| format!("Failed to write Luogu config file: {e}"))
 }
 
 fn normalize_problem_id(problem_id: &str) -> Result<String, String> {
@@ -331,6 +381,16 @@ pub fn import_luogu_insight(
     )
 }
 
+#[tauri::command]
+pub fn get_luogu_config() -> Result<LuoguConfig, String> {
+    read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))
+}
+
+#[tauri::command]
+pub fn save_luogu_config(config: LuoguConfig) -> Result<(), String> {
+    write_luogu_config_to_path(&config_path_for_repo(&repo_root()?), &config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,5 +479,36 @@ Use a difference array.
             &sample_source(),
         );
         assert!(second.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn missing_luogu_config_returns_default() {
+        let dir = tempdir().unwrap();
+        let config_path = config_path_for_repo(dir.path());
+
+        let config = read_luogu_config_from_path(&config_path).unwrap();
+
+        assert_eq!(config, LuoguConfig::default());
+    }
+
+    #[test]
+    fn writes_luogu_config_with_snake_case_fields() {
+        let dir = tempdir().unwrap();
+        let config_path = config_path_for_repo(dir.path());
+        let config = LuoguConfig {
+            luogu: LuoguConfigFields {
+                uid: "12345".to_string(),
+                client_id: "client-secret".to_string(),
+                last_submission_id: Some(987654),
+            },
+        };
+
+        write_luogu_config_to_path(&config_path, &config).unwrap();
+        let raw = fs::read_to_string(&config_path).unwrap();
+        let parsed = read_luogu_config_from_path(&config_path).unwrap();
+
+        assert!(raw.contains("\"client_id\""));
+        assert!(raw.contains("\"last_submission_id\""));
+        assert_eq!(parsed, config);
     }
 }

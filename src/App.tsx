@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, ExternalLink, Plus, RotateCcw, Upload } from "lucide-react";
+import { Download, ExternalLink, Plus, RotateCcw, Settings, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -116,6 +116,12 @@ export default function App() {
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
   const [isLuoguDialogOpen, setIsLuoguDialogOpen] = useState(false);
+  const [isLuoguSettingsOpen, setIsLuoguSettingsOpen] = useState(false);
+  const [isLoadingLuoguConfig, setIsLoadingLuoguConfig] = useState(false);
+  const [isSavingLuoguConfig, setIsSavingLuoguConfig] = useState(false);
+  const [luoguConfigUid, setLuoguConfigUid] = useState("");
+  const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
+  const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
@@ -280,6 +286,58 @@ export default function App() {
       toast.error(`Git 同步失败：${e}`);
     } finally {
       setIsPushingGit(false);
+    }
+  };
+
+  const openLuoguSettings = async () => {
+    setIsLuoguSettingsOpen(true);
+    setIsLoadingLuoguConfig(true);
+    try {
+      const config = await getLuoguConfig();
+      setLuoguConfigUid(config.luogu.uid);
+      setLuoguConfigClientId(config.luogu.client_id);
+      setLuoguConfigLastSubmissionId(
+        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
+      );
+    } catch (e) {
+      toast.error(`洛谷配置读取失败：${e}`);
+    } finally {
+      setIsLoadingLuoguConfig(false);
+    }
+  };
+
+  const closeLuoguSettings = () => {
+    if (isSavingLuoguConfig) return;
+    setIsLuoguSettingsOpen(false);
+  };
+
+  const handleSaveLuoguConfig = async () => {
+    const lastSubmissionId = luoguConfigLastSubmissionId.trim();
+    const parsedLastSubmissionId =
+      lastSubmissionId === "" ? null : Number(lastSubmissionId);
+    if (
+      parsedLastSubmissionId !== null &&
+      (!Number.isInteger(parsedLastSubmissionId) || parsedLastSubmissionId < 0)
+    ) {
+      toast.error("last_submission_id 必须是非负整数或留空");
+      return;
+    }
+
+    setIsSavingLuoguConfig(true);
+    try {
+      await saveLuoguConfig({
+        luogu: {
+          uid: luoguConfigUid.trim(),
+          client_id: luoguConfigClientId.trim(),
+          last_submission_id: parsedLastSubmissionId,
+        },
+      });
+      toast.success("洛谷配置已保存");
+      setIsLuoguSettingsOpen(false);
+    } catch (e) {
+      toast.error(`洛谷配置保存失败：${e}`);
+    } finally {
+      setIsSavingLuoguConfig(false);
     }
   };
 
@@ -701,6 +759,58 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={isLuoguSettingsOpen} onOpenChange={(open) => !open && closeLuoguSettings()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>洛谷设置</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="grid gap-2">
+            <Label htmlFor="luogu-config-uid">UID</Label>
+            <Input
+              id="luogu-config-uid"
+              value={luoguConfigUid}
+              disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+              placeholder="洛谷 _uid"
+              onChange={(e) => setLuoguConfigUid(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="luogu-config-client-id">__client_id</Label>
+            <Input
+              id="luogu-config-client-id"
+              value={luoguConfigClientId}
+              disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+              placeholder="洛谷 __client_id"
+              type="password"
+              onChange={(e) => setLuoguConfigClientId(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="luogu-config-last-submission-id">last_submission_id</Label>
+            <Input
+              id="luogu-config-last-submission-id"
+              value={luoguConfigLastSubmissionId}
+              disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+              placeholder="留空表示尚未同步"
+              inputMode="numeric"
+              onChange={(e) => setLuoguConfigLastSubmissionId(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeLuoguSettings} disabled={isSavingLuoguConfig}>
+            取消
+          </Button>
+          <Button
+            onClick={handleSaveLuoguConfig}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+          >
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -787,6 +897,16 @@ export default function App() {
           >
             <Download className="h-3.5 w-3.5" />
             导入洛谷
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={openLuoguSettings}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            洛谷设置
           </Button>
           <Button
             variant="outline"
