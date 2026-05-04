@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, ExternalLink, Plus, RotateCcw, Settings, Upload } from "lucide-react";
+import { Download, ExternalLink, PlugZap, Plus, RotateCcw, Settings, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection } from "@/lib/api";
+import type { TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -119,6 +120,8 @@ export default function App() {
   const [isLuoguSettingsOpen, setIsLuoguSettingsOpen] = useState(false);
   const [isLoadingLuoguConfig, setIsLoadingLuoguConfig] = useState(false);
   const [isSavingLuoguConfig, setIsSavingLuoguConfig] = useState(false);
+  const [isTestingLuoguConnection, setIsTestingLuoguConnection] = useState(false);
+  const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
@@ -338,6 +341,20 @@ export default function App() {
       toast.error(`洛谷配置保存失败：${e}`);
     } finally {
       setIsSavingLuoguConfig(false);
+    }
+  };
+
+  const handleTestLuoguConnection = async () => {
+    setIsTestingLuoguConnection(true);
+    setLuoguConnectionResult(null);
+    try {
+      const result = await testLuoguConnection();
+      setLuoguConnectionResult(result);
+      toast.success(`洛谷连接正常，拉到 ${result.fetchedCount} 条提交`);
+    } catch (e) {
+      toast.error(`洛谷连接测试失败：${e}`);
+    } finally {
+      setIsTestingLuoguConnection(false);
     }
   };
 
@@ -797,14 +814,39 @@ export default function App() {
               onChange={(e) => setLuoguConfigLastSubmissionId(e.target.value)}
             />
           </div>
+          {luoguConnectionResult && (
+            <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
+              <div className="font-medium text-foreground">
+                本次 dry run 拉到 {luoguConnectionResult.fetchedCount} 条提交
+              </div>
+              <div className="grid gap-1 text-muted-foreground">
+                {luoguConnectionResult.submissions.length === 0 ? (
+                  <div>暂无提交预览</div>
+                ) : (
+                  luoguConnectionResult.submissions.map((submission) => (
+                    <div key={submission.submissionId} className="font-mono">
+                      #{submission.submissionId} {submission.problemId} {submission.problemTitle} · {submission.status} · {submission.submitTime}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={closeLuoguSettings} disabled={isSavingLuoguConfig}>
             取消
           </Button>
           <Button
+            variant="outline"
+            onClick={handleTestLuoguConnection}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
+          >
+            测试连接
+          </Button>
+          <Button
             onClick={handleSaveLuoguConfig}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
           >
             保存
           </Button>
@@ -902,8 +944,18 @@ export default function App() {
             variant="outline"
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleTestLuoguConnection}
+            disabled={isTestingLuoguConnection}
+          >
+            <PlugZap className="h-3.5 w-3.5" />
+            测试连接
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
             onClick={openLuoguSettings}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection}
           >
             <Settings className="h-3.5 w-3.5" />
             洛谷设置

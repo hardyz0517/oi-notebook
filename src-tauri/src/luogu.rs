@@ -2,10 +2,13 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_yaml::{Mapping, Value};
+use serde_json::Value as JsonValue;
+use serde_yaml::{Mapping, Value as YamlValue};
 
 use crate::frontmatter;
 
@@ -25,6 +28,23 @@ pub struct LuoguConfigFields {
 #[serde(rename_all = "camelCase")]
 pub struct ImportLuoguInsightResult {
     pub relative_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LuoguSubmissionPreview {
+    pub submission_id: String,
+    pub problem_id: String,
+    pub problem_title: String,
+    pub status: String,
+    pub submit_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TestLuoguConnectionResult {
+    pub fetched_count: usize,
+    pub submissions: Vec<LuoguSubmissionPreview>,
 }
 
 #[derive(Debug, Default)]
@@ -92,6 +112,166 @@ fn write_luogu_config_to_path(config_path: &Path, config: &LuoguConfig) -> Resul
         .map_err(|e| format!("Failed to write Luogu config file: {e}"))
 }
 
+fn require_luogu_config(config: &LuoguConfig) -> Result<(&str, &str), String> {
+    let uid = config.luogu.uid.trim();
+    let client_id = config.luogu.client_id.trim();
+
+    if uid.is_empty() {
+        return Err("Luogu connection failed: uid is missing in .oinb/config.json".to_string());
+    }
+    if !uid.chars().all(|ch| ch.is_ascii_digit()) {
+        return Err(
+            "Luogu connection failed: uid in .oinb/config.json must be numeric".to_string(),
+        );
+    }
+    if client_id.is_empty() {
+        return Err(
+            "Luogu connection failed: __client_id is missing in .oinb/config.json".to_string(),
+        );
+    }
+    if client_id.contains(['\r', '\n', ';']) {
+        return Err(
+            "Luogu connection failed: __client_id in .oinb/config.json contains invalid characters"
+                .to_string(),
+        );
+    }
+
+    Ok((uid, client_id))
+}
+
+fn luogu_submission_status(value: &JsonValue) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    if let Some(code) = value.as_i64() {
+        return code.to_string();
+    }
+    if let Some(code) = value.as_u64() {
+        return code.to_string();
+    }
+    "unknown".to_string()
+}
+
+fn value_to_string(value: &JsonValue) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    if let Some(number) = value.as_i64() {
+        return Some(number.to_string());
+    }
+    if let Some(number) = value.as_u64() {
+        return Some(number.to_string());
+    }
+    None
+}
+
+fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionPreview, String> {
+    let submission_id = record
+        .get("id")
+        .and_then(value_to_string)
+        .ok_or_else(|| "Luogu connection failed: submission record is missing id".to_string())?;
+
+    let problem = record.get("problem").ok_or_else(|| {
+        "Luogu connection failed: submission record is missing problem".to_string()
+    })?;
+    let problem_id = problem
+        .get("pid")
+        .or_else(|| problem.get("id"))
+        .and_then(value_to_string)
+        .ok_or_else(|| {
+            "Luogu connection failed: submission record is missing problem id".to_string()
+        })?;
+    let problem_title = problem
+        .get("title")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let status = record
+        .get("status")
+        .map(luogu_submission_status)
+        .unwrap_or_else(|| "unknown".to_string());
+    let submit_time = record
+        .get("submitTime")
+        .or_else(|| record.get("submit_time"))
+        .or_else(|| record.get("createTime"))
+        .and_then(value_to_string)
+        .unwrap_or_else(|| "".to_string());
+
+    Ok(LuoguSubmissionPreview {
+        submission_id,
+        problem_id,
+        problem_title,
+        status,
+        submit_time,
+    })
+}
+
+fn parse_luogu_submission_list(value: &JsonValue) -> Result<TestLuoguConnectionResult, String> {
+    let records = value
+        .pointer("/currentData/records/result")
+        .or_else(|| value.pointer("/currentData/submissions/result"))
+        .or_else(|| value.pointer("/data/records/result"))
+        .or_else(|| value.pointer("/data/submissions/result"))
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| {
+            "Luogu connection failed: unexpected submissions JSON structure".to_string()
+        })?;
+
+    let submissions = records
+        .iter()
+        .take(5)
+        .map(parse_luogu_submission_record)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(TestLuoguConnectionResult {
+        fetched_count: records.len(),
+        submissions,
+    })
+}
+
+fn fetch_luogu_submission_list(
+    uid: &str,
+    client_id: &str,
+) -> Result<TestLuoguConnectionResult, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("Luogu connection failed: cannot create HTTP client: {e}"))?;
+    let url = format!("https://www.luogu.com.cn/record/list?user={uid}&page=1&_contentOnly=1");
+    let cookie = format!("_uid={uid}; __client_id={client_id}");
+
+    let response = client
+        .get(url)
+        .header(reqwest::header::COOKIE, cookie)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Luogu connection failed: request timed out".to_string()
+            } else {
+                format!("Luogu connection failed: network error: {e}")
+            }
+        })?;
+
+    let status = response.status();
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Err("Luogu connection failed: Cookie may be invalid or expired".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "Luogu connection failed: server returned HTTP {}",
+            status.as_u16()
+        ));
+    }
+
+    let json = response
+        .json::<JsonValue>()
+        .map_err(|e| format!("Luogu connection failed: cannot parse response JSON: {e}"))?;
+    parse_luogu_submission_list(&json)
+}
+
 fn normalize_problem_id(problem_id: &str) -> Result<String, String> {
     let trimmed = problem_id.trim();
     if trimmed.is_empty() {
@@ -153,22 +333,22 @@ fn safe_title_for_filename(title: &str, fallback: &str) -> String {
 
 fn extract_oinb_insight(source_code: &str) -> Result<String, String> {
     let marker = "/* @oinb-insight";
-    let start = source_code
-        .find(marker)
-        .ok_or_else(|| "Luogu import failed: cannot find /* @oinb-insight ... */ block".to_string())?;
+    let start = source_code.find(marker).ok_or_else(|| {
+        "Luogu import failed: cannot find /* @oinb-insight ... */ block".to_string()
+    })?;
     let content_start = start + marker.len();
     let rest = &source_code[content_start..];
-    let end = rest
-        .find("*/")
-        .ok_or_else(|| "Luogu import failed: @oinb-insight block is not closed with */".to_string())?;
+    let end = rest.find("*/").ok_or_else(|| {
+        "Luogu import failed: @oinb-insight block is not closed with */".to_string()
+    })?;
 
     Ok(rest[..end].trim().to_string())
 }
 
 fn yaml_string(mapping: &Mapping, key: &str) -> Option<String> {
     mapping
-        .get(Value::String(key.to_string()))
-        .and_then(Value::as_str)
+        .get(YamlValue::String(key.to_string()))
+        .and_then(YamlValue::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
@@ -176,24 +356,24 @@ fn yaml_string(mapping: &Mapping, key: &str) -> Option<String> {
 
 fn yaml_bool(mapping: &Mapping, key: &str) -> Option<bool> {
     mapping
-        .get(Value::String(key.to_string()))
-        .and_then(Value::as_bool)
+        .get(YamlValue::String(key.to_string()))
+        .and_then(YamlValue::as_bool)
 }
 
 fn yaml_tags(mapping: &Mapping) -> Vec<String> {
-    let Some(value) = mapping.get(Value::String("tags".to_string())) else {
+    let Some(value) = mapping.get(YamlValue::String("tags".to_string())) else {
         return Vec::new();
     };
 
     match value {
-        Value::Sequence(items) => items
+        YamlValue::Sequence(items) => items
             .iter()
-            .filter_map(Value::as_str)
+            .filter_map(YamlValue::as_str)
             .map(str::trim)
             .filter(|tag| !tag.is_empty())
             .map(ToOwned::to_owned)
             .collect(),
-        Value::String(value) => value
+        YamlValue::String(value) => value
             .split(',')
             .map(str::trim)
             .filter(|tag| !tag.is_empty())
@@ -220,11 +400,11 @@ fn split_insight_frontmatter(insight: &str) -> Result<InsightBlock, String> {
     let after_yaml = &rest[end_index + "\n---".len()..];
     let body = after_yaml.trim_start_matches('\n').trim().to_string();
 
-    let value: Value = serde_yaml::from_str(yaml_text)
+    let value: YamlValue = serde_yaml::from_str(yaml_text)
         .map_err(|e| format!("Luogu import failed: cannot parse insight frontmatter: {e}"))?;
-    let mapping = value
-        .as_mapping()
-        .ok_or_else(|| "Luogu import failed: insight frontmatter must be a YAML mapping".to_string())?;
+    let mapping = value.as_mapping().ok_or_else(|| {
+        "Luogu import failed: insight frontmatter must be a YAML mapping".to_string()
+    })?;
 
     Ok(InsightBlock {
         frontmatter: InsightFrontmatter {
@@ -331,8 +511,9 @@ fn import_luogu_insight_to_notes_dir(
     let target_path = notes_dir.join(&relative_path);
 
     if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Luogu import failed: cannot create notes/luogu directory: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Luogu import failed: cannot create notes/luogu directory: {e}")
+        })?;
     }
 
     let markdown = build_note_markdown(&problem_id, problem_title, submission_id, insight);
@@ -391,6 +572,13 @@ pub fn save_luogu_config(config: LuoguConfig) -> Result<(), String> {
     write_luogu_config_to_path(&config_path_for_repo(&repo_root()?), &config)
 }
 
+#[tauri::command]
+pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
+    let config = read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    fetch_luogu_submission_list(uid, client_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,8 +629,8 @@ Use a difference array.
 
     #[test]
     fn generated_frontmatter_uses_insight_fields() {
-        let insight = split_insight_frontmatter(&extract_oinb_insight(&sample_source()).unwrap())
-            .unwrap();
+        let insight =
+            split_insight_frontmatter(&extract_oinb_insight(&sample_source()).unwrap()).unwrap();
         let markdown = build_note_markdown("P1234", "Fallback", "987654", insight);
 
         assert!(markdown.contains("title: Interval Coverage"));
@@ -510,5 +698,62 @@ Use a difference array.
         assert!(raw.contains("\"client_id\""));
         assert!(raw.contains("\"last_submission_id\""));
         assert_eq!(parsed, config);
+    }
+
+    #[test]
+    fn missing_luogu_connection_config_returns_clear_error() {
+        let config = LuoguConfig::default();
+
+        assert!(require_luogu_config(&config)
+            .unwrap_err()
+            .contains("uid is missing"));
+    }
+
+    #[test]
+    fn parses_luogu_submission_list_preview() {
+        let json = serde_json::json!({
+            "currentData": {
+                "records": {
+                    "result": [
+                        {
+                            "id": 123456,
+                            "problem": { "pid": "P1000", "title": "A+B Problem" },
+                            "status": 12,
+                            "submitTime": 1777777777
+                        },
+                        {
+                            "id": 123455,
+                            "problem": { "pid": "P1001", "title": "Test" },
+                            "status": "Accepted",
+                            "submitTime": "2026-05-04 12:00:00"
+                        }
+                    ]
+                }
+            }
+        });
+
+        let result = parse_luogu_submission_list(&json).unwrap();
+
+        assert_eq!(result.fetched_count, 2);
+        assert_eq!(
+            result.submissions[0],
+            LuoguSubmissionPreview {
+                submission_id: "123456".to_string(),
+                problem_id: "P1000".to_string(),
+                problem_title: "A+B Problem".to_string(),
+                status: "12".to_string(),
+                submit_time: "1777777777".to_string(),
+            }
+        );
+        assert_eq!(result.submissions[1].status, "Accepted");
+    }
+
+    #[test]
+    fn rejects_unexpected_luogu_submission_json() {
+        let json = serde_json::json!({ "currentData": {} });
+
+        assert!(parse_luogu_submission_list(&json)
+            .unwrap_err()
+            .contains("unexpected submissions JSON structure"));
     }
 }

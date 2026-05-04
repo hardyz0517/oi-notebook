@@ -179,6 +179,7 @@ pub fn run() {
             luogu::import_luogu_insight,
             luogu::get_luogu_config,
             luogu::save_luogu_config,
+            luogu::test_luogu_connection,
             open_blog,
             restart_blog_server,
         ])
