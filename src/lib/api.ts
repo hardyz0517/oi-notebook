@@ -3,6 +3,11 @@ import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
 
+export interface SaveNoteAssetResult {
+  markdownPath: string;
+  assetRelativePath: string;
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -72,9 +77,32 @@ export async function writeNote(
  *
  * @param relativePath - 相对于 notes/ 的路径，如 "tricks/qpow.md"
  */
-export async function commitNote(relativePath: string): Promise<CommitNoteStatus> {
+export async function commitNote(
+  relativePath: string,
+  extraPaths?: string[],
+): Promise<CommitNoteStatus> {
   try {
-    return await invoke<CommitNoteStatus>("commit_note", { relativePath });
+    return await invoke<CommitNoteStatus>("commit_note", { relativePath, extraPaths });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+/**
+ * 保存粘贴图片到 notes/assets/，并返回当前笔记可用的 Markdown 链接路径。
+ * 对应 Rust 命令：save_note_asset
+ */
+export async function saveNoteAsset(
+  noteRelativePath: string,
+  bytes: number[],
+  mimeType: string,
+): Promise<SaveNoteAssetResult> {
+  try {
+    return await invoke<SaveNoteAssetResult>("save_note_asset", {
+      noteRelativePath,
+      bytes,
+      mimeType,
+    });
   } catch (e) {
     throw toError(e);
   }

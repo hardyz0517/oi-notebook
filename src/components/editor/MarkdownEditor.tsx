@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
+  onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
   className?: string;
 }
@@ -20,6 +21,7 @@ interface MarkdownEditorProps {
 export default function MarkdownEditor({
   value,
   onChange,
+  onPasteImage,
   onScroll,
   className,
 }: MarkdownEditorProps) {
@@ -36,6 +38,11 @@ export default function MarkdownEditor({
   useEffect(() => {
     onChangeFn.current = onChange;
   }, [onChange]);
+
+  const onPasteImageFn = useRef(onPasteImage);
+  useEffect(() => {
+    onPasteImageFn.current = onPasteImage;
+  }, [onPasteImage]);
 
   const onScrollFn = useRef(onScroll);
   useEffect(() => {
@@ -67,6 +74,29 @@ export default function MarkdownEditor({
 
           // 软换行：Markdown 编辑必须打开，否则长行会溢出容器
           EditorView.lineWrapping,
+
+          EditorView.domEventHandlers({
+            paste(event, view) {
+              const items = Array.from(event.clipboardData?.items ?? []);
+              const imageItem = items.find((item) => item.type.startsWith("image/"));
+              const imageFile = imageItem?.getAsFile();
+              const pasteImage = onPasteImageFn.current;
+
+              if (!imageFile || !pasteImage) return false;
+
+              event.preventDefault();
+              pasteImage(imageFile)
+                .then((markdownImage) => {
+                  view.dispatch(view.state.replaceSelection(markdownImage));
+                  view.focus();
+                })
+                .catch((e) => {
+                  console.error("Paste image failed:", e);
+                });
+
+              return true;
+            },
+          }),
 
           // 监听文档变化，把最新内容通过 onChange 同步给 React
           EditorView.updateListener.of((update: ViewUpdate) => {

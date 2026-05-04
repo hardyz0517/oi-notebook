@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -115,6 +115,7 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
+  const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
 
   function validateFilename(name: string): string | null {
@@ -267,6 +268,35 @@ export default function App() {
     setIsDirty(true);
   };
 
+  const handlePasteImage = async (file: File) => {
+    if (!currentFilePath) {
+      const message = "请先打开一个笔记后再粘贴图片";
+      toast.error(message);
+      throw new Error(message);
+    }
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      const saved = await saveNoteAsset(currentFilePath, bytes, file.type);
+
+      setPendingAssetsByFile((prev) => {
+        const current = prev[currentFilePath] ?? [];
+        if (current.includes(saved.assetRelativePath)) return prev;
+        return {
+          ...prev,
+          [currentFilePath]: [...current, saved.assetRelativePath],
+        };
+      });
+
+      toast.success("图片已插入，保存后提交");
+      return `![image](${saved.markdownPath})`;
+    } catch (e) {
+      toast.error(`图片粘贴失败：${e}`);
+      throw e;
+    }
+  };
+
   const updateFrontmatter = (patch: Partial<FrontmatterFields>) => {
     if (!currentFilePath) return;
     if (!frontmatter.canMerge) {
@@ -317,12 +347,19 @@ export default function App() {
       try {
         const warning = await writeNote(currentFilePath, markdown);
         try {
-          const commitStatus = await commitNote(currentFilePath);
+          const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
+          const commitStatus = await commitNote(currentFilePath, pendingAssets);
           if (commitStatus === "committed") {
             showSavedToast("已保存并提交", warning);
           } else {
             showSavedToast("已保存", warning);
           }
+          setPendingAssetsByFile((prev) => {
+            if (!prev[currentFilePath]) return prev;
+            const next = { ...prev };
+            delete next[currentFilePath];
+            return next;
+          });
         } catch (commitError) {
           const message = `已保存，Git 提交失败：${commitError}`;
           if (warning) {
@@ -338,7 +375,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentFilePath, markdown]);
+  }, [currentFilePath, markdown, pendingAssetsByFile]);
 
   // 挂载时从后端加载笔记列表
   useEffect(() => {
@@ -733,6 +770,7 @@ export default function App() {
           <MarkdownEditor
             value={markdown}
             onChange={handleEditorChange}
+            onPasteImage={handlePasteImage}
             onScroll={(r) => setScrollRatio(r)}
             className="min-h-0 flex-1"
           />

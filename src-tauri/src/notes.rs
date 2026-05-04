@@ -5,11 +5,12 @@
 //! 两边都符合各自语言的代码风格。
 
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::Serialize;
 use walkdir::WalkDir;
 
@@ -26,6 +27,13 @@ pub struct NoteFileInfo {
     pub path: String,
     /// ISO 8601 / RFC 3339 格式的最后修改时间，如 "2026-04-24T10:00:00+00:00"
     pub modified: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveNoteAssetResult {
+    pub markdown_path: String,
+    pub asset_relative_path: String,
 }
 
 /// 返回 notes 目录的绝对 PathBuf。
@@ -95,9 +103,7 @@ fn safe_note_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, Stri
     // 按段检查只拒绝 ".." 整段（真正的向上跳目录语义）和 "." 当前目录引用。
     for segment in normalized.split('/') {
         if segment == ".." || segment == "." {
-            return Err(format!(
-                "非法路径：'{relative_path}' 包含路径遍历段"
-            ));
+            return Err(format!("非法路径：'{relative_path}' 包含路径遍历段"));
         }
     }
 
@@ -113,12 +119,56 @@ fn safe_note_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, Stri
     // 这里仍按路径组件（不是字符串前缀）确认目标在 notes/ 之内。
     // 两层防御缺一不可——字符串过滤防快速注入，此层防符号链接等 OS 层绕过。
     if !target.starts_with(&canonical_notes) {
-        return Err(format!(
-            "路径 '{relative_path}' 越界到 notes 目录之外"
-        ));
+        return Err(format!("路径 '{relative_path}' 越界到 notes 目录之外"));
     }
 
     Ok(target)
+}
+
+fn validate_note_reference_path(notes_dir: &Path, relative_path: &str) -> Result<String, String> {
+    let normalized = relative_path.replace('\\', "/");
+
+    if normalized.is_empty() {
+        return Err("图片保存失败：当前笔记路径不能为空".to_string());
+    }
+    if Path::new(&normalized).is_absolute()
+        || normalized.starts_with('/')
+        || relative_path.starts_with('\\')
+    {
+        return Err(format!("图片保存失败：非法笔记路径 '{relative_path}'"));
+    }
+    for segment in normalized.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(format!("图片保存失败：非法笔记路径 '{relative_path}'"));
+        }
+    }
+
+    let canonical_notes = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 notes 目录路径：{e}"))?;
+    let target = canonical_notes.join(&normalized);
+    if !target.starts_with(&canonical_notes) {
+        return Err(format!(
+            "图片保存失败：笔记路径 '{relative_path}' 越界到 notes 目录之外"
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn image_extension(mime_type: &str) -> Result<&'static str, String> {
+    match mime_type {
+        "image/png" => Ok("png"),
+        "image/jpeg" => Ok("jpg"),
+        "image/webp" => Ok("webp"),
+        other => Err(format!("图片保存失败：暂不支持的图片类型 {other}")),
+    }
+}
+
+fn markdown_asset_path(note_relative_path: &str, asset_relative_path: &str) -> String {
+    let depth = note_relative_path.split('/').count().saturating_sub(1);
+    let prefix = "../".repeat(depth);
+    format!("{prefix}{asset_relative_path}")
 }
 
 /// 递归列出 notes/ 目录下所有 .md 文件（含子目录），
@@ -132,8 +182,7 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
     let notes_dir = get_notes_dir()?;
 
     // 首次运行时目录可能不存在，自动创建避免报错
-    fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     // 确保四个标准子目录存在（新克隆仓库的人第一次启动即可看到完整结构）
     for sub in ["inbox", "tricks", "problems", "luogu"] {
@@ -209,8 +258,7 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
 #[tauri::command]
 pub fn read_note(relative_path: String) -> Result<String, String> {
     let notes_dir = get_notes_dir()?;
-    fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     let path = safe_note_path(&notes_dir, &relative_path)?;
 
@@ -218,8 +266,7 @@ pub fn read_note(relative_path: String) -> Result<String, String> {
         return Err(format!("笔记不存在：{relative_path}"));
     }
 
-    fs::read_to_string(&path)
-        .map_err(|e| format!("读取笔记失败（{relative_path}）：{e}"))
+    fs::read_to_string(&path).map_err(|e| format!("读取笔记失败（{relative_path}）：{e}"))
 }
 
 /// 覆盖写入指定笔记，写入前自动补全 frontmatter。如果父目录不存在，会自动创建。
@@ -234,15 +281,13 @@ pub fn read_note(relative_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn write_note(relative_path: String, content: String) -> Result<Option<String>, String> {
     let notes_dir = get_notes_dir()?;
-    fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     let path = safe_note_path(&notes_dir, &relative_path)?;
 
     // 支持 "tricks/qpow.md" 这类带子目录的路径——确保父目录存在
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("创建笔记父目录失败：{e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("创建笔记父目录失败：{e}"))?;
     }
 
     let (final_content, warning) = frontmatter::process_for_write(&content, &relative_path);
@@ -253,14 +298,75 @@ pub fn write_note(relative_path: String, content: String) -> Result<Option<Strin
     Ok(warning)
 }
 
+#[tauri::command]
+pub fn save_note_asset(
+    note_relative_path: String,
+    bytes: Vec<u8>,
+    mime_type: String,
+) -> Result<SaveNoteAssetResult, String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+
+    let note_relative_path = validate_note_reference_path(&notes_dir, &note_relative_path)?;
+    let extension = image_extension(&mime_type)?;
+
+    let assets_dir = notes_dir.join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|e| format!("创建 notes/assets 目录失败：{e}"))?;
+
+    let canonical_assets = assets_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 notes/assets 目录路径：{e}"))?;
+
+    let mut saved_filename = None;
+    for _ in 0..16 {
+        let now = Utc::now();
+        let filename = format!(
+            "{}-{:09}.{}",
+            now.format("%Y%m%d-%H%M%S"),
+            now.nanosecond(),
+            extension
+        );
+        let target = canonical_assets.join(&filename);
+
+        if !target.starts_with(&canonical_assets) {
+            return Err("图片保存失败：目标路径越界到 notes/assets 目录之外".to_string());
+        }
+
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut file) => {
+                file.write_all(&bytes)
+                    .map_err(|e| format!("写入图片失败（{filename}）：{e}"))?;
+                saved_filename = Some(filename);
+                break;
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("写入图片失败（{filename}）：{e}")),
+        }
+    }
+
+    let filename =
+        saved_filename.ok_or_else(|| "图片保存失败：连续生成了重复文件名".to_string())?;
+
+    let asset_relative_path = format!("assets/{filename}");
+    let markdown_path = markdown_asset_path(&note_relative_path, &asset_relative_path);
+
+    Ok(SaveNoteAssetResult {
+        markdown_path,
+        asset_relative_path,
+    })
+}
+
 /// 删除指定笔记文件。若文件不存在，返回明确的错误信息而非静默忽略。
 ///
 /// `relative_path`：相对于 notes/ 的路径，如 `"tricks/qpow.md"`
 #[tauri::command]
 pub fn delete_note(relative_path: String) -> Result<(), String> {
     let notes_dir = get_notes_dir()?;
-    fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     let path = safe_note_path(&notes_dir, &relative_path)?;
 
@@ -268,8 +374,7 @@ pub fn delete_note(relative_path: String) -> Result<(), String> {
         return Err(format!("笔记不存在：{relative_path}"));
     }
 
-    fs::remove_file(&path)
-        .map_err(|e| format!("删除笔记失败（{relative_path}）：{e}"))
+    fs::remove_file(&path).map_err(|e| format!("删除笔记失败（{relative_path}）：{e}"))
 }
 
 /// 重命名笔记文件。原子操作，支持跨子目录移动（目标父目录不存在时自动创建）。
@@ -279,8 +384,7 @@ pub fn delete_note(relative_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn rename_note(old_relative_path: String, new_relative_path: String) -> Result<(), String> {
     let notes_dir = get_notes_dir()?;
-    fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     let old_path = safe_note_path(&notes_dir, &old_relative_path)?;
     let new_path = safe_note_path(&notes_dir, &new_relative_path)?;
@@ -294,8 +398,7 @@ pub fn rename_note(old_relative_path: String, new_relative_path: String) -> Resu
 
     // 支持跨子目录重命名（如 inbox/note.md → tricks/note.md）——确保目标父目录存在
     if let Some(parent) = new_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("创建笔记父目录失败：{e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("创建笔记父目录失败：{e}"))?;
     }
 
     fs::rename(&old_path, &new_path)
