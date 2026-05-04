@@ -96,9 +96,9 @@ export async function commitNote(
  * 自动提交已经删除的单个 notes 文件。
  * 对应 Rust 命令：commit_deleted_note
  */
-export async function commitDeletedNote(relativePath: string): Promise<void> {
+export async function commitDeletedNote(relativePath: string): Promise<CommitNoteStatus> {
   try {
-    await invoke<void>("commit_deleted_note", { relativePath });
+    return await invoke<CommitNoteStatus>("commit_deleted_note", { relativePath });
   } catch (e) {
     throw toError(e);
   }

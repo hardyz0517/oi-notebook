@@ -226,8 +226,12 @@ export default function App() {
     try {
       await deleteNote(path);
       try {
-        await commitDeletedNote(path);
-        toast.success("已删除并提交");
+        const commitStatus = await commitDeletedNote(path);
+        if (commitStatus === "committed") {
+          toast.success("已删除并提交");
+        } else {
+          toast.success("已删除");
+        }
       } catch (commitError) {
         toast.warning(`删除成功，Git 提交失败：${commitError}`);
       }

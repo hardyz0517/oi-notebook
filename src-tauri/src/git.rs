@@ -162,6 +162,18 @@ fn cached_names(repo_root: &Path) -> Result<Vec<String>, String> {
     Ok(parse_nul_separated_paths(&staged.stdout))
 }
 
+fn git_tracks_pathspec(repo_root: &Path, pathspec: &str) -> Result<bool, String> {
+    let output = git_output(repo_root, &["ls-files", "--error-unmatch", "--", pathspec])?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "git ls-files --error-unmatch failed: {}",
+            output_text(&output)
+        )),
+    }
+}
+
 fn ensure_staging_area_empty(repo_root: &Path, action: &str) -> Result<(), String> {
     let staged_names = cached_names(repo_root)?;
     if !staged_names.is_empty() {
@@ -317,17 +329,22 @@ pub fn commit_note(
 }
 
 #[tauri::command]
-pub fn commit_deleted_note(relative_path: String) -> Result<(), String> {
+pub fn commit_deleted_note(relative_path: String) -> Result<CommitNoteStatus, String> {
     let repo_root = repo_root()?;
     let pathspecs = vec![safe_note_pathspec_allow_missing(
         &repo_root,
         &relative_path,
     )?];
+    if !git_tracks_pathspec(&repo_root, &pathspecs[0])? {
+        return Ok(CommitNoteStatus::NoChanges);
+    }
+
     let message = format!("note: delete {relative_path}");
 
     ensure_staging_area_empty(&repo_root, "auto delete note commit")?;
     stage_allowed_pathspecs(&repo_root, &pathspecs, "Auto delete note commit")?;
-    commit_staged_pathspecs(&repo_root, &pathspecs, &message)
+    commit_staged_pathspecs(&repo_root, &pathspecs, &message)?;
+    Ok(CommitNoteStatus::Committed)
 }
 
 #[tauri::command]
@@ -390,6 +407,21 @@ mod tests {
                 "notes/assets/a.png".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn git_tracks_deleted_tracked_path_but_not_untracked_path() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("notes").join("tricks")).unwrap();
+        git_success(dir.path(), &["init"]).unwrap();
+
+        let tracked_path = dir.path().join("notes").join("tricks").join("tracked.md");
+        fs::write(&tracked_path, "test").unwrap();
+        git_success(dir.path(), &["add", "--", "notes/tricks/tracked.md"]).unwrap();
+        fs::remove_file(&tracked_path).unwrap();
+
+        assert!(git_tracks_pathspec(dir.path(), "notes/tricks/tracked.md").unwrap());
+        assert!(!git_tracks_pathspec(dir.path(), "notes/tricks/untracked.md").unwrap());
     }
 
     #[test]
