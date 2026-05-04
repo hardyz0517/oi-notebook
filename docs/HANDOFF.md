@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-04（记录洛谷分页同步进度）
+**最后更新**：2026-05-04（记录洛谷 Cookie 配置引导）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -112,7 +112,8 @@
     ├─ “测试连接”dry run 已完成并验收：只拉提交列表摘要，不生成笔记、不更新 `last_submission_id`
     ├─ 手动“同步洛谷”MVP 已完成：分页拉取提交、过滤 AC、抓详情源码、生成 `notes/luogu` 并自动 commit
     ├─ 分页同步已完成：最多扫描 5 页，遇到 `last_submission_id` 会提前停止
-    └─ 未完成：Cookie 引导/过期处理、启动/定时自动同步、AI 辅助
+    ├─ Cookie 配置引导和过期提示已完成
+    └─ 未完成：启动/定时自动同步、AI 辅助
 
 [ ] Phase 7  AI 辅助整理
     └─ OpenAI-compatible providers + OpenRouter-compatible routing
@@ -446,8 +447,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 洛谷同步页间隔为 1 秒，详情请求仍保持至少 3 秒间隔；目标文件已存在时跳过不覆盖。
 - [x] 同步流程整体成功后更新 `.oinb/config.json` 中的 `last_submission_id`；同步中有失败时不推进，避免漏扫。
 - [x] 同步结果反馈已增强：完成后会显示 `scanned` / `scanned_pages` / `ac` / `imported` / `no_insight` / `existing` / `failed` / `reached_last_submission_id` / `last_submission_id`，避免只看到“没有新笔记”而不知道跳过原因。
-- [x] 当前 Cookie 仍由 Hardy 从浏览器手动复制；不会在 toast、日志或错误信息中输出完整 `__client_id`。
-- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；不做 AI 润色；Cookie 引导和过期处理还没完善；洛谷 API 字段仍需要继续真实使用验证。
+- [x] 洛谷 Cookie 配置引导和过期提示已完成：设置面板说明需要从浏览器洛谷 Cookie 中复制 `_uid` 和 `__client_id`，路径为 `F12 -> Application/应用 -> Cookies -> https://www.luogu.com.cn`。
+- [x] 设置面板已提醒 `__client_id` 不要泄露、不要提交到 Git；toast、日志或错误信息中不会输出完整 `__client_id`。
+- [x] 测试连接 / 同步遇到 401 或 403 时会提示“洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。”；网络失败、请求超时、返回格式异常也有简短错误提示。
+- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；不做 AI 润色；洛谷 API 字段仍需要继续真实使用验证。
 
 相关提交：
 
@@ -490,6 +493,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `986d45f feat(luogu): sync insight submissions`
 - `1f5cbc8 fix(luogu): show sync summary`
 - `69069f0 feat(luogu): paginate submission sync`
+- `2027b5c fix(luogu): clarify cookie setup errors`
 
 端到端验证结果：
 
@@ -574,14 +578,15 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - 页间隔为 1 秒，详情请求间隔仍保持 3 秒；文件已存在时跳过不覆盖。
   - 同步成功且本轮无严重失败时才更新 `last_submission_id`；失败时不推进。
   - 同步摘要会显示 scanned/ac/imported/no_insight/existing/failed/scanned_pages/reached_last_submission_id/last_submission_id。
-  - 已知限制：只手动同步，不做启动自动同步或定时同步；不做 AI 润色；Cookie 仍需用户手动从浏览器复制，Cookie 引导和过期处理还没完善；API 字段仍需继续真实使用验证。
+  - Cookie 配置引导和过期提示已完成：设置面板说明从 `F12 -> Application/应用 -> Cookies -> https://www.luogu.com.cn` 复制 `_uid` 和 `__client_id`，并提醒 `__client_id` 不要泄露、不要提交到 Git。
+  - 401/403 会提示 Cookie 可能失效，需要重新复制；网络失败、请求超时、返回格式异常也有简短错误提示。
+  - 已知限制：只手动同步，不做启动自动同步或定时同步；不做 AI 润色；API 字段仍需继续真实使用验证。
 
 尚未完成：
 
 - 博客视觉仍可继续打磨。
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
-- Cookie 引导/过期处理还没完善。
 - 启动/定时自动同步还没做。
 - 还没有 AI 辅助。
 
@@ -698,7 +703,6 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
-- Cookie 引导/过期处理还没完善。
 - 启动/定时自动同步还没做。
 - AI 辅助。
 - 博客视觉仍可继续打磨。
