@@ -782,6 +782,7 @@ export default function App() {
         <aside className="flex flex-1 overflow-hidden">
           <MarkdownPreview
             markdown={markdown}
+            noteRelativePath={currentFilePath}
             scrollRatio={scrollRatio}
             className="h-full w-full"
           />

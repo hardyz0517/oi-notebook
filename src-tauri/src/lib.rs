@@ -168,6 +168,7 @@ pub fn run() {
             notes::read_note,
             notes::write_note,
             notes::save_note_asset,
+            notes::resolve_note_asset_url,
             notes::delete_note,
             notes::rename_note,
             git::commit_note,

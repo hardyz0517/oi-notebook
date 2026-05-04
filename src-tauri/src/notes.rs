@@ -7,7 +7,7 @@
 use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use chrono::{DateTime, Timelike, Utc};
@@ -34,6 +34,12 @@ pub struct NoteFileInfo {
 pub struct SaveNoteAssetResult {
     pub markdown_path: String,
     pub asset_relative_path: String,
+}
+
+#[derive(Debug)]
+struct ResolvedNoteAsset {
+    path: PathBuf,
+    mime_type: &'static str,
 }
 
 /// 返回 notes 目录的绝对 PathBuf。
@@ -169,6 +175,128 @@ fn markdown_asset_path(note_relative_path: &str, asset_relative_path: &str) -> S
     let depth = note_relative_path.split('/').count().saturating_sub(1);
     let prefix = "../".repeat(depth);
     format!("{prefix}{asset_relative_path}")
+}
+
+fn image_mime_type(path: &Path) -> Result<&'static str, String> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("png") => Ok("image/png"),
+        Some("jpg") | Some("jpeg") => Ok("image/jpeg"),
+        Some("webp") => Ok("image/webp"),
+        _ => Err("图片预览失败：仅支持 png/jpg/webp 图片".to_string()),
+    }
+}
+
+fn normalize_relative_image_src(image_src: &str) -> Result<String, String> {
+    let normalized = image_src.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || image_src.starts_with('\\')
+        || Path::new(&normalized).is_absolute()
+        || lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("data:")
+        || lower.starts_with("blob:")
+        || lower.starts_with("file:")
+        || lower.starts_with("asset:")
+        || normalized.contains('?')
+        || normalized.contains('#')
+    {
+        return Err(format!("图片预览失败：不支持的图片路径 '{image_src}'"));
+    }
+
+    Ok(normalized)
+}
+
+fn resolve_note_asset_path(
+    notes_dir: &Path,
+    note_relative_path: &str,
+    image_src: &str,
+) -> Result<ResolvedNoteAsset, String> {
+    let note_relative_path = validate_note_reference_path(notes_dir, note_relative_path)?;
+    let image_src = normalize_relative_image_src(image_src)?;
+
+    let canonical_notes = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 notes 目录路径：{e}"))?;
+
+    let assets_dir = canonical_notes.join("assets");
+    let canonical_assets = assets_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 notes/assets 目录路径：{e}"))?;
+
+    let note_dir = Path::new(&note_relative_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let base_dir = canonical_notes.join(note_dir);
+    let candidate = base_dir.join(Path::new(&image_src));
+
+    let mut resolved = PathBuf::new();
+    for component in candidate.components() {
+        match component {
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+            Component::RootDir => resolved.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Normal(segment) => resolved.push(segment),
+        }
+    }
+
+    if !resolved.starts_with(&canonical_assets) {
+        return Err(format!(
+            "图片预览失败：图片路径 '{image_src}' 不在 notes/assets/ 下"
+        ));
+    }
+
+    let canonical_target = resolved
+        .canonicalize()
+        .map_err(|e| format!("图片预览失败：无法读取图片 '{image_src}'：{e}"))?;
+    if !canonical_target.starts_with(&canonical_assets) {
+        return Err(format!(
+            "图片预览失败：图片路径 '{image_src}' 越界到 notes/assets/ 之外"
+        ));
+    }
+    if !canonical_target.is_file() {
+        return Err(format!("图片预览失败：图片不存在 '{image_src}'"));
+    }
+
+    let mime_type = image_mime_type(&canonical_target)?;
+
+    Ok(ResolvedNoteAsset {
+        path: canonical_target,
+        mime_type,
+    })
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+
+        encoded.push(TABLE[(b0 >> 2) as usize] as char);
+        encoded.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+
+        if chunk.len() > 1 {
+            encoded.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+
+        if chunk.len() > 2 {
+            encoded.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+
+    encoded
 }
 
 /// 递归列出 notes/ 目录下所有 .md 文件（含子目录），
@@ -360,6 +488,25 @@ pub fn save_note_asset(
     })
 }
 
+#[tauri::command]
+pub fn resolve_note_asset_url(
+    note_relative_path: String,
+    image_src: String,
+) -> Result<String, String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+
+    let resolved = resolve_note_asset_path(&notes_dir, &note_relative_path, &image_src)?;
+    let bytes = fs::read(&resolved.path)
+        .map_err(|e| format!("图片预览失败：读取图片失败（{}）：{e}", resolved.path.display()))?;
+
+    Ok(format!(
+        "data:{};base64,{}",
+        resolved.mime_type,
+        base64_encode(&bytes)
+    ))
+}
+
 /// 删除指定笔记文件。若文件不存在，返回明确的错误信息而非静默忽略。
 ///
 /// `relative_path`：相对于 notes/ 的路径，如 `"tricks/qpow.md"`
@@ -468,5 +615,37 @@ mod tests {
         // tricks/ 子目录不存在也应返回 Ok（safe_note_path 只做校验，不要求目标存在）
         let result = safe_note_path(dir.path(), "tricks/qpow.md").unwrap();
         assert!(!result.exists());
+    }
+
+    #[test]
+    fn resolve_asset_from_nested_note() {
+        let dir = tempdir().unwrap();
+        let assets_dir = dir.path().join("assets");
+        fs::create_dir_all(&assets_dir).unwrap();
+        fs::write(assets_dir.join("paste.png"), [1_u8, 2, 3]).unwrap();
+
+        let resolved =
+            resolve_note_asset_path(dir.path(), "luogu/P/foo.md", "../../assets/paste.png")
+                .unwrap();
+
+        assert!(resolved.path.ends_with("assets/paste.png"));
+        assert_eq!(resolved.mime_type, "image/png");
+    }
+
+    #[test]
+    fn reject_resolved_image_outside_assets() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("assets")).unwrap();
+        fs::create_dir_all(dir.path().join("tricks")).unwrap();
+        fs::write(dir.path().join("tricks/local.png"), [1_u8]).unwrap();
+
+        assert!(resolve_note_asset_path(dir.path(), "tricks/foo.md", "local.png").is_err());
+    }
+
+    #[test]
+    fn base64_encode_pads_short_chunks() {
+        assert_eq!(base64_encode(&[1]), "AQ==");
+        assert_eq!(base64_encode(&[1, 2]), "AQI=");
+        assert_eq!(base64_encode(&[1, 2, 3]), "AQID");
     }
 }

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/lib/markdown";
+import { resolveNoteAssetUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface MarkdownPreviewProps {
   markdown: string;
+  noteRelativePath?: string | null;
   scrollRatio?: number;
   className?: string;
 }
 
 export default function MarkdownPreview({
   markdown,
+  noteRelativePath,
   scrollRatio,
   className,
 }: MarkdownPreviewProps) {
@@ -33,17 +36,19 @@ export default function MarkdownPreview({
     // 过期结果。
     let cancelled = false;
 
-    renderMarkdown(markdown).then((html) => {
-      if (!cancelled) {
-        setRenderedHtml(html);
-      }
-    });
+    renderMarkdown(markdown)
+      .then((html) => rewritePreviewImageSources(html, noteRelativePath))
+      .then((html) => {
+        if (!cancelled) {
+          setRenderedHtml(html);
+        }
+      });
 
     return () => {
       // effect cleanup：将当前这次异步操作标记为已取消
       cancelled = true;
     };
-  }, [markdown]); // markdown 每次变化都重新渲染
+  }, [markdown, noteRelativePath]); // markdown 每次变化都重新渲染
 
   // 编辑器滚动比例变化、或 HTML 重新渲染后同步预览位置
   // scrollRatio 为 undefined 时（初次挂载）跳过，避免奇怪跳动
@@ -125,4 +130,47 @@ export default function MarkdownPreview({
       />
     </div>
   );
+}
+
+function shouldResolveNoteAsset(src: string): boolean {
+  const normalized = src.replace(/\\/g, "/").toLowerCase();
+  if (
+    normalized === "" ||
+    normalized.startsWith("/") ||
+    normalized.includes("?") ||
+    normalized.includes("#")
+  ) {
+    return false;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/.test(normalized)) {
+    return false;
+  }
+  return normalized === "assets" || normalized.startsWith("assets/") || normalized.includes("/assets/");
+}
+
+async function rewritePreviewImageSources(
+  html: string,
+  noteRelativePath?: string | null,
+): Promise<string> {
+  if (!noteRelativePath) return html;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const images = Array.from(doc.querySelectorAll("img"));
+
+  await Promise.all(
+    images.map(async (image) => {
+      const src = image.getAttribute("src");
+      if (!src || !shouldResolveNoteAsset(src)) return;
+
+      try {
+        const resolvedSrc = await resolveNoteAssetUrl(noteRelativePath, src);
+        image.setAttribute("src", resolvedSrc);
+      } catch (error) {
+        console.warn("Resolve note image failed:", error);
+      }
+    }),
+  );
+
+  return doc.body.innerHTML;
 }

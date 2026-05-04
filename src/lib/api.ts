@@ -108,6 +108,20 @@ export async function saveNoteAsset(
   }
 }
 
+export async function resolveNoteAssetUrl(
+  noteRelativePath: string,
+  imageSrc: string,
+): Promise<string> {
+  try {
+    return await invoke<string>("resolve_note_asset_url", {
+      noteRelativePath,
+      imageSrc,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 /**
  * 手动执行 git push origin main。
  * 对应 Rust 命令：push_git
