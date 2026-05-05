@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-04（记录洛谷 Cookie 配置引导）
+**最后更新**：2026-05-05（记录 AI-first 洛谷 insight 工作流）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -104,7 +104,7 @@
     ├─ 主窗口新建笔记已有模板选择，支持空白/Trick 模板/题解模板，已验收
     ├─ 主窗口 CodeMirror 已支持粘贴图片到 notes/assets，保存时当前 note 和本轮 assets 一起自动 commit，已验收
     ├─ 右侧 MarkdownPreview 已支持显示 notes/assets 图片，已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、AI 辅助、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动定时/退出时 push、通用 AI 笔记能力、博客视觉继续打磨
 
 [~] Phase 6  洛谷爬虫
     ├─ @oinb-insight 本地导入 MVP 已完成
@@ -113,10 +113,13 @@
     ├─ 手动“同步洛谷”MVP 已完成：分页拉取提交、过滤 AC、抓详情源码、生成 `notes/luogu` 并自动 commit
     ├─ 分页同步已完成：最多扫描 5 页，遇到 `last_submission_id` 会提前停止
     ├─ Cookie 配置引导和过期提示已完成
-    └─ 未完成：启动/定时自动同步、AI 辅助
+    ├─ AI-first 洛谷 insight 已完成：普通尾部块注释候选会由 AI 整理成 `notes/luogu` draft 笔记
+    └─ 未完成：启动/定时自动同步
 
-[ ] Phase 7  AI 辅助整理
-    └─ OpenAI-compatible providers + OpenRouter-compatible routing
+[~] Phase 7  AI 辅助整理
+    ├─ OpenAI-compatible AI 配置和连接测试已完成，DeepSeek 已验收可用
+    ├─ 洛谷普通注释 AI 整理已接入同步和本地导入
+    └─ 未完成：通用 AI 自动打标签、摘要、润色、缓存、多 provider 路由
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
@@ -143,7 +146,7 @@
 | 数学 | **KaTeX** | 快，适合实时预览 |
 | 代码高亮 | **@shikijs/rehype** | 官方维护的 Shiki rehype 集成 |
 | 博客（部分完成） | **Astro** | `site/` 子项目已初始化，直接读取 `notes/**/*.md` |
-| AI（未做） | OpenAI-compatible providers | DeepSeek/Kimi/GLM/通义/OpenRouter 等可走统一适配 |
+| AI（部分完成） | OpenAI-compatible Chat Completions | DeepSeek 已验收；当前已接入洛谷 insight 整理，通用标签/摘要/润色/缓存仍未做 |
 
 其它重要决策：
 
@@ -363,7 +366,7 @@ Phase 5 Astro 子项目初始化、Tauri 开发模式集成、打开博客入口
 
 ## §12. Phase 5 本地 Astro 博客进度（截至 2026-05-02）
 
-Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署和当前最小 Git 同步工作流：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”“重启博客”和“同步 Git”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前 Git 工作流是“保存/图片 assets/删除/重命名后自动 commit，手动按钮 push”，图片粘贴已能保存到 `notes/assets` 并随当前 note 一起自动 commit，删除和重命名笔记也已生成对应 note commit；仍不包含自动定时/退出时 push、生产分发策略或 AI。
+Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 GitHub Pages project page 部署和当前最小 Git 同步工作流：仓库新增独立 `site/` Astro 子项目，Tauri 应用启动时会在后台启动本地 Astro dev server，桌面端 Header 提供“打开博客”“重启博客”和“同步 Git”入口；线上站点通过 GitHub Actions 发布到 `https://hardyz0517.github.io/oi-notebook/`。当前 Git 工作流是“保存/图片 assets/删除/重命名后自动 commit，手动按钮 push”，图片粘贴已能保存到 `notes/assets` 并随当前 note 一起自动 commit，删除和重命名笔记也已生成对应 note commit；仍不包含自动定时/退出时 push、生产分发策略或通用 AI 笔记能力。
 
 已完成内容：
 
@@ -439,10 +442,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] tracked draft 测试笔记已创建用于验证自动 commit 和博客 UI；它们均为 `draft: true`，生产构建会过滤。
 - [x] 手动同步 Git 已验收成功：点击按钮后 `git push origin main` 成功，并触发 GitHub Actions / Pages 链路更新。
 - [x] 洛谷配置存储 MVP 已完成：本地配置写入仓库根目录 `.oinb/config.json`，字段包含 `luogu.uid`、`luogu.client_id`、`luogu.last_submission_id`；当前只做本地保存，不做网络请求、不验证 Cookie、不同步提交；`.oinb/config.json` 已加入 `.gitignore`，避免提交敏感配置。
-- [x] 洛谷 @oinb-insight 本地导入 MVP 已完成：用户可手动粘贴洛谷源码，解析第一个 C/C++ 块注释 `/* @oinb-insight ... */`，生成 `notes/luogu/P{problem_id}-{safe_title}.md`，文件已存在时跳过不覆盖。
+- [x] 洛谷 @oinb-insight 本地导入 MVP 已完成：用户可手动粘贴洛谷源码，解析第一个 C/C++ 块注释 `/* @oinb-insight ... */`，生成 `notes/luogu/P{problem_id}-{safe_title}.md`，文件已存在时跳过不覆盖；该路径现在只作为历史 MVP 保留，不再是主路径。
 - [x] 中文路径 Git 自动提交已修复：staged 文件列表改用 NUL 分隔解析，中文文件名不再因为 Git quote/转义而误判；删除未跟踪残留笔记时会返回 noChanges，不再误报 `pathspec did not match any files`。
 - [x] 洛谷“测试连接”dry run 已完成并验收：读取 `.oinb/config.json` 里的 `uid` / `__client_id`，只请求提交列表第一页并返回最近提交摘要；不生成笔记、不更新 `last_submission_id`、不 commit、不 push。
-- [x] 手动“同步洛谷”MVP 已完成：读取配置，分页拉取提交，过滤 AC，按 `submission_id` 从小到大处理，抓取详情源码，提取 `@oinb-insight`，生成 `notes/luogu` 笔记，并对新笔记执行自动 commit。
+- [x] 手动“同步洛谷”MVP 已完成：读取配置，分页拉取提交，过滤 AC，按 `submission_id` 从小到大处理，抓取详情源码，生成 `notes/luogu` 笔记，并对新笔记执行自动 commit。
 - [x] 洛谷分页同步已完成：从第 1 页开始，最多扫描 5 页；遇到 `submission_id <= last_submission_id` 会提前停止继续翻页。
 - [x] 洛谷同步页间隔为 1 秒，详情请求仍保持至少 3 秒间隔；目标文件已存在时跳过不覆盖。
 - [x] 同步流程整体成功后更新 `.oinb/config.json` 中的 `last_submission_id`；同步中有失败时不推进，避免漏扫。
@@ -450,7 +453,17 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] 洛谷 Cookie 配置引导和过期提示已完成：设置面板说明需要从浏览器洛谷 Cookie 中复制 `_uid` 和 `__client_id`，路径为 `F12 -> Application/应用 -> Cookies -> https://www.luogu.com.cn`。
 - [x] 设置面板已提醒 `__client_id` 不要泄露、不要提交到 Git；toast、日志或错误信息中不会输出完整 `__client_id`。
 - [x] 测试连接 / 同步遇到 401 或 403 时会提示“洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。”；网络失败、请求超时、返回格式异常也有简短错误提示。
-- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；不做 AI 润色；洛谷 API 字段仍需要继续真实使用验证。
+- [x] AI 配置和 OpenAI-compatible 连接测试已完成：`.oinb/config.json` 记录 `ai.base_url`、`ai.api_key`、`ai.model`；前端使用 password input 保存 API Key；连接测试通过 Chat Completions 做极小 JSON 任务，不打印完整 `api_key`。
+- [x] 普通尾部注释候选提取已完成：AC 源码靠近末尾的 C/C++ 块注释 `/* ... */`，只要包含“启示 / 坑点 / 思路 / 总结 / trick / idea”等关键词且内容达到下限，就会作为 AI 候选；源码中间注释、无关键词注释、过短注释不会作为候选。
+- [x] 洛谷同步和本地导入已改为 AI-first：不再要求用户写完整 `@oinb-insight` YAML；如果仍有 `@oinb-insight`，也只把注释内容作为候选交给 AI，不再走本地 YAML 解析生成笔记。
+- [x] 没有候选注释时不会调用 AI，避免无注释源码浪费 token 或产生幻觉。
+- [x] 洛谷 insight AI 第一版只发送题目信息、提交 ID 和候选注释，不发送完整源码。
+- [x] AI 必须返回结构化 JSON：`should_import`、`title`、`tags`、`difficulty`、`summary`、`draft`、`body`；解析失败算 AI failed，不把完整模型输出打到 toast。
+- [x] `should_import=true` 时生成 `notes/luogu/Pxxx-title.md` draft 笔记，文件已存在则跳过不覆盖；同步生成后自动 commit，不自动 push。
+- [x] AI 生成笔记 frontmatter 会写入 `ai_generated: true` 和 `ai_model`，但不会写入 `api_key` 或 `base_url`。
+- [x] 同步摘要已包含 `ai_imported_count` / `ai_skipped_count` / `ai_failed_count`，AI 调用失败算严重失败，本轮不推进 `last_submission_id`。
+- [x] DeepSeek 路径已由 Hardy 验收：测试连接成功，AI 整理洛谷注释时 DeepSeek API 平台能看到请求。
+- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；通用 AI 自动打标签、摘要、润色和缓存还没做；生产分发策略还没做。
 
 相关提交：
 
@@ -494,6 +507,10 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `1f5cbc8 fix(luogu): show sync summary`
 - `69069f0 feat(luogu): paginate submission sync`
 - `2027b5c fix(luogu): clarify cookie setup errors`
+- `edbc15e feat(luogu): detect AI insight comment candidates`
+- `ecb605c feat(ai): add provider config and test`
+- `dd9818f feat(ai): organize Luogu comments with AI`
+- `7ef9ed9 feat(ai): mark generated Luogu notes`
 
 端到端验证结果：
 
@@ -570,17 +587,21 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - 删除/重命名 commit 不自动 push，仍由 Header “同步 Git”按钮手动执行 `git push origin main`。
   - Git 端保持误提交防护：commit 前检查暂存区为空；只使用精确 pathspec；add 后复查 staged 文件只属于本次允许集合；不使用 `git add .` 或 `git add notes/`。
 - 洛谷 Phase 4 手动同步 MVP 当前进度：
-  - 本地导入已完成：可粘贴洛谷源码并从 `@oinb-insight` 注释块生成 `notes/luogu` 笔记。
+  - 本地导入已完成：可粘贴洛谷源码并通过 AI-first 路径从普通尾部块注释生成 `notes/luogu` draft 笔记；旧 `@oinb-insight` 注释块只作为候选输入，不再本地解析 YAML。
   - 配置存储已完成：`.oinb/config.json` 保存 `luogu.uid`、`luogu.client_id`、`luogu.last_submission_id`，且已加入 `.gitignore`。
   - “测试连接”dry run 已完成并验收：只拉提交列表摘要，不生成笔记、不更新 `last_submission_id`。
-  - 手动“同步洛谷”MVP 已完成：读取配置、分页拉取提交、过滤 AC、按 `submission_id` 从小到大处理、抓详情源码、提取 `@oinb-insight`、生成 `notes/luogu`、自动 commit。
+  - 手动“同步洛谷”MVP 已完成：读取配置、分页拉取提交、过滤 AC、按 `submission_id` 从小到大处理、抓详情源码、提取 AI 候选注释、生成 `notes/luogu`、自动 commit。
   - 分页同步已完成：最多扫描 5 页；遇到 `submission_id <= last_submission_id` 会提前停止继续翻页。
   - 页间隔为 1 秒，详情请求间隔仍保持 3 秒；文件已存在时跳过不覆盖。
   - 同步成功且本轮无严重失败时才更新 `last_submission_id`；失败时不推进。
-  - 同步摘要会显示 scanned/ac/imported/no_insight/existing/failed/scanned_pages/reached_last_submission_id/last_submission_id。
+  - 普通尾部块注释包含“启示 / 坑点 / 思路 / 总结 / trick / idea”等候选内容时会调用 AI 整理；没有候选注释时不会调用 AI。
+  - AI 只接收题目信息、提交 ID 和候选注释，第一版不发送完整源码。
+  - AI 返回结构化 JSON 后生成 `notes/luogu` draft 笔记；AI 生成笔记 frontmatter 会写入 `ai_generated: true` 和 `ai_model`，不写入 `api_key` 或 `base_url`。
+  - 同步摘要会显示 scanned/ac/imported/no_insight/existing/failed/scanned_pages/reached_last_submission_id/last_submission_id，以及 ai_imported/ai_skipped/ai_failed。
   - Cookie 配置引导和过期提示已完成：设置面板说明从 `F12 -> Application/应用 -> Cookies -> https://www.luogu.com.cn` 复制 `_uid` 和 `__client_id`，并提醒 `__client_id` 不要泄露、不要提交到 Git。
   - 401/403 会提示 Cookie 可能失效，需要重新复制；网络失败、请求超时、返回格式异常也有简短错误提示。
-  - 已知限制：只手动同步，不做启动自动同步或定时同步；不做 AI 润色；API 字段仍需继续真实使用验证。
+  - AI 配置和测试连接已完成，DeepSeek 路径已由 Hardy 验收：API 平台能看到请求。
+  - 已知限制：只手动同步，不做启动自动同步或定时同步；通用 AI 自动打标签、摘要、润色和缓存还没做；生产分发策略还没做。
 
 尚未完成：
 
@@ -588,9 +609,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
 - 启动/定时自动同步还没做。
-- 还没有 AI 辅助。
+- 通用 AI 自动打标签还没做。
+- 通用 AI 摘要 / 润色还没做。
+- AI 缓存还没做。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、洛谷配置体验或 AI 辅助方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、启动/定时洛谷同步，或通用 AI 标签/摘要/润色方向。
 
 ### 博客 UI 打磨进展
 
@@ -704,5 +727,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
 - 启动/定时自动同步还没做。
-- AI 辅助。
+- 通用 AI 自动打标签还没做。
+- 通用 AI 摘要 / 润色还没做。
+- AI 缓存还没做。
 - 博客视觉仍可继续打磨。
