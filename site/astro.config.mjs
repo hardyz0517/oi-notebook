@@ -1,16 +1,13 @@
 import { defineConfig } from "astro/config";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
+import { resolveNotesDir } from "./notes-path.mjs";
 
 const isGithubPages = process.env.GITHUB_PAGES === "true";
 
 function watchExternalNotes() {
-  const notesDir = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../notes",
-  );
+  const notesDir = resolveNotesDir();
 
   return {
     name: "watch-external-notes",

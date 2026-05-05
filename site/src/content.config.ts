@@ -1,5 +1,6 @@
 import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
+import { resolveNotesDirUrl } from "../notes-path.mjs";
 
 const optionalDate = z.preprocess(
   (value) => (value === "" || value == null ? undefined : value),
@@ -8,7 +9,7 @@ const optionalDate = z.preprocess(
 
 const notes = defineCollection({
   loader: glob({
-    base: "../notes",
+    base: resolveNotesDirUrl(),
     pattern: "**/*.md",
   }),
   schema: z.object({
