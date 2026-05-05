@@ -167,6 +167,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             notes::list_notes,
+            notes::search_notes,
             notes::read_note,
             notes::write_note,
             notes::save_note_asset,

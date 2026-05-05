@@ -8,6 +8,15 @@ export interface SaveNoteAssetResult {
   assetRelativePath: string;
 }
 
+export interface NoteSearchResult {
+  path: string;
+  title: string;
+  date: string;
+  tags: string[];
+  summary: string;
+  excerpt: string;
+}
+
 export interface ImportLuoguInsightResult {
   relativePath: string;
   aiModel: string;
@@ -114,6 +123,14 @@ export async function listNotes(): Promise<NoteFileInfo[]> {
 export async function readNote(relativePath: string): Promise<string> {
   try {
     return await invoke<string>("read_note", { relativePath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function searchNotes(query: string): Promise<NoteSearchResult[]> {
+  try {
+    return await invoke<NoteSearchResult[]>("search_notes", { query });
   } catch (e) {
     throw toError(e);
   }

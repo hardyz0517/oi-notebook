@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Sparkles, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody } from "@/lib/api";
-import type { SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes } from "@/lib/api";
+import type { NoteSearchResult, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -123,6 +123,15 @@ function splitMarkdownBody(markdown: string): MarkdownBodyParts {
   };
 }
 
+function formatSearchDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -160,12 +169,17 @@ export default function App() {
   const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
   const [isPolishingNoteBody, setIsPolishingNoteBody] = useState(false);
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
+  const [isSearchingNotes, setIsSearchingNotes] = useState(false);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
   const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
 
   function validateFilename(name: string): string | null {
@@ -688,12 +702,21 @@ export default function App() {
     setPolishedBodyPreview(null);
   };
 
-  const handleSelectFile = (path: string) => {
+  const handleSelectFile = (path: string): boolean => {
     if (isDirty) {
       const ok = window.confirm("当前笔记有未保存的改动，切换将会丢失。确定切换吗？");
-      if (!ok) return;
+      if (!ok) return false;
     }
     setCurrentFilePath(path);
+    return true;
+  };
+
+  const handleSearchResultSelect = (path: string) => {
+    const didSelect = handleSelectFile(path);
+    if (didSelect) {
+      setIsSearchOpen(false);
+      setSearchQuery("");
+    }
   };
 
   const showSavedToast = (message: string, warning: string | null) => {
@@ -745,6 +768,57 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentFilePath, markdown, pendingAssetsByFile]);
+
+  // Ctrl+K / Cmd+K 打开当前窗口内搜索面板
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) return;
+      e.preventDefault();
+      setIsSearchOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isSearchOpen) return;
+
+    const timer = window.setTimeout(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (!isSearchOpen) return;
+
+    let cancelled = false;
+    setIsSearchingNotes(true);
+
+    const timer = window.setTimeout(() => {
+      searchNotes(searchQuery)
+        .then((results) => {
+          if (!cancelled) setSearchResults(results);
+        })
+        .catch((e: Error) => {
+          if (!cancelled) {
+            setSearchResults([]);
+            toast.error(`搜索失败：${e.message}`);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsSearchingNotes(false);
+        });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isSearchOpen, searchQuery]);
 
   // 挂载时从后端加载笔记列表
   useEffect(() => {
@@ -817,6 +891,86 @@ export default function App() {
   return (
     <>
     <Toaster />
+    <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
+      <DialogContent className="max-w-2xl gap-0 p-0">
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Search className="h-4 w-4" />
+            搜索笔记
+          </DialogTitle>
+        </DialogHeader>
+        <div className="border-b border-border p-3">
+          <Input
+            ref={searchInputRef}
+            value={searchQuery}
+            placeholder="搜索标题、正文、tags、source、summary、路径；支持 tag:DP source:luogu @recent"
+            className="h-9"
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchResults[0]) {
+                e.preventDefault();
+                handleSearchResultSelect(searchResults[0].path);
+              }
+            }}
+          />
+        </div>
+        <div className="max-h-[28rem] overflow-y-auto p-2">
+          {isSearchingNotes ? (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+              搜索中...
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+              没有找到匹配的笔记
+            </div>
+          ) : (
+            <div className="grid gap-1">
+              {searchResults.map((result) => {
+                const preview = result.summary || result.excerpt;
+
+                return (
+                  <button
+                    key={result.path}
+                    type="button"
+                    className="grid gap-1 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                    onClick={() => handleSearchResultSelect(result.path)}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {result.title}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatSearchDate(result.date)}
+                      </span>
+                    </div>
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">
+                      {result.path}
+                    </div>
+                    {result.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {result.tags.slice(0, 5).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {preview && (
+                      <div className="max-h-10 overflow-hidden text-xs leading-5 text-muted-foreground">
+                        {preview}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
     <Dialog open={dialogMode !== null} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent>
         <DialogHeader>
@@ -1355,16 +1509,28 @@ export default function App() {
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               笔记列表
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={openCreateDialog}
-              title="新建笔记"
-              aria-label="新建笔记"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setIsSearchOpen(true)}
+                title="搜索笔记 Ctrl+K"
+                aria-label="搜索笔记"
+              >
+                <Search className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={openCreateDialog}
+                title="新建笔记"
+                aria-label="新建笔记"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
             <FileTree
