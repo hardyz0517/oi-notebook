@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, FileText, PlugZap, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes } from "@/lib/api";
-import type { NoteSearchResult, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import type { NoteSearchResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -166,6 +166,12 @@ export default function App() {
   const [aiConfigBaseUrl, setAiConfigBaseUrl] = useState("");
   const [aiConfigApiKey, setAiConfigApiKey] = useState("");
   const [aiConfigModel, setAiConfigModel] = useState("");
+  const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplateSummary[]>([]);
+  const [selectedPromptFileName, setSelectedPromptFileName] = useState("");
+  const [promptContent, setPromptContent] = useState("");
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
   const [isPolishingNoteBody, setIsPolishingNoteBody] = useState(false);
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
@@ -181,6 +187,10 @@ export default function App() {
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
   const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
+  const selectedPrompt = useMemo(
+    () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
+    [promptTemplates, selectedPromptFileName],
+  );
 
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
@@ -456,6 +466,65 @@ export default function App() {
       toast.error(`AI 连接测试失败：${getErrorMessage(e)}`);
     } finally {
       setIsTestingAiConnection(false);
+    }
+  };
+
+  const loadPromptContent = async (fileName: string) => {
+    setIsLoadingPrompt(true);
+    try {
+      const prompt = await readAiPrompt(fileName);
+      setSelectedPromptFileName(prompt.fileName);
+      setPromptContent(prompt.content);
+    } catch (e) {
+      toast.error(`Prompt 读取失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsLoadingPrompt(false);
+    }
+  };
+
+  const openPromptDialog = async () => {
+    setIsPromptDialogOpen(true);
+    setIsLoadingPrompt(true);
+    try {
+      const prompts = await listAiPrompts();
+      setPromptTemplates(prompts);
+      const firstPrompt = prompts[0];
+      if (firstPrompt) {
+        const prompt = await readAiPrompt(firstPrompt.fileName);
+        setSelectedPromptFileName(prompt.fileName);
+        setPromptContent(prompt.content);
+      }
+    } catch (e) {
+      toast.error(`Prompt 读取失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsLoadingPrompt(false);
+    }
+  };
+
+  const closePromptDialog = () => {
+    if (isLoadingPrompt || isSavingPrompt) return;
+    setIsPromptDialogOpen(false);
+  };
+
+  const handleSelectPrompt = (fileName: string) => {
+    if (fileName === selectedPromptFileName || isLoadingPrompt || isSavingPrompt) return;
+    void loadPromptContent(fileName);
+  };
+
+  const handleSavePrompt = async () => {
+    if (!selectedPromptFileName) {
+      toast.error("请先选择一个 Prompt");
+      return;
+    }
+
+    setIsSavingPrompt(true);
+    try {
+      await saveAiPrompt(selectedPromptFileName, promptContent);
+      toast.success("Prompt 已保存");
+    } catch (e) {
+      toast.error(`Prompt 保存失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsSavingPrompt(false);
     }
   };
 
@@ -1319,6 +1388,59 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={isPromptDialogOpen} onOpenChange={(open) => !open && closePromptDialog()}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>AI Prompt</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+            <div>Prompt 保存在本地 .oinb/prompts/，不会提交到 Git。</div>
+            <div>支持变量：{"{{problem_id}}"}、{"{{problem_title}}"}、{"{{submission_id}}"}、{"{{candidate_comment}}"}、{"{{note_path}}"}、{"{{content}}"}、{"{{body}}"}。</div>
+            <div>不要把 API Key、Base URL、Cookie 或其它密钥写进 Prompt。</div>
+          </div>
+          <div className="grid grid-cols-[13rem_1fr] gap-3">
+            <div className="grid content-start gap-2">
+              {promptTemplates.map((prompt) => (
+                <Button
+                  key={prompt.fileName}
+                  variant={prompt.fileName === selectedPromptFileName ? "secondary" : "outline"}
+                  className="h-auto justify-start px-3 py-2 text-left text-xs"
+                  disabled={isLoadingPrompt || isSavingPrompt}
+                  onClick={() => handleSelectPrompt(prompt.fileName)}
+                >
+                  <span className="grid gap-0.5">
+                    <span className="font-medium">{prompt.fileName}</span>
+                    <span className="text-[10px] text-muted-foreground">{prompt.displayName}</span>
+                  </span>
+                </Button>
+              ))}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ai-prompt-content">
+                {selectedPrompt ? selectedPrompt.fileName : "Prompt"}
+              </Label>
+              <textarea
+                id="ai-prompt-content"
+                value={promptContent}
+                disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}
+                rows={18}
+                className="min-h-[30rem] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                onChange={(e) => setPromptContent(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closePromptDialog} disabled={isLoadingPrompt || isSavingPrompt}>
+            取消
+          </Button>
+          <Button onClick={handleSavePrompt} disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -1468,6 +1590,16 @@ export default function App() {
           >
             <Bot className="h-3.5 w-3.5" />
             AI 设置
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={openPromptDialog}
+            disabled={isLoadingPrompt || isSavingPrompt}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            AI Prompt
           </Button>
           <Button
             variant="outline"

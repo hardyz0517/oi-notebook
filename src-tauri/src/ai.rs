@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use crate::luogu::{read_config, write_config, AiConfigFields};
+use crate::prompts::{render_prompt_template, PromptTemplateKind};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -308,36 +309,19 @@ pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
 ) -> Result<OrganizedLuoguInsight, String> {
-    let system_prompt = r#"You are an OI competitive programming notebook assistant.
-Return only strict JSON. Do not use markdown fences around the JSON.
-Required JSON schema:
-{
-  "should_import": boolean,
-  "title": string,
-  "tags": string[],
-  "difficulty": string,
-  "summary": string,
-  "draft": boolean,
-  "body": string
-}
-Rules:
-- Only organize the insight, idea, trick, pitfall, or lesson explicitly written in the user's comment.
-- Do not invent a complete solution, proof, or missing algorithm details.
-- If the comment has no clear reusable value, return should_import=false.
-- body must be Markdown.
-- tags must contain 2-5 concise items when should_import=true.
-- draft should default to true unless the comment clearly says it is publish-ready."#;
-    let user_prompt = format!(
-        "Problem ID: {}\nProblem title: {}\nSubmission ID: {}\n\nCandidate comment:\n{}",
-        input.problem_id.trim(),
-        input.problem_title.trim(),
-        input.submission_id.trim(),
-        input.candidate_comment.trim()
-    );
+    let user_prompt = render_prompt_template(
+        PromptTemplateKind::LuoguInsight,
+        &[
+            ("problem_id", input.problem_id.trim()),
+            ("problem_title", input.problem_title.trim()),
+            ("submission_id", input.submission_id.trim()),
+            ("candidate_comment", input.candidate_comment.trim()),
+        ],
+    )?;
     let messages = json!([
         {
             "role": "system",
-            "content": system_prompt
+            "content": "Return only strict JSON. Do not use markdown fences."
         },
         {
             "role": "user",
@@ -365,28 +349,14 @@ pub fn generate_note_metadata(
     }
 
     let config = read_config()?.ai;
-    let system_prompt = r#"You are an OI competitive programming notebook metadata assistant.
-Return only strict JSON. Do not use markdown fences.
-Required JSON schema:
-{
-  "title": string,
-  "tags": string[],
-  "summary": string
-}
-Rules:
-- Generate metadata only from the current note content.
-- tags must contain 3-5 concise OI or algorithm oriented labels.
-- summary must be one concise sentence.
-- title may be improved, but keep it factual and not exaggerated.
-- Do not rewrite or polish the note body.
-- Do not return Markdown, only JSON."#;
-    let user_prompt = format!(
-        "Note relative path: {relative_path}\n\nCurrent markdown content:\n{markdown_content}"
-    );
+    let user_prompt = render_prompt_template(
+        PromptTemplateKind::NoteMetadata,
+        &[("note_path", relative_path), ("content", markdown_content)],
+    )?;
     let messages = json!([
         {
             "role": "system",
-            "content": system_prompt
+            "content": "Return only strict JSON. Do not use markdown fences."
         },
         {
             "role": "user",
@@ -418,27 +388,14 @@ pub fn polish_note_body(
     }
 
     let config = read_config()?.ai;
-    let system_prompt = r#"You are an OI competitive programming notebook writing assistant.
-Return only strict JSON. Do not use markdown fences.
-Required JSON schema:
-{
-  "polished_body": string
-}
-Rules:
-- Polish only the Markdown body provided by the user.
-- Preserve the existing Markdown structure.
-- Do not change the content inside fenced code blocks.
-- Do not change math formulas, including inline $...$ and block $$...$$ formulas.
-- Do not delete links, images, or tables.
-- Do not invent new solution ideas, proof details, algorithms, or examples.
-- Make the wording clearer and more suitable for OI note review.
-- Return only JSON, not Markdown outside JSON."#;
-    let user_prompt =
-        format!("Note relative path: {relative_path}\n\nMarkdown body to polish:\n{body}");
+    let user_prompt = render_prompt_template(
+        PromptTemplateKind::NotePolish,
+        &[("note_path", relative_path), ("body", body)],
+    )?;
     let messages = json!([
         {
             "role": "system",
-            "content": system_prompt
+            "content": "Return only strict JSON. Do not use markdown fences."
         },
         {
             "role": "user",

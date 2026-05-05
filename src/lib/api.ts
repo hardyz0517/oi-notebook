@@ -65,6 +65,16 @@ export interface PolishedNoteBody {
   polished_body: string;
 }
 
+export interface PromptTemplateSummary {
+  fileName: string;
+  displayName: string;
+}
+
+export interface PromptTemplateContent {
+  fileName: string;
+  content: string;
+}
+
 export interface SyncLuoguInsightsResult {
   scannedPages: number;
   scannedCount: number;
@@ -330,6 +340,30 @@ export async function polishNoteBody(
       relativePath,
       markdownContent,
     });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function listAiPrompts(): Promise<PromptTemplateSummary[]> {
+  try {
+    return await invoke<PromptTemplateSummary[]>("list_ai_prompts");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function readAiPrompt(fileName: string): Promise<PromptTemplateContent> {
+  try {
+    return await invoke<PromptTemplateContent>("read_ai_prompt", { fileName });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function saveAiPrompt(fileName: string, content: string): Promise<void> {
+  try {
+    await invoke<void>("save_ai_prompt", { fileName, content });
   } catch (e) {
     throw toError(e);
   }

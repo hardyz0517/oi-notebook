@@ -3,6 +3,7 @@ mod frontmatter;
 mod git;
 mod luogu;
 mod notes;
+mod prompts;
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -188,6 +189,9 @@ pub fn run() {
             ai::test_ai_connection,
             ai::generate_note_metadata,
             ai::polish_note_body,
+            prompts::list_ai_prompts,
+            prompts::read_ai_prompt,
+            prompts::save_ai_prompt,
             open_blog,
             restart_blog_server,
         ])
