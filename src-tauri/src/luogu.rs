@@ -14,6 +14,7 @@ use serde_yaml::{Mapping, Value as YamlValue};
 use crate::ai::{organize_luogu_insight, OrganizeLuoguInsightInput, OrganizedLuoguInsight};
 use crate::frontmatter;
 use crate::git::{commit_note, CommitNoteStatus};
+use crate::paths;
 
 const LUOGU_SYNC_MAX_PAGES: u32 = 5;
 const LUOGU_SYNC_PAGE_INTERVAL: Duration = Duration::from_secs(1);
@@ -120,20 +121,17 @@ enum LuoguAiImportOutcome {
     AiSkipped,
 }
 
-pub(crate) fn repo_root() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "Cannot resolve repo root from CARGO_MANIFEST_DIR".to_string())
-}
-
 fn get_notes_dir() -> Result<PathBuf, String> {
-    Ok(repo_root()?.join("notes"))
+    paths::notes_dir()
 }
 
+#[cfg(test)]
 fn config_path_for_repo(repo_root: &Path) -> PathBuf {
     repo_root.join(".oinb").join("config.json")
+}
+
+fn config_path() -> Result<PathBuf, String> {
+    Ok(paths::oinb_dir()?.join("config.json"))
 }
 
 impl Default for LuoguConfig {
@@ -175,11 +173,11 @@ pub(crate) fn write_luogu_config_to_path(
 }
 
 pub(crate) fn read_config() -> Result<LuoguConfig, String> {
-    read_luogu_config_from_path(&config_path_for_repo(&repo_root()?))
+    read_luogu_config_from_path(&config_path()?)
 }
 
 pub(crate) fn write_config(config: &LuoguConfig) -> Result<(), String> {
-    write_luogu_config_to_path(&config_path_for_repo(&repo_root()?), config)
+    write_luogu_config_to_path(&config_path()?, config)
 }
 
 fn require_luogu_config(config: &LuoguConfig) -> Result<(&str, &str), String> {
@@ -942,8 +940,7 @@ pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
 
 #[tauri::command]
 pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
-    let repo_root = repo_root()?;
-    let config_path = config_path_for_repo(&repo_root);
+    let config_path = config_path()?;
     let mut config = read_luogu_config_from_path(&config_path)?;
     let (uid, client_id) = require_luogu_config(&config)?;
     let uid = uid.to_string();

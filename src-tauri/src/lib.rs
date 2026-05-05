@@ -3,9 +3,9 @@ mod frontmatter;
 mod git;
 mod luogu;
 mod notes;
+mod paths;
 mod prompts;
 
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -33,15 +33,9 @@ impl Drop for BlogServerState {
     }
 }
 
-fn site_dir() -> Option<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir.parent()?;
-    Some(repo_root.join("site"))
-}
-
 fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
-    let Some(site_dir) = site_dir() else {
-        return Err("无法定位仓库根目录，无法启动 Astro dev server".to_string());
+    let Some(site_dir) = paths::site_dir()? else {
+        return Ok(());
     };
 
     if !site_dir.is_dir() {
@@ -151,12 +145,24 @@ fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
 
 #[tauri::command]
 fn open_blog() -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err(
+            "Local blog preview is unavailable in this classmates preview build".to_string(),
+        );
+    }
+
     tauri_plugin_opener::open_url("http://localhost:4321", None::<&str>)
         .map_err(|e| format!("打开本地博客失败：{e}"))
 }
 
 #[tauri::command]
 fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err(
+            "Local blog preview is unavailable in this classmates preview build".to_string(),
+        );
+    }
+
     stop_blog_server(&state)?;
     start_blog_server(&state)
 }
@@ -196,6 +202,15 @@ pub fn run() {
             restart_blog_server,
         ])
         .setup(|app| {
+            if let Err(e) = paths::init_app_data_dir(app.handle()) {
+                eprintln!("{e}");
+            }
+            if let Err(e) = paths::ensure_data_dirs() {
+                eprintln!("{e}");
+            }
+            if let Err(e) = prompts::ensure_default_prompts() {
+                eprintln!("{e}");
+            }
             if let Err(e) = start_blog_server(&app.state::<BlogServerState>()) {
                 eprintln!("{e}");
             }

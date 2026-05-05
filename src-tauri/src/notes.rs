@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_yaml::{Mapping, Value};
 use walkdir::WalkDir;
 
-use crate::frontmatter;
+use crate::{frontmatter, paths};
 
 /// 单个笔记文件的元信息。
 /// `Serialize` 使其可以被 Tauri 自动序列化为 JSON 发给前端。
@@ -80,25 +80,8 @@ struct ParsedSearchQuery {
     recent: bool,
 }
 
-/// 返回 notes 目录的绝对 PathBuf。
-///
-/// 使用编译期宏 `env!("CARGO_MANIFEST_DIR")` 定位 src-tauri/（Cargo.toml 所在处），
-/// 向上一级即为项目根，再拼接 "notes"。
-///
-/// 这在 `cargo tauri dev`（cwd 不固定）和 `cargo check`（cwd = src-tauri/）下均可靠。
-///
-/// TODO: 生产分发版本应改用 `tauri::Manager::path().app_data_dir()` 获取
-/// 平台标准的应用数据目录，而不是依赖编译时的源码树路径。
 fn get_notes_dir() -> Result<PathBuf, String> {
-    // CARGO_MANIFEST_DIR 在编译时由 Cargo 写入，值为 src-tauri/ 的绝对路径
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-    // .parent() 得到项目根目录（src-tauri/ 的上一级）
-    let project_root = manifest_dir
-        .parent()
-        .ok_or_else(|| "无法从 CARGO_MANIFEST_DIR 获取项目根目录".to_string())?;
-
-    Ok(project_root.join("notes"))
+    paths::notes_dir()
 }
 
 /// safe_note_path 里绝对路径 / 路径遍历的统一错误消息。
@@ -473,7 +456,11 @@ fn contains_lower(haystack: &str, needle: &str) -> bool {
     haystack.to_lowercase().contains(needle)
 }
 
-fn score_search_note(note: &SearchNote, query: &ParsedSearchQuery, now: DateTime<Utc>) -> Option<i64> {
+fn score_search_note(
+    note: &SearchNote,
+    query: &ParsedSearchQuery,
+    now: DateTime<Utc>,
+) -> Option<i64> {
     if query.recent && !is_recent(note, now) {
         return None;
     }
@@ -534,7 +521,8 @@ fn score_search_note(note: &SearchNote, query: &ParsedSearchQuery, now: DateTime
         }
     }
 
-    if query.terms.is_empty() && query.tags.is_empty() && query.sources.is_empty() && !query.recent {
+    if query.terms.is_empty() && query.tags.is_empty() && query.sources.is_empty() && !query.recent
+    {
         score += 1;
     }
 
@@ -617,7 +605,11 @@ fn search_notes_in_dir(notes_dir: &Path, query: &str) -> Result<Vec<NoteSearchRe
         }
     }
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)).then_with(|| a.2.path.cmp(&b.2.path)));
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.path.cmp(&b.2.path))
+    });
 
     Ok(scored
         .into_iter()
@@ -653,14 +645,7 @@ fn search_notes_in_dir(notes_dir: &Path, query: &str) -> Result<Vec<NoteSearchRe
 pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
     let notes_dir = get_notes_dir()?;
 
-    // 首次运行时目录可能不存在，自动创建避免报错
-    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
-
-    // 确保四个标准子目录存在（新克隆仓库的人第一次启动即可看到完整结构）
-    for sub in ["inbox", "tricks", "problems", "luogu"] {
-        fs::create_dir_all(notes_dir.join(sub))
-            .map_err(|e| format!("创建子目录 {sub} 失败：{e}"))?;
-    }
+    paths::ensure_data_dirs()?;
 
     // canonicalize 一次，后续 WalkDir 和 strip_prefix 都用同一份规范化路径，
     // 避免 Windows 上 \\?\ verbatim 前缀不一致导致 strip_prefix 失败。
@@ -847,8 +832,12 @@ pub fn resolve_note_asset_url(
     fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
     let resolved = resolve_note_asset_path(&notes_dir, &note_relative_path, &image_src)?;
-    let bytes = fs::read(&resolved.path)
-        .map_err(|e| format!("图片预览失败：读取图片失败（{}）：{e}", resolved.path.display()))?;
+    let bytes = fs::read(&resolved.path).map_err(|e| {
+        format!(
+            "图片预览失败：读取图片失败（{}）：{e}",
+            resolved.path.display()
+        )
+    })?;
 
     Ok(format!(
         "data:{};base64,{}",
@@ -1021,7 +1010,12 @@ mod tests {
 
         assert_eq!(search_notes_in_dir(dir.path(), "区间").unwrap().len(), 1);
         assert_eq!(search_notes_in_dir(dir.path(), "tag:DP").unwrap().len(), 1);
-        assert_eq!(search_notes_in_dir(dir.path(), "source:P1000").unwrap().len(), 1);
+        assert_eq!(
+            search_notes_in_dir(dir.path(), "source:P1000")
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(search_notes_in_dir(dir.path(), "四边形").unwrap().len(), 1);
     }
 

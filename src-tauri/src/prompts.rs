@@ -5,7 +5,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::luogu::repo_root;
+use crate::paths;
 
 const LUOGU_INSIGHT_PROMPT: &str = "luogu-insight.md";
 const NOTE_METADATA_PROMPT: &str = "note-metadata.md";
@@ -148,8 +148,8 @@ Markdown body to polish:
 {{body}}
 "#;
 
-fn prompts_dir_for_repo(repo_root: &Path) -> PathBuf {
-    repo_root.join(".oinb").join("prompts")
+fn prompts_dir() -> Result<PathBuf, String> {
+    Ok(paths::oinb_dir()?.join("prompts"))
 }
 
 fn prompt_kind_from_file_name(file_name: &str) -> Result<PromptTemplateKind, String> {
@@ -186,7 +186,7 @@ pub(crate) fn render_prompt_template(
     kind: PromptTemplateKind,
     variables: &[(&str, &str)],
 ) -> Result<String, String> {
-    let prompts_dir = prompts_dir_for_repo(&repo_root()?);
+    let prompts_dir = prompts_dir()?;
     render_prompt_template_from_dir(&prompts_dir, kind, variables)
 }
 
@@ -217,6 +217,14 @@ fn list_prompt_templates_from_dir(
         .collect()
 }
 
+pub(crate) fn ensure_default_prompts() -> Result<(), String> {
+    let prompts_dir = prompts_dir()?;
+    for kind in PROMPT_KINDS {
+        ensure_prompt_file(&prompts_dir, kind)?;
+    }
+    Ok(())
+}
+
 fn save_prompt_template_to_dir(
     prompts_dir: &Path,
     file_name: &str,
@@ -231,13 +239,13 @@ fn save_prompt_template_to_dir(
 
 #[tauri::command]
 pub fn list_ai_prompts() -> Result<Vec<PromptTemplateSummary>, String> {
-    list_prompt_templates_from_dir(&prompts_dir_for_repo(&repo_root()?))
+    list_prompt_templates_from_dir(&prompts_dir()?)
 }
 
 #[tauri::command]
 pub fn read_ai_prompt(file_name: String) -> Result<PromptTemplateContent, String> {
     let kind = prompt_kind_from_file_name(&file_name)?;
-    let content = read_prompt_template_from_dir(&prompts_dir_for_repo(&repo_root()?), kind)?;
+    let content = read_prompt_template_from_dir(&prompts_dir()?, kind)?;
     Ok(PromptTemplateContent {
         file_name: kind.file_name().to_string(),
         content,
@@ -246,7 +254,7 @@ pub fn read_ai_prompt(file_name: String) -> Result<PromptTemplateContent, String
 
 #[tauri::command]
 pub fn save_ai_prompt(file_name: String, content: String) -> Result<(), String> {
-    save_prompt_template_to_dir(&prompts_dir_for_repo(&repo_root()?), &file_name, &content)
+    save_prompt_template_to_dir(&prompts_dir()?, &file_name, &content)
 }
 
 #[cfg(test)]
@@ -266,6 +274,21 @@ mod tests {
         assert!(prompts_dir.join(LUOGU_INSIGHT_PROMPT).exists());
         assert!(prompts_dir.join(NOTE_METADATA_PROMPT).exists());
         assert!(prompts_dir.join(NOTE_POLISH_PROMPT).exists());
+    }
+
+    #[test]
+    fn ensure_prompt_file_does_not_overwrite_existing_prompt() {
+        let dir = tempdir().unwrap();
+        let prompts_dir = dir.path().join("prompts");
+        fs::create_dir_all(&prompts_dir).unwrap();
+        fs::write(prompts_dir.join(NOTE_METADATA_PROMPT), "custom metadata prompt").unwrap();
+
+        ensure_prompt_file(&prompts_dir, PromptTemplateKind::NoteMetadata).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(prompts_dir.join(NOTE_METADATA_PROMPT)).unwrap(),
+            "custom metadata prompt"
+        );
     }
 
     #[test]

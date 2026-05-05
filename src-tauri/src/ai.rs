@@ -8,7 +8,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
-use crate::luogu::{read_config, repo_root, write_config, AiConfigFields};
+use crate::luogu::{read_config, write_config, AiConfigFields};
+use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
 
 const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
@@ -103,8 +104,8 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
     Ok((base_url, api_key, model))
 }
 
-fn ai_cache_dir_for_repo(repo_root: &Path) -> PathBuf {
-    repo_root.join(".oinb").join("ai-cache")
+fn ai_cache_dir() -> Result<PathBuf, String> {
+    Ok(paths::oinb_dir()?.join("ai-cache"))
 }
 
 fn stable_hash_hex(content: &str) -> String {
@@ -153,7 +154,7 @@ fn ai_cache_path(
     context: JsonValue,
 ) -> Result<PathBuf, String> {
     let key = build_ai_cache_key(task, config, prompt, context)?;
-    Ok(ai_cache_dir_for_repo(&repo_root()?).join(format!("{task}-{key}.json")))
+    Ok(ai_cache_dir()?.join(format!("{task}-{key}.json")))
 }
 
 fn read_ai_cache(cache_path: &Path) -> Option<JsonValue> {
