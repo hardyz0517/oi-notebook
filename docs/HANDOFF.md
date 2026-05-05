@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-05（记录 AI Prompt 模板系统与面板布局修复）  
+**最后更新**：2026-05-05（记录 UI 打磨后置，不零散继续修）  
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -127,6 +127,8 @@
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
+    ├─ 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 面板虽然已改善，但整体 UI 仍需后续统一整理
+    ├─ 当前阶段暂时不要零散继续修 UI，先推进功能；等 Hardy 明确同意后再做一次集中 UI pass
     ├─ 博客模板向文人博客风格调整
     └─ 光标颜色等小细节
 ```
@@ -233,6 +235,8 @@ Rust 侧的 `safe_note_path` 有两层防御：字符串过滤 + canonicalize �
 - 托盘图标在 Windows 默认进溢出区，这是系统行为。
 - QuickNoteApp 保存失败只 `console.error`，Phase 8 再统一 UI 反馈。
 - FileTree 在窄宽度下 hover 按钮位置可用但不够精致，Phase 8 再打磨。
+- 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 面板虽然已从窄 textarea 改成宽弹窗 + 左侧列表 + 右侧大 textarea，但整体 UI 仍需后续统一整理。
+- 暂时不要零散继续修 UI，先推进功能；等 Hardy 明确同意后，再做一次集中 UI pass。
 
 ### 敏感事项
 
