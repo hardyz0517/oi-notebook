@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody } from "@/lib/api";
 import type { SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
@@ -105,6 +105,24 @@ function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+interface MarkdownBodyParts {
+  frontmatterPrefix: string;
+  body: string;
+}
+
+function splitMarkdownBody(markdown: string): MarkdownBodyParts {
+  const match = markdown.match(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (!match) {
+    return { frontmatterPrefix: "", body: markdown };
+  }
+
+  const frontmatterPrefix = match[0];
+  return {
+    frontmatterPrefix,
+    body: markdown.slice(frontmatterPrefix.length),
+  };
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -140,6 +158,8 @@ export default function App() {
   const [aiConfigApiKey, setAiConfigApiKey] = useState("");
   const [aiConfigModel, setAiConfigModel] = useState("");
   const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
+  const [isPolishingNoteBody, setIsPolishingNoteBody] = useState(false);
+  const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
@@ -624,6 +644,48 @@ export default function App() {
     } finally {
       setIsGeneratingNoteMetadata(false);
     }
+  };
+
+  const handlePolishNoteBody = async () => {
+    if (!currentFilePath) {
+      toast.info("请先打开一个笔记");
+      return;
+    }
+
+    const { body } = splitMarkdownBody(markdown);
+    if (!body.trim()) {
+      toast.warning("当前笔记正文为空，无法润色");
+      return;
+    }
+
+    setIsPolishingNoteBody(true);
+    try {
+      const result = await polishNoteBody(currentFilePath, markdown);
+      setPolishedBodyPreview(result.polished_body);
+    } catch (e) {
+      const message = getErrorMessage(e);
+      if (message.includes("base_url is missing") || message.includes("api_key is missing") || message.includes("model is missing")) {
+        toast.error("AI 配置缺失，请先到 AI 设置填写");
+      } else {
+        toast.error(`AI 全文润色失败：${message}`);
+      }
+    } finally {
+      setIsPolishingNoteBody(false);
+    }
+  };
+
+  const handleApplyPolishedBody = () => {
+    if (polishedBodyPreview === null) return;
+
+    const { frontmatterPrefix } = splitMarkdownBody(markdown);
+    setMarkdown(`${frontmatterPrefix}${polishedBodyPreview}`);
+    setIsDirty(true);
+    setPolishedBodyPreview(null);
+    toast.success("润色稿已应用，请确认后保存");
+  };
+
+  const handleCancelPolishedBody = () => {
+    setPolishedBodyPreview(null);
   };
 
   const handleSelectFile = (path: string) => {
@@ -1164,6 +1226,29 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog open={polishedBodyPreview !== null} onOpenChange={(open) => !open && handleCancelPolishedBody()}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>AI 全文润色预览</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-2 py-2">
+          <textarea
+            value={polishedBodyPreview ?? ""}
+            readOnly
+            rows={18}
+            className="min-h-[28rem] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={handleCancelPolishedBody}>
+            取消
+          </Button>
+          <Button onClick={handleApplyPolishedBody}>
+            应用到正文
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
@@ -1307,7 +1392,17 @@ export default function App() {
                 )}
               </summary>
               <div className="grid gap-3 px-4 py-3">
-                <div className="flex items-center justify-end">
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-xs"
+                    onClick={handlePolishNoteBody}
+                    disabled={!currentFilePath || isPolishingNoteBody}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI 全文润色
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"

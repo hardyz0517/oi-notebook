@@ -186,6 +186,7 @@ pub fn run() {
             ai::save_ai_config,
             ai::test_ai_connection,
             ai::generate_note_metadata,
+            ai::polish_note_body,
             open_blog,
             restart_blog_server,
         ])

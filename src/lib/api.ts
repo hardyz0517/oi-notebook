@@ -52,6 +52,10 @@ export interface GeneratedNoteMetadata {
   summary: string;
 }
 
+export interface PolishedNoteBody {
+  polished_body: string;
+}
+
 export interface SyncLuoguInsightsResult {
   scannedPages: number;
   scannedCount: number;
@@ -292,6 +296,20 @@ export async function generateNoteMetadata(
 ): Promise<GeneratedNoteMetadata> {
   try {
     return await invoke<GeneratedNoteMetadata>("generate_note_metadata", {
+      relativePath,
+      markdownContent,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function polishNoteBody(
+  relativePath: string,
+  markdownContent: string,
+): Promise<PolishedNoteBody> {
+  try {
+    return await invoke<PolishedNoteBody>("polish_note_body", {
       relativePath,
       markdownContent,
     });

@@ -28,6 +28,11 @@ pub struct GeneratedNoteMetadata {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PolishedNoteBody {
+    pub polished_body: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct OrganizedLuoguInsight {
     pub should_import: bool,
@@ -265,6 +270,40 @@ fn validate_generated_note_metadata(
     })
 }
 
+fn markdown_body_without_frontmatter(markdown: &str) -> &str {
+    let Some(after_open) = markdown.strip_prefix("---") else {
+        return markdown;
+    };
+    let after_open = after_open
+        .strip_prefix("\r\n")
+        .or_else(|| after_open.strip_prefix('\n'));
+    let Some(after_open) = after_open else {
+        return markdown;
+    };
+
+    let mut offset = markdown.len() - after_open.len();
+    for line in after_open.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches(['\r', '\n']);
+        if line_without_newline.trim() == "---" {
+            return &markdown[offset + line.len()..];
+        }
+        offset += line.len();
+    }
+
+    markdown
+}
+
+fn validate_polished_note_body(value: JsonValue, scope: &str) -> Result<PolishedNoteBody, String> {
+    let polished_body = value
+        .get("polished_body")
+        .and_then(JsonValue::as_str)
+        .filter(|body| !body.trim().is_empty())
+        .ok_or_else(|| format!("{scope}: response polished_body was missing or empty"))?
+        .to_string();
+
+    Ok(PolishedNoteBody { polished_body })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -358,6 +397,58 @@ Rules:
     let value = parse_json_object_from_ai_content(&content, "AI metadata failed")?;
 
     validate_generated_note_metadata(value, "AI metadata failed")
+}
+
+#[tauri::command]
+pub fn polish_note_body(
+    relative_path: String,
+    markdown_content: String,
+) -> Result<PolishedNoteBody, String> {
+    let relative_path = relative_path.trim();
+    if relative_path.is_empty() {
+        return Err("AI polish failed: note path is missing".to_string());
+    }
+    if markdown_content.trim().is_empty() {
+        return Err("AI polish failed: note content is empty".to_string());
+    }
+
+    let body = markdown_body_without_frontmatter(&markdown_content);
+    if body.trim().is_empty() {
+        return Err("AI polish failed: note body is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let system_prompt = r#"You are an OI competitive programming notebook writing assistant.
+Return only strict JSON. Do not use markdown fences.
+Required JSON schema:
+{
+  "polished_body": string
+}
+Rules:
+- Polish only the Markdown body provided by the user.
+- Preserve the existing Markdown structure.
+- Do not change the content inside fenced code blocks.
+- Do not change math formulas, including inline $...$ and block $$...$$ formulas.
+- Do not delete links, images, or tables.
+- Do not invent new solution ideas, proof details, algorithms, or examples.
+- Make the wording clearer and more suitable for OI note review.
+- Return only JSON, not Markdown outside JSON."#;
+    let user_prompt =
+        format!("Note relative path: {relative_path}\n\nMarkdown body to polish:\n{body}");
+    let messages = json!([
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(&config, messages, 0.2, "AI polish failed")?;
+    let value = parse_json_object_from_ai_content(&content, "AI polish failed")?;
+
+    validate_polished_note_body(value, "AI polish failed")
 }
 
 #[tauri::command]
@@ -506,6 +597,48 @@ mod tests {
         assert!(validate_generated_note_metadata(value, "test")
             .unwrap_err()
             .contains("3-5"));
+    }
+
+    #[test]
+    fn extracts_body_after_frontmatter() {
+        let markdown = "---\ntitle: Test\n---\n\n## Body\n\ncontent";
+
+        assert_eq!(
+            markdown_body_without_frontmatter(markdown),
+            "\n## Body\n\ncontent"
+        );
+    }
+
+    #[test]
+    fn leaves_markdown_without_frontmatter_unchanged() {
+        let markdown = "# Title\n\ncontent";
+
+        assert_eq!(markdown_body_without_frontmatter(markdown), markdown);
+    }
+
+    #[test]
+    fn validates_polished_note_body_json() {
+        let value = json!({
+            "polished_body": "## Insight\n\nA clearer explanation."
+        });
+
+        let polished = validate_polished_note_body(value, "test").unwrap();
+
+        assert_eq!(
+            polished.polished_body,
+            "## Insight\n\nA clearer explanation."
+        );
+    }
+
+    #[test]
+    fn rejects_empty_polished_note_body() {
+        let value = json!({
+            "polished_body": "   "
+        });
+
+        assert!(validate_polished_note_body(value, "test")
+            .unwrap_err()
+            .contains("polished_body"));
     }
 
     #[test]
