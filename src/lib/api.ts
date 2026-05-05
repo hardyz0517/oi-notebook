@@ -46,6 +46,12 @@ export interface TestAiConnectionResult {
   ok: boolean;
 }
 
+export interface GeneratedNoteMetadata {
+  title: string;
+  tags: string[];
+  summary: string;
+}
+
 export interface SyncLuoguInsightsResult {
   scannedPages: number;
   scannedCount: number;
@@ -275,6 +281,20 @@ export async function saveAiConfig(config: AiConfig): Promise<void> {
 export async function testAiConnection(): Promise<TestAiConnectionResult> {
   try {
     return await invoke<TestAiConnectionResult>("test_ai_connection");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function generateNoteMetadata(
+  relativePath: string,
+  markdownContent: string,
+): Promise<GeneratedNoteMetadata> {
+  try {
+    return await invoke<GeneratedNoteMetadata>("generate_note_metadata", {
+      relativePath,
+      markdownContent,
+    });
   } catch (e) {
     throw toError(e);
   }

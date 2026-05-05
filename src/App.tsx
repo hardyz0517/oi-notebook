@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, PlugZap, Plus, RefreshCw, RotateCcw, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata } from "@/lib/api";
 import type { SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
-import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
+import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -139,6 +139,7 @@ export default function App() {
   const [aiConfigBaseUrl, setAiConfigBaseUrl] = useState("");
   const [aiConfigApiKey, setAiConfigApiKey] = useState("");
   const [aiConfigModel, setAiConfigModel] = useState("");
+  const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
@@ -588,6 +589,41 @@ export default function App() {
       .map((tag) => tag.trim())
       .filter(Boolean);
     updateFrontmatter({ tags });
+  };
+
+  const handleGenerateNoteMetadata = async () => {
+    if (!currentFilePath) {
+      toast.info("请先打开一个笔记");
+      return;
+    }
+    if (!frontmatter.canMerge) {
+      toast.warning(frontmatter.warning ?? "当前 frontmatter 暂不能改写");
+      return;
+    }
+    if (!frontmatter.canEditTags) {
+      toast.warning(frontmatter.warning ?? "当前 tags 暂不能通过表单改写");
+      return;
+    }
+
+    setIsGeneratingNoteMetadata(true);
+    try {
+      const metadata = await generateNoteMetadata(currentFilePath, markdown);
+      const nextMarkdown = mergeFrontmatterMetadata(markdown, metadata);
+      if (nextMarkdown !== markdown) {
+        setMarkdown(nextMarkdown);
+        setIsDirty(true);
+      }
+      toast.success("AI 元数据已生成，请确认后保存");
+    } catch (e) {
+      const message = getErrorMessage(e);
+      if (message.includes("base_url is missing") || message.includes("api_key is missing") || message.includes("model is missing")) {
+        toast.error("AI 配置缺失，请先到 AI 设置填写");
+      } else {
+        toast.error(`AI 元数据生成失败：${message}`);
+      }
+    } finally {
+      setIsGeneratingNoteMetadata(false);
+    }
   };
 
   const handleSelectFile = (path: string) => {
@@ -1271,6 +1307,23 @@ export default function App() {
                 )}
               </summary>
               <div className="grid gap-3 px-4 py-3">
+                <div className="flex items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-xs"
+                    onClick={handleGenerateNoteMetadata}
+                    disabled={
+                      !currentFilePath ||
+                      !frontmatter.canMerge ||
+                      !frontmatter.canEditTags ||
+                      isGeneratingNoteMetadata
+                    }
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI 补全元数据
+                  </Button>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="grid gap-1.5">
                     <Label htmlFor="frontmatter-title">title</Label>

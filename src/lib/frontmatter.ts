@@ -15,6 +15,12 @@ export interface ParsedFrontmatter {
   warning: string | null;
 }
 
+export interface FrontmatterMetadataPatch {
+  title: string;
+  tags: string[];
+  summary: string;
+}
+
 type SplitFrontmatterResult =
   | { kind: "none"; body: string }
   | { kind: "unclosed" }
@@ -183,6 +189,59 @@ export function mergeFrontmatterFields(
   return `---\n${yamlWithTrailingNewline}---\n${split.body}`;
 }
 
+export function mergeFrontmatterMetadata(
+  markdown: string,
+  patch: FrontmatterMetadataPatch,
+): string {
+  const split = splitFrontmatter(markdown);
+
+  if (split.kind === "unclosed") {
+    return markdown;
+  }
+
+  if (split.kind === "none") {
+    return `---\n${serializeMetadataPatch(patch)}---\n${markdown}`;
+  }
+
+  const lines = splitLines(split.yaml);
+  const tagResult = parseTags(lines);
+  const fieldLines = new Map<"title" | "summary", number>();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (index >= tagResult.start && index <= tagResult.end) continue;
+    const parsed = parseTopLevelKeyValue(lines[index]);
+    if (!parsed) continue;
+    if (parsed.key === "title" || parsed.key === "summary") {
+      fieldLines.set(parsed.key, index);
+    }
+  }
+
+  const titleLine = fieldLines.get("title");
+  if (titleLine === undefined) {
+    lines.push(`title: ${formatScalar(patch.title)}`);
+  } else {
+    lines[titleLine] = `title: ${formatScalar(patch.title)}`;
+  }
+
+  const summaryLine = fieldLines.get("summary");
+  if (summaryLine === undefined) {
+    lines.push(`summary: ${formatScalar(patch.summary)}`);
+  } else {
+    lines[summaryLine] = `summary: ${formatScalar(patch.summary)}`;
+  }
+
+  if (tagResult.ok && tagResult.start >= 0) {
+    const tagLines = serializeTags(patch.tags);
+    lines.splice(tagResult.start, tagResult.end - tagResult.start + 1, ...tagLines);
+  } else if (tagResult.ok) {
+    lines.push(...serializeTags(patch.tags));
+  }
+
+  const yaml = lines.join("\n");
+  const yamlWithTrailingNewline = yaml.length > 0 ? `${yaml}\n` : "";
+  return `---\n${yamlWithTrailingNewline}---\n${split.body}`;
+}
+
 function splitLines(value: string): string[] {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter((line, index, lines) => {
     return index < lines.length - 1 || line.length > 0;
@@ -310,6 +369,14 @@ function isSimpleScalar(value: string): boolean {
 
 function serializeKnownFields(fields: FrontmatterFields): string {
   return KNOWN_FIELD_ORDER.map((key) => serializeField(key, fields)).join("\n") + "\n";
+}
+
+function serializeMetadataPatch(patch: FrontmatterMetadataPatch): string {
+  return [
+    `title: ${formatScalar(patch.title)}`,
+    ...serializeTags(patch.tags),
+    `summary: ${formatScalar(patch.summary)}`,
+  ].join("\n") + "\n";
 }
 
 function serializeField(key: keyof FrontmatterFields, fields: FrontmatterFields): string {

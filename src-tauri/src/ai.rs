@@ -20,6 +20,14 @@ pub(crate) struct OrganizeLuoguInsightInput {
     pub candidate_comment: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedNoteMetadata {
+    pub title: String,
+    pub tags: Vec<String>,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct OrganizedLuoguInsight {
     pub should_import: bool,
@@ -194,6 +202,69 @@ fn validate_organized_luogu_insight(
     Ok(insight)
 }
 
+fn normalize_metadata_tags(tags: Vec<String>, scope: &str) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !normalized.iter().any(|existing| existing == trimmed) {
+            normalized.push(trimmed.to_string());
+        }
+        if normalized.len() == 5 {
+            break;
+        }
+    }
+
+    if normalized.len() < 3 {
+        return Err(format!(
+            "{scope}: response tags must contain 3-5 non-empty items"
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn validate_generated_note_metadata(
+    value: JsonValue,
+    scope: &str,
+) -> Result<GeneratedNoteMetadata, String> {
+    let title = value
+        .get("title")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .ok_or_else(|| format!("{scope}: response title was missing or empty"))?
+        .to_string();
+    let summary = value
+        .get("summary")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+        .ok_or_else(|| format!("{scope}: response summary was missing or empty"))?
+        .to_string();
+    let tags_value = value
+        .get("tags")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| format!("{scope}: response tags must be an array"))?;
+    let mut raw_tags = Vec::new();
+    for tag in tags_value {
+        let Some(tag_text) = tag.as_str() else {
+            return Err(format!("{scope}: response tags must only contain strings"));
+        };
+        raw_tags.push(tag_text.to_string());
+    }
+    let tags = normalize_metadata_tags(raw_tags, scope)?;
+
+    Ok(GeneratedNoteMetadata {
+        title,
+        tags,
+        summary,
+    })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -238,6 +309,55 @@ Rules:
     let value = parse_json_object_from_ai_content(&content, "Luogu AI insight failed")?;
 
     validate_organized_luogu_insight(value, "Luogu AI insight failed")
+}
+
+#[tauri::command]
+pub fn generate_note_metadata(
+    relative_path: String,
+    markdown_content: String,
+) -> Result<GeneratedNoteMetadata, String> {
+    let relative_path = relative_path.trim();
+    let markdown_content = markdown_content.trim();
+    if relative_path.is_empty() {
+        return Err("AI metadata failed: note path is missing".to_string());
+    }
+    if markdown_content.is_empty() {
+        return Err("AI metadata failed: note content is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let system_prompt = r#"You are an OI competitive programming notebook metadata assistant.
+Return only strict JSON. Do not use markdown fences.
+Required JSON schema:
+{
+  "title": string,
+  "tags": string[],
+  "summary": string
+}
+Rules:
+- Generate metadata only from the current note content.
+- tags must contain 3-5 concise OI or algorithm oriented labels.
+- summary must be one concise sentence.
+- title may be improved, but keep it factual and not exaggerated.
+- Do not rewrite or polish the note body.
+- Do not return Markdown, only JSON."#;
+    let user_prompt = format!(
+        "Note relative path: {relative_path}\n\nCurrent markdown content:\n{markdown_content}"
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(&config, messages, 0.2, "AI metadata failed")?;
+    let value = parse_json_object_from_ai_content(&content, "AI metadata failed")?;
+
+    validate_generated_note_metadata(value, "AI metadata failed")
 }
 
 #[tauri::command]
@@ -332,6 +452,60 @@ mod tests {
         assert!(validate_organized_luogu_insight(value, "test")
             .unwrap_err()
             .contains("tags must contain 2-5 items"));
+    }
+
+    #[test]
+    fn validates_generated_note_metadata_json() {
+        let value = json!({
+            "title": "Monotonic Queue DP",
+            "tags": ["DP", "monotonic queue", "optimization"],
+            "summary": "Uses a monotonic queue to optimize a DP transition."
+        });
+
+        let metadata = validate_generated_note_metadata(value, "test").unwrap();
+
+        assert_eq!(metadata.title, "Monotonic Queue DP");
+        assert_eq!(metadata.tags, vec!["DP", "monotonic queue", "optimization"]);
+        assert_eq!(
+            metadata.summary,
+            "Uses a monotonic queue to optimize a DP transition."
+        );
+    }
+
+    #[test]
+    fn trims_deduplicates_and_limits_metadata_tags() {
+        let tags = normalize_metadata_tags(
+            vec![
+                " DP ".to_string(),
+                "graph".to_string(),
+                "DP".to_string(),
+                "".to_string(),
+                "shortest path".to_string(),
+                "Dijkstra".to_string(),
+                "priority queue".to_string(),
+                "extra".to_string(),
+            ],
+            "test",
+        )
+        .unwrap();
+
+        assert_eq!(
+            tags,
+            vec!["DP", "graph", "shortest path", "Dijkstra", "priority queue"]
+        );
+    }
+
+    #[test]
+    fn rejects_metadata_with_too_few_tags_after_normalization() {
+        let value = json!({
+            "title": "Tiny note",
+            "tags": ["DP", "DP", " "],
+            "summary": "A tiny note."
+        });
+
+        assert!(validate_generated_note_metadata(value, "test")
+            .unwrap_err()
+            .contains("3-5"));
     }
 
     #[test]
