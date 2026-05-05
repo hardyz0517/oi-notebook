@@ -14,6 +14,12 @@ const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
 const NOTE_ROUTE_PREFIX: &str = "/note/";
 
+#[derive(PartialEq)]
+enum ListKind {
+    Ordered,
+    Unordered,
+}
+
 #[derive(Debug, Clone)]
 struct BlogNote {
     title: String,
@@ -36,7 +42,7 @@ struct NoteFrontmatter {
 #[derive(Debug, Clone)]
 struct BlogNoteDetail {
     note: BlogNote,
-    markdown: String,
+    markdown_body: String,
 }
 
 pub(crate) struct ProductionBlogServer {
@@ -213,8 +219,12 @@ fn read_blog_note_detail(root: &Path, path: &Path) -> Result<BlogNoteDetail, Str
     let markdown = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read note {}: {e}", path.display()))?;
     let note = blog_note_from_content(root, path, &markdown)?;
+    let (_frontmatter, body) = split_frontmatter(&markdown);
 
-    Ok(BlogNoteDetail { note, markdown })
+    Ok(BlogNoteDetail {
+        note,
+        markdown_body: body.to_string(),
+    })
 }
 
 fn blog_note_from_content(root: &Path, path: &Path, content: &str) -> Result<BlogNote, String> {
@@ -572,6 +582,307 @@ fn truncate_chars(value: &str, limit: usize) -> String {
     truncated
 }
 
+fn render_markdown_body(body: &str) -> String {
+    let mut html = String::new();
+    let mut paragraph = Vec::new();
+    let mut in_code_block = false;
+    let mut code_lang = String::new();
+    let mut code_content = String::new();
+    let mut list_kind: Option<ListKind> = None;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+
+        if in_code_block {
+            if trimmed.starts_with("```") {
+                html.push_str("<pre><code");
+                if !code_lang.is_empty() {
+                    html.push_str(&format!(r#" class="language-{}""#, escape_html(&code_lang)));
+                }
+                html.push('>');
+                html.push_str(&escape_html(&code_content));
+                html.push_str("</code></pre>");
+                in_code_block = false;
+                code_lang.clear();
+                code_content.clear();
+            } else {
+                code_content.push_str(line);
+                code_content.push('\n');
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("```") {
+            flush_paragraph(&mut html, &mut paragraph);
+            close_list(&mut html, &mut list_kind);
+            in_code_block = true;
+            code_lang = trimmed.trim_start_matches("```").trim().to_string();
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            flush_paragraph(&mut html, &mut paragraph);
+            close_list(&mut html, &mut list_kind);
+            continue;
+        }
+
+        if let Some((level, title)) = markdown_heading(trimmed) {
+            flush_paragraph(&mut html, &mut paragraph);
+            close_list(&mut html, &mut list_kind);
+            html.push_str(&format!(
+                "<h{level}>{}</h{level}>",
+                render_inline_markdown(title)
+            ));
+            continue;
+        }
+
+        if let Some(item) = unordered_list_item(trimmed) {
+            flush_paragraph(&mut html, &mut paragraph);
+            open_list(&mut html, &mut list_kind, ListKind::Unordered);
+            html.push_str(&format!("<li>{}</li>", render_inline_markdown(item)));
+            continue;
+        }
+
+        if let Some(item) = ordered_list_item(trimmed) {
+            flush_paragraph(&mut html, &mut paragraph);
+            open_list(&mut html, &mut list_kind, ListKind::Ordered);
+            html.push_str(&format!("<li>{}</li>", render_inline_markdown(item)));
+            continue;
+        }
+
+        paragraph.push(trimmed.to_string());
+    }
+
+    if in_code_block {
+        html.push_str("<pre><code");
+        if !code_lang.is_empty() {
+            html.push_str(&format!(r#" class="language-{}""#, escape_html(&code_lang)));
+        }
+        html.push('>');
+        html.push_str(&escape_html(&code_content));
+        html.push_str("</code></pre>");
+    }
+
+    flush_paragraph(&mut html, &mut paragraph);
+    close_list(&mut html, &mut list_kind);
+
+    html
+}
+
+fn flush_paragraph(html: &mut String, paragraph: &mut Vec<String>) {
+    if paragraph.is_empty() {
+        return;
+    }
+
+    let text = paragraph.join(" ");
+    html.push_str(&format!("<p>{}</p>", render_inline_markdown(&text)));
+    paragraph.clear();
+}
+
+fn open_list(html: &mut String, current: &mut Option<ListKind>, next: ListKind) {
+    if current.as_ref() == Some(&next) {
+        return;
+    }
+
+    close_list(html, current);
+    match next {
+        ListKind::Ordered => html.push_str("<ol>"),
+        ListKind::Unordered => html.push_str("<ul>"),
+    }
+    *current = Some(next);
+}
+
+fn close_list(html: &mut String, current: &mut Option<ListKind>) {
+    match current.take() {
+        Some(ListKind::Ordered) => html.push_str("</ol>"),
+        Some(ListKind::Unordered) => html.push_str("</ul>"),
+        None => {}
+    }
+}
+
+fn markdown_heading(line: &str) -> Option<(usize, &str)> {
+    for level in (1..=3).rev() {
+        let marker = "#".repeat(level);
+        if let Some(title) = line.strip_prefix(&marker) {
+            if let Some(title) = title.strip_prefix(' ') {
+                return Some((level, title.trim()));
+            }
+        }
+    }
+
+    None
+}
+
+fn unordered_list_item(line: &str) -> Option<&str> {
+    line.strip_prefix("- ").map(str::trim)
+}
+
+fn ordered_list_item(line: &str) -> Option<&str> {
+    let (number, item) = line.split_once(". ")?;
+    if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    Some(item.trim())
+}
+
+fn render_inline_markdown(value: &str) -> String {
+    let mut html = String::new();
+    let mut index = 0;
+
+    while index < value.len() {
+        let rest = &value[index..];
+
+        if let Some((consumed, rendered)) = render_inline_image(rest) {
+            html.push_str(&rendered);
+            index += consumed;
+            continue;
+        }
+
+        if let Some((consumed, rendered)) = render_inline_link(rest) {
+            html.push_str(&rendered);
+            index += consumed;
+            continue;
+        }
+
+        if let Some((consumed, rendered)) = render_delimited_inline(rest, "`", "code") {
+            html.push_str(&rendered);
+            index += consumed;
+            continue;
+        }
+
+        if let Some((consumed, rendered)) = render_delimited_inline(rest, "**", "strong") {
+            html.push_str(&rendered);
+            index += consumed;
+            continue;
+        }
+
+        if let Some((consumed, rendered)) = render_delimited_inline(rest, "*", "em") {
+            html.push_str(&rendered);
+            index += consumed;
+            continue;
+        }
+
+        let ch = rest.chars().next().expect("rest is not empty");
+        html.push_str(&escape_html(&ch.to_string()));
+        index += ch.len_utf8();
+    }
+
+    html
+}
+
+fn render_delimited_inline(value: &str, delimiter: &str, tag: &str) -> Option<(usize, String)> {
+    let inner_start = delimiter.len();
+    if !value.starts_with(delimiter) {
+        return None;
+    }
+
+    let inner_end = value[inner_start..].find(delimiter)? + inner_start;
+    if inner_end == inner_start {
+        return None;
+    }
+
+    let inner = &value[inner_start..inner_end];
+    let consumed = inner_end + delimiter.len();
+    Some((consumed, format!("<{tag}>{}</{tag}>", escape_html(inner))))
+}
+
+fn render_inline_link(value: &str) -> Option<(usize, String)> {
+    if !value.starts_with('[') {
+        return None;
+    }
+
+    let label_end = value.find("](")?;
+    let url_start = label_end + 2;
+    let url_end = value[url_start..].find(')')? + url_start;
+    let label = &value[1..label_end];
+    let url = &value[url_start..url_end];
+    let consumed = url_end + 1;
+
+    match safe_markdown_url(url) {
+        Some(href) => Some((
+            consumed,
+            format!(
+                r#"<a href="{}" rel="noopener noreferrer">{}</a>"#,
+                escape_html_attribute(&href),
+                escape_html(label)
+            ),
+        )),
+        None => Some((consumed, escape_html(label))),
+    }
+}
+
+fn render_inline_image(value: &str) -> Option<(usize, String)> {
+    if !value.starts_with("![") {
+        return None;
+    }
+
+    let alt_end = value.find("](")?;
+    let url_start = alt_end + 2;
+    let url_end = value[url_start..].find(')')? + url_start;
+    let alt = &value[2..alt_end];
+    let url = &value[url_start..url_end];
+    let consumed = url_end + 1;
+
+    match safe_markdown_asset_url(url) {
+        Some(src) => Some((
+            consumed,
+            format!(
+                r#"<img src="{}" alt="{}" loading="lazy">"#,
+                escape_html_attribute(&src),
+                escape_html_attribute(alt)
+            ),
+        )),
+        None => Some((consumed, escape_html(alt))),
+    }
+}
+
+fn safe_markdown_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Some(trimmed.to_string());
+    }
+
+    safe_markdown_asset_url(trimmed)
+}
+
+fn safe_markdown_asset_url(url: &str) -> Option<String> {
+    let normalized = url.trim().replace('\\', "/");
+    let lower = normalized.to_lowercase();
+
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.contains('?')
+        || normalized.contains('#')
+        || lower.contains(':')
+    {
+        return None;
+    }
+
+    let mut without_current_dir = normalized.as_str();
+    while let Some(rest) = without_current_dir.strip_prefix("./") {
+        without_current_dir = rest;
+    }
+
+    let mut candidate = without_current_dir;
+    while let Some(rest) = candidate.strip_prefix("../") {
+        candidate = rest;
+    }
+
+    let asset_path = candidate.strip_prefix("assets/")?;
+    if asset_path.is_empty() || !is_safe_asset_relative_path(asset_path) {
+        return None;
+    }
+
+    Some(format!("/assets/{}", percent_encode_path(asset_path)))
+}
+
+fn is_safe_asset_relative_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
 fn render_notes_page(notes: &[BlogNote], error: Option<&str>) -> String {
     let mut content = String::new();
 
@@ -800,6 +1111,7 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
     } else {
         escape_html(&detail.note.summary)
     };
+    let rendered_body = render_markdown_body(&detail.markdown_body);
 
     format!(
         r#"<!doctype html>
@@ -900,6 +1212,81 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
         white-space: pre-wrap;
         word-break: break-word;
       }}
+
+      .markdown-body {{
+        margin: 28px 0 0;
+        color: #242424;
+        font-size: 17px;
+        line-height: 1.75;
+      }}
+
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3 {{
+        margin: 28px 0 12px;
+        line-height: 1.25;
+      }}
+
+      .markdown-body h1 {{
+        font-size: 30px;
+      }}
+
+      .markdown-body h2 {{
+        font-size: 24px;
+      }}
+
+      .markdown-body h3 {{
+        font-size: 20px;
+      }}
+
+      .markdown-body p {{
+        margin: 0 0 16px;
+      }}
+
+      .markdown-body ul,
+      .markdown-body ol {{
+        margin: 0 0 16px;
+        padding-left: 26px;
+      }}
+
+      .markdown-body pre {{
+        overflow: auto;
+        margin: 20px 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffaf2;
+      }}
+
+      .markdown-body code {{
+        font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+        font-size: 0.9em;
+      }}
+
+      .markdown-body :not(pre) > code {{
+        padding: 2px 5px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: #fffaf2;
+      }}
+
+      .markdown-body img {{
+        display: block;
+        max-width: 100%;
+        height: auto;
+        margin: 20px 0;
+      }}
+
+      details.source-details {{
+        margin-top: 28px;
+      }}
+
+      details.source-details summary {{
+        cursor: pointer;
+        color: var(--muted);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 13px;
+      }}
     </style>
   </head>
   <body>
@@ -911,7 +1298,11 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
         <p class="path">{path}</p>
         <div class="tags">{tags}</div>
         <p class="summary">{summary}</p>
-        <pre class="markdown-source">{markdown}</pre>
+        <div class="markdown-body">{rendered_body}</div>
+        <details class="source-details">
+          <summary>Markdown source</summary>
+          <pre class="markdown-source">{markdown}</pre>
+        </details>
       </article>
     </main>
   </body>
@@ -921,7 +1312,8 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
         path = escape_html(&detail.note.relative_path),
         tags = tags,
         summary = summary,
-        markdown = escape_html(&detail.markdown)
+        rendered_body = rendered_body,
+        markdown = escape_html(&detail.markdown_body)
     )
 }
 
@@ -992,6 +1384,10 @@ fn escape_html(value: &str) -> String {
     }
 
     escaped
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    escape_html(value)
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
@@ -1104,7 +1500,7 @@ This note becomes an excerpt.
     }
 
     #[test]
-    fn renders_detail_markdown_as_escaped_source() {
+    fn renders_detail_markdown_body_without_frontmatter() {
         let detail = BlogNoteDetail {
             note: BlogNote {
                 title: "Danger".to_string(),
@@ -1114,13 +1510,96 @@ This note becomes an excerpt.
                 date: "2026-05-05".to_string(),
                 sort_key: "2026-05-05".to_string(),
             },
-            markdown: "# Hi\n<script>alert(1)</script>".to_string(),
+            markdown_body: "# Hi\n<script>alert(1)</script>".to_string(),
         };
 
         let html = render_detail_page(&detail);
+        assert!(html.contains("<h1>Hi</h1>"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("&lt;summary&gt;"));
         assert!(html.contains("#&lt;tag&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(!html.contains("title: Danger"));
+    }
+
+    #[test]
+    fn renders_minimal_markdown_blocks_and_escapes_code() {
+        let html = render_markdown_body(
+            r#"# Title
+
+Plain **bold** and *italic* with `code`.
+
+- one
+- two
+
+1. first
+2. second
+
+```cpp
+if (x < y) {
+  cout << "<script>";
+}
+```
+"#,
+        );
+
+        assert!(html.contains("<h1>Title</h1>"));
+        assert!(html.contains("<strong>bold</strong>"));
+        assert!(html.contains("<em>italic</em>"));
+        assert!(html.contains("<code>code</code>"));
+        assert!(html.contains("<ul><li>one</li><li>two</li></ul>"));
+        assert!(html.contains("<ol><li>first</li><li>second</li></ol>"));
+        assert!(html.contains(r#"<pre><code class="language-cpp">"#));
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn renders_only_safe_markdown_links_and_images() {
+        let html = render_markdown_body(
+            r#"See [safe](https://example.com) and [bad](javascript:alert(1)).
+![local](../assets/a.png)
+![nested](../../assets/sub/b c.png)
+![bad](javascript:alert(1))
+![escape](../secret.png)
+"#,
+        );
+
+        assert!(
+            html.contains(r#"<a href="https://example.com" rel="noopener noreferrer">safe</a>"#)
+        );
+        assert!(html.contains("bad"));
+        assert!(!html.contains("javascript:alert"));
+        assert!(html.contains(r#"<img src="/assets/a.png" alt="local" loading="lazy">"#));
+        assert!(html.contains(r#"<img src="/assets/sub/b%20c.png" alt="nested" loading="lazy">"#));
+        assert!(!html.contains(r#"<img src="javascript"#));
+        assert!(!html.contains("../secret.png"));
+    }
+
+    #[test]
+    fn detail_page_renders_only_body_after_frontmatter_split() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        let note_path = notes_dir.join("tricks/detail.md");
+        fs::write(
+            &note_path,
+            r#"---
+title: Detail
+tags: [render]
+summary: Summary
+---
+
+## Body title
+"#,
+        )
+        .unwrap();
+
+        let detail = read_blog_note_detail(notes_dir, &note_path).unwrap();
+        let html = render_detail_page(&detail);
+
+        assert!(html.contains("<h2>Body title</h2>"));
+        assert!(!html.contains("title: Detail"));
+        assert!(!html.contains("tags: [render]"));
     }
 }
