@@ -3,8 +3,10 @@ import path from "node:path";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { resolveNotesDir } from "./notes-path.mjs";
+import { rehypeNoteAssets, remarkNoteAssets } from "./rehype-note-assets.mjs";
 
 const isGithubPages = process.env.GITHUB_PAGES === "true";
+const basePath = isGithubPages ? "/oi-notebook" : "";
 
 function watchExternalNotes() {
   const notesDir = resolveNotesDir();
@@ -56,11 +58,11 @@ function watchExternalNotes() {
 
 export default defineConfig({
   site: isGithubPages ? "https://hardyz0517.github.io" : "http://localhost:4321",
-  ...(isGithubPages ? { base: "/oi-notebook" } : {}),
+  ...(isGithubPages ? { base: basePath } : {}),
   integrations: [watchExternalNotes()],
   markdown: {
-    remarkPlugins: [remarkMath],
-    rehypePlugins: [rehypeKatex],
+    remarkPlugins: [[remarkNoteAssets, { basePath }], remarkMath],
+    rehypePlugins: [[rehypeNoteAssets, { basePath }], rehypeKatex],
     shikiConfig: {
       theme: "github-light",
     },
