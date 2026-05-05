@@ -60,11 +60,14 @@ const categoryHref = (category: string) => withBase(`/categories/${category}`);
 const tagHref = (tag: string) => withBase(`/tags/${encodeURIComponent(tag.trim())}`);
 
 const excerptOf = (note: NoteEntry) => {
-  if (note.data.summary.trim()) {
-    return note.data.summary.trim();
+  const summary = note.data.summary?.trim() ?? "";
+
+  if (summary) {
+    return summary;
   }
 
-  const body = note.body
+  const rawBody = note.body ?? "";
+  const body = rawBody
     .replace(/^---[\s\S]*?---/, "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]+)`/g, "$1")
