@@ -1389,18 +1389,18 @@ export default function App() {
       </DialogContent>
     </Dialog>
     <Dialog open={isPromptDialogOpen} onOpenChange={(open) => !open && closePromptDialog()}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="grid h-[82vh] max-h-[90vh] w-[min(90vw,1100px)] max-w-none grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader>
           <DialogTitle>AI Prompt</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 py-2">
-          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 py-2">
+          <div className="rounded-md border border-border bg-muted/20 p-2.5 text-xs leading-5 text-muted-foreground">
             <div>Prompt 保存在本地 .oinb/prompts/，不会提交到 Git。</div>
             <div>支持变量：{"{{problem_id}}"}、{"{{problem_title}}"}、{"{{submission_id}}"}、{"{{candidate_comment}}"}、{"{{note_path}}"}、{"{{content}}"}、{"{{body}}"}。</div>
             <div>不要把 API Key、Base URL、Cookie 或其它密钥写进 Prompt。</div>
           </div>
-          <div className="grid grid-cols-[13rem_1fr] gap-3">
-            <div className="grid content-start gap-2">
+          <div className="grid min-h-0 grid-cols-1 gap-3 sm:grid-cols-[13.75rem_minmax(0,1fr)]">
+            <div className="grid content-start gap-2 overflow-y-auto pr-1">
               {promptTemplates.map((prompt) => (
                 <Button
                   key={prompt.fileName}
@@ -1416,7 +1416,7 @@ export default function App() {
                 </Button>
               ))}
             </div>
-            <div className="grid gap-2">
+            <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
               <Label htmlFor="ai-prompt-content">
                 {selectedPrompt ? selectedPrompt.fileName : "Prompt"}
               </Label>
@@ -1425,7 +1425,7 @@ export default function App() {
                 value={promptContent}
                 disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}
                 rows={18}
-                className="min-h-[30rem] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                className="h-full min-h-[60vh] w-full resize-none overflow-auto rounded-none border border-input bg-transparent px-3 py-2.5 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80 sm:min-h-0"
                 onChange={(e) => setPromptContent(e.target.value)}
               />
             </div>
