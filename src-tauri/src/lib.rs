@@ -1,4 +1,5 @@
 mod ai;
+mod blog_server;
 mod frontmatter;
 mod git;
 mod luogu;
@@ -15,12 +16,14 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 struct BlogServerState {
     child: Mutex<Option<Child>>,
+    production_server: blog_server::ProductionBlogServer,
 }
 
 impl BlogServerState {
     fn new() -> Self {
         Self {
             child: Mutex::new(None),
+            production_server: blog_server::ProductionBlogServer::new(),
         }
     }
 }
@@ -34,6 +37,10 @@ impl Drop for BlogServerState {
 }
 
 fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return state.production_server.ensure_running();
+    }
+
     let Some(site_dir) = paths::site_dir()? else {
         return Ok(());
     };
@@ -71,6 +78,10 @@ fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
 }
 
 fn stop_blog_server(state: &BlogServerState) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Ok(());
+    }
+
     let mut child = match state.child.lock() {
         Ok(mut guard) => guard.take(),
         Err(e) => return Err(format!("无法获取 Astro dev server 状态锁：{e}")),
@@ -144,11 +155,11 @@ fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_blog() -> Result<(), String> {
+fn open_blog(state: tauri::State<'_, BlogServerState>) -> Result<(), String> {
     if !cfg!(debug_assertions) {
-        return Err(
-            "Local blog preview is unavailable in this classmates preview build".to_string(),
-        );
+        start_blog_server(&state)?;
+        return tauri_plugin_opener::open_url("http://127.0.0.1:4321", None::<&str>)
+            .map_err(|e| format!("打开本地博客失败：{e}"));
     }
 
     tauri_plugin_opener::open_url("http://localhost:4321", None::<&str>)
@@ -156,15 +167,18 @@ fn open_blog() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<(), String> {
+fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<String, String> {
     if !cfg!(debug_assertions) {
-        return Err(
-            "Local blog preview is unavailable in this classmates preview build".to_string(),
+        start_blog_server(&state)?;
+        return Ok(
+            "Local blog health server is running at http://127.0.0.1:4321. Full blog refresh is not wired yet."
+                .to_string(),
         );
     }
 
     stop_blog_server(&state)?;
-    start_blog_server(&state)
+    start_blog_server(&state)?;
+    Ok("Astro dev server restarted at http://localhost:4321.".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
