@@ -1,10 +1,19 @@
-use std::time::Duration;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
-use crate::luogu::{read_config, write_config, AiConfigFields};
+use crate::luogu::{read_config, repo_root, write_config, AiConfigFields};
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
+
+const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
+const NOTE_METADATA_TASK: &str = "note-metadata";
+const NOTE_POLISH_TASK: &str = "note-polish";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +69,14 @@ struct ChatCompletionMessage {
     content: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AiCacheFile {
+    created_at: String,
+    task: String,
+    model: String,
+    response_json: JsonValue,
+}
+
 fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), String> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -84,6 +101,89 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
     }
 
     Ok((base_url, api_key, model))
+}
+
+fn ai_cache_dir_for_repo(repo_root: &Path) -> PathBuf {
+    repo_root.join(".oinb").join("ai-cache")
+}
+
+fn stable_hash_hex(content: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x00000100000001b3;
+    let mut first = FNV_OFFSET;
+    let mut second = FNV_OFFSET ^ 0x9e3779b97f4a7c15;
+
+    for byte in content.as_bytes() {
+        first ^= u64::from(*byte);
+        first = first.wrapping_mul(FNV_PRIME);
+        second ^= u64::from(*byte).rotate_left(1);
+        second = second
+            .wrapping_mul(FNV_PRIME)
+            .rotate_left(5)
+            .wrapping_add(0x517cc1b727220a95);
+    }
+
+    format!("{first:016x}{second:016x}")
+}
+
+fn build_ai_cache_key(
+    task: &str,
+    config: &AiConfigFields,
+    prompt: &str,
+    context: JsonValue,
+) -> Result<String, String> {
+    let (base_url, _, model) = require_ai_config(config)?;
+    let key_json = json!({
+        "task": task,
+        "model": model,
+        "base_url_hash": stable_hash_hex(base_url),
+        "prompt": prompt,
+        "context": context,
+    });
+    let key_text = serde_json::to_string(&key_json)
+        .map_err(|e| format!("AI cache failed: cannot serialize cache key: {e}"))?;
+
+    Ok(stable_hash_hex(&key_text))
+}
+
+fn ai_cache_path(
+    task: &str,
+    config: &AiConfigFields,
+    prompt: &str,
+    context: JsonValue,
+) -> Result<PathBuf, String> {
+    let key = build_ai_cache_key(task, config, prompt, context)?;
+    Ok(ai_cache_dir_for_repo(&repo_root()?).join(format!("{task}-{key}.json")))
+}
+
+fn read_ai_cache(cache_path: &Path) -> Option<JsonValue> {
+    let content = fs::read_to_string(cache_path).ok()?;
+    let value = serde_json::from_str::<JsonValue>(&content).ok()?;
+    value.get("response_json").cloned()
+}
+
+fn write_ai_cache(
+    cache_path: &Path,
+    task: &str,
+    config: &AiConfigFields,
+    response_json: &JsonValue,
+) -> Result<(), String> {
+    let (_, _, model) = require_ai_config(config)?;
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("AI cache failed: cannot create .oinb/ai-cache directory: {e}"))?;
+    }
+
+    let cache = AiCacheFile {
+        created_at: Utc::now().to_rfc3339(),
+        task: task.to_string(),
+        model: model.to_string(),
+        response_json: response_json.clone(),
+    };
+    let content = serde_json::to_string_pretty(&cache)
+        .map_err(|e| format!("AI cache failed: cannot serialize cache file: {e}"))?;
+    fs::write(cache_path, format!("{content}\n"))
+        .map_err(|e| format!("AI cache failed: cannot write cache file: {e}"))
 }
 
 fn parse_ai_ok_response(content: &str) -> Result<bool, String> {
@@ -318,6 +418,24 @@ pub(crate) fn organize_luogu_insight(
             ("candidate_comment", input.candidate_comment.trim()),
         ],
     )?;
+    let cache_context = json!({
+        "problem_id": input.problem_id.trim(),
+        "problem_title": input.problem_title.trim(),
+        "submission_id": input.submission_id.trim(),
+        "candidate_comment": input.candidate_comment.trim(),
+    });
+    let cache_path = ai_cache_path(
+        LUOGU_INSIGHT_TASK,
+        config,
+        &user_prompt,
+        cache_context.clone(),
+    )?;
+    if let Some(value) = read_ai_cache(&cache_path) {
+        if let Ok(insight) = validate_organized_luogu_insight(value, "Luogu AI insight failed") {
+            return Ok(insight);
+        }
+    }
+
     let messages = json!([
         {
             "role": "system",
@@ -330,8 +448,10 @@ pub(crate) fn organize_luogu_insight(
     ]);
     let content = request_chat_completion(config, messages, 0.2, "Luogu AI insight failed")?;
     let value = parse_json_object_from_ai_content(&content, "Luogu AI insight failed")?;
+    let insight = validate_organized_luogu_insight(value.clone(), "Luogu AI insight failed")?;
+    let _ = write_ai_cache(&cache_path, LUOGU_INSIGHT_TASK, config, &value);
 
-    validate_organized_luogu_insight(value, "Luogu AI insight failed")
+    Ok(insight)
 }
 
 #[tauri::command]
@@ -353,6 +473,22 @@ pub fn generate_note_metadata(
         PromptTemplateKind::NoteMetadata,
         &[("note_path", relative_path), ("content", markdown_content)],
     )?;
+    let cache_context = json!({
+        "note_path": relative_path,
+        "content": markdown_content,
+    });
+    let cache_path = ai_cache_path(
+        NOTE_METADATA_TASK,
+        &config,
+        &user_prompt,
+        cache_context.clone(),
+    )?;
+    if let Some(value) = read_ai_cache(&cache_path) {
+        if let Ok(metadata) = validate_generated_note_metadata(value, "AI metadata failed") {
+            return Ok(metadata);
+        }
+    }
+
     let messages = json!([
         {
             "role": "system",
@@ -365,8 +501,10 @@ pub fn generate_note_metadata(
     ]);
     let content = request_chat_completion(&config, messages, 0.2, "AI metadata failed")?;
     let value = parse_json_object_from_ai_content(&content, "AI metadata failed")?;
+    let metadata = validate_generated_note_metadata(value.clone(), "AI metadata failed")?;
+    let _ = write_ai_cache(&cache_path, NOTE_METADATA_TASK, &config, &value);
 
-    validate_generated_note_metadata(value, "AI metadata failed")
+    Ok(metadata)
 }
 
 #[tauri::command]
@@ -392,6 +530,22 @@ pub fn polish_note_body(
         PromptTemplateKind::NotePolish,
         &[("note_path", relative_path), ("body", body)],
     )?;
+    let cache_context = json!({
+        "note_path": relative_path,
+        "body": body,
+    });
+    let cache_path = ai_cache_path(
+        NOTE_POLISH_TASK,
+        &config,
+        &user_prompt,
+        cache_context.clone(),
+    )?;
+    if let Some(value) = read_ai_cache(&cache_path) {
+        if let Ok(polished) = validate_polished_note_body(value, "AI polish failed") {
+            return Ok(polished);
+        }
+    }
+
     let messages = json!([
         {
             "role": "system",
@@ -404,8 +558,10 @@ pub fn polish_note_body(
     ]);
     let content = request_chat_completion(&config, messages, 0.2, "AI polish failed")?;
     let value = parse_json_object_from_ai_content(&content, "AI polish failed")?;
+    let polished = validate_polished_note_body(value.clone(), "AI polish failed")?;
+    let _ = write_ai_cache(&cache_path, NOTE_POLISH_TASK, &config, &value);
 
-    validate_polished_note_body(value, "AI polish failed")
+    Ok(polished)
 }
 
 #[tauri::command]
@@ -619,5 +775,89 @@ mod tests {
 
         assert_eq!(base_url, "https://api.example.com/v1");
         assert_eq!(model, "model");
+    }
+
+    #[test]
+    fn same_input_generates_same_cache_key() {
+        let config = AiConfigFields {
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-one".to_string(),
+            model: "model-a".to_string(),
+        };
+        let context = json!({
+            "note_path": "tricks/a.md",
+            "content": "# A"
+        });
+
+        let first =
+            build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt", context.clone()).unwrap();
+        let second = build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt", context).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn prompt_change_changes_cache_key() {
+        let config = AiConfigFields {
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-one".to_string(),
+            model: "model-a".to_string(),
+        };
+        let context = json!({
+            "note_path": "tricks/a.md",
+            "content": "# A"
+        });
+
+        let first =
+            build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt one", context.clone()).unwrap();
+        let second =
+            build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt two", context).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn model_change_changes_cache_key() {
+        let mut config = AiConfigFields {
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-one".to_string(),
+            model: "model-a".to_string(),
+        };
+        let context = json!({
+            "note_path": "tricks/a.md",
+            "content": "# A"
+        });
+
+        let first =
+            build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt", context.clone()).unwrap();
+        config.model = "model-b".to_string();
+        let second = build_ai_cache_key(NOTE_METADATA_TASK, &config, "prompt", context).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn cache_json_does_not_contain_api_key() {
+        let config = AiConfigFields {
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-one".to_string(),
+            model: "model-a".to_string(),
+        };
+        let cache = AiCacheFile {
+            created_at: "2026-05-05T00:00:00Z".to_string(),
+            task: NOTE_METADATA_TASK.to_string(),
+            model: config.model.clone(),
+            response_json: json!({
+                "title": "A",
+                "tags": ["DP", "graph", "trick"],
+                "summary": "A short summary."
+            }),
+        };
+
+        let serialized = serde_json::to_string(&cache).unwrap();
+
+        assert!(!serialized.contains(&config.api_key));
+        assert!(!serialized.contains("api_key"));
+        assert!(!serialized.contains("base_url"));
     }
 }
