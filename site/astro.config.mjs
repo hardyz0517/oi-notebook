@@ -1,5 +1,7 @@
 import { defineConfig } from "astro/config";
+import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { resolveNotesDir } from "./notes-path.mjs";
@@ -56,10 +58,43 @@ function watchExternalNotes() {
   };
 }
 
+function copyNoteAssets() {
+  const notesDir = resolveNotesDir();
+  const sourceDir = path.join(notesDir, "assets");
+
+  return {
+    name: "copy-note-assets",
+    hooks: {
+      "astro:build:done": async ({ dir, logger }) => {
+        let sourceStats;
+
+        try {
+          sourceStats = await fs.stat(sourceDir);
+        } catch (error) {
+          if (error?.code === "ENOENT") {
+            logger.info(`No note assets directory found, skipping: ${sourceDir}`);
+            return;
+          }
+          throw error;
+        }
+
+        if (!sourceStats.isDirectory()) {
+          logger.warn(`Note assets path is not a directory, skipping: ${sourceDir}`);
+          return;
+        }
+
+        const targetDir = path.join(fileURLToPath(dir), "assets");
+        await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
+        logger.info(`Copied note assets from ${sourceDir} to ${targetDir}`);
+      },
+    },
+  };
+}
+
 export default defineConfig({
   site: isGithubPages ? "https://hardyz0517.github.io" : "http://localhost:4321",
   ...(isGithubPages ? { base: basePath } : {}),
-  integrations: [watchExternalNotes()],
+  integrations: [watchExternalNotes(), copyNoteAssets()],
   markdown: {
     remarkPlugins: [[remarkNoteAssets, { basePath }], remarkMath],
     rehypePlugins: [[rehypeNoteAssets, { basePath }], rehypeKatex],
