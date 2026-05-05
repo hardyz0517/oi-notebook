@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
+use crate::ai::{organize_luogu_insight, OrganizeLuoguInsightInput, OrganizedLuoguInsight};
 use crate::frontmatter;
 use crate::git::{commit_note, CommitNoteStatus};
 
@@ -41,7 +42,7 @@ pub struct AiConfigFields {
     pub model: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportLuoguInsightResult {
     pub relative_path: String,
@@ -74,6 +75,9 @@ pub struct SyncLuoguInsightsResult {
     pub skipped_no_insight: usize,
     pub skipped_existing: usize,
     pub failed_count: usize,
+    pub ai_imported_count: usize,
+    pub ai_skipped_count: usize,
+    pub ai_failed_count: usize,
     pub reached_last_submission_id: bool,
     pub updated_last_submission_id: Option<u64>,
     pub imported_paths: Vec<String>,
@@ -90,6 +94,7 @@ struct LuoguSubmissionRecord {
     submit_time: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct InsightFrontmatter {
     title: Option<String>,
@@ -99,10 +104,18 @@ struct InsightFrontmatter {
     draft: Option<bool>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct InsightBlock {
     frontmatter: InsightFrontmatter,
     body: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum LuoguAiImportOutcome {
+    Imported(ImportLuoguInsightResult),
+    NoCandidate,
+    AiSkipped,
 }
 
 pub(crate) fn repo_root() -> Result<PathBuf, String> {
@@ -584,6 +597,18 @@ fn extract_ai_candidate_comment(source_code: &str) -> Option<String> {
     candidate
 }
 
+fn extract_luogu_ai_candidate_comment(source_code: &str) -> Option<String> {
+    if source_code.contains("/* @oinb-insight") {
+        return extract_oinb_insight(source_code)
+            .ok()
+            .map(|content| clean_block_comment_content(&content))
+            .filter(|content| has_enough_ai_candidate_content(content));
+    }
+
+    extract_ai_candidate_comment(source_code)
+}
+
+#[allow(dead_code)]
 fn yaml_string(mapping: &Mapping, key: &str) -> Option<String> {
     mapping
         .get(YamlValue::String(key.to_string()))
@@ -593,12 +618,14 @@ fn yaml_string(mapping: &Mapping, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+#[allow(dead_code)]
 fn yaml_bool(mapping: &Mapping, key: &str) -> Option<bool> {
     mapping
         .get(YamlValue::String(key.to_string()))
         .and_then(YamlValue::as_bool)
 }
 
+#[allow(dead_code)]
 fn yaml_tags(mapping: &Mapping) -> Vec<String> {
     let Some(value) = mapping.get(YamlValue::String("tags".to_string())) else {
         return Vec::new();
@@ -622,6 +649,7 @@ fn yaml_tags(mapping: &Mapping) -> Vec<String> {
     }
 }
 
+#[allow(dead_code)]
 fn split_insight_frontmatter(insight: &str) -> Result<InsightBlock, String> {
     let normalized = insight.replace("\r\n", "\n").replace('\r', "\n");
     let Some(rest) = normalized.strip_prefix("---\n") else {
@@ -679,6 +707,7 @@ fn tags_yaml(tags: &[String]) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn build_note_markdown(
     problem_id: &str,
     problem_title: &str,
@@ -723,29 +752,54 @@ fn build_note_markdown(
     markdown
 }
 
-fn import_luogu_insight_to_notes_dir(
-    notes_dir: &Path,
+fn build_ai_note_markdown(
     problem_id: &str,
-    problem_title: &str,
     submission_id: &str,
-    source_code: &str,
-) -> Result<ImportLuoguInsightResult, String> {
-    let problem_id = normalize_problem_id(problem_id)?;
-    if problem_title.trim().is_empty() {
-        return Err("Luogu import failed: problem title cannot be empty".to_string());
-    }
-    if submission_id.trim().is_empty() {
-        return Err("Luogu import failed: submission id cannot be empty".to_string());
+    insight: &OrganizedLuoguInsight,
+) -> String {
+    let tags = insight
+        .tags
+        .iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect::<Vec<_>>();
+
+    let mut markdown = format!(
+        "---\ntitle: {}\ntags: {}\ndifficulty: {}\nsource: {}\nsummary: {}\ndraft: {}\nluogu_submission: {}\n---\n\n",
+        yaml_quote(insight.title.trim()),
+        tags_yaml(&tags),
+        yaml_quote(insight.difficulty.trim()),
+        yaml_quote(&format!("luogu-{problem_id}")),
+        yaml_quote(insight.summary.trim()),
+        insight.draft,
+        yaml_quote(submission_id.trim()),
+    );
+
+    let body = insight.body.trim();
+    if !body.is_empty() {
+        markdown.push_str(body);
+        markdown.push_str("\n\n");
     }
 
-    let insight_text = extract_oinb_insight(source_code)?;
-    let insight = split_insight_frontmatter(&insight_text)?;
-    let title = insight
-        .frontmatter
-        .title
-        .as_deref()
-        .unwrap_or_else(|| problem_title.trim());
-    let safe_title = safe_title_for_filename(title, &problem_id);
+    markdown.push_str("## Links\n\n");
+    markdown.push_str(&format!(
+        "- Original problem: https://www.luogu.com.cn/problem/{problem_id}\n"
+    ));
+    markdown.push_str(&format!(
+        "- AC submission: https://www.luogu.com.cn/record/{}\n",
+        submission_id.trim()
+    ));
+
+    markdown
+}
+
+fn write_ai_luogu_note_to_notes_dir(
+    notes_dir: &Path,
+    problem_id: &str,
+    submission_id: &str,
+    insight: &OrganizedLuoguInsight,
+) -> Result<ImportLuoguInsightResult, String> {
+    let safe_title = safe_title_for_filename(insight.title.trim(), problem_id);
     let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
     let target_path = notes_dir.join(&relative_path);
 
@@ -755,7 +809,7 @@ fn import_luogu_insight_to_notes_dir(
         })?;
     }
 
-    let markdown = build_note_markdown(&problem_id, problem_title, submission_id, insight);
+    let markdown = build_ai_note_markdown(problem_id, submission_id, insight);
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
         return Err(format!(
@@ -781,6 +835,44 @@ fn import_luogu_insight_to_notes_dir(
     Ok(ImportLuoguInsightResult { relative_path })
 }
 
+fn import_luogu_insight_to_notes_dir(
+    notes_dir: &Path,
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    source_code: &str,
+    ai_config: &AiConfigFields,
+) -> Result<LuoguAiImportOutcome, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    if problem_title.trim().is_empty() {
+        return Err("Luogu import failed: problem title cannot be empty".to_string());
+    }
+    if submission_id.trim().is_empty() {
+        return Err("Luogu import failed: submission id cannot be empty".to_string());
+    }
+
+    let Some(candidate_comment) = extract_luogu_ai_candidate_comment(source_code) else {
+        return Ok(LuoguAiImportOutcome::NoCandidate);
+    };
+
+    let insight = organize_luogu_insight(
+        ai_config,
+        &OrganizeLuoguInsightInput {
+            problem_id: problem_id.clone(),
+            problem_title: problem_title.trim().to_string(),
+            submission_id: submission_id.trim().to_string(),
+            candidate_comment,
+        },
+    )?;
+
+    if !insight.should_import {
+        return Ok(LuoguAiImportOutcome::AiSkipped);
+    }
+
+    write_ai_luogu_note_to_notes_dir(notes_dir, &problem_id, submission_id, &insight)
+        .map(LuoguAiImportOutcome::Imported)
+}
+
 #[tauri::command]
 pub fn import_luogu_insight(
     problem_id: String,
@@ -791,14 +883,26 @@ pub fn import_luogu_insight(
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir)
         .map_err(|e| format!("Luogu import failed: cannot create notes directory: {e}"))?;
+    let config = read_config()?;
 
-    import_luogu_insight_to_notes_dir(
+    match import_luogu_insight_to_notes_dir(
         &notes_dir,
         &problem_id,
         &problem_title,
         &submission_id,
         &source_code,
-    )
+        &config.ai,
+    )? {
+        LuoguAiImportOutcome::Imported(imported) => Ok(imported),
+        LuoguAiImportOutcome::NoCandidate => Err(
+            "Luogu import failed: source code does not contain an AI insight comment candidate"
+                .to_string(),
+        ),
+        LuoguAiImportOutcome::AiSkipped => Err(
+            "Luogu import skipped: AI did not find enough reusable insight in the comment"
+                .to_string(),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -830,6 +934,7 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
     let (uid, client_id) = require_luogu_config(&config)?;
     let uid = uid.to_string();
     let client_id = client_id.to_string();
+    let ai_config = config.ai.clone();
     let last_submission_id = config.luogu.last_submission_id;
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir)
@@ -888,6 +993,9 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
     let mut skipped_no_insight = 0;
     let mut skipped_existing = 0;
     let mut failed_count = 0;
+    let mut ai_imported_count = 0;
+    let mut ai_skipped_count = 0;
+    let mut ai_failed_count = 0;
     let mut imported_paths = Vec::new();
     let mut warnings = Vec::new();
     let mut detail_requests = 0usize;
@@ -913,19 +1021,23 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
                 }
             };
 
-        if extract_oinb_insight(&source_code).is_err() {
-            skipped_no_insight += 1;
-            continue;
-        }
-
         let imported = match import_luogu_insight_to_notes_dir(
             &notes_dir,
             &record.problem_id,
             &record.problem_title,
             &record.submission_id.to_string(),
             &source_code,
+            &ai_config,
         ) {
-            Ok(imported) => imported,
+            Ok(LuoguAiImportOutcome::Imported(imported)) => imported,
+            Ok(LuoguAiImportOutcome::NoCandidate) => {
+                skipped_no_insight += 1;
+                continue;
+            }
+            Ok(LuoguAiImportOutcome::AiSkipped) => {
+                ai_skipped_count += 1;
+                continue;
+            }
             Err(error) if error.contains("already exists") => {
                 skipped_existing += 1;
                 warnings.push(error);
@@ -933,6 +1045,7 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
             }
             Err(error) => {
                 failed_count += 1;
+                ai_failed_count += 1;
                 warnings.push(error);
                 continue;
             }
@@ -958,6 +1071,7 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
         }
 
         imported_count += 1;
+        ai_imported_count += 1;
         imported_paths.push(imported.relative_path);
     }
 
@@ -984,11 +1098,11 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
 
     let message = if failed_count == 0 {
         format!(
-            "Luogu sync completed: imported {imported_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
+            "Luogu sync completed: AI imported {ai_imported_count}, AI skipped {ai_skipped_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
         )
     } else {
         format!(
-            "Luogu sync completed with {failed_count} failure(s): imported {imported_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
+            "Luogu sync completed with {failed_count} failure(s): AI imported {ai_imported_count}, AI skipped {ai_skipped_count}, AI failed {ai_failed_count}, skipped {skipped_no_insight} without insight, skipped {skipped_existing} existing notes"
         )
     };
 
@@ -1000,6 +1114,9 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
         skipped_no_insight,
         skipped_existing,
         failed_count,
+        ai_imported_count,
+        ai_skipped_count,
+        ai_failed_count,
         reached_last_submission_id,
         updated_last_submission_id,
         imported_paths,
@@ -1121,6 +1238,16 @@ int main() {
     }
 
     #[test]
+    fn extracts_oinb_insight_as_luogu_ai_candidate() {
+        let comment = extract_luogu_ai_candidate_comment(&sample_source()).unwrap();
+
+        assert!(comment.contains("title: Interval Coverage"));
+        assert!(comment.contains("## Insight"));
+        assert!(!comment.contains("/*"));
+        assert!(!comment.contains("*/"));
+    }
+
+    #[test]
     fn extracts_tail_ai_candidate_comment_with_english_keywords() {
         let source = r#"
 int main() {
@@ -1168,27 +1295,48 @@ Keep one sentinel item to avoid special casing.
     }
 
     #[test]
+    fn generated_ai_frontmatter_uses_ai_fields_and_keeps_draft() {
+        let insight = OrganizedLuoguInsight {
+            should_import: true,
+            title: "AI Interval Coverage".to_string(),
+            tags: vec!["difference".to_string(), "pitfall".to_string()],
+            difficulty: "improve+".to_string(),
+            summary: "Boundary handling matters.".to_string(),
+            draft: true,
+            body: "## Insight\n\nUse a difference array.".to_string(),
+        };
+
+        let markdown = build_ai_note_markdown("P1234", "987654", &insight);
+
+        assert!(markdown.contains("title: AI Interval Coverage"));
+        assert!(markdown.contains("tags: [difference, pitfall]"));
+        assert!(markdown.contains("difficulty: improve+"));
+        assert!(markdown.contains("source: luogu-P1234"));
+        assert!(markdown.contains("summary: Boundary handling matters."));
+        assert!(markdown.contains("draft: true"));
+        assert!(markdown.contains("luogu_submission: '987654'"));
+        assert!(markdown.contains("## Insight"));
+    }
+
+    #[test]
     fn import_does_not_overwrite_existing_file() {
         let dir = tempdir().unwrap();
         let notes_dir = dir.path();
+        let insight = OrganizedLuoguInsight {
+            should_import: true,
+            title: "Interval Coverage".to_string(),
+            tags: vec!["difference".to_string(), "construction".to_string()],
+            difficulty: "improve+".to_string(),
+            summary: "Find the difference-array view.".to_string(),
+            draft: true,
+            body: "## Insight\n\nUse a difference array.".to_string(),
+        };
 
-        let first = import_luogu_insight_to_notes_dir(
-            notes_dir,
-            "1234",
-            "Fallback",
-            "987654",
-            &sample_source(),
-        )
-        .unwrap();
+        let first =
+            write_ai_luogu_note_to_notes_dir(notes_dir, "P1234", "987654", &insight).unwrap();
         assert_eq!(first.relative_path, "luogu/P1234-Interval-Coverage.md");
 
-        let second = import_luogu_insight_to_notes_dir(
-            notes_dir,
-            "P1234",
-            "Fallback",
-            "987654",
-            &sample_source(),
-        );
+        let second = write_ai_luogu_note_to_notes_dir(notes_dir, "P1234", "987654", &insight);
         assert!(second.unwrap_err().contains("already exists"));
     }
 

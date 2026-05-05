@@ -447,7 +447,7 @@ export default function App() {
       }
 
       const reachedLastText = result.reachedLastSubmissionId ? "已触达 last_submission_id" : "未触达 last_submission_id";
-      const syncSummary = `扫描 ${result.scannedPages} 页 / ${result.scannedCount} 条，AC ${result.acCount} 条，导入 ${result.importedCount} 篇，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，失败 ${result.failedCount} 条，${reachedLastText}，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
+      const syncSummary = `扫描 ${result.scannedPages} 页 / ${result.scannedCount} 条，AC ${result.acCount} 条，AI 导入 ${result.aiImportedCount} 篇，AI 跳过 ${result.aiSkippedCount} 条，AI 失败 ${result.aiFailedCount} 条，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，总失败 ${result.failedCount} 条，${reachedLastText}，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
       if (result.failedCount > 0) {
         toast.warning(`洛谷同步完成，但有失败：${syncSummary}`);
       } else if (result.importedCount > 0) {
@@ -944,11 +944,11 @@ export default function App() {
           {luoguSyncResult && (
             <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
               <div className="font-medium text-foreground">
-                洛谷同步：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，导入 {luoguSyncResult.importedCount} 篇
+                洛谷同步：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，AI 导入 {luoguSyncResult.aiImportedCount} 篇
               </div>
               <div className="grid gap-1 text-muted-foreground">
                 <div>
-                  跳过无 insight {luoguSyncResult.skippedNoInsight} 条，已存在 {luoguSyncResult.skippedExisting} 条，失败 {luoguSyncResult.failedCount} 条
+                  AI 跳过 {luoguSyncResult.aiSkippedCount} 条，AI 失败 {luoguSyncResult.aiFailedCount} 条，跳过无 insight {luoguSyncResult.skippedNoInsight} 条，已存在 {luoguSyncResult.skippedExisting} 条，总失败 {luoguSyncResult.failedCount} 条
                 </div>
                 <div>
                   {luoguSyncResult.reachedLastSubmissionId ? "已触达 last_submission_id" : "未触达 last_submission_id"}
@@ -1109,7 +1109,7 @@ export default function App() {
               disabled={isImportingLuogu}
               rows={14}
               className="min-h-64 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
-              placeholder={`/* @oinb-insight\n---\ntitle: 区间覆盖差分\ntags: [差分, 构造]\n---\n\n## 启示\n\n...\n*/`}
+              placeholder={`int main() {\n  return 0;\n}\n\n/*\n启示：\n这题的关键观察是 ...\n\n坑点：\n边界需要额外处理 ...\n*/`}
               onChange={(e) => setLuoguSourceCode(e.target.value)}
             />
           </div>

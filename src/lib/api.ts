@@ -53,6 +53,9 @@ export interface SyncLuoguInsightsResult {
   skippedNoInsight: number;
   skippedExisting: number;
   failedCount: number;
+  aiImportedCount: number;
+  aiSkippedCount: number;
+  aiFailedCount: number;
   reachedLastSubmissionId: boolean;
   updatedLastSubmissionId: number | null;
   importedPaths: string[];

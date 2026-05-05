@@ -12,6 +12,25 @@ pub struct TestAiConnectionResult {
     pub ok: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OrganizeLuoguInsightInput {
+    pub problem_id: String,
+    pub problem_title: String,
+    pub submission_id: String,
+    pub candidate_comment: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct OrganizedLuoguInsight {
+    pub should_import: bool,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub difficulty: String,
+    pub summary: String,
+    pub draft: bool,
+    pub body: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
@@ -54,14 +73,7 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
 }
 
 fn parse_ai_ok_response(content: &str) -> Result<bool, String> {
-    let trimmed = content.trim();
-    let json_text = if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
-        &trimmed[start..=end]
-    } else {
-        trimmed
-    };
-    let value: JsonValue = serde_json::from_str(json_text)
-        .map_err(|_| "AI connection failed: response was not valid JSON".to_string())?;
+    let value = parse_json_object_from_ai_content(content, "AI connection failed")?;
 
     value
         .get("ok")
@@ -69,9 +81,23 @@ fn parse_ai_ok_response(content: &str) -> Result<bool, String> {
         .ok_or_else(|| "AI connection failed: response JSON did not contain boolean ok".to_string())
 }
 
-fn test_ai_connection_with_config(
+fn parse_json_object_from_ai_content(content: &str, scope: &str) -> Result<JsonValue, String> {
+    let trimmed = content.trim();
+    let json_text = if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        &trimmed[start..=end]
+    } else {
+        trimmed
+    };
+
+    serde_json::from_str(json_text).map_err(|_| format!("{scope}: response was not valid JSON"))
+}
+
+fn request_chat_completion(
     config: &AiConfigFields,
-) -> Result<TestAiConnectionResult, String> {
+    messages: JsonValue,
+    temperature: f32,
+    scope: &str,
+) -> Result<String, String> {
     let (base_url, api_key, model) = require_ai_config(config)?;
     let url = format!("{base_url}/chat/completions");
     let client = reqwest::blocking::Client::builder()
@@ -86,44 +112,50 @@ fn test_ai_connection_with_config(
         .header(reqwest::header::ACCEPT, "application/json")
         .json(&json!({
             "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Return only strict JSON. No markdown."
-                },
-                {
-                    "role": "user",
-                    "content": "Return exactly {\"ok\": true}."
-                }
-            ],
-            "temperature": 0
+            "messages": messages,
+            "temperature": temperature,
+            "response_format": { "type": "json_object" }
         }))
         .send()
         .map_err(|e| {
             if e.is_timeout() {
-                "AI connection failed: request timed out".to_string()
+                format!("{scope}: request timed out")
             } else {
-                "AI connection failed: network error".to_string()
+                format!("{scope}: network error")
             }
         })?;
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!(
-            "AI connection failed: server returned HTTP {}",
-            status.as_u16()
-        ));
+        return Err(format!("{scope}: server returned HTTP {}", status.as_u16()));
     }
 
     let body = response
         .json::<ChatCompletionResponse>()
-        .map_err(|_| "AI connection failed: response format was unexpected".to_string())?;
-    let content = body
-        .choices
+        .map_err(|_| format!("{scope}: response format was unexpected"))?;
+    body.choices
         .first()
         .map(|choice| choice.message.content.as_str())
-        .ok_or_else(|| "AI connection failed: response did not include a choice".to_string())?;
-    let ok = parse_ai_ok_response(content)?;
+        .ok_or_else(|| format!("{scope}: response did not include a choice"))
+        .map(ToOwned::to_owned)
+}
+
+fn test_ai_connection_with_config(
+    config: &AiConfigFields,
+) -> Result<TestAiConnectionResult, String> {
+    let messages = json!([
+        {
+            "role": "system",
+            "content": "Return only strict JSON. No markdown."
+        },
+        {
+            "role": "user",
+            "content": "Return exactly {\"ok\": true}."
+        }
+    ]);
+    let content = request_chat_completion(config, messages, 0.0, "AI connection failed")?;
+    let ok = parse_ai_ok_response(&content)?;
+    let (_, _, model) = require_ai_config(config)?;
 
     if !ok {
         return Err("AI connection failed: model returned ok=false".to_string());
@@ -133,6 +165,79 @@ fn test_ai_connection_with_config(
         model: model.to_string(),
         ok,
     })
+}
+
+fn validate_organized_luogu_insight(
+    value: JsonValue,
+    scope: &str,
+) -> Result<OrganizedLuoguInsight, String> {
+    let insight: OrganizedLuoguInsight = serde_json::from_value(value)
+        .map_err(|_| format!("{scope}: response JSON schema was unexpected"))?;
+
+    if !insight.should_import {
+        return Ok(insight);
+    }
+
+    if insight.title.trim().is_empty() {
+        return Err(format!("{scope}: response title was empty"));
+    }
+    if insight.tags.len() < 2 || insight.tags.len() > 5 {
+        return Err(format!("{scope}: response tags must contain 2-5 items"));
+    }
+    if insight.tags.iter().any(|tag| tag.trim().is_empty()) {
+        return Err(format!("{scope}: response tags contained an empty item"));
+    }
+    if insight.body.trim().is_empty() {
+        return Err(format!("{scope}: response body was empty"));
+    }
+
+    Ok(insight)
+}
+
+pub(crate) fn organize_luogu_insight(
+    config: &AiConfigFields,
+    input: &OrganizeLuoguInsightInput,
+) -> Result<OrganizedLuoguInsight, String> {
+    let system_prompt = r#"You are an OI competitive programming notebook assistant.
+Return only strict JSON. Do not use markdown fences around the JSON.
+Required JSON schema:
+{
+  "should_import": boolean,
+  "title": string,
+  "tags": string[],
+  "difficulty": string,
+  "summary": string,
+  "draft": boolean,
+  "body": string
+}
+Rules:
+- Only organize the insight, idea, trick, pitfall, or lesson explicitly written in the user's comment.
+- Do not invent a complete solution, proof, or missing algorithm details.
+- If the comment has no clear reusable value, return should_import=false.
+- body must be Markdown.
+- tags must contain 2-5 concise items when should_import=true.
+- draft should default to true unless the comment clearly says it is publish-ready."#;
+    let user_prompt = format!(
+        "Problem ID: {}\nProblem title: {}\nSubmission ID: {}\n\nCandidate comment:\n{}",
+        input.problem_id.trim(),
+        input.problem_title.trim(),
+        input.submission_id.trim(),
+        input.candidate_comment.trim()
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(config, messages, 0.2, "Luogu AI insight failed")?;
+    let value = parse_json_object_from_ai_content(&content, "Luogu AI insight failed")?;
+
+    validate_organized_luogu_insight(value, "Luogu AI insight failed")
 }
 
 #[tauri::command]
@@ -174,6 +279,59 @@ mod tests {
     #[test]
     fn rejects_ai_ok_response_without_boolean_ok() {
         assert!(parse_ai_ok_response(r#"{"ok": "true"}"#).is_err());
+    }
+
+    #[test]
+    fn validates_organized_luogu_insight_json() {
+        let value = json!({
+            "should_import": true,
+            "title": "P1000 insight",
+            "tags": ["math", "trick"],
+            "difficulty": "",
+            "summary": "Remember the boundary.",
+            "draft": true,
+            "body": "## Insight\n\nRemember the boundary."
+        });
+
+        let insight = validate_organized_luogu_insight(value, "test").unwrap();
+
+        assert!(insight.should_import);
+        assert_eq!(insight.tags, vec!["math", "trick"]);
+        assert!(insight.draft);
+    }
+
+    #[test]
+    fn allows_ai_to_decline_luogu_import() {
+        let value = json!({
+            "should_import": false,
+            "title": "",
+            "tags": [],
+            "difficulty": "",
+            "summary": "",
+            "draft": true,
+            "body": ""
+        });
+
+        let insight = validate_organized_luogu_insight(value, "test").unwrap();
+
+        assert!(!insight.should_import);
+    }
+
+    #[test]
+    fn rejects_importable_luogu_insight_with_too_few_tags() {
+        let value = json!({
+            "should_import": true,
+            "title": "P1000 insight",
+            "tags": ["math"],
+            "difficulty": "",
+            "summary": "Remember the boundary.",
+            "draft": true,
+            "body": "## Insight\n\nRemember the boundary."
+        });
+
+        assert!(validate_organized_luogu_insight(value, "test")
+            .unwrap_err()
+            .contains("tags must contain 2-5 items"));
     }
 
     #[test]
