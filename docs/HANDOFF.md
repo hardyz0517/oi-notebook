@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-05（记录 AI-first 洛谷 insight 工作流）
+**最后更新**：2026-05-05（记录通用 AI 元数据补全验收）
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -104,7 +104,7 @@
     ├─ 主窗口新建笔记已有模板选择，支持空白/Trick 模板/题解模板，已验收
     ├─ 主窗口 CodeMirror 已支持粘贴图片到 notes/assets，保存时当前 note 和本轮 assets 一起自动 commit，已验收
     ├─ 右侧 MarkdownPreview 已支持显示 notes/assets 图片，已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、通用 AI 笔记能力、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动定时/退出时 push、AI 正文润色/缓存/关联推荐、博客视觉继续打磨
 
 [~] Phase 6  洛谷爬虫
     ├─ @oinb-insight 本地导入 MVP 已完成
@@ -119,7 +119,8 @@
 [~] Phase 7  AI 辅助整理
     ├─ OpenAI-compatible AI 配置和连接测试已完成，DeepSeek 已验收可用
     ├─ 洛谷普通注释 AI 整理已接入同步和本地导入
-    └─ 未完成：通用 AI 自动打标签、摘要、润色、缓存、多 provider 路由
+    ├─ 当前笔记 AI 元数据补全已完成并验收：手动触发生成 title/tags/summary，不改正文、不自动保存、不自动 commit
+    └─ 未完成：AI 正文润色、缓存、关联推荐、多 provider 路由
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
@@ -146,7 +147,7 @@
 | 数学 | **KaTeX** | 快，适合实时预览 |
 | 代码高亮 | **@shikijs/rehype** | 官方维护的 Shiki rehype 集成 |
 | 博客（部分完成） | **Astro** | `site/` 子项目已初始化，直接读取 `notes/**/*.md` |
-| AI（部分完成） | OpenAI-compatible Chat Completions | DeepSeek 已验收；当前已接入洛谷 insight 整理，通用标签/摘要/润色/缓存仍未做 |
+| AI（部分完成） | OpenAI-compatible Chat Completions | DeepSeek 已验收；当前已接入洛谷 insight 整理和当前笔记元数据补全，正文润色/缓存/关联推荐仍未做 |
 
 其它重要决策：
 
@@ -463,7 +464,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] AI 生成笔记 frontmatter 会写入 `ai_generated: true` 和 `ai_model`，但不会写入 `api_key` 或 `base_url`。
 - [x] 同步摘要已包含 `ai_imported_count` / `ai_skipped_count` / `ai_failed_count`，AI 调用失败算严重失败，本轮不推进 `last_submission_id`。
 - [x] DeepSeek 路径已由 Hardy 验收：测试连接成功，AI 整理洛谷注释时 DeepSeek API 平台能看到请求。
-- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；通用 AI 自动打标签、摘要、润色和缓存还没做；生产分发策略还没做。
+- [x] 通用 AI 元数据补全已完成并由 Hardy 人工验收通过：主窗口当前笔记区域有“AI 补全元数据”手动触发入口，AI 只根据当前打开笔记生成 `title`、`tags`、`summary`。
+- [x] AI 元数据补全的 `tags` 会收敛为 3-5 个偏 OI/算法标签；成功后只更新当前编辑器里的 frontmatter，并标记 dirty。
+- [x] AI 元数据补全不改正文，不自动保存，不自动 commit；保存仍由用户 Ctrl+S 触发，然后沿用现有保存后自动 commit 流程。
+- [x] AI 元数据补全只写 frontmatter 的 `title` / `tags` / `summary`；`draft`、`difficulty`、`source`、`created`、`updated`、`luogu_submission`、`ai_generated`、`ai_model` 和未知字段会保留。
+- [!] 已知限制：当前仍是手动同步，不做启动自动同步或定时同步；AI 正文润色、缓存、关联推荐和多 provider 路由还没做；生产分发策略还没做。
 
 相关提交：
 
@@ -511,6 +516,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - `ecb605c feat(ai): add provider config and test`
 - `dd9818f feat(ai): organize Luogu comments with AI`
 - `7ef9ed9 feat(ai): mark generated Luogu notes`
+- `0c053db feat(ai): generate note metadata`
 
 端到端验证结果：
 
@@ -601,7 +607,9 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - Cookie 配置引导和过期提示已完成：设置面板说明从 `F12 -> Application/应用 -> Cookies -> https://www.luogu.com.cn` 复制 `_uid` 和 `__client_id`，并提醒 `__client_id` 不要泄露、不要提交到 Git。
   - 401/403 会提示 Cookie 可能失效，需要重新复制；网络失败、请求超时、返回格式异常也有简短错误提示。
   - AI 配置和测试连接已完成，DeepSeek 路径已由 Hardy 验收：API 平台能看到请求。
-  - 已知限制：只手动同步，不做启动自动同步或定时同步；通用 AI 自动打标签、摘要、润色和缓存还没做；生产分发策略还没做。
+  - 当前笔记 AI 元数据补全已完成并验收：用户手动点击“AI 补全元数据”，AI 只生成 `title`、`tags`、`summary`；`tags` 限制为 3-5 个偏 OI/算法标签；不改正文、不自动保存、不自动 commit，只标记 dirty，等待用户确认后 Ctrl+S 保存。
+  - 元数据补全只更新 frontmatter 的 `title` / `tags` / `summary`；`draft`、`difficulty`、`source`、`created`、`updated`、`luogu_submission`、`ai_generated`、`ai_model` 和未知字段会保留。
+  - 已知限制：只手动同步，不做启动自动同步或定时同步；AI 正文润色、缓存、关联推荐还没做；生产分发策略还没做。
 
 尚未完成：
 
@@ -609,11 +617,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 还没有生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 还没有自动定时 push / 退出时 push；当前只支持 Header 手动“同步 Git”。
 - 启动/定时自动同步还没做。
-- 通用 AI 自动打标签还没做。
-- 通用 AI 摘要 / 润色还没做。
+- AI 正文润色还没做。
+- AI 关联推荐还没做。
 - AI 缓存还没做。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、启动/定时洛谷同步，或通用 AI 标签/摘要/润色方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入生产分发策略、自动定时/退出时 push、启动/定时洛谷同步，或 AI 正文润色/缓存/关联推荐方向。
 
 ### 博客 UI 打磨进展
 
@@ -727,7 +735,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 生产分发策略；当前桌面端仍是开发模式下启动 Astro dev server。
 - 自动定时 push / 退出时 push；当前只支持手动“同步 Git”。
 - 启动/定时自动同步还没做。
-- 通用 AI 自动打标签还没做。
-- 通用 AI 摘要 / 润色还没做。
+- AI 正文润色还没做。
+- AI 关联推荐还没做。
 - AI 缓存还没做。
 - 博客视觉仍可继续打磨。
