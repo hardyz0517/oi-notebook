@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-05（记录 UI 打磨后置，不零散继续修）  
+**最后更新**：2026-05-05（记录 AI 缓存第一版完成）  
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -105,7 +105,7 @@
     ├─ 主窗口新建笔记已有模板选择，支持空白/Trick 模板/题解模板，已验收
     ├─ 主窗口 CodeMirror 已支持粘贴图片到 notes/assets，保存时当前 note 和本轮 assets 一起自动 commit，已验收
     ├─ 右侧 MarkdownPreview 已支持显示 notes/assets 图片，已验收
-    └─ 未完成：生产分发策略、自动定时/退出时 push、SQLite FTS5 正式索引、AI 缓存/关联推荐、博客视觉继续打磨
+    └─ 未完成：生产分发策略、自动定时/退出时 push、SQLite FTS5 正式索引、AI 关联推荐、博客视觉继续打磨
 
 [~] Phase 6  洛谷爬虫
     ├─ @oinb-insight 本地导入 MVP 已完成
@@ -123,7 +123,8 @@
     ├─ 当前笔记 AI 元数据补全已完成并验收：手动触发生成 title/tags/summary，不改正文、不自动保存、不自动 commit
     ├─ 当前笔记 AI 全文润色预览已完成并验收：只润色正文 body，先预览，用户应用后才写回并标记 dirty
     ├─ AI Prompt 模板系统已完成：模板存储在 `.oinb/prompts/`，已 gitignore；前端 AI Prompt 面板可读取、编辑、保存模板
-    └─ 未完成：AI 缓存、关联推荐、多 provider 路由
+    ├─ AI 缓存第一版已完成：`.oinb/ai-cache/` 已 gitignore，洛谷 insight、元数据补全、全文润色会走缓存，测试连接不缓存
+    └─ 未完成：关联推荐
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
@@ -152,7 +153,7 @@
 | 数学 | **KaTeX** | 快，适合实时预览 |
 | 代码高亮 | **@shikijs/rehype** | 官方维护的 Shiki rehype 集成 |
 | 博客（部分完成） | **Astro** | `site/` 子项目已初始化，直接读取 `notes/**/*.md` |
-| AI（部分完成） | OpenAI-compatible Chat Completions | DeepSeek 已验收；当前已接入洛谷 insight 整理、当前笔记元数据补全和全文润色预览，缓存/关联推荐仍未做 |
+| AI（部分完成） | OpenAI-compatible Chat Completions | DeepSeek 已验收；当前已接入洛谷 insight 整理、当前笔记元数据补全、全文润色预览和本地响应缓存，关联推荐仍未做 |
 
 其它重要决策：
 
@@ -480,7 +481,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] AI Prompt 模板系统已完成：Prompt 存储路径为 `.oinb/prompts/`，该目录已加入 `.gitignore`，不会提交到 Git。
 - [x] 当前支持三个 Prompt 模板：`luogu-insight.md` 对应洛谷 insight 整理，`note-metadata.md` 对应当前笔记元数据补全，`note-polish.md` 对应当前笔记正文润色。
 - [x] 前端已有“AI Prompt”面板，可读取、编辑、保存模板；Prompt 编辑面板已修复为宽弹窗、左侧模板列表、右侧大 textarea，改善长文本编辑体验。
-- [!] 已知限制：全文润色 prompt 效果一般，后续可单独继续调优；当前仍是手动同步，不做启动自动同步或定时同步；AI 缓存、关联推荐和多 provider 路由还没做；生产分发策略还没做。
+- [x] AI 缓存第一版已完成：缓存目录为 `.oinb/ai-cache/`，该目录已加入 `.gitignore`，不会提交到 Git。
+- [x] 洛谷 insight、当前笔记元数据补全、当前笔记全文润色会走缓存；`test_ai_connection` 不缓存。
+- [x] 缓存 key 包含 task、model、base_url hash、渲染后的 prompt 和输入上下文；prompt、model、base_url 或输入内容变化后会重新请求。
+- [x] 缓存损坏会忽略并重新请求；AI 请求失败不会写缓存；缓存 JSON 不保存 `api_key` / `base_url`。
+- [!] 已知限制：全文润色 prompt 效果一般，后续可单独继续调优；当前仍是手动同步，不做启动自动同步或定时同步；关联推荐还没做；生产分发策略还没做。
 
 相关提交：
 
@@ -626,8 +631,11 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - AI Prompt 模板系统已完成：Prompt 存储在 `.oinb/prompts/`，且 `.oinb/prompts/` 已 gitignore，不提交到 Git。
   - 当前支持 `luogu-insight.md`、`note-metadata.md`、`note-polish.md` 三个模板，分别用于洛谷 insight 整理、当前笔记元数据补全、当前笔记正文润色。
   - 前端已有“AI Prompt”面板，可读取、编辑、保存模板；原右侧 textarea 过窄的问题已修复为宽弹窗 + 左侧列表 + 右侧大 textarea。
+  - AI 缓存第一版已完成：缓存路径为 `.oinb/ai-cache/`，该目录已 gitignore；洛谷 insight、AI 补全元数据、AI 全文润色会走缓存，`test_ai_connection` 不缓存。
+  - AI 缓存 key 包含 task、model、base_url hash、渲染后的 prompt 和输入上下文；prompt、model、base_url 或输入内容变化后会重新请求。
+  - AI 缓存损坏会忽略并重新请求；AI 请求失败不会写缓存；缓存 JSON 不保存 `api_key` / `base_url`。
   - 桌面端 Ctrl+K / Cmd+K 搜索 MVP 已完成并验收：当前为内存扫描，不是 SQLite FTS5；搜索覆盖标题、正文、summary、tags、source 和路径；支持普通关键词、`tag:xxx`、`source:xxx`、`@recent`；最多显示 20 条结果；点击结果会打开对应笔记；若当前笔记有未保存改动，会复用现有 dirty 切换确认，不会直接丢内容。
-  - 已知限制：全文润色 prompt 效果后续还可继续调优；桌面搜索正式 SQLite FTS5 索引还没做；只手动同步，不做启动自动同步或定时同步；AI 缓存、关联推荐还没做；生产分发策略还没做。
+  - 已知限制：全文润色 prompt 效果后续还可继续调优；桌面搜索正式 SQLite FTS5 索引还没做；只手动同步，不做启动自动同步或定时同步；关联推荐还没做；生产分发策略还没做。
 
 尚未完成：
 
@@ -637,9 +645,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - SQLite FTS5 正式索引还没做；当前桌面端 Ctrl+K / Cmd+K 搜索是内存扫描 MVP。
 - 启动/定时自动同步还没做。
 - AI 关联推荐还没做。
-- AI 缓存还没做。
 
-下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入 SQLite FTS5 正式索引、生产分发策略、自动定时/退出时 push、启动/定时洛谷同步，或 AI 缓存/关联推荐方向。
+下一步建议：等待 Hardy 决定方向，可以继续博客视觉打磨，或进入 SQLite FTS5 正式索引、生产分发策略、自动定时/退出时 push、启动/定时洛谷同步，或 AI 关联推荐方向。
 
 ### 博客 UI 打磨进展
 
@@ -755,5 +762,4 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - SQLite FTS5 正式索引还没做；当前桌面端 Ctrl+K / Cmd+K 搜索是内存扫描 MVP。
 - 启动/定时自动同步还没做。
 - AI 关联推荐还没做。
-- AI 缓存还没做。
 - 博客视觉仍可继续打磨。
