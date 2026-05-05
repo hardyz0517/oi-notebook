@@ -447,7 +447,8 @@ export default function App() {
       }
 
       const reachedLastText = result.reachedLastSubmissionId ? "已触达 last_submission_id" : "未触达 last_submission_id";
-      const syncSummary = `扫描 ${result.scannedPages} 页 / ${result.scannedCount} 条，AC ${result.acCount} 条，AI 导入 ${result.aiImportedCount} 篇，AI 跳过 ${result.aiSkippedCount} 条，AI 失败 ${result.aiFailedCount} 条，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，总失败 ${result.failedCount} 条，${reachedLastText}，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
+      const aiModelText = result.aiModel ?? "未配置";
+      const syncSummary = `扫描 ${result.scannedPages} 页 / ${result.scannedCount} 条，AC ${result.acCount} 条，AI 整理：是，模型：${aiModelText}，AI 导入 ${result.aiImportedCount} 篇，AI 跳过 ${result.aiSkippedCount} 条，AI 失败 ${result.aiFailedCount} 条，无 insight ${result.skippedNoInsight} 条，已存在 ${result.skippedExisting} 条，总失败 ${result.failedCount} 条，${reachedLastText}，last_submission_id ${result.updatedLastSubmissionId ?? "未更新"}`;
       if (result.failedCount > 0) {
         toast.warning(`洛谷同步完成，但有失败：${syncSummary}`);
       } else if (result.importedCount > 0) {
@@ -511,7 +512,7 @@ export default function App() {
         await commitNote(imported.relativePath);
       } catch (commitError) {
         commitSucceeded = false;
-        toast.warning(`洛谷笔记已导入，Git 提交失败：${commitError}`);
+        toast.warning(`洛谷笔记已导入，AI 整理：是，模型：${imported.aiModel}，Git 提交失败：${commitError}`);
       }
 
       const updated = await listNotes();
@@ -524,7 +525,7 @@ export default function App() {
       setLuoguSubmissionId("");
       setLuoguSourceCode("");
       if (commitSucceeded) {
-        toast.success("洛谷笔记已导入并提交");
+        toast.success(`洛谷笔记已导入并提交，AI 整理：是，模型：${imported.aiModel}`);
       }
     } catch (e) {
       toast.error(`洛谷导入失败：${e}`);
@@ -947,6 +948,9 @@ export default function App() {
                 洛谷同步：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AC {luoguSyncResult.acCount} 条，AI 导入 {luoguSyncResult.aiImportedCount} 篇
               </div>
               <div className="grid gap-1 text-muted-foreground">
+                <div>
+                  AI 整理：是，模型：{luoguSyncResult.aiModel ?? "未配置"}
+                </div>
                 <div>
                   AI 跳过 {luoguSyncResult.aiSkippedCount} 条，AI 失败 {luoguSyncResult.aiFailedCount} 条，跳过无 insight {luoguSyncResult.skippedNoInsight} 条，已存在 {luoguSyncResult.skippedExisting} 条，总失败 {luoguSyncResult.failedCount} 条
                 </div>

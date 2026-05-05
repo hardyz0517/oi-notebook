@@ -10,6 +10,7 @@ export interface SaveNoteAssetResult {
 
 export interface ImportLuoguInsightResult {
   relativePath: string;
+  aiModel: string;
 }
 
 export interface LuoguConfig {
@@ -56,6 +57,7 @@ export interface SyncLuoguInsightsResult {
   aiImportedCount: number;
   aiSkippedCount: number;
   aiFailedCount: number;
+  aiModel: string | null;
   reachedLastSubmissionId: boolean;
   updatedLastSubmissionId: number | null;
   importedPaths: string[];

@@ -46,6 +46,7 @@ pub struct AiConfigFields {
 #[serde(rename_all = "camelCase")]
 pub struct ImportLuoguInsightResult {
     pub relative_path: String,
+    pub ai_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -78,6 +79,7 @@ pub struct SyncLuoguInsightsResult {
     pub ai_imported_count: usize,
     pub ai_skipped_count: usize,
     pub ai_failed_count: usize,
+    pub ai_model: Option<String>,
     pub reached_last_submission_id: bool,
     pub updated_last_submission_id: Option<u64>,
     pub imported_paths: Vec<String>,
@@ -756,6 +758,7 @@ fn build_ai_note_markdown(
     problem_id: &str,
     submission_id: &str,
     insight: &OrganizedLuoguInsight,
+    ai_model: &str,
 ) -> String {
     let tags = insight
         .tags
@@ -765,7 +768,7 @@ fn build_ai_note_markdown(
         .collect::<Vec<_>>();
 
     let mut markdown = format!(
-        "---\ntitle: {}\ntags: {}\ndifficulty: {}\nsource: {}\nsummary: {}\ndraft: {}\nluogu_submission: {}\n---\n\n",
+        "---\ntitle: {}\ntags: {}\ndifficulty: {}\nsource: {}\nsummary: {}\ndraft: {}\nluogu_submission: {}\nai_generated: true\nai_model: {}\n---\n\n",
         yaml_quote(insight.title.trim()),
         tags_yaml(&tags),
         yaml_quote(insight.difficulty.trim()),
@@ -773,6 +776,7 @@ fn build_ai_note_markdown(
         yaml_quote(insight.summary.trim()),
         insight.draft,
         yaml_quote(submission_id.trim()),
+        yaml_quote(ai_model.trim()),
     );
 
     let body = insight.body.trim();
@@ -798,6 +802,7 @@ fn write_ai_luogu_note_to_notes_dir(
     problem_id: &str,
     submission_id: &str,
     insight: &OrganizedLuoguInsight,
+    ai_model: &str,
 ) -> Result<ImportLuoguInsightResult, String> {
     let safe_title = safe_title_for_filename(insight.title.trim(), problem_id);
     let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
@@ -809,7 +814,7 @@ fn write_ai_luogu_note_to_notes_dir(
         })?;
     }
 
-    let markdown = build_ai_note_markdown(problem_id, submission_id, insight);
+    let markdown = build_ai_note_markdown(problem_id, submission_id, insight, ai_model);
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
         return Err(format!(
@@ -832,7 +837,10 @@ fn write_ai_luogu_note_to_notes_dir(
     file.write_all(final_content.as_bytes())
         .map_err(|e| format!("Luogu import failed: cannot write note {relative_path}: {e}"))?;
 
-    Ok(ImportLuoguInsightResult { relative_path })
+    Ok(ImportLuoguInsightResult {
+        relative_path,
+        ai_model: ai_model.trim().to_string(),
+    })
 }
 
 fn import_luogu_insight_to_notes_dir(
@@ -869,8 +877,14 @@ fn import_luogu_insight_to_notes_dir(
         return Ok(LuoguAiImportOutcome::AiSkipped);
     }
 
-    write_ai_luogu_note_to_notes_dir(notes_dir, &problem_id, submission_id, &insight)
-        .map(LuoguAiImportOutcome::Imported)
+    write_ai_luogu_note_to_notes_dir(
+        notes_dir,
+        &problem_id,
+        submission_id,
+        &insight,
+        ai_config.model.trim(),
+    )
+    .map(LuoguAiImportOutcome::Imported)
 }
 
 #[tauri::command]
@@ -935,6 +949,14 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
     let uid = uid.to_string();
     let client_id = client_id.to_string();
     let ai_config = config.ai.clone();
+    let ai_model = {
+        let model = ai_config.model.trim();
+        if model.is_empty() {
+            None
+        } else {
+            Some(model.to_string())
+        }
+    };
     let last_submission_id = config.luogu.last_submission_id;
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir)
@@ -1117,6 +1139,7 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
         ai_imported_count,
         ai_skipped_count,
         ai_failed_count,
+        ai_model,
         reached_last_submission_id,
         updated_last_submission_id,
         imported_paths,
@@ -1306,7 +1329,7 @@ Keep one sentinel item to avoid special casing.
             body: "## Insight\n\nUse a difference array.".to_string(),
         };
 
-        let markdown = build_ai_note_markdown("P1234", "987654", &insight);
+        let markdown = build_ai_note_markdown("P1234", "987654", &insight, "deepseek-chat");
 
         assert!(markdown.contains("title: AI Interval Coverage"));
         assert!(markdown.contains("tags: [difference, pitfall]"));
@@ -1315,6 +1338,10 @@ Keep one sentinel item to avoid special casing.
         assert!(markdown.contains("summary: Boundary handling matters."));
         assert!(markdown.contains("draft: true"));
         assert!(markdown.contains("luogu_submission: '987654'"));
+        assert!(markdown.contains("ai_generated: true"));
+        assert!(markdown.contains("ai_model: deepseek-chat"));
+        assert!(!markdown.contains("api_key"));
+        assert!(!markdown.contains("base_url"));
         assert!(markdown.contains("## Insight"));
     }
 
@@ -1332,11 +1359,24 @@ Keep one sentinel item to avoid special casing.
             body: "## Insight\n\nUse a difference array.".to_string(),
         };
 
-        let first =
-            write_ai_luogu_note_to_notes_dir(notes_dir, "P1234", "987654", &insight).unwrap();
+        let first = write_ai_luogu_note_to_notes_dir(
+            notes_dir,
+            "P1234",
+            "987654",
+            &insight,
+            "deepseek-chat",
+        )
+        .unwrap();
         assert_eq!(first.relative_path, "luogu/P1234-Interval-Coverage.md");
+        assert_eq!(first.ai_model, "deepseek-chat");
 
-        let second = write_ai_luogu_note_to_notes_dir(notes_dir, "P1234", "987654", &insight);
+        let second = write_ai_luogu_note_to_notes_dir(
+            notes_dir,
+            "P1234",
+            "987654",
+            &insight,
+            "deepseek-chat",
+        );
         assert!(second.unwrap_err().contains("already exists"));
     }
 
