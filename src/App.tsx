@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Bot, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
@@ -46,6 +46,11 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
+const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
+const CONTENT_ZOOM_MIN = 0.8;
+const CONTENT_ZOOM_MAX = 1.6;
+const CONTENT_ZOOM_STEP = 0.1;
+const CONTENT_ZOOM_DEFAULT = 1;
 const AI_CONFIG_MISSING_MESSAGE =
   "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
 
@@ -75,6 +80,20 @@ function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
 
 function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function clampContentZoom(value: number): number {
+  const stepped = Math.round(value * 10) / 10;
+  return Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, stepped));
+}
+
+function getInitialContentZoom(): number {
+  const stored = window.localStorage.getItem(CONTENT_ZOOM_STORAGE_KEY);
+  if (stored === null) return CONTENT_ZOOM_DEFAULT;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return CONTENT_ZOOM_DEFAULT;
+  return clampContentZoom(parsed);
 }
 
 function isAiConfigMissingError(message: string): boolean {
@@ -119,6 +138,7 @@ export default function App() {
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
+  const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [isDirty, setIsDirty] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
@@ -174,6 +194,25 @@ export default function App() {
     [promptTemplates, selectedPromptFileName],
   );
   const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
+
+  const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
+  const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
+
+  const updateContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
+    setContentZoom((currentZoom) => {
+      const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
+      return clampContentZoom(rawZoom);
+    });
+  };
+
+  const handleContentWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+
+    event.preventDefault();
+    updateContentZoom((currentZoom) =>
+      currentZoom + (event.deltaY < 0 ? CONTENT_ZOOM_STEP : -CONTENT_ZOOM_STEP),
+    );
+  };
 
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
@@ -850,6 +889,32 @@ export default function App() {
       if (!((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) return;
       e.preventDefault();
       setIsSearchOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
+  }, [contentZoom]);
+
+  // Ctrl/Cmd + Plus/Minus/0 缩放编辑器正文和右侧预览正文，不拦截 Ctrl+S 保存。
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "+" || key === "=") {
+        e.preventDefault();
+        updateContentZoom((currentZoom) => currentZoom + CONTENT_ZOOM_STEP);
+      } else if (key === "-" || key === "_") {
+        e.preventDefault();
+        updateContentZoom((currentZoom) => currentZoom - CONTENT_ZOOM_STEP);
+      } else if (key === "0") {
+        e.preventDefault();
+        updateContentZoom(CONTENT_ZOOM_DEFAULT);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1755,7 +1820,11 @@ export default function App() {
         <Separator orientation="vertical" />
 
         {/* Center: Markdown editor */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <main
+          className="flex min-w-0 flex-1 flex-col overflow-hidden"
+          style={zoomStyle}
+          onWheelCapture={handleContentWheel}
+        >
           {currentFilePath && (
             <details className="shrink-0 border-b border-border bg-background/95">
               <summary className="flex h-8 cursor-pointer select-none items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
@@ -1863,6 +1932,7 @@ export default function App() {
               onChange={handleEditorChange}
               onPasteImage={handlePasteImage}
               onScroll={(r) => setScrollRatio(r)}
+              zoomLabel={contentZoomLabel}
               className="min-h-0 min-w-0 flex-1"
             />
           ) : (
@@ -1930,7 +2000,11 @@ export default function App() {
         <Separator orientation="vertical" />
 
         {/* Right: Live preview */}
-        <aside className="flex min-w-0 flex-1 overflow-hidden">
+        <aside
+          className="flex min-w-0 flex-1 overflow-hidden"
+          style={zoomStyle}
+          onWheelCapture={handleContentWheel}
+        >
           {currentFilePath ? (
             <MarkdownPreview
               markdown={markdown}

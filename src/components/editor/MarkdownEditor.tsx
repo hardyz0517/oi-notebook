@@ -34,6 +34,7 @@ interface MarkdownEditorProps {
   onChange: (value: string) => void;
   onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
+  zoomLabel?: string;
   className?: string;
 }
 
@@ -283,6 +284,7 @@ export default function MarkdownEditor({
   onChange,
   onPasteImage,
   onScroll,
+  zoomLabel,
   className,
 }: MarkdownEditorProps) {
   // 容器 div 的 DOM 引用，CodeMirror 需要一个真实的 DOM 节点作为挂载点
@@ -397,7 +399,12 @@ export default function MarkdownEditor({
             },
             ".cm-gutters": { backgroundColor: "var(--background)", borderRight: "none" },
             // 内容区留内边距；caretColor 对齐主题 foreground
-            ".cm-content": { padding: "12px 16px", minHeight: "100%", caretColor: "var(--foreground)" },
+            ".cm-content": {
+              padding: "12px 16px",
+              minHeight: "100%",
+              caretColor: "var(--foreground)",
+              fontSize: "calc(0.875rem * var(--content-zoom, 1))",
+            },
             // 去掉聚焦时 CodeMirror 自带的 outline，由主题的 focus-visible 接管
             ".cm-focused": { outline: "none" },
             // 选中态：聚焦时用 accent，非聚焦时用 muted，避免 oneDark 默认蓝色过强
@@ -489,6 +496,11 @@ export default function MarkdownEditor({
             })}
           </div>
         ))}
+        {zoomLabel && (
+          <span className="ml-auto shrink-0 px-1.5 text-[10px] font-semibold text-muted-foreground">
+            {zoomLabel}
+          </span>
+        )}
       </div>
       <div
         ref={containerRef}

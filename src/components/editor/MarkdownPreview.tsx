@@ -138,20 +138,20 @@ export default function MarkdownPreview({
         data-markdown-preview-content
         className={cn(
           // 基础排版：内边距、字号、文字颜色
-          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-sm text-foreground",
+          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-[calc(0.875rem*var(--content-zoom,1))] text-foreground",
 
           // ── 标题 ──────────────────────────────────────────────────────
-          "[&_h1]:mb-4 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
-          "[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:leading-tight",
-          "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:leading-snug",
-          "[&_h4]:mb-2 [&_h4]:mt-3 [&_h4]:text-base [&_h4]:font-semibold",
+          "[&_h1]:mb-4 [&_h1]:mt-6 [&_h1]:text-[calc(1.5rem*var(--content-zoom,1))] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
+          "[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-[calc(1.25rem*var(--content-zoom,1))] [&_h2]:font-semibold [&_h2]:leading-tight",
+          "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-[calc(1.125rem*var(--content-zoom,1))] [&_h3]:font-semibold [&_h3]:leading-snug",
+          "[&_h4]:mb-2 [&_h4]:mt-3 [&_h4]:text-[calc(1rem*var(--content-zoom,1))] [&_h4]:font-semibold",
 
           // ── 段落 ──────────────────────────────────────────────────────
           "[&_p]:mb-3 [&_p]:leading-relaxed",
 
           // ── 行内代码（inline code）──────────────────────────────────────
           // 注意：pre > code 是代码块，样式会在下面被 reset，不受这条影响
-          "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs",
+          "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[calc(0.75rem*var(--content-zoom,1))]",
 
           // ── 代码块（pre + code）─────────────────────────────────────────
           // pre 只加间距和圆角；背景色和文字颜色由 Shiki 注入的 inline style 控制，
