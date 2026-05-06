@@ -16,6 +16,8 @@ const EXCERPT_LIMIT: usize = 180;
 const API_NOTE_ROUTE: &str = "/api/note";
 const API_NOTES_ROUTE: &str = "/api/notes";
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
+const LOCAL_BLOG_ROUTE: &str = "/local-blog";
+const LOCAL_BLOG_ROUTE_PREFIX: &str = "/local-blog/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
 const KATEX_CSS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css";
 const KATEX_JS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js";
@@ -103,6 +105,12 @@ struct BlogAsset {
     content_type: &'static str,
 }
 
+#[derive(Debug, Clone)]
+struct LocalBlogStaticAsset {
+    path: PathBuf,
+    content_type: &'static str,
+}
+
 pub(crate) struct ProductionBlogServer {
     handle: Mutex<Option<JoinHandle<()>>>,
 }
@@ -182,6 +190,24 @@ fn handle_connection(mut stream: TcpStream) {
             Err(message) => {
                 let body = render_json_error(&message);
                 write_json_response(&mut stream, 404, "Not Found", &body);
+            }
+        }
+        return;
+    }
+
+    if path == LOCAL_BLOG_ROUTE {
+        write_redirect_response(&mut stream, LOCAL_BLOG_ROUTE_PREFIX);
+        return;
+    }
+
+    if path.starts_with(LOCAL_BLOG_ROUTE_PREFIX) {
+        match read_local_blog_static_response(path) {
+            Ok((content_type, body)) => {
+                write_binary_response(&mut stream, 200, "OK", content_type, &body)
+            }
+            Err(message) => {
+                let body = render_404_page(&message);
+                write_response(&mut stream, 404, "Not Found", &body);
             }
         }
         return;
@@ -303,6 +329,19 @@ fn read_asset_response(request_path: &str) -> Result<(&'static str, Vec<u8>), St
     let asset = resolve_asset_request_path(&notes_dir, request_path)?;
     let body = fs::read(&asset.path)
         .map_err(|e| format!("Failed to read asset {}: {e}", asset.path.display()))?;
+
+    Ok((asset.content_type, body))
+}
+
+fn read_local_blog_static_response(request_path: &str) -> Result<(&'static str, Vec<u8>), String> {
+    let dist_dir = paths::local_blog_dist_dir()?;
+    let asset = resolve_local_blog_static_request_path(&dist_dir, request_path)?;
+    let body = fs::read(&asset.path).map_err(|e| {
+        format!(
+            "Failed to read local blog asset {}: {e}",
+            asset.path.display()
+        )
+    })?;
 
     Ok((asset.content_type, body))
 }
@@ -529,6 +568,47 @@ fn resolve_asset_request_path(notes_dir: &Path, request_path: &str) -> Result<Bl
     })
 }
 
+fn resolve_local_blog_static_request_path(
+    dist_dir: &Path,
+    request_path: &str,
+) -> Result<LocalBlogStaticAsset, String> {
+    let encoded_path = request_path
+        .strip_prefix(LOCAL_BLOG_ROUTE_PREFIX)
+        .ok_or_else(|| "Unknown local blog route.".to_string())?;
+    let relative_path = if encoded_path.is_empty() {
+        "index.html".to_string()
+    } else {
+        percent_decode_path(encoded_path)?
+    };
+
+    if !is_safe_static_request_relative_path(&relative_path) {
+        return Err("Local blog asset path is not available.".to_string());
+    }
+
+    let candidate = dist_dir.join(Path::new(&relative_path));
+    if !candidate.is_file() {
+        return Err("Local blog asset was not found.".to_string());
+    }
+
+    let root = dist_dir
+        .canonicalize()
+        .map_err(|e| format!("Could not verify local blog dist directory: {e}"))?;
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|e| format!("Could not verify local blog asset path: {e}"))?;
+
+    if !resolved.starts_with(&root) {
+        return Err("Local blog asset path is not available.".to_string());
+    }
+
+    let content_type = static_asset_content_type(&relative_path);
+
+    Ok(LocalBlogStaticAsset {
+        path: resolved,
+        content_type,
+    })
+}
+
 fn is_safe_note_relative_path(relative_path: &str) -> bool {
     if relative_path.is_empty()
         || relative_path.contains('\\')
@@ -576,6 +656,16 @@ fn is_safe_asset_request_relative_path(relative_path: &str) -> bool {
         .all(|component| matches!(component, Component::Normal(_)))
 }
 
+fn is_safe_static_request_relative_path(relative_path: &str) -> bool {
+    if relative_path.is_empty() || relative_path.contains('\\') || relative_path.contains('\0') {
+        return false;
+    }
+
+    let path = Path::new(relative_path);
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
 fn asset_content_type(relative_path: &str) -> Option<&'static str> {
     let extension = Path::new(relative_path)
         .extension()
@@ -588,6 +678,31 @@ fn asset_content_type(relative_path: &str) -> Option<&'static str> {
         "gif" => Some("image/gif"),
         "svg" => Some("image/svg+xml"),
         _ => None,
+    }
+}
+
+fn static_asset_content_type(relative_path: &str) -> &'static str {
+    let extension = Path::new(relative_path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+
+    match extension.to_ascii_lowercase().as_str() {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        "map" => "application/json; charset=utf-8",
+        _ => "application/octet-stream",
     }
 }
 
@@ -1729,6 +1844,16 @@ fn write_json_response(stream: &mut TcpStream, status: u16, reason: &str, body: 
     }
 }
 
+fn write_redirect_response(stream: &mut TcpStream, location: &str) {
+    let response = format!(
+        "HTTP/1.1 308 Permanent Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+
+    if let Err(e) = stream.write_all(response.as_bytes()) {
+        eprintln!("Failed to write local blog redirect response: {e}");
+    }
+}
+
 fn write_binary_response(
     stream: &mut TcpStream,
     status: u16,
@@ -1903,7 +2028,66 @@ Inline body excerpt.
             request_path("GET /assets/demo.png HTTP/1.1"),
             Some("/assets/demo.png")
         );
+        assert_eq!(
+            request_path("GET /local-blog/ HTTP/1.1"),
+            Some(LOCAL_BLOG_ROUTE_PREFIX)
+        );
+        assert_eq!(
+            request_path("GET /local-blog/assets/index.js HTTP/1.1"),
+            Some("/local-blog/assets/index.js")
+        );
         assert_eq!(request_path("POST /api/notes HTTP/1.1"), None);
+    }
+
+    #[test]
+    fn resolves_local_blog_static_files_from_dist() {
+        let dir = tempdir().unwrap();
+        let dist_dir = dir.path();
+        fs::create_dir_all(dist_dir.join("assets")).unwrap();
+        fs::write(dist_dir.join("index.html"), "<!doctype html>").unwrap();
+        fs::write(dist_dir.join("assets/index.js"), "console.log('ok')").unwrap();
+        fs::write(dist_dir.join("assets/index.css"), "body{}").unwrap();
+
+        let index =
+            resolve_local_blog_static_request_path(dist_dir, "/local-blog/").expect("index");
+        assert!(index.path.ends_with("index.html"));
+        assert_eq!(index.content_type, "text/html; charset=utf-8");
+
+        let js = resolve_local_blog_static_request_path(dist_dir, "/local-blog/assets/index.js")
+            .expect("js");
+        assert!(js.path.ends_with(Path::new("assets/index.js")));
+        assert_eq!(js.content_type, "text/javascript; charset=utf-8");
+
+        let css = resolve_local_blog_static_request_path(dist_dir, "/local-blog/assets/index.css")
+            .expect("css");
+        assert!(css.path.ends_with(Path::new("assets/index.css")));
+        assert_eq!(css.content_type, "text/css; charset=utf-8");
+    }
+
+    #[test]
+    fn rejects_unsafe_local_blog_static_paths() {
+        let dir = tempdir().unwrap();
+        let dist_dir = dir.path();
+        fs::create_dir_all(dist_dir.join("assets")).unwrap();
+        fs::write(dist_dir.join("index.html"), "<!doctype html>").unwrap();
+        fs::write(dist_dir.join("assets/index.js"), "console.log('ok')").unwrap();
+
+        assert!(
+            resolve_local_blog_static_request_path(dist_dir, "/local-blog/../index.html").is_err()
+        );
+        assert!(
+            resolve_local_blog_static_request_path(dist_dir, "/local-blog/%2E%2E/index.html")
+                .is_err()
+        );
+        assert!(
+            resolve_local_blog_static_request_path(dist_dir, "/local-blog/assets\\index.js")
+                .is_err()
+        );
+        assert!(resolve_local_blog_static_request_path(dist_dir, "/local-blog/%00.js").is_err());
+        assert!(
+            resolve_local_blog_static_request_path(dist_dir, "/local-blog/missing.js").is_err()
+        );
+        assert!(resolve_local_blog_static_request_path(dist_dir, "/assets/index.js").is_err());
     }
 
     #[test]

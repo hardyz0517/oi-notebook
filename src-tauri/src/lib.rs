@@ -37,6 +37,10 @@ impl Drop for BlogServerState {
 }
 
 fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return state.production_server.ensure_running();
+    }
+
     if !cfg!(debug_assertions) {
         return state.production_server.ensure_running();
     }
@@ -184,8 +188,7 @@ fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<Strin
 #[tauri::command]
 fn open_notes_folder() -> Result<(), String> {
     let notes_dir = paths::notes_dir()?;
-    std::fs::create_dir_all(&notes_dir)
-        .map_err(|e| format!("创建笔记文件夹失败：{e}"))?;
+    std::fs::create_dir_all(&notes_dir).map_err(|e| format!("创建笔记文件夹失败：{e}"))?;
     tauri_plugin_opener::open_path(&notes_dir, None::<&str>)
         .map_err(|e| format!("打开笔记文件夹失败：{e}"))
 }

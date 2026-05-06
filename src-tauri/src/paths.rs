@@ -7,6 +7,7 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+static LOCAL_BLOG_DIST_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub(crate) fn init_app_data_dir(app: &AppHandle) -> Result<(), String> {
     let app_data_dir = app
@@ -14,6 +15,25 @@ pub(crate) fn init_app_data_dir(app: &AppHandle) -> Result<(), String> {
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
     let _ = APP_DATA_DIR.set(app_data_dir);
+
+    let local_blog_dist_dir = if cfg!(debug_assertions) {
+        repo_root()?.join("local-blog").join("dist")
+    } else {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to resolve resource directory: {e}"))?;
+        let candidates = [
+            resource_dir.join("local-blog").join("dist"),
+            resource_dir.join("dist"),
+        ];
+        candidates
+            .iter()
+            .find(|candidate| candidate.is_dir())
+            .cloned()
+            .unwrap_or_else(|| candidates[0].clone())
+    };
+    let _ = LOCAL_BLOG_DIST_DIR.set(local_blog_dist_dir);
     Ok(())
 }
 
@@ -50,6 +70,18 @@ pub(crate) fn site_dir() -> Result<Option<PathBuf>, String> {
     } else {
         Ok(None)
     }
+}
+
+pub(crate) fn local_blog_dist_dir() -> Result<PathBuf, String> {
+    if let Some(path) = LOCAL_BLOG_DIST_DIR.get() {
+        return Ok(path.clone());
+    }
+
+    if cfg!(debug_assertions) {
+        return Ok(repo_root()?.join("local-blog").join("dist"));
+    }
+
+    Err("Local blog dist directory was not initialized".to_string())
 }
 
 pub(crate) fn ensure_data_dirs() -> Result<(), String> {
