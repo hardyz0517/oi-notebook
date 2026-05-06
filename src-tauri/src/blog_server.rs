@@ -1,5 +1,6 @@
 use crate::paths;
 
+use serde::Serialize;
 use std::{
     fs,
     io::{Read, Write},
@@ -12,6 +13,7 @@ use std::{
 
 const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
+const API_NOTES_ROUTE: &str = "/api/notes";
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
 const KATEX_CSS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css";
@@ -25,14 +27,40 @@ enum ListKind {
     Unordered,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BlogNote {
     title: String,
     relative_path: String,
     summary: String,
+    excerpt: String,
     tags: Vec<String>,
+    category: String,
+    created: Option<String>,
+    updated: Option<String>,
     date: String,
     sort_key: String,
+    draft: bool,
+}
+
+impl BlogNote {
+    fn display_summary(&self) -> &str {
+        if self.summary.is_empty() {
+            &self.excerpt
+        } else {
+            &self.summary
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct BlogNotesApiResponse {
+    notes: Vec<BlogNote>,
+}
+
+#[derive(Debug, Serialize)]
+struct BlogErrorApiResponse<'a> {
+    error: &'a str,
 }
 
 #[derive(Debug, Default)]
@@ -42,6 +70,7 @@ struct NoteFrontmatter {
     tags: Vec<String>,
     updated: Option<String>,
     created: Option<String>,
+    draft: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +146,17 @@ fn handle_connection(mut stream: TcpStream) {
         return;
     };
 
+    if path == API_NOTES_ROUTE {
+        match render_notes_api_json() {
+            Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
+            Err(message) => {
+                let body = render_json_error(&message);
+                write_json_response(&mut stream, 500, "Internal Server Error", &body);
+            }
+        }
+        return;
+    }
+
     if path == "/" {
         let body = render_index_page();
         write_response(&mut stream, 200, "OK", &body);
@@ -147,7 +187,8 @@ fn handle_connection(mut stream: TcpStream) {
         return;
     }
 
-    let body = render_404_page("This preview server only serves /, /note/{path}, and /assets/{path}.");
+    let body =
+        render_404_page("This preview server only serves /, /note/{path}, and /assets/{path}.");
     write_response(&mut stream, 404, "Not Found", &body);
 }
 
@@ -168,6 +209,22 @@ fn render_index_page() -> String {
         Ok(notes) => render_notes_page(&notes, None),
         Err(e) => render_notes_page(&[], Some(&e)),
     }
+}
+
+fn render_notes_api_json() -> Result<String, String> {
+    let notes_dir = paths::notes_dir()?;
+    let notes = scan_notes_dir(&notes_dir)?;
+    serialize_notes_api_json(notes)
+}
+
+fn serialize_notes_api_json(notes: Vec<BlogNote>) -> Result<String, String> {
+    serde_json::to_string(&BlogNotesApiResponse { notes })
+        .map_err(|e| format!("Failed to serialize notes API response: {e}"))
+}
+
+fn render_json_error(message: &str) -> String {
+    serde_json::to_string(&BlogErrorApiResponse { error: message })
+        .unwrap_or_else(|_| r#"{"error":"Failed to serialize error response."}"#.to_string())
 }
 
 fn render_note_detail_page(request_path: &str) -> Result<String, String> {
@@ -264,30 +321,42 @@ fn blog_note_from_content(root: &Path, path: &Path, content: &str) -> Result<Blo
     let (frontmatter, body) = split_frontmatter(&content);
     let parsed = frontmatter.map(parse_frontmatter).unwrap_or_default();
     let relative_path = note_relative_path(root, path);
+    let category = note_category(&relative_path);
     let fallback_title = path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("Untitled")
         .to_string();
     let modified_key = modified_sort_key(path);
-    let date = parsed
-        .updated
+    let summary = parsed.summary.unwrap_or_default();
+    let excerpt = if summary.is_empty() {
+        excerpt_from_markdown(body)
+    } else {
+        summary.clone()
+    };
+    let updated = parsed.updated;
+    let created = parsed.created;
+    let date = updated
         .clone()
-        .or(parsed.created.clone())
+        .or(created.clone())
+        .unwrap_or_else(|| modified_key.clone());
+    let sort_key = updated
+        .clone()
+        .or(created.clone())
         .unwrap_or_else(|| modified_key.clone());
 
     Ok(BlogNote {
         title: parsed.title.unwrap_or(fallback_title),
         relative_path,
-        summary: parsed
-            .summary
-            .unwrap_or_else(|| excerpt_from_markdown(body)),
+        summary,
+        excerpt,
         tags: parsed.tags,
-        sort_key: parsed
-            .updated
-            .or(parsed.created)
-            .unwrap_or_else(|| modified_key.clone()),
+        category,
+        created,
+        updated,
         date,
+        sort_key,
+        draft: parsed.draft,
     })
 }
 
@@ -479,6 +548,15 @@ fn note_relative_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+fn note_category(relative_path: &str) -> String {
+    relative_path
+        .split('/')
+        .next()
+        .filter(|category| *category != relative_path)
+        .unwrap_or("")
+        .to_string()
+}
+
 fn modified_sort_key(path: &Path) -> String {
     let modified = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
@@ -541,6 +619,7 @@ fn parse_frontmatter(frontmatter: &str) -> NoteFrontmatter {
             "summary" => parsed.summary = parse_scalar(value),
             "updated" => parsed.updated = parse_scalar(value),
             "created" => parsed.created = parse_scalar(value),
+            "draft" => parsed.draft = parse_bool(value).unwrap_or(false),
             "tags" => {
                 if value.starts_with('[') && value.ends_with(']') {
                     parsed.tags = parse_inline_tags(value);
@@ -557,6 +636,14 @@ fn parse_frontmatter(frontmatter: &str) -> NoteFrontmatter {
     }
 
     parsed
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match strip_comment(value).trim().to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }
 
 fn parse_scalar(value: &str) -> Option<String> {
@@ -1182,7 +1269,7 @@ fn render_note_card(note: &BlogNote) -> String {
         href = escape_html(&note_detail_url(&note.relative_path)),
         title = escape_html(&note.title),
         path = escape_html(&note.relative_path),
-        summary = escape_html(&note.summary),
+        summary = escape_html(note.display_summary()),
         tags = tags
     )
 }
@@ -1200,10 +1287,10 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
             .join("")
     };
 
-    let summary = if detail.note.summary.is_empty() {
+    let summary = if detail.note.display_summary().is_empty() {
         "No summary yet.".to_string()
     } else {
-        escape_html(&detail.note.summary)
+        escape_html(detail.note.display_summary())
     };
     let rendered_body = render_markdown_body(&detail.markdown_body);
 
@@ -1521,6 +1608,23 @@ fn write_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str)
     }
 }
 
+fn write_json_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
+    let body = body.as_bytes();
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+
+    if let Err(e) = stream.write_all(response.as_bytes()) {
+        eprintln!("Failed to write local blog JSON response headers: {e}");
+        return;
+    }
+
+    if let Err(e) = stream.write_all(body) {
+        eprintln!("Failed to write local blog JSON response body: {e}");
+    }
+}
+
 fn write_binary_response(
     stream: &mut TcpStream,
     status: u16,
@@ -1601,7 +1705,97 @@ This note becomes an excerpt.
         assert_eq!(notes[0].title, "Demo");
         assert_eq!(notes[0].relative_path, "tricks/demo.md");
         assert_eq!(notes[0].tags, vec!["dp", "test"]);
-        assert!(notes[0].summary.contains("Demo body"));
+        assert_eq!(notes[0].summary, "");
+        assert!(notes[0].excerpt.contains("Demo body"));
+        assert_eq!(notes[0].category, "tricks");
+        assert_eq!(
+            notes[0].created.as_deref(),
+            Some("2026-05-01T00:00:00+08:00")
+        );
+        assert_eq!(notes[0].updated, None);
+        assert!(!notes[0].draft);
+    }
+
+    #[test]
+    fn serializes_notes_api_json_with_required_fields() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        fs::create_dir_all(notes_dir.join("problems")).unwrap();
+        fs::create_dir_all(notes_dir.join("assets")).unwrap();
+
+        fs::write(
+            notes_dir.join("tricks/escape.md"),
+            r#"---
+title: A "quote" <x>
+tags:
+  - 数学
+  - "图论"
+summary: "Use <unsafe> & quotes"
+created: 2026-05-01T00:00:00+08:00
+updated: 2026-05-06T00:00:00+08:00
+draft: true
+---
+
+Body should not become excerpt because summary exists.
+"#,
+        )
+        .unwrap();
+        fs::write(
+            notes_dir.join("problems/inline.md"),
+            r#"---
+title: Inline
+tags: [dp, "字符串"]
+created: 2026-05-05T00:00:00+08:00
+---
+
+Inline body excerpt.
+"#,
+        )
+        .unwrap();
+        fs::write(notes_dir.join("tricks/测试1.md"), "# 中文路径\n\n正文").unwrap();
+        fs::write(notes_dir.join("assets/ignored.md"), "# ignored").unwrap();
+
+        let notes = scan_notes_dir(notes_dir).unwrap();
+        let json = serialize_notes_api_json(notes).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let notes = value["notes"].as_array().unwrap();
+
+        assert_eq!(notes.len(), 3);
+        assert_eq!(notes[0]["relativePath"], "tricks/escape.md");
+        assert_eq!(notes[0]["title"], r#"A "quote" <x>"#);
+        assert_eq!(notes[0]["summary"], "Use <unsafe> & quotes");
+        assert_eq!(notes[0]["excerpt"], "Use <unsafe> & quotes");
+        assert_eq!(notes[0]["tags"], serde_json::json!(["数学", "图论"]));
+        assert_eq!(notes[0]["category"], "tricks");
+        assert_eq!(notes[0]["created"], "2026-05-01T00:00:00+08:00");
+        assert_eq!(notes[0]["updated"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(notes[0]["date"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(notes[0]["sortKey"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(notes[0]["draft"], true);
+
+        assert_eq!(notes[1]["relativePath"], "problems/inline.md");
+        assert_eq!(notes[1]["tags"], serde_json::json!(["dp", "字符串"]));
+        assert_eq!(notes[2]["relativePath"], "tricks/测试1.md");
+        assert!(json.contains(r#"\"quote\""#));
+    }
+
+    #[test]
+    fn api_route_does_not_shadow_existing_routes() {
+        assert_eq!(
+            request_path("GET /api/notes HTTP/1.1"),
+            Some(API_NOTES_ROUTE)
+        );
+        assert_eq!(request_path("GET / HTTP/1.1"), Some("/"));
+        assert_eq!(
+            request_path("GET /note/tricks/demo.md HTTP/1.1"),
+            Some("/note/tricks/demo.md")
+        );
+        assert_eq!(
+            request_path("GET /assets/demo.png HTTP/1.1"),
+            Some("/assets/demo.png")
+        );
+        assert_eq!(request_path("POST /api/notes HTTP/1.1"), None);
     }
 
     #[test]
@@ -1642,9 +1836,14 @@ This note becomes an excerpt.
                 title: "Danger".to_string(),
                 relative_path: "tricks/danger.md".to_string(),
                 summary: "<summary>".to_string(),
+                excerpt: "<summary>".to_string(),
                 tags: vec!["<tag>".to_string()],
+                category: "tricks".to_string(),
+                created: None,
+                updated: None,
                 date: "2026-05-05".to_string(),
                 sort_key: "2026-05-05".to_string(),
+                draft: false,
             },
             markdown_body: "# Hi\n<script>alert(1)</script>".to_string(),
         };
@@ -1665,9 +1864,14 @@ This note becomes an excerpt.
                 title: "Math".to_string(),
                 relative_path: "tricks/math.md".to_string(),
                 summary: "Formula note".to_string(),
+                excerpt: "Formula note".to_string(),
                 tags: vec![],
+                category: "tricks".to_string(),
+                created: None,
+                updated: None,
                 date: "2026-05-06".to_string(),
                 sort_key: "2026-05-06".to_string(),
+                draft: false,
             },
             markdown_body: "Inline $a_i + b_i$ formula.".to_string(),
         };
