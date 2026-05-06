@@ -1,2 +1,6 @@
+packages:
+  - site
+  - local-blog
+
 allowBuilds:
   esbuild: true

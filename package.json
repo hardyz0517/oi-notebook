@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:local-blog": "pnpm --dir local-blog build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
