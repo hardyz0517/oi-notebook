@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, FileText, PlugZap, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, FileText, FolderOpen, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -11,70 +11,37 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { NoteSearchResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
-const INITIAL_MARKDOWN = `# OI Notebook 欢迎使用
+const INITIAL_MARKDOWN = `# OI Notebook
 
-## 这是什么？
+OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到的 trick、题解和 AC 后的 insight 及时沉淀下来。
 
-**OI Notebook** 是一个专为竞赛选手设计的本地笔记工具。你可以在左侧编辑 *Markdown*，右侧实时预览渲染结果。支持 \`LaTeX\` 数学公式和代码语法高亮。
+## 你可以用它做什么
 
-## 功能一览
+- 写 Markdown 笔记：左边编辑，右边实时预览，支持标题、列表、代码块、表格、图片和公式。
+- 打开本地博客复习：点击顶部“打开博客”，用更适合阅读的页面回看自己的笔记。
+- 用 AI 整理内容：配置 API 后，可以让 AI 补全标题、标签、摘要，也可以尝试润色正文。
+- 同步洛谷 insight：配置洛谷 Cookie 后，可以把 AC 提交里的沉淀内容同步成笔记。
 
-- 支持 **GitHub Flavored Markdown**（表格、任务列表、删除线）
-- 支持 $\\LaTeX$ 行内公式和块级公式
-- 代码块语法高亮（由 Shiki 驱动）
-- 深色主题，护眼适合长时间刷题
+## 笔记保存在哪里
 
-## 快速幂模板
+笔记默认保存在本机数据目录的 \`notes/\` 里。开发版会打开项目里的 \`notes/\`，安装版会打开系统 app data 里的 \`notes/\`。
 
-下面是一段常用的快速幂代码（$O(\\log n)$ 时间复杂度）：
+想看真实位置，可以点顶部“打开笔记文件夹”。
 
-\`\`\`cpp
-// 快速幂：计算 base^exp % mod
-long long qpow(long long base, long long exp, long long mod) {
-    long long result = 1;
-    base %= mod;
-    while (exp > 0) {
-        if (exp & 1) result = result * base % mod;
-        base = base * base % mod;
-        exp >>= 1;
-    }
-    return result;
-}
-\`\`\`
+## 推荐第一步
 
-## 数学公式
+1. 点左侧笔记列表右上角的“+”，新建一篇 trick 或 problem 笔记。
+2. 写几行 Markdown，然后点顶部“保存”。
+3. 点“打开博客”，看看它在本地博客里的效果。
 
-费马小定理：若 $p$ 是质数且 $\\gcd(a, p) = 1$，则
-
-$$
-a^{p-1} \\equiv 1 \\pmod{p}
-$$
-
-因此 $a$ 在模 $p$ 意义下的逆元为 $a^{p-2} \\bmod p$，可用快速幂 $O(\\log p)$ 求出。
-
-## 常用复杂度速查
-
-| 算法 | 时间复杂度 |
-|------|-----------|
-| 快速排序（平均） | $O(n \\log n)$ |
-| 线段树单点修改 | $O(\\log n)$ |
-| Dijkstra（堆优化） | $O((V + E) \\log V)$ |
-
-## 学习建议
-
-1. 先把基础数据结构（线段树、树状数组）打扎实
-2. 图论专题：最短路、最小生成树、强连通分量
-3. 动态规划：背包、区间 DP、树形 DP
-4. 数学：快速幂、逆元、组合数、莫比乌斯反演
-
-> 刷题不在多，在精。每道题都要弄懂为什么对、为什么错，而不是只追 AC 数量。
+普通写笔记和本地博客不需要配置 AI 或洛谷；这些能力可以等你熟悉后再打开。
 `;
 
 type NewNoteDirectory = "tricks" | "problems";
@@ -140,6 +107,7 @@ export default function App() {
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
   const [isDirty, setIsDirty] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
   const [dialogValue, setDialogValue] = useState("");
   const [newNoteDirectory, setNewNoteDirectory] = useState<NewNoteDirectory>("tricks");
@@ -191,6 +159,7 @@ export default function App() {
     () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
     [promptTemplates, selectedPromptFileName],
   );
+  const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
 
   function validateFilename(name: string): string | null {
     const trimmed = name.trim();
@@ -796,47 +765,63 @@ export default function App() {
     }
   };
 
+  const handleSaveCurrentNote = async () => {
+    if (currentFilePath === null) {
+      toast.info("请先打开一个笔记后再保存");
+      return;
+    }
+
+    setIsSavingNote(true);
+    try {
+      const warning = await writeNote(currentFilePath, markdown);
+      try {
+        const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
+        const commitStatus = await commitNote(currentFilePath, pendingAssets);
+        if (commitStatus === "committed") {
+          showSavedToast("已保存并提交", warning);
+        } else {
+          showSavedToast("已保存", warning);
+        }
+        setPendingAssetsByFile((prev) => {
+          if (!prev[currentFilePath]) return prev;
+          const next = { ...prev };
+          delete next[currentFilePath];
+          return next;
+        });
+      } catch (commitError) {
+        const message = `已保存，Git 提交失败：${commitError}`;
+        if (warning) {
+          toast.warning(`${message}（${warning}）`);
+        } else {
+          toast.warning(message);
+        }
+      }
+      setIsDirty(false);
+    } catch (err) {
+      toast.error(`保存失败: ${err}`);
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  const handleOpenNotesFolder = async () => {
+    try {
+      await openNotesFolder();
+    } catch (e) {
+      toast.error(`打开笔记文件夹失败：${getErrorMessage(e)}`);
+    }
+  };
+
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === "s")) return;
       e.preventDefault();
-      if (currentFilePath === null) {
-        toast.info("请先打开一个笔记后再保存");
-        return;
-      }
-      try {
-        const warning = await writeNote(currentFilePath, markdown);
-        try {
-          const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
-          const commitStatus = await commitNote(currentFilePath, pendingAssets);
-          if (commitStatus === "committed") {
-            showSavedToast("已保存并提交", warning);
-          } else {
-            showSavedToast("已保存", warning);
-          }
-          setPendingAssetsByFile((prev) => {
-            if (!prev[currentFilePath]) return prev;
-            const next = { ...prev };
-            delete next[currentFilePath];
-            return next;
-          });
-        } catch (commitError) {
-          const message = `已保存，Git 提交失败：${commitError}`;
-          if (warning) {
-            toast.warning(`${message}（${warning}）`);
-          } else {
-            toast.warning(message);
-          }
-        }
-        setIsDirty(false);
-      } catch (err) {
-        toast.error(`保存失败: ${err}`);
-      }
+      void handleSaveCurrentNote();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentFilePath, markdown, pendingAssetsByFile]);
+  }, [handleSaveCurrentNote]);
 
   // Ctrl+K / Cmd+K 打开当前窗口内搜索面板
   useEffect(() => {
@@ -1530,18 +1515,34 @@ export default function App() {
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="text-sm font-semibold tracking-wide">OI Notebook</span>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {currentFilePath && (
-            <>
-              <span>{currentFilePath}</span>
-              {isDirty && (
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-foreground"
-                  aria-label="有未保存的改动"
-                  title="有未保存的改动"
-                />
-              )}
-            </>
-          )}
+          <div className="flex max-w-72 items-center gap-2 truncate">
+            <span className="truncate">{currentFilePath ?? "未选择文件"}</span>
+            <span
+              className={isDirty ? "shrink-0 text-amber-300" : "shrink-0 text-muted-foreground"}
+              title={saveStatusLabel}
+            >
+              {saveStatusLabel}
+            </span>
+          </div>
+          <Button
+            variant={isDirty ? "default" : "outline"}
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleSaveCurrentNote}
+            disabled={!currentFilePath || !isDirty || isSavingNote}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {isDirty ? "保存" : "已保存"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleOpenNotesFolder}
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            打开笔记文件夹
+          </Button>
           <Button
             variant="outline"
             size="sm"

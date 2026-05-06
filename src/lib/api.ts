@@ -439,3 +439,16 @@ export async function restartBlogServer(): Promise<void> {
     throw toError(e);
   }
 }
+
+/**
+ * 打开当前实际 notes 目录。
+ * 开发模式对应仓库 notes/，release 对应 app data notes/。
+ * 对应 Rust 命令：open_notes_folder
+ */
+export async function openNotesFolder(): Promise<void> {
+  try {
+    await invoke<void>("open_notes_folder");
+  } catch (e) {
+    throw toError(e);
+  }
+}

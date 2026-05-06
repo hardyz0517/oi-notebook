@@ -181,6 +181,15 @@ fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<Strin
     Ok("Astro dev server restarted at http://localhost:4321.".to_string())
 }
 
+#[tauri::command]
+fn open_notes_folder() -> Result<(), String> {
+    let notes_dir = paths::notes_dir()?;
+    std::fs::create_dir_all(&notes_dir)
+        .map_err(|e| format!("创建笔记文件夹失败：{e}"))?;
+    tauri_plugin_opener::open_path(&notes_dir, None::<&str>)
+        .map_err(|e| format!("打开笔记文件夹失败：{e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -214,6 +223,7 @@ pub fn run() {
             prompts::save_ai_prompt,
             open_blog,
             restart_blog_server,
+            open_notes_folder,
         ])
         .setup(|app| {
             if let Err(e) = paths::init_app_data_dir(app.handle()) {
