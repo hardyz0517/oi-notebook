@@ -62,6 +62,68 @@ export default function MarkdownPreview({
     el.scrollTop = scrollRatio * max;
   }, [scrollRatio, renderedHtml]);
 
+  useEffect(() => {
+    const root = containerRef.current?.querySelector<HTMLElement>("[data-markdown-preview-content]");
+    if (!root) return;
+
+    const timeoutIds = new Set<number>();
+
+    for (const code of root.querySelectorAll<HTMLElement>("pre > code")) {
+      const pre = code.parentElement;
+      if (!pre || pre.dataset.copyDecorated === "true") continue;
+
+      pre.dataset.copyDecorated = "true";
+      pre.classList.add("relative");
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "复制";
+      button.dataset.codeCopyButton = "true";
+      button.setAttribute("aria-label", "复制代码块");
+      button.className =
+        "absolute right-2 top-2 z-10 rounded-sm border border-border/70 bg-background/85 px-2 py-1 text-[11px] leading-none text-muted-foreground shadow-sm backdrop-blur transition hover:border-border hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+      pre.append(button);
+    }
+
+    const setButtonStatus = (button: HTMLButtonElement, label: string) => {
+      button.textContent = label;
+      const timeoutId = window.setTimeout(() => {
+        button.textContent = "复制";
+        timeoutIds.delete(timeoutId);
+      }, 1400);
+      timeoutIds.add(timeoutId);
+    };
+
+    const handleCopyClick = async (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const button = target.closest<HTMLButtonElement>("button[data-code-copy-button='true']");
+      if (!button || !root.contains(button)) return;
+
+      const code = button.closest("pre")?.querySelector<HTMLElement>(":scope > code");
+      const text = code?.textContent ?? "";
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setButtonStatus(button, "已复制");
+      } catch (error) {
+        console.warn("Copy code block failed:", error);
+        setButtonStatus(button, "复制失败");
+      }
+    };
+
+    root.addEventListener("click", handleCopyClick);
+
+    return () => {
+      root.removeEventListener("click", handleCopyClick);
+      for (const timeoutId of timeoutIds) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [renderedHtml]);
+
   return (
     // 外层容器：支持 className 覆盖，负责滚动
     <div ref={containerRef} className={cn("h-full w-full min-w-0 overflow-auto", className)}>
@@ -73,6 +135,7 @@ export default function MarkdownPreview({
        * 需要在管线中加 rehype-sanitize 做净化。
        */}
       <div
+        data-markdown-preview-content
         className={cn(
           // 基础排版：内边距、字号、文字颜色
           "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-sm text-foreground",
