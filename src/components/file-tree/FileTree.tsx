@@ -21,7 +21,7 @@ function stripMdExtension(name: string): string {
 /**
  * 分组规则：
  * - 分组依据 path 的一级目录（第一个 "/" 前的部分）判定
- * - tricks / problems / luogu / inbox 归对应标准分组，始终显示标题（空组显示「暂无」）
+ * - tricks / problems / luogu / inbox 归对应标准分组，始终显示标题（空组显示具体提示）
  * - 其余（含顶层文件 / 未知子目录）归「其他」，仅有文件时才渲染
  * - 文件项显示用 file.name（后端保证为纯文件名，不含路径前缀），不论分组
  * - 组内顺序保持后端传入顺序（已按 modified 降序排好，前端不再排序）
@@ -30,6 +30,13 @@ type GroupKey = "tricks" | "problems" | "luogu" | "inbox" | "其他";
 
 const GROUP_ORDER: GroupKey[] = ["tricks", "problems", "luogu", "inbox", "其他"];
 const STANDARD_DIRS = new Set<string>(["tricks", "problems", "luogu", "inbox"]);
+const GROUP_META: Record<GroupKey, { label: string; emptyText: string }> = {
+  tricks: { label: "技巧 / tricks", emptyText: "还没有手写技巧" },
+  problems: { label: "题解 / problems", emptyText: "还没有题解" },
+  luogu: { label: "洛谷 / luogu", emptyText: "还没有洛谷同步笔记" },
+  inbox: { label: "收件箱 / inbox", emptyText: "还没有速记" },
+  其他: { label: "其他", emptyText: "暂无其他笔记" },
+};
 
 function buildGroupMap(files: NoteFileInfo[]): Map<GroupKey, NoteFileInfo[]> {
   const map = new Map<GroupKey, NoteFileInfo[]>(GROUP_ORDER.map((k) => [k, []]));
@@ -59,6 +66,7 @@ export default function FileTree({
         {GROUP_ORDER.map((groupKey, idx) => {
           const groupFiles = groups.get(groupKey)!;
           const count = groupFiles.length;
+          const groupMeta = GROUP_META[groupKey];
 
           // 「其他」分组没有文件时整组不渲染（标准目录即使为空也要显示）
           if (groupKey === "其他" && count === 0) return null;
@@ -67,14 +75,16 @@ export default function FileTree({
             <div key={groupKey} className={cn(idx > 0 && "mt-3")}>
               {/* 分组标题，不可点击，样式与「笔记列表」标题一致 */}
               <div className="px-3 pb-0.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {groupKey} ({count})
+                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground">
+                  {groupMeta.label} ({count})
                 </span>
               </div>
 
               {count === 0 ? (
-                // 标准目录空组：显示「暂无」占位，让用户知道这里是规划好的入口
-                <p className="py-1 pl-6 text-[10px] text-muted-foreground">暂无</p>
+                // 标准目录空组：显示具体提示，让用户知道这里适合沉淀什么内容
+                <p className="py-1 pl-6 text-[10px] text-muted-foreground">
+                  {groupMeta.emptyText}
+                </p>
               ) : (
                 <ul className="w-full">
                   {groupFiles.map((file) => {
