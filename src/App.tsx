@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, FileText, FolderOpen, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -157,6 +157,7 @@ export default function App() {
   const [isPolishingNoteBody, setIsPolishingNoteBody] = useState(false);
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
   const [isSearchingNotes, setIsSearchingNotes] = useState(false);
@@ -1545,52 +1546,38 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
-        <span className="text-sm font-semibold tracking-wide">OI Notebook</span>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <div className="flex max-w-72 items-center gap-2 truncate">
-            <span className="truncate">{currentFilePath ?? "未选择文件"}</span>
-            <span
-              className={isDirty ? "shrink-0 text-amber-300" : "shrink-0 text-muted-foreground"}
-              title={saveStatusLabel}
-            >
-              {saveStatusLabel}
-            </span>
-          </div>
-          <Button
-            variant={isDirty ? "default" : "outline"}
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={handleSaveCurrentNote}
-            disabled={!currentFilePath || !isDirty || isSavingNote}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {isDirty ? "保存" : "已保存"}
-          </Button>
+    <Dialog open={isAdvancedActionsOpen} onOpenChange={setIsAdvancedActionsOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>高级与维护</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-2 py-2">
           <Button
             variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={handleOpenNotesFolder}
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            打开笔记文件夹
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={openLuoguDialog}
+            className="justify-start gap-2"
+            onClick={() => {
+              setIsAdvancedActionsOpen(false);
+              openLuoguDialog();
+            }}
           >
             <Download className="h-3.5 w-3.5" />
             导入洛谷
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="justify-start gap-2"
+            onClick={() => {
+              setIsAdvancedActionsOpen(false);
+              openLuoguSettings();
+            }}
+            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            洛谷设置
+          </Button>
+          <Button
+            variant="outline"
+            className="justify-start gap-2"
             onClick={handleTestLuoguConnection}
             disabled={isTestingLuoguConnection}
           >
@@ -1599,39 +1586,11 @@ export default function App() {
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={handleSyncLuoguInsights}
-            disabled={isTestingLuoguConnection || isSyncingLuogu}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            同步洛谷
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={openLuoguSettings}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
-          >
-            <Settings className="h-3.5 w-3.5" />
-            洛谷设置
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={openAiSettings}
-            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-          >
-            <Bot className="h-3.5 w-3.5" />
-            AI 设置
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={openPromptDialog}
+            className="justify-start gap-2"
+            onClick={() => {
+              setIsAdvancedActionsOpen(false);
+              openPromptDialog();
+            }}
             disabled={isLoadingPrompt || isSavingPrompt}
           >
             <FileText className="h-3.5 w-3.5" />
@@ -1639,17 +1598,7 @@ export default function App() {
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={handleOpenBlog}
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            打开博客
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="justify-start gap-2"
             onClick={handleRestartBlog}
             disabled={isRestartingBlog}
           >
@@ -1658,13 +1607,105 @@ export default function App() {
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="justify-start gap-2"
             onClick={handlePushGit}
             disabled={isPushingGit}
           >
             <Upload className="h-3.5 w-3.5" />
             同步 Git
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      {/* Header */}
+      <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-sm font-semibold tracking-wide">OI Notebook</span>
+          <div className="flex min-w-0 max-w-80 items-center gap-2 truncate text-xs text-muted-foreground">
+            <span className="truncate">{currentFilePath ?? "未选择文件"}</span>
+            <span
+              className={isDirty ? "shrink-0 text-amber-300" : "shrink-0 text-muted-foreground"}
+              title={saveStatusLabel}
+            >
+              {saveStatusLabel}
+            </span>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">主操作</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={openCreateDialog}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新建
+            </Button>
+            <Button
+              variant={isDirty ? "default" : "outline"}
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={handleSaveCurrentNote}
+              disabled={!currentFilePath || !isDirty || isSavingNote}
+            >
+              <Save className="h-3.5 w-3.5" />
+              {isDirty ? "保存" : "已保存"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={handleOpenBlog}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              打开博客
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={handleOpenNotesFolder}
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              笔记文件夹
+            </Button>
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">核心能力</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={openAiSettings}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+            >
+              <Bot className="h-3.5 w-3.5" />
+              AI 设置
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={handleSyncLuoguInsights}
+              disabled={isTestingLuoguConnection || isSyncingLuogu}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              同步洛谷
+            </Button>
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={() => setIsAdvancedActionsOpen(true)}
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+            更多
           </Button>
         </div>
       </header>
