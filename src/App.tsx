@@ -44,6 +44,11 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 普通写笔记和本地博客不需要配置 AI 或洛谷；这些能力可以等你熟悉后再打开。
 `;
 
+const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
+const AI_CONFIG_MISSING_MESSAGE =
+  "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
+
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
 
@@ -70,6 +75,14 @@ function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
 
 function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function isAiConfigMissingError(message: string): boolean {
+  return (
+    message.includes("base_url is missing") ||
+    message.includes("api_key is missing") ||
+    message.includes("model is missing")
+  );
 }
 
 interface MarkdownBodyParts {
@@ -407,6 +420,13 @@ export default function App() {
     setIsAiSettingsOpen(false);
   };
 
+  const handleFillDeepSeekDefaults = () => {
+    setAiConfigBaseUrl(DEEPSEEK_DEFAULT_BASE_URL);
+    setAiConfigModel(DEEPSEEK_DEFAULT_MODEL);
+    setAiConnectionResult(null);
+    toast.info("已填入 DeepSeek 默认 base_url 和 model，请继续填写 API key 后保存");
+  };
+
   const handleSaveAiConfig = async () => {
     setIsSavingAiConfig(true);
     try {
@@ -688,8 +708,8 @@ export default function App() {
       toast.success("AI 元数据已生成，请确认后保存");
     } catch (e) {
       const message = getErrorMessage(e);
-      if (message.includes("base_url is missing") || message.includes("api_key is missing") || message.includes("model is missing")) {
-        toast.error("AI 配置缺失，请先到 AI 设置填写");
+      if (isAiConfigMissingError(message)) {
+        toast.error(AI_CONFIG_MISSING_MESSAGE);
       } else {
         toast.error(`AI 元数据生成失败：${message}`);
       }
@@ -716,8 +736,8 @@ export default function App() {
       setPolishedBodyPreview(result.polished_body);
     } catch (e) {
       const message = getErrorMessage(e);
-      if (message.includes("base_url is missing") || message.includes("api_key is missing") || message.includes("model is missing")) {
-        toast.error("AI 配置缺失，请先到 AI 设置填写");
+      if (isAiConfigMissingError(message)) {
+        toast.error(AI_CONFIG_MISSING_MESSAGE);
       } else {
         toast.error(`AI 全文润色失败：${message}`);
       }
@@ -1313,6 +1333,21 @@ export default function App() {
             <div>使用 OpenAI-compatible Chat Completions 接口。</div>
             <div>API Key 会保存在本地 .oinb/config.json，不要提交到 Git。</div>
             <div>测试连接会请求模型返回 {"{\"ok\": true}"}。</div>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 p-3">
+            <div className="text-xs leading-5 text-muted-foreground">
+              <div className="font-medium text-foreground">DeepSeek 默认配置捷径</div>
+              <div>只填入 base_url 和 model，不会填写 API key，也不会自动保存。</div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={handleFillDeepSeekDefaults}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+            >
+              填入 DeepSeek 默认配置
+            </Button>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="ai-config-base-url">Base URL</Label>

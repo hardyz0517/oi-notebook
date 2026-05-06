@@ -70,7 +70,10 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
     let model = config.model.trim();
 
     if base_url.is_empty() {
-        return Err("AI connection failed: base_url is missing in .oinb/config.json".to_string());
+        return Err(
+            "AI connection failed: base_url is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+                .to_string(),
+        );
     }
     if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
         return Err(
@@ -78,13 +81,19 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
         );
     }
     if api_key.is_empty() {
-        return Err("AI connection failed: api_key is missing in .oinb/config.json".to_string());
+        return Err(
+            "AI connection failed: api_key is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+                .to_string(),
+        );
     }
     if api_key.contains(['\r', '\n']) {
         return Err("AI connection failed: api_key contains invalid characters".to_string());
     }
     if model.is_empty() {
-        return Err("AI connection failed: model is missing in .oinb/config.json".to_string());
+        return Err(
+            "AI connection failed: model is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+                .to_string(),
+        );
     }
 
     Ok((base_url, api_key, model))
