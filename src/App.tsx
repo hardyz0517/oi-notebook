@@ -1755,7 +1755,7 @@ export default function App() {
         <Separator orientation="vertical" />
 
         {/* Center: Markdown editor */}
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {currentFilePath && (
             <details className="shrink-0 border-b border-border bg-background/95">
               <summary className="flex h-8 cursor-pointer select-none items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
@@ -1863,7 +1863,7 @@ export default function App() {
               onChange={handleEditorChange}
               onPasteImage={handlePasteImage}
               onScroll={(r) => setScrollRatio(r)}
-              className="min-h-0 flex-1"
+              className="min-h-0 min-w-0 flex-1"
             />
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6 py-8">
@@ -1930,13 +1930,13 @@ export default function App() {
         <Separator orientation="vertical" />
 
         {/* Right: Live preview */}
-        <aside className="flex flex-1 overflow-hidden">
+        <aside className="flex min-w-0 flex-1 overflow-hidden">
           {currentFilePath ? (
             <MarkdownPreview
               markdown={markdown}
               noteRelativePath={currentFilePath}
               scrollRatio={scrollRatio}
-              className="h-full w-full"
+              className="h-full w-full min-w-0"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground">

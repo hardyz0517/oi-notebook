@@ -64,7 +64,7 @@ export default function MarkdownPreview({
 
   return (
     // 外层容器：支持 className 覆盖，负责滚动
-    <div ref={containerRef} className={cn("h-full w-full overflow-auto", className)}>
+    <div ref={containerRef} className={cn("h-full w-full min-w-0 overflow-auto", className)}>
       {/*
        * dangerouslySetInnerHTML 说明：
        * 这里的 HTML 来自我们自己的 unified 管线（remark → rehype → HTML），
@@ -75,7 +75,7 @@ export default function MarkdownPreview({
       <div
         className={cn(
           // 基础排版：内边距、字号、文字颜色
-          "p-5 text-sm text-foreground",
+          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-sm text-foreground",
 
           // ── 标题 ──────────────────────────────────────────────────────
           "[&_h1]:mb-4 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
@@ -93,9 +93,9 @@ export default function MarkdownPreview({
           // ── 代码块（pre + code）─────────────────────────────────────────
           // pre 只加间距和圆角；背景色和文字颜色由 Shiki 注入的 inline style 控制，
           // 不在这里设置，避免与 Shiki 生成的 style 属性冲突。
-          "[&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-sm",
+          "[&_pre]:my-4 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm",
           // reset 行内 code 样式，防止 pre > code 继承背景和 padding
-          "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
+          "[&_pre_code]:inline-block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
 
           // ── 引用块 ────────────────────────────────────────────────────
           "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",

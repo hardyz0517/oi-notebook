@@ -118,7 +118,23 @@ export default function MarkdownEditor({
             // 显式用 Lyra --background，覆盖 oneDark 自带的蓝灰背景
             "&": { height: "100%", backgroundColor: "var(--background)" },
             // scroller 和 gutters 也一并覆盖，保持三栏背景一致
-            ".cm-scroller": { backgroundColor: "var(--background)", overflow: "auto", fontFamily: "inherit" },
+            ".cm-scroller": {
+              backgroundColor: "var(--background)",
+              overflow: "auto",
+              fontFamily: "inherit",
+              scrollbarColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent",
+              scrollbarWidth: "thin",
+            },
+            ".cm-scroller::-webkit-scrollbar": { width: "10px", height: "10px" },
+            ".cm-scroller::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+            ".cm-scroller::-webkit-scrollbar-thumb": {
+              backgroundColor: "color-mix(in oklch, var(--muted-foreground) 30%, transparent)",
+              border: "3px solid transparent",
+              backgroundClip: "content-box",
+            },
+            ".cm-scroller::-webkit-scrollbar-thumb:hover": {
+              backgroundColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
+            },
             ".cm-gutters": { backgroundColor: "var(--background)", borderRight: "none" },
             // 内容区留内边距；caretColor 对齐主题 foreground
             ".cm-content": { padding: "12px 16px", minHeight: "100%", caretColor: "var(--foreground)" },
