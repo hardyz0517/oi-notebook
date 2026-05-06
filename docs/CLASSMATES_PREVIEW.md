@@ -31,7 +31,13 @@ Windows 可能提示“未知发布者”或类似安全提醒，这是因为当
 - `notes/` 存放 Markdown 笔记和图片资源。
 - `.oinb/` 存放 AI 配置、Prompt 模板和本地缓存。
 
-这些数据默认留在本机，不代表已经云同步。
+同学写的笔记默认只保存在本机：
+
+```text
+%APPDATA%\io.github.hardyz0517.oi-notebook\notes
+```
+
+这些数据不会自动同步到 Hardy 的 GitHub，也不会自动上传。Git / GitHub Pages 暂时只供 Hardy 自己开发使用。
 
 ## 建议试用流程
 
@@ -62,4 +68,3 @@ Windows 可能提示“未知发布者”或类似安全提醒，这是因为当
 - 看到了什么错误或异常表现。
 - 相关截图。
 - 数据目录里是否生成了 `notes/`。
-
