@@ -1857,25 +1857,92 @@ export default function App() {
               </div>
             </details>
           )}
-          <MarkdownEditor
-            value={markdown}
-            onChange={handleEditorChange}
-            onPasteImage={handlePasteImage}
-            onScroll={(r) => setScrollRatio(r)}
-            className="min-h-0 flex-1"
-          />
+          {currentFilePath ? (
+            <MarkdownEditor
+              value={markdown}
+              onChange={handleEditorChange}
+              onPasteImage={handlePasteImage}
+              onScroll={(r) => setScrollRatio(r)}
+              className="min-h-0 flex-1"
+            />
+          ) : (
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6 py-8">
+              <div className="grid w-full max-w-3xl gap-6">
+                <div className="grid gap-2">
+                  <div className="text-2xl font-semibold tracking-wide">OI Notebook</div>
+                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                    为 OIer 准备的本地 Markdown 笔记、博客复习和 AI 整理工具。
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button className="gap-2" onClick={openCreateDialog}>
+                    <Plus className="h-4 w-4" />
+                    新建笔记
+                  </Button>
+                  <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
+                    <ExternalLink className="h-4 w-4" />
+                    打开博客
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    onClick={openAiSettings}
+                    disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                  >
+                    <Bot className="h-4 w-4" />
+                    配置 AI
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    笔记目录
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-medium">tricks</div>
+                      <div className="mt-1 text-xs text-muted-foreground">手写技巧 / trick</div>
+                    </div>
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-medium">problems</div>
+                      <div className="mt-1 text-xs text-muted-foreground">题解</div>
+                    </div>
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-medium">luogu</div>
+                      <div className="mt-1 text-xs text-muted-foreground">洛谷同步沉淀</div>
+                    </div>
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-medium">inbox</div>
+                      <div className="mt-1 text-xs text-muted-foreground">速记收件箱</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-border bg-background/80 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  笔记保存在本机 notes 目录，可通过顶部“笔记文件夹”打开。
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         <Separator orientation="vertical" />
 
         {/* Right: Live preview */}
         <aside className="flex flex-1 overflow-hidden">
-          <MarkdownPreview
-            markdown={markdown}
-            noteRelativePath={currentFilePath}
-            scrollRatio={scrollRatio}
-            className="h-full w-full"
-          />
+          {currentFilePath ? (
+            <MarkdownPreview
+              markdown={markdown}
+              noteRelativePath={currentFilePath}
+              scrollRatio={scrollRatio}
+              className="h-full w-full"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground">
+              选择或新建笔记后，这里会显示 Markdown 预览。
+            </div>
+          )}
         </aside>
       </div>
     </div>
