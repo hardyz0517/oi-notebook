@@ -1,8 +1,27 @@
-import { useEffect, useRef } from "react";
+import { type ComponentType, useEffect, useRef } from "react";
 import { EditorView, ViewUpdate } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
+import {
+  Bold,
+  Code,
+  Code2,
+  Heading1,
+  Heading2,
+  Image,
+  Italic,
+  Link,
+  List,
+  ListChecks,
+  ListOrdered,
+  Minus,
+  Quote,
+  Sigma,
+  SquareFunction,
+  Strikethrough,
+  Table2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ref 转发说明（为什么不用 forwardRef）：
@@ -17,6 +36,247 @@ interface MarkdownEditorProps {
   onScroll?: (ratio: number) => void;
   className?: string;
 }
+
+interface MarkdownSnippet {
+  text: string;
+  anchorOffset?: number;
+  headOffset?: number;
+}
+
+interface MarkdownToolbarAction {
+  id: string;
+  label: string;
+  title: string;
+  icon?: ComponentType<{ className?: string }>;
+  run: (view: EditorView) => void;
+}
+
+interface MarkdownToolbarGroup {
+  id: string;
+  actions: MarkdownToolbarAction[];
+}
+
+const placeholderSnippet = (before: string, placeholder: string, after: string): MarkdownSnippet => ({
+  text: `${before}${placeholder}${after}`,
+  anchorOffset: before.length,
+  headOffset: before.length + placeholder.length,
+});
+
+const insertMarkdownSnippet = (
+  view: EditorView,
+  createSnippet: (selection: string) => MarkdownSnippet,
+) => {
+  const selection = view.state.selection.main;
+  const selectedText = view.state.sliceDoc(selection.from, selection.to);
+  const snippet = createSnippet(selectedText);
+  const anchor = snippet.anchorOffset === undefined
+    ? selection.from + snippet.text.length
+    : selection.from + snippet.anchorOffset;
+  const head = snippet.headOffset === undefined
+    ? anchor
+    : selection.from + snippet.headOffset;
+
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: snippet.text },
+    selection: { anchor, head },
+    scrollIntoView: true,
+  });
+  view.focus();
+};
+
+const prefixSelectedLines = (
+  view: EditorView,
+  createPrefix: (lineIndex: number) => string,
+) => {
+  const selection = view.state.selection.main;
+  const fromLine = view.state.doc.lineAt(selection.from);
+  const toLine = view.state.doc.lineAt(
+    selection.empty ? selection.to : Math.max(selection.from, selection.to - 1),
+  );
+  const from = fromLine.from;
+  const to = toLine.to;
+  const selectedLines = view.state.sliceDoc(from, to).split("\n");
+  const replacement = selectedLines
+    .map((line, index) => `${createPrefix(index)}${line}`)
+    .join("\n");
+
+  view.dispatch({
+    changes: { from, to, insert: replacement },
+    selection: { anchor: from, head: from + replacement.length },
+    scrollIntoView: true,
+  });
+  view.focus();
+};
+
+const markdownToolbarGroups: MarkdownToolbarGroup[] = [
+  {
+    id: "structure",
+    actions: [
+      {
+        id: "h1",
+        label: "H1",
+        title: "Heading 1",
+        icon: Heading1,
+        run: (view) => prefixSelectedLines(view, () => "# "),
+      },
+      {
+        id: "h2",
+        label: "H2",
+        title: "Heading 2",
+        icon: Heading2,
+        run: (view) => prefixSelectedLines(view, () => "## "),
+      },
+      {
+        id: "divider",
+        label: "---",
+        title: "Horizontal rule",
+        icon: Minus,
+        run: (view) => insertMarkdownSnippet(view, () => ({ text: "\n\n---\n\n" })),
+      },
+    ],
+  },
+  {
+    id: "inline",
+    actions: [
+      {
+        id: "bold",
+        label: "B",
+        title: "Bold",
+        icon: Bold,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection ? { text: `**${selection}**` } : placeholderSnippet("**", "bold text", "**"),
+        ),
+      },
+      {
+        id: "italic",
+        label: "I",
+        title: "Italic",
+        icon: Italic,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection ? { text: `*${selection}*` } : placeholderSnippet("*", "italic text", "*"),
+        ),
+      },
+      {
+        id: "strike",
+        label: "S",
+        title: "Strikethrough",
+        icon: Strikethrough,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection ? { text: `~~${selection}~~` } : placeholderSnippet("~~", "deleted text", "~~"),
+        ),
+      },
+      {
+        id: "inline-code",
+        label: "<>",
+        title: "Inline code",
+        icon: Code,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection ? { text: `\`${selection}\`` } : placeholderSnippet("`", "code", "`"),
+        ),
+      },
+      {
+        id: "inline-math",
+        label: "√x",
+        title: "Inline formula",
+        icon: Sigma,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection ? { text: `$${selection}$` } : placeholderSnippet("$", "a_i", "$"),
+        ),
+      },
+    ],
+  },
+  {
+    id: "insert",
+    actions: [
+      {
+        id: "link",
+        label: "Link",
+        title: "Link",
+        icon: Link,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection
+            ? placeholderSnippet(`[${selection}](`, "https://example.com", ")")
+            : placeholderSnippet("[", "link text", "](https://example.com)"),
+        ),
+      },
+      {
+        id: "image",
+        label: "Img",
+        title: "Image",
+        icon: Image,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection
+            ? placeholderSnippet(`![${selection}](`, "image-url", ")")
+            : placeholderSnippet("![image description](", "image-url", ")"),
+        ),
+      },
+      {
+        id: "code-block",
+        label: "Code",
+        title: "C++ code block",
+        icon: Code2,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection
+            ? { text: `\`\`\`cpp\n${selection}\n\`\`\`` }
+            : placeholderSnippet("```cpp\n", "", "\n```"),
+        ),
+      },
+      {
+        id: "table",
+        label: "Table",
+        title: "Table",
+        icon: Table2,
+        run: (view) => insertMarkdownSnippet(view, () => ({
+          text: "| Column 1 | Column 2 |\n|---|---|\n| Content | Content |",
+        })),
+      },
+      {
+        id: "block-math",
+        label: "$$",
+        title: "Block formula",
+        icon: SquareFunction,
+        run: (view) => insertMarkdownSnippet(view, (selection) =>
+          selection
+            ? { text: `$$\n${selection}\n$$` }
+            : placeholderSnippet("$$\n", "a_i = b_i + c_i", "\n$$"),
+        ),
+      },
+    ],
+  },
+  {
+    id: "block",
+    actions: [
+      {
+        id: "quote",
+        label: ">",
+        title: "Quote",
+        icon: Quote,
+        run: (view) => prefixSelectedLines(view, () => "> "),
+      },
+      {
+        id: "unordered-list",
+        label: "-",
+        title: "Unordered list",
+        icon: List,
+        run: (view) => prefixSelectedLines(view, () => "- "),
+      },
+      {
+        id: "ordered-list",
+        label: "1.",
+        title: "Ordered list",
+        icon: ListOrdered,
+        run: (view) => prefixSelectedLines(view, (index) => `${index + 1}. `),
+      },
+      {
+        id: "task-list",
+        label: "[]",
+        title: "Task list",
+        icon: ListChecks,
+        run: (view) => prefixSelectedLines(view, () => "- [ ] "),
+      },
+    ],
+  },
+];
 
 export default function MarkdownEditor({
   value,
@@ -201,9 +461,39 @@ export default function MarkdownEditor({
   }, [value]);
 
   return (
-    <div
-      ref={containerRef}
-      className={cn("h-full w-full overflow-hidden", className)}
-    />
+    <div className={cn("flex h-full w-full min-w-0 flex-col overflow-hidden", className)}>
+      <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-border bg-background px-2 py-1">
+        {markdownToolbarGroups.map((group, groupIndex) => (
+          <div key={group.id} className="flex items-center gap-0.5">
+            {groupIndex > 0 && <div className="mx-1 h-4 w-px bg-border" aria-hidden="true" />}
+            {group.actions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.id}
+                  type="button"
+                  title={action.title}
+                  aria-label={action.title}
+                  className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onMouseDown={(event) => {
+                    const view = viewRef.current;
+                    if (!view) return;
+
+                    event.preventDefault();
+                    action.run(view);
+                  }}
+                >
+                  {Icon ? <Icon className="h-3.5 w-3.5" /> : action.label}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div
+        ref={containerRef}
+        className="min-h-0 flex-1 overflow-hidden"
+      />
+    </div>
   );
 }
