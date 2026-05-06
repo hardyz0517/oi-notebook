@@ -12,6 +12,7 @@ use std::{
 
 const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
+const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
 
 #[derive(PartialEq)]
@@ -43,6 +44,12 @@ struct NoteFrontmatter {
 struct BlogNoteDetail {
     note: BlogNote,
     markdown_body: String,
+}
+
+#[derive(Debug, Clone)]
+struct BlogAsset {
+    path: PathBuf,
+    content_type: &'static str,
 }
 
 pub(crate) struct ProductionBlogServer {
@@ -112,6 +119,19 @@ fn handle_connection(mut stream: TcpStream) {
         return;
     }
 
+    if path.starts_with(ASSET_ROUTE_PREFIX) {
+        match read_asset_response(path) {
+            Ok((content_type, body)) => {
+                write_binary_response(&mut stream, 200, "OK", content_type, &body)
+            }
+            Err(message) => {
+                let body = render_404_page(&message);
+                write_response(&mut stream, 404, "Not Found", &body);
+            }
+        }
+        return;
+    }
+
     if path.starts_with(NOTE_ROUTE_PREFIX) {
         match render_note_detail_page(path) {
             Ok(body) => write_response(&mut stream, 200, "OK", &body),
@@ -123,7 +143,7 @@ fn handle_connection(mut stream: TcpStream) {
         return;
     }
 
-    let body = render_404_page("This preview server only serves / and /note/{path}.");
+    let body = render_404_page("This preview server only serves /, /note/{path}, and /assets/{path}.");
     write_response(&mut stream, 404, "Not Found", &body);
 }
 
@@ -151,6 +171,15 @@ fn render_note_detail_page(request_path: &str) -> Result<String, String> {
     let note_path = resolve_note_request_path(&notes_dir, request_path)?;
     let detail = read_blog_note_detail(&notes_dir, &note_path)?;
     Ok(render_detail_page(&detail))
+}
+
+fn read_asset_response(request_path: &str) -> Result<(&'static str, Vec<u8>), String> {
+    let notes_dir = paths::notes_dir()?;
+    let asset = resolve_asset_request_path(&notes_dir, request_path)?;
+    let body = fs::read(&asset.path)
+        .map_err(|e| format!("Failed to read asset {}: {e}", asset.path.display()))?;
+
+    Ok((asset.content_type, body))
 }
 
 fn scan_notes_dir(notes_dir: &Path) -> Result<Vec<BlogNote>, String> {
@@ -287,6 +316,42 @@ fn resolve_note_request_path(notes_dir: &Path, request_path: &str) -> Result<Pat
     Ok(resolved)
 }
 
+fn resolve_asset_request_path(notes_dir: &Path, request_path: &str) -> Result<BlogAsset, String> {
+    let encoded_path = request_path
+        .strip_prefix(ASSET_ROUTE_PREFIX)
+        .ok_or_else(|| "Unknown asset route.".to_string())?;
+    let relative_path = percent_decode_path(encoded_path)?;
+
+    if !is_safe_asset_request_relative_path(&relative_path) {
+        return Err("Asset path is not available.".to_string());
+    }
+
+    let content_type = asset_content_type(&relative_path)
+        .ok_or_else(|| "Asset type is not available.".to_string())?;
+    let assets_dir = notes_dir.join("assets");
+    let candidate = assets_dir.join(Path::new(&relative_path));
+
+    if !candidate.is_file() {
+        return Err("Asset was not found.".to_string());
+    }
+
+    let root = assets_dir
+        .canonicalize()
+        .map_err(|e| format!("Could not verify assets directory: {e}"))?;
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|e| format!("Could not verify asset path: {e}"))?;
+
+    if !resolved.starts_with(&root) {
+        return Err("Asset path is not available.".to_string());
+    }
+
+    Ok(BlogAsset {
+        path: resolved,
+        content_type,
+    })
+}
+
 fn is_safe_note_relative_path(relative_path: &str) -> bool {
     if relative_path.is_empty()
         || relative_path.contains('\\')
@@ -322,6 +387,31 @@ fn is_safe_note_relative_path(relative_path: &str) -> bool {
             Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir
         )
     })
+}
+
+fn is_safe_asset_request_relative_path(relative_path: &str) -> bool {
+    if relative_path.is_empty() || relative_path.contains('\\') || relative_path.contains('\0') {
+        return false;
+    }
+
+    let path = Path::new(relative_path);
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn asset_content_type(relative_path: &str) -> Option<&'static str> {
+    let extension = Path::new(relative_path)
+        .extension()
+        .and_then(|extension| extension.to_str())?;
+
+    match extension.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    }
 }
 
 fn note_detail_url(relative_path: &str) -> String {
@@ -1407,6 +1497,28 @@ fn write_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str)
     }
 }
 
+fn write_binary_response(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    content_type: &str,
+    body: &[u8],
+) {
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+
+    if let Err(e) = stream.write_all(response.as_bytes()) {
+        eprintln!("Failed to write local blog binary response headers: {e}");
+        return;
+    }
+
+    if let Err(e) = stream.write_all(body) {
+        eprintln!("Failed to write local blog binary response body: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1601,5 +1713,61 @@ summary: Summary
         assert!(html.contains("<h2>Body title</h2>"));
         assert!(!html.contains("title: Detail"));
         assert!(!html.contains("tags: [render]"));
+    }
+
+    #[test]
+    fn resolves_asset_paths_inside_notes_assets() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("assets/sub")).unwrap();
+        fs::write(notes_dir.join("assets/demo.png"), b"png").unwrap();
+        fs::write(notes_dir.join("assets/sub/a.png"), b"nested").unwrap();
+
+        let asset = resolve_asset_request_path(notes_dir, "/assets/demo.png").unwrap();
+        assert!(asset.path.ends_with(Path::new("assets/demo.png")));
+        assert_eq!(asset.content_type, "image/png");
+
+        let nested = resolve_asset_request_path(notes_dir, "/assets/sub/a.png").unwrap();
+        assert!(nested.path.ends_with(Path::new("assets/sub/a.png")));
+        assert_eq!(nested.content_type, "image/png");
+    }
+
+    #[test]
+    fn rejects_asset_path_escape_and_non_assets_files() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("assets")).unwrap();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        fs::write(notes_dir.join("assets/demo.png"), b"png").unwrap();
+        fs::write(notes_dir.join("tricks/other.png"), b"not asset").unwrap();
+
+        assert!(resolve_asset_request_path(notes_dir, "/assets/../tricks/other.png").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/%2E%2E/tricks/other.png").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/sub\\a.png").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/%00.png").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/C:/temp/a.png").is_err());
+    }
+
+    #[test]
+    fn rejects_non_image_and_missing_assets() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("assets")).unwrap();
+        fs::write(notes_dir.join("assets/readme.txt"), b"text").unwrap();
+
+        assert!(resolve_asset_request_path(notes_dir, "/assets/readme.txt").is_err());
+        assert!(resolve_asset_request_path(notes_dir, "/assets/missing.png").is_err());
+    }
+
+    #[test]
+    fn maps_asset_content_types() {
+        assert_eq!(asset_content_type("a.png"), Some("image/png"));
+        assert_eq!(asset_content_type("a.jpg"), Some("image/jpeg"));
+        assert_eq!(asset_content_type("a.jpeg"), Some("image/jpeg"));
+        assert_eq!(asset_content_type("a.webp"), Some("image/webp"));
+        assert_eq!(asset_content_type("a.gif"), Some("image/gif"));
+        assert_eq!(asset_content_type("a.svg"), Some("image/svg+xml"));
+        assert_eq!(asset_content_type("a.txt"), None);
     }
 }
