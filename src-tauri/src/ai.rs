@@ -15,6 +15,7 @@ use crate::prompts::{render_prompt_template, PromptTemplateKind};
 const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
 const NOTE_METADATA_TASK: &str = "note-metadata";
 const NOTE_POLISH_TASK: &str = "note-polish";
+const AI_DIAGNOSTIC_PREVIEW_CHARS: usize = 500;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -53,21 +54,6 @@ pub(crate) struct OrganizedLuoguInsight {
     pub summary: String,
     pub draft: bool,
     pub body: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatCompletionResponse {
-    choices: Vec<ChatCompletionChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatCompletionChoice {
-    message: ChatCompletionMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatCompletionMessage {
-    content: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,6 +173,43 @@ fn write_ai_cache(
         .map_err(|e| format!("AI cache failed: cannot write cache file: {e}"))
 }
 
+fn diagnostic_preview(text: &str) -> String {
+    let normalized = text
+        .chars()
+        .map(|ch| if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' { ' ' } else { ch })
+        .collect::<String>();
+    let preview = normalized
+        .chars()
+        .take(AI_DIAGNOSTIC_PREVIEW_CHARS)
+        .collect::<String>();
+    if normalized.chars().count() > AI_DIAGNOSTIC_PREVIEW_CHARS {
+        format!("{preview}...")
+    } else {
+        preview
+    }
+}
+
+fn diagnostic_json_preview(value: &JsonValue) -> String {
+    match serde_json::to_string(value) {
+        Ok(text) => diagnostic_preview(&text),
+        Err(_) => "<cannot serialize JSON preview>".to_string(),
+    }
+}
+
+fn chat_response_shape(value: &JsonValue) -> String {
+    let choices = value.get("choices");
+    let has_choices = choices.and_then(JsonValue::as_array).is_some();
+    let first_choice = choices
+        .and_then(JsonValue::as_array)
+        .and_then(|items| items.first());
+    let message = first_choice.and_then(|choice| choice.get("message"));
+    let has_message = message.is_some();
+    let content = message.and_then(|message| message.get("content"));
+    let has_content = content.and_then(JsonValue::as_str).is_some();
+
+    format!("choices={has_choices}, message={has_message}, content={has_content}")
+}
+
 fn parse_ai_ok_response(content: &str) -> Result<bool, String> {
     let value = parse_json_object_from_ai_content(content, "AI connection failed")?;
 
@@ -204,7 +227,12 @@ fn parse_json_object_from_ai_content(content: &str, scope: &str) -> Result<JsonV
         trimmed
     };
 
-    serde_json::from_str(json_text).map_err(|_| format!("{scope}: response was not valid JSON"))
+    serde_json::from_str(json_text).map_err(|e| {
+        format!(
+            "{scope}: response JSON parse failed: {e}; content_preview={}",
+            diagnostic_preview(content)
+        )
+    })
 }
 
 fn request_chat_completion(
@@ -241,17 +269,40 @@ fn request_chat_completion(
         })?;
 
     let status = response.status();
+    let status_code = status.as_u16();
     if !status.is_success() {
-        return Err(format!("{scope}: server returned HTTP {}", status.as_u16()));
+        let error_text = response
+            .text()
+            .unwrap_or_else(|_| "<failed to read error body>".to_string());
+        return Err(format!(
+            "{scope}: server returned HTTP {status_code}; response_format=json_object may be unsupported by this provider/model; body_preview={}",
+            diagnostic_preview(&error_text)
+        ));
     }
 
-    let body = response
-        .json::<ChatCompletionResponse>()
-        .map_err(|_| format!("{scope}: response format was unexpected"))?;
-    body.choices
-        .first()
-        .map(|choice| choice.message.content.as_str())
-        .ok_or_else(|| format!("{scope}: response did not include a choice"))
+    let body = response.text().map_err(|e| {
+        format!("{scope}: failed to read HTTP {status_code} response body: {e}")
+    })?;
+    let value = serde_json::from_str::<JsonValue>(&body).map_err(|e| {
+        format!(
+            "{scope}: HTTP {status_code} response was not valid JSON: {e}; body_preview={}",
+            diagnostic_preview(&body)
+        )
+    })?;
+    let shape = chat_response_shape(&value);
+    value
+        .get("choices")
+        .and_then(JsonValue::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{scope}: HTTP {status_code} response did not include choices[0].message.content; {shape}; body_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })
         .map(ToOwned::to_owned)
 }
 
@@ -400,7 +451,12 @@ fn validate_polished_note_body(value: JsonValue, scope: &str) -> Result<Polished
         .get("polished_body")
         .and_then(JsonValue::as_str)
         .filter(|body| !body.trim().is_empty())
-        .ok_or_else(|| format!("{scope}: response polished_body was missing or empty"))?
+        .ok_or_else(|| {
+            format!(
+                "{scope}: response JSON schema failed: polished_body was missing or empty; json_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })?
         .to_string();
 
     Ok(PolishedNoteBody { polished_body })
@@ -541,11 +597,20 @@ pub fn polish_note_body(
         &user_prompt,
         cache_context.clone(),
     )?;
-    if let Some(value) = read_ai_cache(&cache_path) {
-        if let Ok(polished) = validate_polished_note_body(value, "AI polish failed") {
-            return Ok(polished);
+    let cache_diagnostic = if let Some(value) = read_ai_cache(&cache_path) {
+        match validate_polished_note_body(value, "AI polish failed") {
+            Ok(polished) => {
+                return Ok(polished);
+            }
+            Err(e) => {
+                format!("cache=hit-invalid ({e})")
+            }
         }
-    }
+    } else if cache_path.exists() {
+        "cache=hit-unreadable-or-corrupt".to_string()
+    } else {
+        "cache=miss".to_string()
+    };
 
     let messages = json!([
         {
@@ -557,9 +622,12 @@ pub fn polish_note_body(
             "content": user_prompt
         }
     ]);
-    let content = request_chat_completion(&config, messages, 0.2, "AI polish failed")?;
-    let value = parse_json_object_from_ai_content(&content, "AI polish failed")?;
-    let polished = validate_polished_note_body(value.clone(), "AI polish failed")?;
+    let content = request_chat_completion(&config, messages, 0.2, "AI polish failed")
+        .map_err(|e| format!("{e}; source=fresh-request; {cache_diagnostic}"))?;
+    let value = parse_json_object_from_ai_content(&content, "AI polish failed")
+        .map_err(|e| format!("{e}; http_status=2xx; source=fresh-request; {cache_diagnostic}"))?;
+    let polished = validate_polished_note_body(value.clone(), "AI polish failed")
+        .map_err(|e| format!("{e}; http_status=2xx; source=fresh-request; {cache_diagnostic}"))?;
     let _ = write_ai_cache(&cache_path, NOTE_POLISH_TASK, &config, &value);
 
     Ok(polished)
