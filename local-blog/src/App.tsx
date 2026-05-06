@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 type NoteSummary = {
   title: string;
@@ -435,7 +436,7 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
         <p className="post-path">{note.relativePath}</p>
       </header>
 
-      <pre className="markdown-source">{note.body}</pre>
+      <MarkdownRenderer markdown={note.body} />
     </article>
   );
 }
