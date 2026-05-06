@@ -14,6 +14,29 @@ type NoteSummary = {
   draft: boolean;
 };
 
+type NoteMetadata = {
+  title?: string | null;
+  summary?: string | null;
+  tags?: string[];
+  created?: string | null;
+  updated?: string | null;
+  draft?: boolean;
+};
+
+type NoteDetail = {
+  relativePath: string;
+  category: string;
+  title: string;
+  tags: string[];
+  created: string | null;
+  updated: string | null;
+  date: string | null;
+  draft: boolean;
+  summary: string | null;
+  metadata: NoteMetadata;
+  body: string;
+};
+
 type NotesResponse = {
   notes: NoteSummary[];
 };
@@ -23,6 +46,10 @@ type CountItem = {
   label: string;
   count: number;
 };
+
+type Route =
+  | { name: "home" }
+  | { name: "note"; encodedPath: string; relativePath: string };
 
 const navItems = ["首页", "文章", "标签", "分类", "搜索"];
 
@@ -38,6 +65,38 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "long",
   day: "numeric",
 });
+
+function getRouteFromHash(): Route {
+  const hash = window.location.hash;
+  const notePrefix = "#/note/";
+
+  if (!hash.startsWith(notePrefix)) {
+    return { name: "home" };
+  }
+
+  const encodedPath = hash.slice(notePrefix.length);
+  if (!encodedPath) {
+    return { name: "home" };
+  }
+
+  try {
+    return {
+      name: "note",
+      encodedPath,
+      relativePath: decodeURIComponent(encodedPath),
+    };
+  } catch {
+    return {
+      name: "note",
+      encodedPath,
+      relativePath: "",
+    };
+  }
+}
+
+function getNoteHref(relativePath: string) {
+  return `#/note/${encodeURIComponent(relativePath)}`;
+}
 
 function getCategoryLabel(category: string) {
   return categoryLabels[category] ?? category;
@@ -92,6 +151,40 @@ function countBy<T>(
 }
 
 export default function App() {
+  const [route, setRoute] = useState<Route>(() => getRouteFromHash());
+
+  useEffect(() => {
+    const handleHashChange = () => setRoute(getRouteFromHash());
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  return (
+    <main className="site-shell">
+      <header className="site-header">
+        <a className="brand" href="#/" aria-label="OI Notebook 首页">
+          OI Notebook
+        </a>
+        <nav className="nav-links" aria-label="博客导航">
+          {navItems.map((item) => (
+            <a href="#/" key={item}>
+              {item}
+            </a>
+          ))}
+        </nav>
+      </header>
+
+      {route.name === "note" ? (
+        <NoteDetailView relativePath={route.relativePath} />
+      ) : (
+        <HomeView />
+      )}
+    </main>
+  );
+}
+
+function HomeView() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,20 +242,7 @@ export default function App() {
   );
 
   return (
-    <main className="site-shell">
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="OI Notebook 首页">
-          OI Notebook
-        </a>
-        <nav className="nav-links" aria-label="博客导航">
-          {navItems.map((item) => (
-            <a href="#top" key={item}>
-              {item}
-            </a>
-          ))}
-        </nav>
-      </header>
-
+    <>
       <section className="hero" id="top">
         <p className="eyebrow">Local Blog</p>
         <h1>OI Notebook</h1>
@@ -187,7 +267,9 @@ export default function App() {
                   </time>
                   {note.draft ? <span className="draft-badge">草稿</span> : null}
                 </div>
-                <h2>{note.title}</h2>
+                <h2>
+                  <a href={getNoteHref(note.relativePath)}>{note.title}</a>
+                </h2>
                 <p>{getNoteExcerpt(note)}</p>
                 {note.tags.length > 0 ? (
                   <div className="tag-row" aria-label={`${note.title} 标签`}>
@@ -208,7 +290,7 @@ export default function App() {
             {tagStats.length > 0 ? (
               <div className="compact-links">
                 {tagStats.map((tag) => (
-                  <a href="#top" key={tag.name}>
+                  <a href="#/" key={tag.name}>
                     {tag.label}
                     <span>{tag.count}</span>
                   </a>
@@ -224,7 +306,7 @@ export default function App() {
             {categoryStats.length > 0 ? (
               <div className="compact-links">
                 {categoryStats.map((category) => (
-                  <a href="#top" key={category.name}>
+                  <a href="#/" key={category.name}>
                     {category.label}
                     <span>{category.count}</span>
                   </a>
@@ -241,29 +323,159 @@ export default function App() {
           </section>
         </aside>
       </section>
-    </main>
+    </>
   );
 }
 
-function LoadingState() {
+function NoteDetailView({ relativePath }: { relativePath: string }) {
+  const [note, setNote] = useState<NoteDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadNote = async (signal?: AbortSignal) => {
+    if (!relativePath) {
+      setError("无法读取这篇笔记");
+      setNote(null);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({ path: relativePath });
+      const response = await fetch(`/api/note?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = (await response.json()) as NoteDetail;
+      if (!data || typeof data.body !== "string") {
+        throw new Error("Invalid note response");
+      }
+
+      setNote(data);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+
+      console.error("Failed to load local blog note", err);
+      setError("无法读取这篇笔记");
+      setNote(null);
+    } finally {
+      if (!signal?.aborted) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadNote(controller.signal);
+
+    return () => controller.abort();
+  }, [relativePath]);
+
+  if (isLoading) {
+    return (
+      <article className="note-page">
+        <a className="back-link" href="#/">
+          返回首页
+        </a>
+        <LoadingState title="正在打开笔记" description="Local Blog 正在读取这篇 Markdown 笔记。" />
+      </article>
+    );
+  }
+
+  if (error || !note) {
+    return (
+      <article className="note-page">
+        <a className="back-link" href="#/">
+          返回首页
+        </a>
+        <ErrorState
+          title="无法读取这篇笔记"
+          description="这篇笔记可能不存在、路径无效，或本地博客服务暂时无法读取它。"
+          onRetry={() => void loadNote()}
+        />
+      </article>
+    );
+  }
+
+  const displayDate = note.date ?? note.updated ?? note.created;
+  const summary = note.summary?.trim() || note.metadata.summary?.trim();
+
+  return (
+    <article className="note-page">
+      <a className="back-link" href="#/">
+        返回首页
+      </a>
+
+      <header className="note-header">
+        <div className="post-meta">
+          <span>{getCategoryLabel(note.category)}</span>
+          <time dateTime={displayDate ?? undefined}>{formatDate(displayDate)}</time>
+          {note.draft ? <span className="draft-badge">草稿</span> : null}
+        </div>
+        <h1>{note.title}</h1>
+        {summary ? <p className="note-summary">{summary}</p> : null}
+        {note.tags.length > 0 ? (
+          <div className="tag-row" aria-label={`${note.title} 标签`}>
+            {note.tags.map((tag) => (
+              <span key={tag}>{tag}</span>
+            ))}
+          </div>
+        ) : null}
+        <p className="post-path">{note.relativePath}</p>
+      </header>
+
+      <pre className="markdown-source">{note.body}</pre>
+    </article>
+  );
+}
+
+function LoadingState({
+  title = "正在整理本地笔记",
+  description = "Local Blog 正在读取 app data notes，稍等一下就会出现最新文章。",
+}: {
+  title?: string;
+  description?: string;
+}) {
   return (
     <section className="status-panel" aria-live="polite">
       <p className="eyebrow">Loading</p>
-      <h2>正在整理本地笔记</h2>
-      <p>Local Blog 正在读取 app data notes，稍等一下就会出现最新文章。</p>
+      <h2>{title}</h2>
+      <p>{description}</p>
     </section>
   );
 }
 
-function ErrorState({ onRetry }: { onRetry: () => void }) {
+function ErrorState({
+  title = "无法读取本地笔记",
+  description = "请确认本地博客服务正在运行，然后重新尝试读取文章列表。",
+  onRetry,
+}: {
+  title?: string;
+  description?: string;
+  onRetry: () => void;
+}) {
   return (
     <section className="status-panel status-panel-error" role="alert">
       <p className="eyebrow">Error</p>
-      <h2>无法读取本地笔记</h2>
-      <p>请确认本地博客服务正在运行，然后重新尝试读取文章列表。</p>
-      <button type="button" onClick={onRetry}>
-        重试
-      </button>
+      <h2>{title}</h2>
+      <p>{description}</p>
+      <div className="status-actions">
+        <a href="#/">返回首页</a>
+        <button type="button" onClick={onRetry}>
+          重试
+        </button>
+      </div>
     </section>
   );
 }
