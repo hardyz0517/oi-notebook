@@ -14,6 +14,10 @@ const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
+const KATEX_CSS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css";
+const KATEX_JS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js";
+const KATEX_AUTO_RENDER_JS_URL: &str =
+    "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js";
 
 #[derive(PartialEq)]
 enum ListKind {
@@ -1210,6 +1214,7 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{title} - OI Notebook Blog</title>
+    <link rel="stylesheet" href="{katex_css}">
     <style>
       :root {{
         color-scheme: light;
@@ -1378,6 +1383,22 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
         font-size: 13px;
       }}
     </style>
+    <script type="text/javascript">
+      window.renderOinbMath = function () {{
+        var markdownBody = document.querySelector(".markdown-body");
+        if (!markdownBody || typeof renderMathInElement !== "function") return;
+
+        renderMathInElement(markdownBody, {{
+          delimiters: [
+            {{ left: "$$", right: "$$", display: true }},
+            {{ left: "$", right: "$", display: false }}
+          ],
+          throwOnError: false
+        }});
+      }};
+    </script>
+    <script defer src="{katex_js}"></script>
+    <script defer src="{katex_auto_render_js}" onload="window.renderOinbMath && window.renderOinbMath()"></script>
   </head>
   <body>
     <main>
@@ -1403,7 +1424,10 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
         tags = tags,
         summary = summary,
         rendered_body = rendered_body,
-        markdown = escape_html(&detail.markdown_body)
+        markdown = escape_html(&detail.markdown_body),
+        katex_css = KATEX_CSS_URL,
+        katex_js = KATEX_JS_URL,
+        katex_auto_render_js = KATEX_AUTO_RENDER_JS_URL
     )
 }
 
@@ -1632,6 +1656,46 @@ This note becomes an excerpt.
         assert!(html.contains("#&lt;tag&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(!html.contains("title: Danger"));
+    }
+
+    #[test]
+    fn detail_page_includes_katex_auto_render_assets() {
+        let detail = BlogNoteDetail {
+            note: BlogNote {
+                title: "Math".to_string(),
+                relative_path: "tricks/math.md".to_string(),
+                summary: "Formula note".to_string(),
+                tags: vec![],
+                date: "2026-05-06".to_string(),
+                sort_key: "2026-05-06".to_string(),
+            },
+            markdown_body: "Inline $a_i + b_i$ formula.".to_string(),
+        };
+
+        let html = render_detail_page(&detail);
+        assert!(html.contains(KATEX_CSS_URL));
+        assert!(html.contains(KATEX_JS_URL));
+        assert!(html.contains(KATEX_AUTO_RENDER_JS_URL));
+        assert!(html.contains("renderMathInElement(markdownBody"));
+        assert!(html.contains(r#"document.querySelector(".markdown-body")"#));
+        assert!(html.contains("throwOnError: false"));
+    }
+
+    #[test]
+    fn renders_math_delimiters_for_client_katex_rendering() {
+        let html = render_markdown_body(
+            r#"Inline $a_i + b_i$ formula.
+
+$$ f_i = max(f_{i - 1}, g_i) $$
+
+<script>alert(1)</script>
+"#,
+        );
+
+        assert!(html.contains("$a_i + b_i$"));
+        assert!(html.contains("$$ f_i = max(f_{i - 1}, g_i) $$"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
     }
 
     #[test]
