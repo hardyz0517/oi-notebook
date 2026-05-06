@@ -13,6 +13,7 @@ use std::{
 
 const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
+const API_NOTE_ROUTE: &str = "/api/note";
 const API_NOTES_ROUTE: &str = "/api/notes";
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
@@ -59,11 +60,27 @@ struct BlogNotesApiResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlogNoteApiResponse {
+    relative_path: String,
+    category: String,
+    title: String,
+    tags: Vec<String>,
+    created: Option<String>,
+    updated: Option<String>,
+    date: String,
+    draft: bool,
+    summary: String,
+    metadata: NoteFrontmatter,
+    body: String,
+}
+
+#[derive(Debug, Serialize)]
 struct BlogErrorApiResponse<'a> {
     error: &'a str,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 struct NoteFrontmatter {
     title: Option<String>,
     summary: Option<String>,
@@ -76,6 +93,7 @@ struct NoteFrontmatter {
 #[derive(Debug, Clone)]
 struct BlogNoteDetail {
     note: BlogNote,
+    metadata: NoteFrontmatter,
     markdown_body: String,
 }
 
@@ -140,11 +158,12 @@ fn handle_connection(mut stream: TcpStream) {
 
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
     let first_line = request.lines().next().unwrap_or("");
-    let Some(path) = request_path(first_line) else {
+    let Some(target) = request_target(first_line) else {
         let body = render_error_page("Unsupported request.");
         write_response(&mut stream, 400, "Bad Request", &body);
         return;
     };
+    let path = target_path(target);
 
     if path == API_NOTES_ROUTE {
         match render_notes_api_json() {
@@ -152,6 +171,17 @@ fn handle_connection(mut stream: TcpStream) {
             Err(message) => {
                 let body = render_json_error(&message);
                 write_json_response(&mut stream, 500, "Internal Server Error", &body);
+            }
+        }
+        return;
+    }
+
+    if path == API_NOTE_ROUTE {
+        match render_note_api_json(target) {
+            Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
+            Err(message) => {
+                let body = render_json_error(&message);
+                write_json_response(&mut stream, 404, "Not Found", &body);
             }
         }
         return;
@@ -192,7 +222,12 @@ fn handle_connection(mut stream: TcpStream) {
     write_response(&mut stream, 404, "Not Found", &body);
 }
 
+#[cfg(test)]
 fn request_path(first_line: &str) -> Option<&str> {
+    Some(target_path(request_target(first_line)?))
+}
+
+fn request_target(first_line: &str) -> Option<&str> {
     let mut parts = first_line.split_whitespace();
     let method = parts.next()?;
     let path = parts.next()?;
@@ -201,7 +236,11 @@ fn request_path(first_line: &str) -> Option<&str> {
         return None;
     }
 
-    Some(path.split('?').next().unwrap_or(path))
+    Some(path)
+}
+
+fn target_path(target: &str) -> &str {
+    target.split('?').next().unwrap_or(target)
 }
 
 fn render_index_page() -> String {
@@ -217,9 +256,34 @@ fn render_notes_api_json() -> Result<String, String> {
     serialize_notes_api_json(notes)
 }
 
+fn render_note_api_json(request_target: &str) -> Result<String, String> {
+    let notes_dir = paths::notes_dir()?;
+    let note_path = resolve_note_api_request_path(&notes_dir, request_target)?;
+    let detail = read_blog_note_detail(&notes_dir, &note_path)?;
+    serialize_note_api_json(detail)
+}
+
 fn serialize_notes_api_json(notes: Vec<BlogNote>) -> Result<String, String> {
     serde_json::to_string(&BlogNotesApiResponse { notes })
         .map_err(|e| format!("Failed to serialize notes API response: {e}"))
+}
+
+fn serialize_note_api_json(detail: BlogNoteDetail) -> Result<String, String> {
+    let note = detail.note;
+    serde_json::to_string(&BlogNoteApiResponse {
+        relative_path: note.relative_path,
+        category: note.category,
+        title: note.title,
+        tags: note.tags,
+        created: note.created,
+        updated: note.updated,
+        date: note.date,
+        draft: note.draft,
+        summary: note.summary,
+        metadata: detail.metadata,
+        body: detail.markdown_body,
+    })
+    .map_err(|e| format!("Failed to serialize note API response: {e}"))
 }
 
 fn render_json_error(message: &str) -> String {
@@ -308,11 +372,13 @@ fn read_blog_note(root: &Path, path: &Path) -> Result<BlogNote, String> {
 fn read_blog_note_detail(root: &Path, path: &Path) -> Result<BlogNoteDetail, String> {
     let markdown = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read note {}: {e}", path.display()))?;
-    let note = blog_note_from_content(root, path, &markdown)?;
-    let (_frontmatter, body) = split_frontmatter(&markdown);
+    let (frontmatter, body) = split_frontmatter(&markdown);
+    let metadata = frontmatter.map(parse_frontmatter).unwrap_or_default();
+    let note = blog_note_from_parts(root, path, body, metadata.clone());
 
     Ok(BlogNoteDetail {
         note,
+        metadata,
         markdown_body: body.to_string(),
     })
 }
@@ -320,6 +386,10 @@ fn read_blog_note_detail(root: &Path, path: &Path) -> Result<BlogNoteDetail, Str
 fn blog_note_from_content(root: &Path, path: &Path, content: &str) -> Result<BlogNote, String> {
     let (frontmatter, body) = split_frontmatter(&content);
     let parsed = frontmatter.map(parse_frontmatter).unwrap_or_default();
+    Ok(blog_note_from_parts(root, path, body, parsed))
+}
+
+fn blog_note_from_parts(root: &Path, path: &Path, body: &str, parsed: NoteFrontmatter) -> BlogNote {
     let relative_path = note_relative_path(root, path);
     let category = note_category(&relative_path);
     let fallback_title = path
@@ -345,7 +415,7 @@ fn blog_note_from_content(root: &Path, path: &Path, content: &str) -> Result<Blo
         .or(created.clone())
         .unwrap_or_else(|| modified_key.clone());
 
-    Ok(BlogNote {
+    BlogNote {
         title: parsed.title.unwrap_or(fallback_title),
         relative_path,
         summary,
@@ -357,7 +427,26 @@ fn blog_note_from_content(root: &Path, path: &Path, content: &str) -> Result<Blo
         date,
         sort_key,
         draft: parsed.draft,
-    })
+    }
+}
+
+fn resolve_note_api_request_path(
+    notes_dir: &Path,
+    request_target: &str,
+) -> Result<PathBuf, String> {
+    if target_path(request_target) != API_NOTE_ROUTE {
+        return Err("Unknown note API route.".to_string());
+    }
+
+    let query = request_target
+        .split_once('?')
+        .map(|(_, query)| query)
+        .ok_or_else(|| "Missing note path.".to_string())?;
+    let encoded_path =
+        query_param(query, "path").ok_or_else(|| "Missing note path.".to_string())?;
+    let relative_path = percent_decode_path(encoded_path)?;
+
+    resolve_note_relative_path(notes_dir, &relative_path)
 }
 
 fn resolve_note_request_path(notes_dir: &Path, request_path: &str) -> Result<PathBuf, String> {
@@ -366,6 +455,10 @@ fn resolve_note_request_path(notes_dir: &Path, request_path: &str) -> Result<Pat
         .ok_or_else(|| "Unknown note route.".to_string())?;
     let relative_path = percent_decode_path(encoded_path)?;
 
+    resolve_note_relative_path(notes_dir, &relative_path)
+}
+
+fn resolve_note_relative_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
     if !is_safe_note_relative_path(&relative_path) {
         return Err("Note path is not available.".to_string());
     }
@@ -387,6 +480,17 @@ fn resolve_note_request_path(notes_dir: &Path, request_path: &str) -> Result<Pat
     }
 
     Ok(resolved)
+}
+
+fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query.split('&').find_map(|pair| {
+        let (pair_key, value) = pair.split_once('=')?;
+        if pair_key == key {
+            Some(value)
+        } else {
+            None
+        }
+    })
 }
 
 fn resolve_asset_request_path(notes_dir: &Path, request_path: &str) -> Result<BlogAsset, String> {
@@ -1786,6 +1890,10 @@ Inline body excerpt.
             request_path("GET /api/notes HTTP/1.1"),
             Some(API_NOTES_ROUTE)
         );
+        assert_eq!(
+            request_path("GET /api/note?path=tricks/demo.md HTTP/1.1"),
+            Some(API_NOTE_ROUTE)
+        );
         assert_eq!(request_path("GET / HTTP/1.1"), Some("/"));
         assert_eq!(
             request_path("GET /note/tricks/demo.md HTTP/1.1"),
@@ -1796,6 +1904,117 @@ Inline body excerpt.
             Some("/assets/demo.png")
         );
         assert_eq!(request_path("POST /api/notes HTTP/1.1"), None);
+    }
+
+    #[test]
+    fn serializes_note_api_json_with_body_and_metadata() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        let note_path = notes_dir.join("tricks/detail.md");
+        fs::write(
+            &note_path,
+            r#"---
+title: API Detail
+tags:
+  - dp
+  - "中文"
+summary: "A summary"
+created: 2026-05-01T00:00:00+08:00
+updated: 2026-05-06T00:00:00+08:00
+draft: true
+---
+
+## Body title
+
+Body with "quotes" and <unsafe>.
+"#,
+        )
+        .unwrap();
+
+        let detail = read_blog_note_detail(notes_dir, &note_path).unwrap();
+        let json = serialize_note_api_json(detail).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["relativePath"], "tricks/detail.md");
+        assert_eq!(value["category"], "tricks");
+        assert_eq!(value["title"], "API Detail");
+        assert_eq!(value["tags"], serde_json::json!(["dp", "中文"]));
+        assert_eq!(value["created"], "2026-05-01T00:00:00+08:00");
+        assert_eq!(value["updated"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(value["date"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(value["draft"], true);
+        assert_eq!(value["summary"], "A summary");
+        assert_eq!(value["metadata"]["title"], "API Detail");
+        assert_eq!(value["metadata"]["summary"], "A summary");
+        assert_eq!(value["metadata"]["tags"], serde_json::json!(["dp", "中文"]));
+        assert_eq!(value["metadata"]["created"], "2026-05-01T00:00:00+08:00");
+        assert_eq!(value["metadata"]["updated"], "2026-05-06T00:00:00+08:00");
+        assert_eq!(value["metadata"]["draft"], true);
+        assert!(value["body"].as_str().unwrap().contains("## Body title"));
+        assert!(!value["body"]
+            .as_str()
+            .unwrap()
+            .contains("title: API Detail"));
+        assert!(json.contains(r#"\"quotes\""#));
+    }
+
+    #[test]
+    fn resolves_note_api_paths_with_unicode_and_percent_encoding() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        fs::write(notes_dir.join("tricks/测试 笔记.md"), "# unicode").unwrap();
+
+        let direct =
+            resolve_note_api_request_path(notes_dir, "/api/note?path=tricks/测试 笔记.md").unwrap();
+        assert!(direct.ends_with(Path::new("tricks/测试 笔记.md")));
+
+        let encoded = resolve_note_api_request_path(
+            notes_dir,
+            "/api/note?path=tricks/%E6%B5%8B%E8%AF%95%20%E7%AC%94%E8%AE%B0.md",
+        )
+        .unwrap();
+        assert!(encoded.ends_with(Path::new("tricks/测试 笔记.md")));
+    }
+
+    #[test]
+    fn rejects_unsafe_note_api_paths() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        fs::create_dir_all(notes_dir.join("assets")).unwrap();
+        fs::write(notes_dir.join("tricks/demo.md"), "# demo").unwrap();
+        fs::write(notes_dir.join("tricks/demo.txt"), "text").unwrap();
+        fs::write(notes_dir.join("assets/ignored.md"), "# ignored").unwrap();
+
+        assert!(resolve_note_api_request_path(notes_dir, "/api/note").is_err());
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?other=tricks/demo.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=../tricks/demo.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=..%2Ftricks/demo.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=tricks\\demo.md").is_err()
+        );
+        assert!(resolve_note_api_request_path(notes_dir, "/api/note?path=tricks/%00.md").is_err());
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=C:/temp/demo.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=/tricks/demo.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=assets/ignored.md").is_err()
+        );
+        assert!(
+            resolve_note_api_request_path(notes_dir, "/api/note?path=tricks/demo.txt").is_err()
+        );
+        assert!(resolve_note_api_request_path(notes_dir, "/note/tricks/demo.md").is_err());
     }
 
     #[test]
@@ -1845,6 +2064,7 @@ Inline body excerpt.
                 sort_key: "2026-05-05".to_string(),
                 draft: false,
             },
+            metadata: NoteFrontmatter::default(),
             markdown_body: "# Hi\n<script>alert(1)</script>".to_string(),
         };
 
@@ -1873,6 +2093,7 @@ Inline body excerpt.
                 sort_key: "2026-05-06".to_string(),
                 draft: false,
             },
+            metadata: NoteFrontmatter::default(),
             markdown_body: "Inline $a_i + b_i$ formula.".to_string(),
         };
 
