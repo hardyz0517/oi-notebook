@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, importLuoguSubmission, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
-import type { ImportLuoguSubmissionResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -56,7 +56,9 @@ const AI_CONFIG_MISSING_MESSAGE =
 
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
-type LuoguImportCenterTab = "scan" | "manual" | "advanced";
+type LuoguImportCenterTab = "scan" | "account" | "manual" | "advanced";
+type LuoguImportStep = "scan" | "preview";
+type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
@@ -138,28 +140,37 @@ function parseLuoguSubmitTimeMs(value: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function getLuoguImportStatusText(
+function getLuoguPreviewWorkflowStatusText(
   submission: PreviewLuoguSubmission,
-  result: ImportLuoguSubmissionResult | undefined,
-  currentlyImportingId: string | null,
+  prepared: PrepareLuoguSubmissionNoteResult | undefined,
+  prepareError: string | undefined,
+  writeResult: WriteLuoguPreparedNoteResult | undefined,
+  currentlyPreparingId: string | null,
+  currentlyWritingId: string | null,
   selectedIds: Set<string>,
 ): string {
-  if (result) {
-    if (result.skipped) return `跳过：${result.skipReason ?? "未说明原因"}`;
-    if (result.failed && result.relativePath && result.commitStatus === "failed") {
-      if (result.draftFallback) {
-        return `已生成草稿，但 Git 提交失败：${result.error ?? "未说明原因"}`;
-      }
-      return `已生成，但 Git 提交失败：${result.error ?? "未说明原因"}`;
+  if (writeResult) {
+    if (writeResult.skipped) return `skip: ${writeResult.skipReason ?? "no reason"}`;
+    if (writeResult.failed && writeResult.relativePath && writeResult.commitStatus === "failed") {
+      return `written, git commit failed: ${writeResult.error ?? "no reason"}`;
     }
-    if (result.failed) return `失败：${result.error ?? "未说明原因"}`;
-    if (result.relativePath && result.draftFallback) return `已生成草稿：${result.relativePath}`;
-    if (result.relativePath) return `已生成：${result.relativePath}`;
-    return "已生成";
+    if (writeResult.failed) return `write failed: ${writeResult.error ?? "no reason"}`;
+    if (writeResult.relativePath) return `written: ${writeResult.relativePath}`;
+    return "written";
   }
 
-  if (currentlyImportingId === submission.submissionId) return "导入中";
-  if (selectedIds.has(submission.submissionId)) return "等待导入";
+  if (currentlyWritingId === submission.submissionId) return "writing";
+  if (prepareError) return `failed: ${prepareError}`;
+  if (prepared) {
+    if (prepared.skipped) return `skip: ${prepared.skipReason ?? prepared.reason ?? "no reason"}`;
+    if (prepared.aiStatus === "failed") return `failed: ${prepared.reason ?? "no reason"}`;
+    if (prepared.existing) return "已存在：预览已生成，写入不会覆盖";
+    if (prepared.draftFallback) return "draft preview ready";
+    return "preview ready";
+  }
+
+  if (currentlyPreparingId === submission.submissionId) return "preparing preview";
+  if (selectedIds.has(submission.submissionId)) return "waiting for preview";
   return submission.statusLabel;
 }
 
@@ -312,11 +323,19 @@ export default function App() {
   const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
   const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [isImportingSelectedLuogu, setIsImportingSelectedLuogu] = useState(false);
-  const [luoguImportResultsById, setLuoguImportResultsById] = useState<Record<string, ImportLuoguSubmissionResult>>({});
-  const [currentlyImportingLuoguId, setCurrentlyImportingLuoguId] = useState<string | null>(null);
-  const [luoguImportProgress, setLuoguImportProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isPreparingSelectedLuogu, setIsPreparingSelectedLuogu] = useState(false);
+  const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
+  const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
+  const [currentlyPreparingLuoguId, setCurrentlyPreparingLuoguId] = useState<string | null>(null);
+  const [luoguPrepareProgress, setLuoguPrepareProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isWritingPreparedLuogu, setIsWritingPreparedLuogu] = useState(false);
+  const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
+  const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
+  const [luoguWriteProgress, setLuoguWriteProgress] = useState<{ current: number; total: number } | null>(null);
+  const [activeLuoguPreparedPreviewId, setActiveLuoguPreparedPreviewId] = useState<string | null>(null);
+  const [activeLuoguPreviewDetailTab, setActiveLuoguPreviewDetailTab] = useState<LuoguPreviewDetailTab>("rendered");
   const [luoguImportCenterTab, setLuoguImportCenterTab] = useState<LuoguImportCenterTab>("scan");
+  const [luoguImportStep, setLuoguImportStep] = useState<LuoguImportStep>("scan");
   const [isSyncingLuogu, setIsSyncingLuogu] = useState(false);
   const [luoguSyncResult, setLuoguSyncResult] = useState<SyncLuoguInsightsResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
@@ -367,6 +386,20 @@ export default function App() {
   );
   const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
   const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
+  const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
+    (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
+  );
+  const writableLuoguPreparedNotes = preparedLuoguNotes.filter(
+    (prepared) => !luoguWriteResultsById[prepared.submissionId],
+  );
+  const selectedLuoguPreviewSubmissions = useMemo(
+    () => luoguPreviewResult?.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId)) ?? [],
+    [luoguPreviewResult, selectedLuoguSubmissionIds],
+  );
+  const activeLuoguPreparedPreview =
+    (activeLuoguPreparedPreviewId ? luoguPreparedNotesById[activeLuoguPreparedPreviewId] : undefined) ??
+    preparedLuoguNotes[0] ??
+    null;
 
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
@@ -626,9 +659,16 @@ export default function App() {
     setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
     setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
-    setLuoguImportResultsById({});
-    setCurrentlyImportingLuoguId(null);
-    setLuoguImportProgress(null);
+    setLuoguPreparedNotesById({});
+    setLuoguPrepareErrorsById({});
+    setCurrentlyPreparingLuoguId(null);
+    setLuoguPrepareProgress(null);
+    setLuoguWriteResultsById({});
+    setCurrentlyWritingLuoguId(null);
+    setLuoguWriteProgress(null);
+    setActiveLuoguPreparedPreviewId(null);
+    setActiveLuoguPreviewDetailTab("rendered");
+    setLuoguImportStep("scan");
     try {
       const submissions: PreviewLuoguSubmission[] = [];
       const seenSubmissionIds = new Set<string>();
@@ -892,6 +932,7 @@ export default function App() {
   const openLuoguDialog = async () => {
     setIsLuoguDialogOpen(true);
     setLuoguImportCenterTab("scan");
+    setLuoguImportStep("scan");
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
@@ -913,24 +954,31 @@ export default function App() {
   };
 
   const closeLuoguDialog = () => {
-    if (isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
     setIsLuoguDialogOpen(false);
     setLuoguPreviewResult(null);
     setLuoguScanProgress(null);
     setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
-    setLuoguImportResultsById({});
-    setCurrentlyImportingLuoguId(null);
-    setLuoguImportProgress(null);
+    setLuoguPreparedNotesById({});
+    setLuoguPrepareErrorsById({});
+    setCurrentlyPreparingLuoguId(null);
+    setLuoguPrepareProgress(null);
+    setLuoguWriteResultsById({});
+    setCurrentlyWritingLuoguId(null);
+    setLuoguWriteProgress(null);
+    setActiveLuoguPreparedPreviewId(null);
+    setActiveLuoguPreviewDetailTab("rendered");
     setLuoguProblemId("");
     setLuoguProblemTitle("");
     setLuoguSubmissionId("");
     setLuoguSourceCode("");
     setLuoguImportCenterTab("scan");
+    setLuoguImportStep("scan");
   };
 
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {
-    if (!isLuoguImportCandidate(submission) || isImportingSelectedLuogu) return;
+    if (!isLuoguImportCandidate(submission) || isPreparingSelectedLuogu || isWritingPreparedLuogu) return;
     setSelectedLuoguSubmissionIds((current) => {
       const next = new Set(current);
       if (next.has(submission.submissionId)) {
@@ -942,63 +990,119 @@ export default function App() {
     });
   };
 
-  const handleImportSelectedLuoguSubmissions = async () => {
+  const handlePrepareSelectedLuoguSubmissions = async () => {
     if (!luoguPreviewResult) return;
     const selectedSubmissions = luoguPreviewResult.submissions.filter((submission) =>
       selectedLuoguSubmissionIds.has(submission.submissionId),
     );
     if (selectedSubmissions.length === 0) {
-      toast.error("请先勾选要导入的洛谷提交");
+      toast.error("Please select Luogu submissions to preview");
       return;
     }
-    if (isDirty) {
-      const ok = window.confirm("当前笔记有未保存的改动，导入后可能会切换到新笔记。确定继续吗？未保存的改动将丢失。");
-      if (!ok) return;
-    }
 
-    setIsImportingSelectedLuogu(true);
-    setLuoguImportProgress({ current: 0, total: selectedSubmissions.length });
-    let generatedCount = 0;
+    setIsPreparingSelectedLuogu(true);
+    setLuoguPrepareProgress({ current: 0, total: selectedSubmissions.length });
+    setLuoguPrepareErrorsById({});
+    setLuoguWriteResultsById({});
+    let preparedCount = 0;
+    let draftCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
-    let lastGeneratedPath: string | null = null;
+    let firstPreparedId: string | null = null;
 
     try {
       for (let index = 0; index < selectedSubmissions.length; index += 1) {
         const submission = selectedSubmissions[index];
-        setCurrentlyImportingLuoguId(submission.submissionId);
-        setLuoguImportProgress({ current: index + 1, total: selectedSubmissions.length });
+        setCurrentlyPreparingLuoguId(submission.submissionId);
+        setLuoguPrepareProgress({ current: index + 1, total: selectedSubmissions.length });
 
         try {
-          const result = await importLuoguSubmission(submission.submissionId, true);
-          setLuoguImportResultsById((current) => ({
+          const prepared = await prepareLuoguSubmissionNote(submission.submissionId);
+          setLuoguPreparedNotesById((current) => ({
             ...current,
-            [submission.submissionId]: result,
+            [submission.submissionId]: prepared,
           }));
-          if (result.skipped) {
+          setLuoguPrepareErrorsById((current) => {
+            const next = { ...current };
+            delete next[submission.submissionId];
+            return next;
+          });
+          if (prepared.skipped) {
             skippedCount += 1;
-          } else if (result.failed) {
+          } else if (prepared.aiStatus === "failed") {
             failedCount += 1;
-            if (result.relativePath) {
-              generatedCount += 1;
-              lastGeneratedPath = result.relativePath;
-            }
           } else {
-            generatedCount += 1;
-            if (result.relativePath) {
-              lastGeneratedPath = result.relativePath;
-            }
+            preparedCount += 1;
+            if (prepared.draftFallback) draftCount += 1;
+            if (!firstPreparedId) firstPreparedId = submission.submissionId;
           }
         } catch (e) {
           failedCount += 1;
-          setLuoguImportResultsById((current) => ({
+          setLuoguPrepareErrorsById((current) => ({
             ...current,
-            [submission.submissionId]: {
-              submissionId: submission.submissionId,
-              problemId: submission.problemId,
-              problemTitle: submission.problemTitle,
+            [submission.submissionId]: getErrorMessage(e),
+          }));
+        }
+      }
+
+      if (firstPreparedId) {
+        setActiveLuoguPreparedPreviewId(firstPreparedId);
+        setActiveLuoguPreviewDetailTab("rendered");
+      }
+      setLuoguImportStep("preview");
+      toast.success(`Preview generated: ${preparedCount} ready, ${draftCount} draft, ${skippedCount} skipped, ${failedCount} failed`);
+    } finally {
+      setCurrentlyPreparingLuoguId(null);
+      setLuoguPrepareProgress(null);
+      setIsPreparingSelectedLuogu(false);
+    }
+  };
+
+  const handleWritePreparedLuoguNotes = async () => {
+    const preparedNotesToWrite = writableLuoguPreparedNotes;
+    if (preparedNotesToWrite.length === 0) {
+      toast.error("No prepared previews to write");
+      return;
+    }
+
+    setIsWritingPreparedLuogu(true);
+    setLuoguWriteProgress({ current: 0, total: preparedNotesToWrite.length });
+    let writtenCount = 0;
+    let commitFailedCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+    let lastWrittenPath: string | null = null;
+
+    try {
+      for (let index = 0; index < preparedNotesToWrite.length; index += 1) {
+        const prepared = preparedNotesToWrite[index];
+        setCurrentlyWritingLuoguId(prepared.submissionId);
+        setLuoguWriteProgress({ current: index + 1, total: preparedNotesToWrite.length });
+
+        try {
+          const result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, true);
+          setLuoguWriteResultsById((current) => ({
+            ...current,
+            [prepared.submissionId]: result,
+          }));
+          if (result.skipped) {
+            skippedCount += 1;
+          } else if (result.failed && result.relativePath && result.commitStatus === "failed") {
+            writtenCount += 1;
+            commitFailedCount += 1;
+            lastWrittenPath = result.relativePath;
+          } else if (result.failed) {
+            failedCount += 1;
+          } else {
+            writtenCount += 1;
+            if (result.relativePath) lastWrittenPath = result.relativePath;
+          }
+        } catch (e) {
+          failedCount += 1;
+          setLuoguWriteResultsById((current) => ({
+            ...current,
+            [prepared.submissionId]: {
               relativePath: null,
-              draftFallback: false,
               skipped: false,
               skipReason: null,
               failed: true,
@@ -1010,20 +1114,20 @@ export default function App() {
         }
       }
 
-      if (generatedCount > 0) {
+      if (writtenCount > 0) {
         const updated = await listNotes();
         setFiles(updated);
-        if (lastGeneratedPath) {
-          setCurrentFilePath(lastGeneratedPath);
+        if (lastWrittenPath) {
+          setCurrentFilePath(lastWrittenPath);
           setIsDirty(false);
         }
       }
 
-      toast.success(`导入完成：已生成 ${generatedCount} 条，跳过 ${skippedCount} 条，失败 ${failedCount} 条`);
+      toast.success(`Write complete: ${writtenCount} written, ${commitFailedCount} git commit failed, ${skippedCount} skipped, ${failedCount} failed`);
     } finally {
-      setCurrentlyImportingLuoguId(null);
-      setLuoguImportProgress(null);
-      setIsImportingSelectedLuogu(false);
+      setCurrentlyWritingLuoguId(null);
+      setLuoguWriteProgress(null);
+      setIsWritingPreparedLuogu(false);
     }
   };
 
@@ -2075,7 +2179,7 @@ export default function App() {
                 size="icon"
                 className="h-8 w-8 shrink-0"
                 onClick={closeLuoguDialog}
-                disabled={isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}
                 aria-label="关闭洛谷导入中心"
               >
                 <X className="h-4 w-4" />
@@ -2085,7 +2189,8 @@ export default function App() {
             <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
               <aside className="border-r border-border bg-muted/10 p-3">
                 {[
-                  { id: "scan" as const, label: "提交扫描", description: "扫描预览后导入" },
+                  { id: "scan" as const, label: "提交导入", description: "扫描、预览、写入" },
+                  { id: "account" as const, label: "账户状态", description: "Cookie、AI、进度" },
                   { id: "manual" as const, label: "手动导入", description: "粘贴源码导入" },
                   { id: "advanced" as const, label: "高级操作", description: "旧版一键同步" },
                 ].map((item) => (
@@ -2098,7 +2203,7 @@ export default function App() {
                         : "mb-2 w-full rounded-md border border-transparent px-3 py-2 text-left text-muted-foreground hover:border-border/60 hover:bg-muted/30 hover:text-foreground"
                     }
                     onClick={() => setLuoguImportCenterTab(item.id)}
-                    disabled={isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                    disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}
                   >
                     <div className="text-sm font-medium">{item.label}</div>
                     <div className="mt-0.5 text-xs text-muted-foreground">{item.description}</div>
@@ -2108,35 +2213,8 @@ export default function App() {
 
               <main className="min-h-0 min-w-0 overflow-hidden bg-background/60">
                 {luoguImportCenterTab === "scan" && (
+                  luoguImportStep === "scan" ? (
                   <div className="flex h-full min-h-0 flex-col gap-4 p-5">
-                    <section className="grid shrink-0 grid-cols-4 gap-3 text-xs">
-                      <div className="rounded-md border border-border bg-card/70 p-3">
-                        <div className="text-muted-foreground">_uid</div>
-                        <div className={luoguConfigUid.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
-                          {isLoadingLuoguConfig ? "读取中" : luoguConfigUid.trim() ? "已配置" : "未配置"}
-                        </div>
-                      </div>
-                      <div className="rounded-md border border-border bg-card/70 p-3">
-                        <div className="text-muted-foreground">__client_id</div>
-                        <div className={luoguConfigClientId.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
-                          {isLoadingLuoguConfig ? "读取中" : luoguConfigClientId.trim() ? "已配置" : "未配置"}
-                        </div>
-                      </div>
-                      <div className="rounded-md border border-border bg-card/70 p-3">
-                        <div className="text-muted-foreground">AI</div>
-                        <div className={luoguConfigAiConfigured ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
-                          {isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置"}
-                        </div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">AI 整理稍后用于导入阶段</div>
-                      </div>
-                      <div className="rounded-md border border-border bg-card/70 p-3">
-                        <div className="text-muted-foreground">last_submission_id</div>
-                        <div className="mt-1 font-mono text-foreground">
-                          {isLoadingLuoguConfig ? "读取中" : luoguConfigLastSubmissionId.trim() || "未设置"}
-                        </div>
-                      </div>
-                    </section>
-
                     <section className="grid shrink-0 gap-3 rounded-md border border-border bg-card/70 p-3 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
@@ -2216,9 +2294,14 @@ export default function App() {
                                 每页请求之间会短暂停顿，避免过快访问洛谷
                               </span>
                             )}
-                            {luoguImportProgress && (
+                            {luoguPrepareProgress && (
                               <span className="ml-2 text-foreground">
-                                正在导入 {luoguImportProgress.current} / {luoguImportProgress.total}
+                                preparing preview {luoguPrepareProgress.current} / {luoguPrepareProgress.total}
+                              </span>
+                            )}
+                            {luoguWriteProgress && (
+                              <span className="ml-2 text-foreground">
+                                writing {luoguWriteProgress.current} / {luoguWriteProgress.total}
                               </span>
                             )}
                           </div>
@@ -2248,20 +2331,33 @@ export default function App() {
                             <tbody>
                               {luoguPreviewResult.submissions.map((submission) => {
                                 const canSelect = isLuoguImportCandidate(submission);
-                                const result = luoguImportResultsById[submission.submissionId];
-                                const statusText = getLuoguImportStatusText(
+                                const prepared = luoguPreparedNotesById[submission.submissionId];
+                                const prepareError = luoguPrepareErrorsById[submission.submissionId];
+                                const writeResult = luoguWriteResultsById[submission.submissionId];
+                                const statusText = getLuoguPreviewWorkflowStatusText(
                                   submission,
-                                  result,
-                                  currentlyImportingLuoguId,
+                                  prepared,
+                                  prepareError,
+                                  writeResult,
+                                  currentlyPreparingLuoguId,
+                                  currentlyWritingLuoguId,
                                   selectedLuoguSubmissionIds,
                                 );
                                 return (
-                                  <tr key={submission.submissionId} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
+                                  <tr
+                                    key={submission.submissionId}
+                                    className="border-b border-border/60 last:border-0 hover:bg-muted/20"
+                                    onClick={() => {
+                                      if (prepared && !prepared.skipped && prepared.markdown.trim()) {
+                                        setActiveLuoguPreparedPreviewId(submission.submissionId);
+                                      }
+                                    }}
+                                  >
                                     <td className="px-4 py-3">
                                       <input
                                         type="checkbox"
                                         checked={selectedLuoguSubmissionIds.has(submission.submissionId)}
-                                        disabled={!canSelect || isImportingSelectedLuogu}
+                                        disabled={!canSelect || (isPreparingSelectedLuogu || isWritingPreparedLuogu)}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         aria-label={`选择提交 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguSubmissionSelection(submission)}
@@ -2276,7 +2372,7 @@ export default function App() {
                                       {submission.status || "unknown"}
                                     </td>
                                     <td className="px-3 py-3 font-mono text-muted-foreground">{submission.submitTime || "未知"}</td>
-                                    <td className={result?.failed ? "px-3 py-3 text-amber-400" : "px-3 py-3 text-foreground"}>
+                                    <td className={(writeResult?.failed || prepareError || prepared?.aiStatus === "failed") ? "px-3 py-3 text-amber-400" : "px-3 py-3 text-foreground"}>
                                       <div className="max-w-[360px] truncate" title={statusText}>{statusText}</div>
                                     </td>
                                   </tr>
@@ -2287,6 +2383,244 @@ export default function App() {
                         </div>
                       )}
                     </section>
+                  </div>
+                  ) : (
+                    <div className="flex h-full min-h-0 flex-col gap-4 p-5">
+                      <section className="flex shrink-0 items-center justify-between gap-3 rounded-md border border-border bg-card/70 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground">预览生成结果</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {luoguPrepareProgress
+                              ? `正在生成预览 ${luoguPrepareProgress.current} / ${luoguPrepareProgress.total}`
+                              : luoguWriteProgress
+                                ? `正在写入 ${luoguWriteProgress.current} / ${luoguWriteProgress.total}`
+                                : `已生成 ${preparedLuoguNotes.length} 个预览，可写入 ${writableLuoguPreparedNotes.length} 个`}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          onClick={() => setLuoguImportStep("scan")}
+                          disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                        >
+                          返回选择提交
+                        </Button>
+                      </section>
+
+                      {selectedLuoguPreviewSubmissions.length === 0 ? (
+                        <section className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-border bg-card/70 text-sm text-muted-foreground">
+                          还没有生成预览。请返回选择提交后点击“生成预览”。
+                        </section>
+                      ) : (
+                        <section className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-card/70">
+                          <div className="min-h-0 overflow-auto border-r border-border bg-muted/10">
+                            <div className="sticky top-0 z-10 border-b border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground">
+                              已生成预览的提交
+                            </div>
+                            <div className="grid gap-1 p-2">
+                              {selectedLuoguPreviewSubmissions.map((submission) => {
+                                const prepared = luoguPreparedNotesById[submission.submissionId];
+                                const prepareError = luoguPrepareErrorsById[submission.submissionId];
+                                const writeResult = luoguWriteResultsById[submission.submissionId];
+                                const statusText = getLuoguPreviewWorkflowStatusText(
+                                  submission,
+                                  prepared,
+                                  prepareError,
+                                  writeResult,
+                                  currentlyPreparingLuoguId,
+                                  currentlyWritingLuoguId,
+                                  selectedLuoguSubmissionIds,
+                                );
+                                const canPreview = prepared && !prepared.skipped && prepared.markdown.trim();
+                                return (
+                                  <button
+                                    key={submission.submissionId}
+                                    type="button"
+                                    className={
+                                      activeLuoguPreparedPreviewId === submission.submissionId
+                                        ? "w-full rounded-md border border-primary/50 bg-primary/10 px-3 py-2 text-left shadow-sm"
+                                        : "w-full rounded-md border border-transparent px-3 py-2 text-left hover:border-border/70 hover:bg-muted/30"
+                                    }
+                                    onClick={() => {
+                                      if (canPreview) setActiveLuoguPreparedPreviewId(submission.submissionId);
+                                    }}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-medium text-foreground">
+                                        {submission.problemId || "未知题号"} · {submission.problemTitle || "未读取到标题"}
+                                      </div>
+                                      <div className="mt-1 font-mono text-xs text-muted-foreground">
+                                        {submission.submissionId}
+                                      </div>
+                                      <div
+                                        className={
+                                          writeResult?.failed || prepareError || prepared?.aiStatus === "failed" || prepared?.existing
+                                            ? "mt-1 truncate text-xs text-amber-300"
+                                            : prepared?.draftFallback
+                                              ? "mt-1 truncate text-xs text-amber-200"
+                                              : "mt-1 truncate text-xs text-muted-foreground"
+                                        }
+                                        title={statusText}
+                                      >
+                                        {statusText}
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {activeLuoguPreparedPreview ? (
+                            <div className="flex min-h-0 min-w-0 flex-col">
+                              <div className="shrink-0 border-b border-border bg-muted/20 px-4 py-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs text-muted-foreground">suggested path</div>
+                                    <div className="mt-1 break-all font-mono text-sm text-foreground">
+                                      {activeLuoguPreparedPreview.suggestedRelativePath}
+                                    </div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap gap-2 text-xs">
+                                    <span className={activeLuoguPreparedPreview.draftFallback ? "rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-200" : "rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-emerald-200"}>
+                                      {activeLuoguPreparedPreview.draftFallback ? "草稿预览" : "AI 整理预览"}
+                                    </span>
+                                    <span className="rounded-md border border-border bg-background/70 px-2 py-1 text-muted-foreground">
+                                      {activeLuoguPreparedPreview.aiStatus}
+                                    </span>
+                                  </div>
+                                </div>
+                                {activeLuoguPreparedPreview.reason && (
+                                  <div className="mt-2 line-clamp-2 text-xs text-muted-foreground" title={activeLuoguPreparedPreview.reason}>
+                                    {activeLuoguPreparedPreview.reason}
+                                  </div>
+                                )}
+                                {activeLuoguPreparedPreview.existing && (
+                                  <div className="mt-2 text-xs text-amber-300">目标文件已存在；写入阶段不会覆盖。</div>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 gap-2 border-b border-border bg-card px-4 py-2">
+                                {[
+                                  { id: "rendered" as const, label: "渲染预览" },
+                                  { id: "markdown" as const, label: "Markdown 源文" },
+                                  { id: "source" as const, label: "提交源码" },
+                                ].map((tab) => (
+                                  <button
+                                    key={tab.id}
+                                    type="button"
+                                    className={
+                                      activeLuoguPreviewDetailTab === tab.id
+                                        ? "rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs font-medium text-foreground"
+                                        : "rounded-md border border-transparent px-3 py-1.5 text-xs text-muted-foreground hover:border-border/70 hover:bg-muted/30 hover:text-foreground"
+                                    }
+                                    onClick={() => setActiveLuoguPreviewDetailTab(tab.id)}
+                                  >
+                                    {tab.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {activeLuoguPreviewDetailTab === "rendered" && (
+                                <MarkdownPreview
+                                  markdown={activeLuoguPreparedPreview.markdown}
+                                  noteRelativePath={activeLuoguPreparedPreview.suggestedRelativePath}
+                                  className="min-h-0 flex-1 bg-background/70"
+                                />
+                              )}
+                              {activeLuoguPreviewDetailTab === "markdown" && (
+                                <textarea
+                                  readOnly
+                                  value={activeLuoguPreparedPreview.markdown}
+                                  className="min-h-0 w-full flex-1 resize-none border-0 bg-background/70 p-4 font-mono text-xs leading-5 text-foreground outline-none"
+                                  placeholder="Prepared Markdown will appear here. This preview is read-only."
+                                />
+                              )}
+                              {activeLuoguPreviewDetailTab === "source" && (
+                                <textarea
+                                  readOnly
+                                  value={activeLuoguPreparedPreview.sourceCode}
+                                  className="min-h-0 w-full flex-1 resize-none border-0 bg-background/70 p-4 font-mono text-xs leading-5 text-foreground outline-none"
+                                  placeholder="这条 prepare 结果没有返回提交源码。"
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                              这次生成没有可预览的 Markdown。请查看左侧每条提交的失败或跳过原因。
+                            </div>
+                          )}
+                        </section>
+                      )}
+                    </div>
+                  )
+                )}
+
+                {luoguImportCenterTab === "account" && (
+                  <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-5">
+                    <section className="grid shrink-0 grid-cols-2 gap-3 text-xs">
+                      <div className="rounded-md border border-border bg-card/70 p-3">
+                        <div className="text-muted-foreground">_uid</div>
+                        <div className={luoguConfigUid.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                          {isLoadingLuoguConfig ? "读取中" : luoguConfigUid.trim() ? "已配置" : "未配置"}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card/70 p-3">
+                        <div className="text-muted-foreground">__client_id</div>
+                        <div className={luoguConfigClientId.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                          {isLoadingLuoguConfig ? "读取中" : luoguConfigClientId.trim() ? "已配置" : "未配置"}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card/70 p-3">
+                        <div className="text-muted-foreground">AI</div>
+                        <div className={luoguConfigAiConfigured ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                          {isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置"}
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">生成预览时用于整理 insight；不可用时仍可生成源码草稿。</div>
+                      </div>
+                      <div className="rounded-md border border-border bg-card/70 p-3">
+                        <div className="text-muted-foreground">last_submission_id</div>
+                        <div className="mt-1 font-mono text-foreground">
+                          {isLoadingLuoguConfig ? "读取中" : luoguConfigLastSubmissionId.trim() || "未设置"}
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">扫描和生成预览不会更新这个值。</div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+                      <div className="font-medium text-foreground">洛谷账户配置状态</div>
+                      <div>需要从浏览器洛谷 Cookie 中复制 _uid 和 __client_id。</div>
+                      <div>路径：F12 - Application / 应用 - Cookies - https://www.luogu.com.cn。</div>
+                      <div>不要把 __client_id 发给别人，也不要提交到 Git。</div>
+                    </section>
+
+                    {luoguConnectionResult && (
+                      <section className="grid gap-2 rounded-md border border-border bg-card/70 p-3 text-xs">
+                        <div className="font-medium text-foreground">
+                          最近一次连接测试：拉到 {luoguConnectionResult.fetchedCount} 条提交
+                        </div>
+                        <div className="grid gap-1 text-muted-foreground">
+                          {luoguConnectionResult.submissions.length === 0 ? (
+                            <div>暂无提交预览</div>
+                          ) : (
+                            luoguConnectionResult.submissions.map((submission) => (
+                              <div key={submission.submissionId} className="font-mono">
+                                #{submission.submissionId} {submission.problemId} {submission.problemTitle} · {submission.status} · {submission.submitTime}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </section>
+                    )}
+
+                    {luoguSyncResult && (
+                      <section className="grid gap-2 rounded-md border border-border bg-card/70 p-3 text-xs">
+                        <div className="font-medium text-foreground">
+                          旧版同步结果：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AI 导入 {luoguSyncResult.aiImportedCount} 篇
+                        </div>
+                        <div className="grid gap-1 text-muted-foreground">
+                          <div>AI 跳过 {luoguSyncResult.aiSkippedCount} 条，AI 失败 {luoguSyncResult.aiFailedCount} 条，总失败 {luoguSyncResult.failedCount} 条。</div>
+                          <div>last_submission_id: {luoguSyncResult.updatedLastSubmissionId ?? "未更新"}</div>
+                        </div>
+                      </section>
+                    )}
                   </div>
                 )}
 
@@ -2353,7 +2687,7 @@ export default function App() {
                         variant="outline"
                         className="mt-4 w-fit border-amber-500/50 bg-transparent text-amber-100 hover:bg-amber-500/10 hover:text-amber-50"
                         onClick={handleSyncLuoguInsights}
-                        disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isImportingSelectedLuogu || isSyncingLuogu}
+                        disabled={isLoadingLuoguConfig || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
                       >
                         {isSyncingLuogu ? "旧版同步中..." : "高级：执行旧版一键同步"}
                       </Button>
@@ -2382,48 +2716,80 @@ export default function App() {
 
             <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/20 px-6 py-3">
               <div className="min-w-0 truncate text-xs text-muted-foreground">
-                {luoguImportCenterTab === "scan" && luoguImportProgress
-                  ? `正在导入 ${luoguImportProgress.current} / ${luoguImportProgress.total}`
+                {luoguImportCenterTab === "scan" && luoguImportStep === "preview" && luoguWriteProgress
+                  ? `正在写入 ${luoguWriteProgress.current} / ${luoguWriteProgress.total}`
+                  : luoguImportCenterTab === "scan" && luoguImportStep === "preview"
+                    ? `已生成 ${preparedLuoguNotes.length} 个预览，可写入 ${writableLuoguPreparedNotes.length} 个`
+                : luoguImportCenterTab === "scan" && luoguPrepareProgress
+                  ? `preparing preview ${luoguPrepareProgress.current} / ${luoguPrepareProgress.total}`
                   : luoguImportCenterTab === "scan" && luoguScanProgress
                     ? `正在扫描第 ${luoguScanProgress.currentPage} 页，已发现 ${luoguScanProgress.foundCount} 条；范围：${luoguScanProgress.rangeLabel}`
                   : luoguImportCenterTab === "scan"
-                    ? `已选 ${selectedLuoguImportCount} 条`
+                    ? `已选 ${selectedLuoguImportCount} 条，生成预览后进入下一步`
+                    : luoguImportCenterTab === "account"
+                      ? "账户状态只展示配置与最近结果，不扫描、不写入"
                     : luoguImportCenterTab === "manual"
                       ? "手动导入会调用 AI 并写入 notes/luogu"
                       : "旧版同步保留在高级操作中"}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {luoguImportCenterTab === "scan" && (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={handlePreviewLuoguSubmissions}
-                      disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isImportingSelectedLuogu || isSyncingLuogu}
-                    >
-                      {isScanningLuoguPreview
-                        ? "扫描中..."
-                        : `扫描${getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit)}`}
-                    </Button>
-                    <Button
-                      onClick={handleImportSelectedLuoguSubmissions}
-                      disabled={
-                        selectedLuoguImportCount === 0 ||
-                        isLoadingLuoguConfig ||
-                        isScanningLuoguPreview ||
-                        isImportingSelectedLuogu ||
-                        isSyncingLuogu
-                      }
-                    >
-                      {isImportingSelectedLuogu ? "导入中..." : `导入选中 ${selectedLuoguImportCount}`}
-                    </Button>
-                  </>
+                  luoguImportStep === "scan" ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={handlePreviewLuoguSubmissions}
+                        disabled={isLoadingLuoguConfig || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+                      >
+                        {isScanningLuoguPreview
+                          ? "扫描中..."
+                          : `扫描${getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit)}`}
+                      </Button>
+                      <Button
+                        onClick={handlePrepareSelectedLuoguSubmissions}
+                        disabled={
+                          selectedLuoguImportCount === 0 ||
+                          isLoadingLuoguConfig ||
+                          isScanningLuoguPreview ||
+                          isPreparingSelectedLuogu ||
+                          isWritingPreparedLuogu ||
+                          isSyncingLuogu
+                        }
+                      >
+                        {isPreparingSelectedLuogu ? "生成预览中..." : `生成预览 ${selectedLuoguImportCount}`}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => setLuoguImportStep("scan")}
+                        disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                      >
+                        返回选择
+                      </Button>
+                      <Button
+                        onClick={handleWritePreparedLuoguNotes}
+                        disabled={
+                          writableLuoguPreparedNotes.length === 0 ||
+                          isLoadingLuoguConfig ||
+                          isScanningLuoguPreview ||
+                          isPreparingSelectedLuogu ||
+                          isWritingPreparedLuogu ||
+                          isSyncingLuogu
+                        }
+                      >
+                        {isWritingPreparedLuogu ? "写入中..." : `写入已生成预览 ${writableLuoguPreparedNotes.length}`}
+                      </Button>
+                    </>
+                  )
                 )}
                 {luoguImportCenterTab === "manual" && (
-                  <Button onClick={handleImportLuogu} disabled={isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu}>
+                  <Button onClick={handleImportLuogu} disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}>
                     {isImportingLuogu ? "导入中..." : "手动导入"}
                   </Button>
                 )}
-                <Button variant="outline" onClick={closeLuoguDialog} disabled={isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu}>
+                <Button variant="outline" onClick={closeLuoguDialog} disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}>
                   关闭
                 </Button>
               </div>
@@ -2600,7 +2966,7 @@ export default function App() {
               size="sm"
               className="h-7 gap-1.5 px-2 text-xs"
               onClick={() => void openLuoguDialog()}
-              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isImportingSelectedLuogu || isSyncingLuogu}
+              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
             >
               <RefreshCw className="h-3.5 w-3.5" />
               洛谷

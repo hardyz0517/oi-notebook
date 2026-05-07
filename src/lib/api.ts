@@ -95,6 +95,31 @@ export interface ImportLuoguSubmissionResult {
   commitStatus: "committed" | "noChanges" | "skipped" | "failed" | string;
 }
 
+export interface PrepareLuoguSubmissionNoteResult {
+  submissionId: string;
+  problemId: string;
+  problemTitle: string;
+  suggestedRelativePath: string;
+  markdown: string;
+  sourceCode: string;
+  draftFallback: boolean;
+  aiStatus: "organized" | "rawDraftFallback" | "skipped" | "failed" | string;
+  reason: string | null;
+  existing: boolean;
+  skipped: boolean;
+  skipReason: string | null;
+}
+
+export interface WriteLuoguPreparedNoteResult {
+  relativePath: string | null;
+  skipped: boolean;
+  skipReason: string | null;
+  failed: boolean;
+  error: string | null;
+  committed: boolean;
+  commitStatus: "committed" | "noChanges" | "skipped" | "failed" | string;
+}
+
 export interface TestAiConnectionResult {
   model: string;
   ok: boolean;
@@ -357,6 +382,34 @@ export async function importLuoguSubmission(
   try {
     return await invoke<ImportLuoguSubmissionResult>("import_luogu_submission", {
       submissionId,
+      autoCommit,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function prepareLuoguSubmissionNote(
+  submissionId: string,
+): Promise<PrepareLuoguSubmissionNoteResult> {
+  try {
+    return await invoke<PrepareLuoguSubmissionNoteResult>("prepare_luogu_submission_note", {
+      submissionId,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function writeLuoguPreparedNote(
+  relativePath: string,
+  markdown: string,
+  autoCommit = true,
+): Promise<WriteLuoguPreparedNoteResult> {
+  try {
+    return await invoke<WriteLuoguPreparedNoteResult>("write_luogu_prepared_note", {
+      relativePath,
+      markdown,
       autoCommit,
     });
   } catch (e) {

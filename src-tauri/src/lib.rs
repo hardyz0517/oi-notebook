@@ -213,6 +213,8 @@ pub fn run() {
             git::push_git,
             luogu::import_luogu_insight,
             luogu::import_luogu_submission,
+            luogu::prepare_luogu_submission_note,
+            luogu::write_luogu_prepared_note,
             luogu::get_luogu_config,
             luogu::save_luogu_config,
             luogu::test_luogu_connection,

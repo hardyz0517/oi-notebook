@@ -22,6 +22,7 @@ const LUOGU_SYNC_DETAIL_INTERVAL: Duration = Duration::from_secs(3);
 const LUOGU_PREVIEW_DEFAULT_LIMIT: usize = 20;
 const LUOGU_PREVIEW_MAX_LIMIT: usize = 100;
 const LUOGU_PREVIEW_MAX_PAGE: u32 = 50;
+const LUOGU_PREPARE_LOOKUP_PAGE_INTERVAL: Duration = Duration::from_millis(1500);
 const LUOGU_COOKIE_EXPIRED_MESSAGE: &str =
     "洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。";
 
@@ -144,6 +145,35 @@ pub struct ImportLuoguSubmissionResult {
     pub commit_status: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareLuoguSubmissionNoteResult {
+    pub submission_id: String,
+    pub problem_id: String,
+    pub problem_title: String,
+    pub suggested_relative_path: String,
+    pub markdown: String,
+    pub source_code: String,
+    pub draft_fallback: bool,
+    pub ai_status: String,
+    pub reason: Option<String>,
+    pub existing: bool,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteLuoguPreparedNoteResult {
+    pub relative_path: Option<String>,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
+    pub failed: bool,
+    pub error: Option<String>,
+    pub committed: bool,
+    pub commit_status: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LuoguSubmissionRecord {
     submission_id: u64,
@@ -175,6 +205,14 @@ enum LuoguAiImportOutcome {
     Imported(ImportLuoguInsightResult),
     NoCandidate,
     AiSkipped,
+}
+
+struct PreparedLuoguNote {
+    relative_path: String,
+    markdown: String,
+    draft_fallback: bool,
+    ai_status: String,
+    reason: Option<String>,
 }
 
 fn get_notes_dir() -> Result<PathBuf, String> {
@@ -887,6 +925,32 @@ fn build_ai_note_markdown(
     markdown
 }
 
+fn build_ai_prepared_luogu_note(
+    problem_id: &str,
+    submission_id: &str,
+    insight: &OrganizedLuoguInsight,
+    ai_model: &str,
+) -> Result<PreparedLuoguNote, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    let safe_title = safe_title_for_filename(insight.title.trim(), &problem_id);
+    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let markdown = build_ai_note_markdown(&problem_id, submission_id, insight, ai_model);
+    let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
+    if let Some(warning) = warning {
+        return Err(format!(
+            "Luogu import failed: generated frontmatter warning for {relative_path}: {warning}"
+        ));
+    }
+
+    Ok(PreparedLuoguNote {
+        relative_path,
+        markdown: final_content,
+        draft_fallback: false,
+        ai_status: "organized".to_string(),
+        reason: None,
+    })
+}
+
 fn write_ai_luogu_note_to_notes_dir(
     notes_dir: &Path,
     problem_id: &str,
@@ -994,6 +1058,39 @@ fn build_raw_luogu_draft_markdown(
     markdown
 }
 
+fn build_raw_prepared_luogu_note(
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    source_code: &str,
+    fallback_reason: &str,
+) -> Result<PreparedLuoguNote, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    let safe_title = safe_title_for_filename(problem_title.trim(), "raw-draft");
+    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let markdown = build_raw_luogu_draft_markdown(
+        &problem_id,
+        problem_title,
+        submission_id,
+        source_code,
+        fallback_reason,
+    );
+    let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
+    if let Some(warning) = warning {
+        return Err(format!(
+            "Luogu import failed: generated raw draft frontmatter warning for {relative_path}: {warning}"
+        ));
+    }
+
+    Ok(PreparedLuoguNote {
+        relative_path,
+        markdown: final_content,
+        draft_fallback: true,
+        ai_status: "rawDraftFallback".to_string(),
+        reason: Some(fallback_reason.trim().to_string()),
+    })
+}
+
 fn write_raw_luogu_draft_to_notes_dir(
     notes_dir: &Path,
     problem_id: &str,
@@ -1050,6 +1147,251 @@ fn write_raw_luogu_draft_to_notes_dir(
 
 fn should_fallback_to_raw_draft(error: &str) -> bool {
     error.starts_with("AI connection failed") || error.starts_with("Luogu AI insight failed")
+}
+
+fn safe_luogu_note_path_for_write(
+    notes_dir: &Path,
+    relative_path: &str,
+) -> Result<(String, PathBuf), String> {
+    let normalized = relative_path.replace('\\', "/");
+    if normalized.is_empty() {
+        return Err("Luogu write failed: relative_path cannot be empty".to_string());
+    }
+    if Path::new(&normalized).is_absolute()
+        || normalized.starts_with('/')
+        || relative_path.starts_with('\\')
+    {
+        return Err(format!(
+            "Luogu write failed: illegal note path '{relative_path}'"
+        ));
+    }
+    if !normalized.starts_with("luogu/") {
+        return Err(format!(
+            "Luogu write failed: note path must be under notes/luogu: '{relative_path}'"
+        ));
+    }
+    if !normalized.to_ascii_lowercase().ends_with(".md") {
+        return Err(format!(
+            "Luogu write failed: note path must end with .md: '{relative_path}'"
+        ));
+    }
+    for segment in normalized.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(format!(
+                "Luogu write failed: illegal note path segment in '{relative_path}'"
+            ));
+        }
+    }
+
+    fs::create_dir_all(notes_dir)
+        .map_err(|e| format!("Luogu write failed: cannot create notes directory: {e}"))?;
+    let luogu_dir = notes_dir.join("luogu");
+    fs::create_dir_all(&luogu_dir)
+        .map_err(|e| format!("Luogu write failed: cannot create notes/luogu directory: {e}"))?;
+
+    let canonical_notes = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("Luogu write failed: cannot resolve notes directory: {e}"))?;
+    let canonical_luogu = luogu_dir
+        .canonicalize()
+        .map_err(|e| format!("Luogu write failed: cannot resolve notes/luogu directory: {e}"))?;
+    if !canonical_luogu.starts_with(&canonical_notes) {
+        return Err("Luogu write failed: notes/luogu escapes notes directory".to_string());
+    }
+
+    let target_path = canonical_notes.join(&normalized);
+    if !target_path.starts_with(&canonical_luogu) {
+        return Err(format!(
+            "Luogu write failed: note path '{relative_path}' escapes notes/luogu"
+        ));
+    }
+
+    Ok((normalized, target_path))
+}
+
+fn luogu_note_exists(notes_dir: &Path, relative_path: &str) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    if normalized.is_empty()
+        || !normalized.starts_with("luogu/")
+        || !normalized.to_ascii_lowercase().ends_with(".md")
+    {
+        return false;
+    }
+
+    notes_dir.join(normalized).exists()
+}
+
+fn find_luogu_submission_record_by_id(
+    uid: &str,
+    client_id: &str,
+    submission_id: u64,
+) -> Result<Option<LuoguSubmissionRecord>, String> {
+    for page in 1..=LUOGU_PREVIEW_MAX_PAGE {
+        if page > 1 {
+            sleep(LUOGU_PREPARE_LOOKUP_PAGE_INTERVAL);
+        }
+
+        let records = fetch_luogu_submission_records(uid, client_id, page)?;
+        if records.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(record) = records
+            .into_iter()
+            .find(|record| record.submission_id == submission_id)
+        {
+            return Ok(Some(record));
+        }
+    }
+
+    Ok(None)
+}
+
+fn prepare_luogu_submission_record_note(
+    client: &reqwest::blocking::Client,
+    uid: &str,
+    client_id: &str,
+    notes_dir: &Path,
+    ai_config: &AiConfigFields,
+    record: &LuoguSubmissionRecord,
+) -> PrepareLuoguSubmissionNoteResult {
+    if !is_ac_status(&record.status) {
+        return PrepareLuoguSubmissionNoteResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            suggested_relative_path: String::new(),
+            markdown: String::new(),
+            source_code: String::new(),
+            draft_fallback: false,
+            ai_status: "skipped".to_string(),
+            reason: Some(format!("非 AC 提交，当前 verdict 为 {}", record.status)),
+            existing: false,
+            skipped: true,
+            skip_reason: Some(format!("非 AC 提交，当前 verdict 为 {}", record.status)),
+        };
+    }
+
+    let source_code =
+        match fetch_luogu_submission_source(client, uid, client_id, record.submission_id) {
+            Ok(source_code) => source_code,
+            Err(error) => {
+                return PrepareLuoguSubmissionNoteResult {
+                    submission_id: record.submission_id.to_string(),
+                    problem_id: record.problem_id.clone(),
+                    problem_title: record.problem_title.clone(),
+                    suggested_relative_path: String::new(),
+                    markdown: String::new(),
+                    source_code: String::new(),
+                    draft_fallback: false,
+                    ai_status: "failed".to_string(),
+                    reason: Some(error.clone()),
+                    existing: false,
+                    skipped: false,
+                    skip_reason: None,
+                };
+            }
+        };
+
+    let prepared = match prepare_ai_first_luogu_note(
+        &record.problem_id,
+        &record.problem_title,
+        &record.submission_id.to_string(),
+        &source_code,
+        ai_config,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return PrepareLuoguSubmissionNoteResult {
+                submission_id: record.submission_id.to_string(),
+                problem_id: record.problem_id.clone(),
+                problem_title: record.problem_title.clone(),
+                suggested_relative_path: String::new(),
+                markdown: String::new(),
+                source_code: source_code.clone(),
+                draft_fallback: false,
+                ai_status: "failed".to_string(),
+                reason: Some(error),
+                existing: false,
+                skipped: false,
+                skip_reason: None,
+            };
+        }
+    };
+    let existing = luogu_note_exists(notes_dir, &prepared.relative_path);
+
+    PrepareLuoguSubmissionNoteResult {
+        submission_id: record.submission_id.to_string(),
+        problem_id: record.problem_id.clone(),
+        problem_title: record.problem_title.clone(),
+        suggested_relative_path: prepared.relative_path,
+        markdown: prepared.markdown,
+        source_code,
+        draft_fallback: prepared.draft_fallback,
+        ai_status: prepared.ai_status,
+        reason: prepared.reason,
+        existing,
+        skipped: false,
+        skip_reason: None,
+    }
+}
+
+fn prepare_ai_first_luogu_note(
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    source_code: &str,
+    ai_config: &AiConfigFields,
+) -> Result<PreparedLuoguNote, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    if problem_title.trim().is_empty() {
+        return Err("Luogu import failed: problem title cannot be empty".to_string());
+    }
+    if submission_id.trim().is_empty() {
+        return Err("Luogu import failed: submission id cannot be empty".to_string());
+    }
+
+    let Some(candidate_comment) = extract_luogu_ai_candidate_comment(source_code) else {
+        return build_raw_prepared_luogu_note(
+            &problem_id,
+            problem_title,
+            submission_id,
+            source_code,
+            "没有找到 @oinb-insight 候选内容，已生成待整理源码草稿。",
+        );
+    };
+
+    match organize_luogu_insight(
+        ai_config,
+        &OrganizeLuoguInsightInput {
+            problem_id: problem_id.clone(),
+            problem_title: problem_title.trim().to_string(),
+            submission_id: submission_id.trim().to_string(),
+            candidate_comment,
+        },
+    ) {
+        Ok(insight) if insight.should_import => build_ai_prepared_luogu_note(
+            &problem_id,
+            submission_id,
+            &insight,
+            ai_config.model.trim(),
+        ),
+        Ok(_) => build_raw_prepared_luogu_note(
+            &problem_id,
+            problem_title,
+            submission_id,
+            source_code,
+            "AI 判断这条注释暂不适合结构化导入，已生成待整理源码草稿。",
+        ),
+        Err(error) if should_fallback_to_raw_draft(&error) => build_raw_prepared_luogu_note(
+            &problem_id,
+            problem_title,
+            submission_id,
+            source_code,
+            &format!("AI 未整理原因：{error}"),
+        ),
+        Err(error) => Err(error),
+    }
 }
 
 fn import_luogu_insight_to_notes_dir(
@@ -1394,6 +1736,151 @@ pub fn import_luogu_submission(
         &record,
         auto_commit.unwrap_or(true),
     ))
+}
+
+#[tauri::command]
+pub fn prepare_luogu_submission_note(
+    submission_id: String,
+) -> Result<PrepareLuoguSubmissionNoteResult, String> {
+    let submission_id = submission_id.trim();
+    let parsed_submission_id = match submission_id.parse::<u64>() {
+        Ok(value) if value > 0 => value,
+        _ => {
+            return Err("submission_id 必须是正整数".to_string());
+        }
+    };
+
+    let config = read_config()?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
+    let Some(record) = find_luogu_submission_record_by_id(&uid, &client_id, parsed_submission_id)?
+    else {
+        return Err("未在最多 50 页洛谷提交列表中找到这条 submission".to_string());
+    };
+
+    let notes_dir = get_notes_dir()?;
+    let client = luogu_http_client()?;
+
+    Ok(prepare_luogu_submission_record_note(
+        &client,
+        &uid,
+        &client_id,
+        &notes_dir,
+        &config.ai,
+        &record,
+    ))
+}
+
+#[tauri::command]
+pub fn write_luogu_prepared_note(
+    relative_path: String,
+    markdown: String,
+    auto_commit: Option<bool>,
+) -> Result<WriteLuoguPreparedNoteResult, String> {
+    let notes_dir = get_notes_dir()?;
+    let (relative_path, target_path) =
+        safe_luogu_note_path_for_write(&notes_dir, relative_path.trim())?;
+    let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
+    if let Some(warning) = warning {
+        return Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: true,
+            error: Some(format!("生成的 frontmatter 有问题：{warning}")),
+            committed: false,
+            commit_status: "skipped".to_string(),
+        });
+    }
+
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Luogu write failed: cannot create note parent directory: {e}")
+        })?;
+    }
+
+    let mut file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target_path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Ok(WriteLuoguPreparedNoteResult {
+                relative_path: Some(relative_path),
+                skipped: true,
+                skip_reason: Some("已存在，未覆盖".to_string()),
+                failed: false,
+                error: None,
+                committed: false,
+                commit_status: "skipped".to_string(),
+            });
+        }
+        Err(e) => {
+            return Err({
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("已存在：{relative_path}")
+            } else {
+                format!("Luogu write failed: cannot create note {relative_path}: {e}")
+            }
+            });
+        }
+    };
+
+    if let Err(error) = file.write_all(final_content.as_bytes()) {
+        return Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: true,
+            error: Some(format!("Luogu write failed: cannot write note: {error}")),
+            committed: false,
+            commit_status: "skipped".to_string(),
+        });
+    }
+
+    if !auto_commit.unwrap_or(true) {
+        return Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: false,
+            commit_status: "skipped".to_string(),
+        });
+    }
+
+    match commit_note(relative_path.clone(), None) {
+        Ok(CommitNoteStatus::Committed) => Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: true,
+            commit_status: "committed".to_string(),
+        }),
+        Ok(CommitNoteStatus::NoChanges) => Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: false,
+            commit_status: "noChanges".to_string(),
+        }),
+        Err(error) => Ok(WriteLuoguPreparedNoteResult {
+            relative_path: Some(relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: true,
+            error: Some(format!("Git 提交失败：{error}")),
+            committed: false,
+            commit_status: "failed".to_string(),
+        }),
+    }
 }
 
 #[tauri::command]
