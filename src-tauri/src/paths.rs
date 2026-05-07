@@ -23,15 +23,7 @@ pub(crate) fn init_app_data_dir(app: &AppHandle) -> Result<(), String> {
             .path()
             .resource_dir()
             .map_err(|e| format!("Failed to resolve resource directory: {e}"))?;
-        let candidates = [
-            resource_dir.join("local-blog").join("dist"),
-            resource_dir.join("dist"),
-        ];
-        candidates
-            .iter()
-            .find(|candidate| candidate.is_dir())
-            .cloned()
-            .unwrap_or_else(|| candidates[0].clone())
+        local_blog_dist_dir_from_resource_dir(&resource_dir)
     };
     let _ = LOCAL_BLOG_DIST_DIR.set(local_blog_dist_dir);
     Ok(())
@@ -84,6 +76,20 @@ pub(crate) fn local_blog_dist_dir() -> Result<PathBuf, String> {
     Err("Local blog dist directory was not initialized".to_string())
 }
 
+fn local_blog_dist_dir_from_resource_dir(resource_dir: &Path) -> PathBuf {
+    let candidates = [
+        resource_dir.join("local-blog").join("dist"),
+        resource_dir.join("_up_").join("local-blog").join("dist"),
+        resource_dir.join("dist"),
+    ];
+
+    candidates
+        .iter()
+        .find(|candidate| candidate.is_dir())
+        .cloned()
+        .unwrap_or_else(|| candidates[0].clone())
+}
+
 pub(crate) fn ensure_data_dirs() -> Result<(), String> {
     let notes_dir = notes_dir()?;
     fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
@@ -100,4 +106,32 @@ pub(crate) fn ensure_data_dirs() -> Result<(), String> {
         .map_err(|e| format!("Failed to create .oinb/ai-cache directory: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn local_blog_dist_prefers_explicit_resource_mapping() {
+        let dir = tempdir().unwrap();
+        let resource_dir = dir.path();
+        let explicit = resource_dir.join("local-blog").join("dist");
+        let legacy = resource_dir.join("_up_").join("local-blog").join("dist");
+        fs::create_dir_all(&explicit).unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+
+        assert_eq!(local_blog_dist_dir_from_resource_dir(resource_dir), explicit);
+    }
+
+    #[test]
+    fn local_blog_dist_accepts_legacy_up_resource_mapping() {
+        let dir = tempdir().unwrap();
+        let resource_dir = dir.path();
+        let legacy = resource_dir.join("_up_").join("local-blog").join("dist");
+        fs::create_dir_all(&legacy).unwrap();
+
+        assert_eq!(local_blog_dist_dir_from_resource_dir(resource_dir), legacy);
+    }
 }
