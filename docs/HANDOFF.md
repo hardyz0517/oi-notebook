@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-07（同步 Local Blog v2 默认入口切换状态）  
+**最后更新**：2026-05-07（同步 Local Blog v2、桌面编辑器与 AI Prompt WIP 状态）  
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -128,7 +128,7 @@
 
 [ ] Phase 8  打磨阶段
     ├─ 审美升级（目前只做功能，UI 统一在这个阶段打磨）
-    ├─ 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 面板虽然已改善，但整体 UI 仍需后续统一整理
+    ├─ 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 编辑器正在改成专用宽屏 modal，当前仍可能有未提交 WIP
     ├─ 当前阶段暂时不要零散继续修 UI，先推进功能；等 Hardy 明确同意后再做一次集中 UI pass
     ├─ 博客模板向文人博客风格调整
     └─ 光标颜色等小细节
@@ -236,7 +236,7 @@ Rust 侧的 `safe_note_path` 有两层防御：字符串过滤 + canonicalize �
 - 托盘图标在 Windows 默认进溢出区，这是系统行为。
 - QuickNoteApp 保存失败只 `console.error`，Phase 8 再统一 UI 反馈。
 - FileTree 在窄宽度下 hover 按钮位置可用但不够精致，Phase 8 再打磨。
-- 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 面板虽然已从窄 textarea 改成宽弹窗 + 左侧列表 + 右侧大 textarea，但整体 UI 仍需后续统一整理。
+- 桌面端顶部工具栏按钮已经明显偏多，视觉拥挤；AI Prompt 编辑器正在改成专用宽屏 modal，当前 `src/App.tsx` 可能仍有未提交 WIP，继续前必须先看真实 UI。
 - 暂时不要零散继续修 UI，先推进功能；等 Hardy 明确同意后，再做一次集中 UI pass。
 
 ### 敏感事项
@@ -480,7 +480,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - [x] AI 全文润色只有用户点击“应用到正文”后才替换正文并标记 dirty；不自动保存，不自动 commit。
 - [x] AI Prompt 模板系统已完成：Prompt 存储路径为 `.oinb/prompts/`，该目录已加入 `.gitignore`，不会提交到 Git。
 - [x] 当前支持三个 Prompt 模板：`luogu-insight.md` 对应洛谷 insight 整理，`note-metadata.md` 对应当前笔记元数据补全，`note-polish.md` 对应当前笔记正文润色。
-- [x] 前端已有“AI Prompt”面板，可读取、编辑、保存模板；Prompt 编辑面板已修复为宽弹窗、左侧模板列表、右侧大 textarea，改善长文本编辑体验。
+- [~] 前端已有“AI Prompt”面板，可读取、编辑、保存模板；Prompt 编辑界面正在从难用小弹窗改成宽屏双栏编辑器，当前 `src/App.tsx` 可能仍有未提交 WIP。
 - [x] AI 缓存第一版已完成：缓存目录为 `.oinb/ai-cache/`，该目录已加入 `.gitignore`，不会提交到 Git。
 - [x] 洛谷 insight、当前笔记元数据补全、当前笔记全文润色会走缓存；`test_ai_connection` 不缓存。
 - [x] 缓存 key 包含 task、model、base_url hash、渲染后的 prompt 和输入上下文；prompt、model、base_url 或输入内容变化后会重新请求。
@@ -630,7 +630,7 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
   - 当前笔记 AI 全文润色预览已完成并验收：只润色正文 body，不改 frontmatter；AI 返回后先预览，不直接覆盖；用户点击“应用到正文”后才替换正文并标记 dirty；不自动保存，不自动 commit。
   - AI Prompt 模板系统已完成：Prompt 存储在 `.oinb/prompts/`，且 `.oinb/prompts/` 已 gitignore，不提交到 Git。
   - 当前支持 `luogu-insight.md`、`note-metadata.md`、`note-polish.md` 三个模板，分别用于洛谷 insight 整理、当前笔记元数据补全、当前笔记正文润色。
-  - 前端已有“AI Prompt”面板，可读取、编辑、保存模板；原右侧 textarea 过窄的问题已修复为宽弹窗 + 左侧列表 + 右侧大 textarea。
+  - 前端已有“AI Prompt”面板，可读取、编辑、保存模板；当前正在把 Prompt 编辑界面重做成专用宽屏 modal，`src/App.tsx` 可能仍有未提交 WIP，继续前先确认真实 UI。
   - AI 缓存第一版已完成：缓存路径为 `.oinb/ai-cache/`，该目录已 gitignore；洛谷 insight、AI 补全元数据、AI 全文润色会走缓存，`test_ai_connection` 不缓存。
   - AI 缓存 key 包含 task、model、base_url hash、渲染后的 prompt 和输入上下文；prompt、model、base_url 或输入内容变化后会重新请求。
   - AI 缓存损坏会忽略并重新请求；AI 请求失败不会写缓存；缓存 JSON 不保存 `api_key` / `base_url`。
@@ -771,7 +771,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 ### 当前总体状态
 
 - v0.1 classmates preview 已能打包；release 下 notes 读取 app data，不再依赖同学机器上的 repo 内 `notes/`。
-- 桌面主界面已完成一轮集中 UI pass，当前重点已从桌面外观转向 Local Blog v2 迁移与发版前 smoke test。
+- Hardy 暂时不要 build release；当前阶段继续发现和修改问题，等没有明显问题后再发给同学。
+- 桌面主界面已完成一轮集中 UI pass；当前同一大块可以多轮改完后再统一 commit，每次提交仍必须精确 add，禁止 `git add .`。
 - Local Blog v2 已完成 SPA 架构迁移的默认入口切换：Rust 负责 JSON API、assets 与 static shell，`/` 与 `/local-blog/` 默认进入 `local-blog/` React SPA。
 - 旧 Rust HTML blog 已退为 fallback：当前保留在 `/legacy-blog/`，旧 `/note/...` HTML 详情直链也暂时保留。
 
@@ -782,12 +783,15 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 文件树目录名已中文化，`tricks/problems/luogu/inbox` 等分类在 UI 中更易读。
 - 编辑器与预览的滚动、溢出和窄宽度布局已做修正。
 - 右侧 Markdown 预览代码块已加入复制按钮，并保留短暂复制状态反馈。
-- Markdown 工具栏已调整为更接近洛谷编辑器的写作入口。
+- 桌面编辑器已隐藏 raw frontmatter：打开笔记时主编辑器只编辑正文 body，MarkdownPreview 也只预览 body；保存时重新组合 frontmatter + body。
+- 未知 frontmatter 字段尽量保留，frontmatter 表单仍负责编辑 title/tags/summary/draft/difficulty/source 等元信息。
+- Markdown 工具栏已调整为更接近洛谷编辑器的写作入口：标题增大一级 / 减小一级；链接 / 图片 / 代码块 / 表格使用弹窗插入；表格弹窗支持先填写单元格再插入。
+- 已新增 `@codemirror/commands`，接入 CodeMirror 官方 `history()` / `historyKeymap`，并移除组件内自制 undo/redo 栈；Ctrl+Z / Ctrl+Y 应由 CodeMirror history 负责。
 - 编辑器/预览内容区已支持 Ctrl+滚轮内容缩放。
 
 ### Local Blog v2 已完成阶段
 
-PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 `05319f7` 查看。
+PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 `05319f7` 查看，后续又补了默认入口、打包路径和 assets 路径修复。
 
 - Phase 1: `GET /api/notes` 已完成。
 - Phase 2: `GET /api/note?path=...` 已完成。
@@ -796,10 +800,14 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - Phase 5: local-blog 首页已接入 `/api/notes`。
 - Phase 6: local-blog 详情页已接入 `/api/note`。
 - Phase 7: Markdown / KaTeX / 图片 / 代码复制已接入。
-- Shiki 代码高亮已接入，使用 `shiki@4.0.2` 与 `github-light` 主题。
+- Shiki 代码高亮已接入，使用 `shiki@4.0.2` 与 `oi-light` 自定义浅色高亮主题。
 - 首页已改成多列博客卡片布局。
+- 首页最近更新横向展示已完成。
 - 详情页视觉和路径展示已修复：代码块变为克制浅色阅读区，长标题尺寸受控，无效日期不再显示突兀 fallback，本机绝对路径不会出现在页面。
+- 文章详情上一篇 / 下一篇导航已完成。
 - Phase 8: 标签 / 分类 / 搜索最小可用已完成；顶部导航不再是假入口。
+- release 下 local-blog resource 打包路径已修复。
+- `/` 白屏问题已修复：local-blog assets 固定从 `/local-blog/assets/...` 加载。
 
 ### 当前博客入口状态
 
@@ -807,6 +815,7 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - 兼容新版 Local Blog v2 入口：`http://127.0.0.1:4321/local-blog/`
 - 旧 Rust HTML blog fallback：`http://127.0.0.1:4321/legacy-blog/`
 - 旧 `/note/...` HTML 详情路由暂时保留，仅作为 legacy direct link。
+- `/api/notes`、`/api/note`、`/assets/...` 保持正常。
 - `local-blog` build 已纳入 Tauri `beforeBuildCommand`，release 打包前会先构建 bundled SPA。
 
 ### Local Blog v2 Phase 8 行为
@@ -819,6 +828,15 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - 标签/分类详情页复用文章卡片网格；文章详情页的标签和分类也可点击跳转。
 - 搜索页已有输入框、结果数量、无结果状态和清除搜索入口。
 
+### AI Prompt 当前 WIP
+
+- Hardy 认为此前 AI Prompt 编辑器非常难用，尤其是正文 textarea 太窄，不适合编辑长 prompt。
+- 当前 `src/App.tsx` 可能有未提交 WIP：AI Prompt 专用宽屏 modal，目标是让 prompt 正文 textarea 成为主编辑区。
+- 之前的关键问题不是右栏内容本身，而是默认 `DialogContent` 的 max-width 限制导致右侧编辑区被挤成窄条。
+- 当前方向是绕过默认 `DialogContent`，用专用 `fixed inset-0` modal 容器，内部做左侧模板列表 + 右侧主编辑区。
+- 如果继续修，必须先确认真实 UI 是否已经变宽；如果仍然窄，贴出 AI Prompt modal JSX / className / inline style，再定位外层宽度是否真正生效。
+- 不要改 prompt 文件格式、prompt 内容、AI 请求逻辑、`readAiPrompt` / `saveAiPrompt` 数据链路或 AI 设置弹窗。
+
 ### 下一步建议
 
 - Phase 8 已提交并 push；入口切换已进入当前后端路由。
@@ -826,6 +844,8 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - 同时验证 `http://127.0.0.1:4321/legacy-blog/` 仍能打开旧 Rust HTML blog fallback。
 - 入口切换后重新 build preview 包。
 - 发给同学前做 smoke test：启动应用、打开博客、刷新 local-blog、打开一篇含代码/公式/图片的文章，确认无 Node/pnpm 运行时要求。
+- 当前阶段优先继续发现和修改问题；等 Hardy 觉得没有明显问题后再 build release / 发给同学。
+- 同一大块可以多轮迭代后再统一 commit；提交时继续精确 add 目标文件，禁止 `git add .`。
 
 ### 注意事项
 
@@ -834,4 +854,6 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - 不要把 Rust HTML renderer 当长期方向；新博客前端应继续落在 `local-blog/` SPA。
 - 不要要求用户运行 Node/pnpm；release 运行时不能依赖用户机器安装开发环境。
 - release 下 notes 读 app data；debug 下仍可读 repo 内 notes 以便开发。
+- local-blog build 已纳入 Tauri build；但当前阶段不要主动跑 Tauri build / release build，除非 Hardy 明确要求。
 - `/` 已切换到 Local Blog v2；后续不要继续美化或扩展旧 Rust HTML blog，只保留必要 fallback。
+- 如果分享目录里出现 `apikey.txt`，这是 Hardy 的限额测试 key，不要提交进 Git。
