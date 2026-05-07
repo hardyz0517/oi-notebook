@@ -761,7 +761,20 @@ fn hex_value(byte: u8) -> Option<u8> {
 }
 
 fn note_relative_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
+    if let Ok(relative) = path.strip_prefix(root) {
+        return relative.to_string_lossy().replace('\\', "/");
+    }
+
+    let canonical_root = root.canonicalize().ok();
+    let canonical_path = path.canonicalize().ok();
+
+    canonical_path
+        .as_deref()
+        .and_then(|path| {
+            canonical_root
+                .as_deref()
+                .and_then(|root| path.strip_prefix(root).ok())
+        })
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
@@ -2141,6 +2154,21 @@ Body with "quotes" and <unsafe>.
             .unwrap()
             .contains("title: API Detail"));
         assert!(json.contains(r#"\"quotes\""#));
+    }
+
+    #[test]
+    fn serializes_note_api_json_with_canonical_path_as_relative_path() {
+        let dir = tempdir().unwrap();
+        let notes_dir = dir.path();
+        fs::create_dir_all(notes_dir.join("tricks")).unwrap();
+        let note_path = notes_dir.join("tricks/detail.md");
+        fs::write(&note_path, "# Detail").unwrap();
+
+        let detail = read_blog_note_detail(notes_dir, &note_path.canonicalize().unwrap()).unwrap();
+        let json = serialize_note_api_json(detail).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["relativePath"], "tricks/detail.md");
     }
 
     #[test]

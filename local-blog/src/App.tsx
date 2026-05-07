@@ -110,6 +110,21 @@ function formatDate(value: string | null) {
   return dateFormatter.format(date);
 }
 
+function formatOptionalDate(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return dateFormatter.format(date);
+    }
+  }
+
+  return null;
+}
+
 function getNoteExcerpt(note: NoteSummary) {
   return (
     note.summary?.trim() ||
@@ -320,7 +335,7 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
     );
   }
 
-  const displayDate = note.date ?? note.updated ?? note.created;
+  const displayDate = formatOptionalDate(note.updated, note.created, note.date);
   const summary = note.summary?.trim() || note.metadata.summary?.trim();
 
   return (
@@ -332,7 +347,7 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
       <header className="note-header">
         <div className="post-meta">
           <span>{getCategoryLabel(note.category)}</span>
-          <time dateTime={displayDate ?? undefined}>{formatDate(displayDate)}</time>
+          {displayDate ? <time>{displayDate}</time> : null}
           {note.draft ? <span className="draft-badge">草稿</span> : null}
         </div>
         <h1>{note.title}</h1>
@@ -344,7 +359,6 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
             ))}
           </div>
         ) : null}
-        <p className="post-path">{note.relativePath}</p>
       </header>
 
       <MarkdownRenderer markdown={note.body} />

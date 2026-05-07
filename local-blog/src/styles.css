@@ -224,14 +224,6 @@ a {
   padding: 5px 10px;
 }
 
-.post-path {
-  margin-top: 16px;
-  color: #9ca3af;
-  font-size: 12px;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
 .empty-state p {
   margin: 0;
   color: var(--ink-muted);
@@ -322,8 +314,8 @@ a {
 .note-header h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(40px, 7vw, 68px);
-  line-height: 1.08;
+  font-size: clamp(32px, 5vw, 48px);
+  line-height: 1.18;
   letter-spacing: 0;
 }
 
@@ -466,10 +458,11 @@ a {
 }
 
 .code-block {
+  max-width: 100%;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid #d8dee4;
   border-radius: 8px;
-  background: #f7f8f8;
+  background: #f6f8fa;
 }
 
 .code-block-bar {
@@ -477,9 +470,10 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid #e0e5e7;
+  border-bottom: 1px solid #d8dee4;
   padding: 8px 10px 8px 14px;
-  color: #687076;
+  background: #f8fafc;
+  color: #57606a;
   font-family:
     Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12px;
@@ -487,22 +481,24 @@ a {
 
 .code-block-bar button {
   border: 1px solid #d0d7de;
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 4px 10px;
   background: #ffffff;
-  color: #44515a;
+  color: #57606a;
   font: inherit;
   cursor: pointer;
 }
 
 .code-block-bar button:hover,
 .code-block-bar button:focus-visible {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: #afb8c1;
+  background: #f6f8fa;
+  color: #24292f;
 }
 
 .code-block pre {
   margin: 0;
+  max-width: 100%;
   overflow-x: auto;
   padding: 18px;
 }
@@ -510,7 +506,9 @@ a {
 .code-block code {
   display: block;
   min-width: max-content;
-  color: #263238;
+  border: 0;
+  background: transparent;
+  color: #24292f;
   font-family:
     "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 14px;

@@ -143,9 +143,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           {label}
         </button>
       </div>
-      <pre>
-        <code className={className}>{children}</code>
-      </pre>
+      <pre>{children}</pre>
     </div>
   );
 }
