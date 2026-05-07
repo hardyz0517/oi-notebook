@@ -503,6 +503,14 @@ a {
   padding: 18px;
 }
 
+.code-block-highlight {
+  max-width: 100%;
+}
+
+.code-block-highlight pre.shiki {
+  background: transparent !important;
+}
+
 .code-block code {
   display: block;
   min-width: max-content;

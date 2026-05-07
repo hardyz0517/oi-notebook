@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useState,
   type AnchorHTMLAttributes,
   type HTMLAttributes,
@@ -10,6 +11,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
+import { highlightCode } from "./highlight";
 
 type MarkdownRendererProps = {
   markdown: string;
@@ -112,6 +114,7 @@ function getNodeText(children: ReactNode): string {
 
 function CodeBlock({ children }: { children: ReactNode }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
   const codeText = getNodeText(children).replace(/\n$/, "");
   const codeChild = Array.isArray(children) ? children[0] : children;
   const className =
@@ -119,6 +122,22 @@ function CodeBlock({ children }: { children: ReactNode }) {
       ? (codeChild.props as { className?: string }).className
       : undefined;
   const language = className?.match(/language-([A-Za-z0-9_+-]+)/)?.[1];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setHighlightedHtml(null);
+
+    highlightCode(codeText, language).then((html) => {
+      if (!cancelled) {
+        setHighlightedHtml(html);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [codeText, language]);
 
   const copyCode = async () => {
     try {
@@ -143,7 +162,14 @@ function CodeBlock({ children }: { children: ReactNode }) {
           {label}
         </button>
       </div>
-      <pre>{children}</pre>
+      {highlightedHtml ? (
+        <div
+          className="code-block-highlight"
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
+      ) : (
+        <pre>{children}</pre>
+      )}
     </div>
   );
 }
