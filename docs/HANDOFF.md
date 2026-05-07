@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-07（同步桌面 UI pass 与 Local Blog v2 Phase 8 状态）  
+**最后更新**：2026-05-07（同步 Local Blog v2 默认入口切换状态）  
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -772,8 +772,8 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 
 - v0.1 classmates preview 已能打包；release 下 notes 读取 app data，不再依赖同学机器上的 repo 内 `notes/`。
 - 桌面主界面已完成一轮集中 UI pass，当前重点已从桌面外观转向 Local Blog v2 迁移与发版前 smoke test。
-- Local Blog v2 已进入 SPA 架构迁移：Rust 负责 JSON API、assets 与 static shell，`local-blog/` React SPA 负责博客 UI、Markdown 渲染和交互。
-- 旧 Rust HTML blog 仍未被默认 `/` 替换；当前 `/` 还是旧 Rust HTML blog，`/local-blog/` 才是新版 SPA 入口。
+- Local Blog v2 已完成 SPA 架构迁移的默认入口切换：Rust 负责 JSON API、assets 与 static shell，`/` 与 `/local-blog/` 默认进入 `local-blog/` React SPA。
+- 旧 Rust HTML blog 已退为 fallback：当前保留在 `/legacy-blog/`，旧 `/note/...` HTML 详情直链也暂时保留。
 
 ### 已完成的桌面 UI pass
 
@@ -803,9 +803,10 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 
 ### 当前博客入口状态
 
-- 新版 Local Blog v2 入口：`http://127.0.0.1:4321/local-blog/`
-- 旧 `/` 入口仍是旧 Rust HTML blog。
-- 还没有正式切换旧 `/` 到 local-blog；不要在无明确任务时顺手切换。
+- 默认新版 Local Blog v2 入口：`http://127.0.0.1:4321/`
+- 兼容新版 Local Blog v2 入口：`http://127.0.0.1:4321/local-blog/`
+- 旧 Rust HTML blog fallback：`http://127.0.0.1:4321/legacy-blog/`
+- 旧 `/note/...` HTML 详情路由暂时保留，仅作为 legacy direct link。
 - `local-blog` build 已纳入 Tauri `beforeBuildCommand`，release 打包前会先构建 bundled SPA。
 
 ### Local Blog v2 Phase 8 行为
@@ -820,9 +821,9 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 
 ### 下一步建议
 
-- Phase 8 已提交为 `05319f7 feat(blog): add local blog discovery views`；如果新窗口看到该提交未在远端，先按 Hardy 指令决定是否 push。
-- 先肉眼验证 `http://127.0.0.1:4321/local-blog/` 的首页、详情、标签、分类、搜索。
-- 验证通过后，再单独做入口切换：让 `/` 默认进入 local-blog。
+- Phase 8 已提交并 push；入口切换已进入当前后端路由。
+- 先肉眼验证 `http://127.0.0.1:4321/` 与 `http://127.0.0.1:4321/local-blog/` 的首页、详情、标签、分类、搜索。
+- 同时验证 `http://127.0.0.1:4321/legacy-blog/` 仍能打开旧 Rust HTML blog fallback。
 - 入口切换后重新 build preview 包。
 - 发给同学前做 smoke test：启动应用、打开博客、刷新 local-blog、打开一篇含代码/公式/图片的文章，确认无 Node/pnpm 运行时要求。
 
@@ -833,4 +834,4 @@ PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 
 - 不要把 Rust HTML renderer 当长期方向；新博客前端应继续落在 `local-blog/` SPA。
 - 不要要求用户运行 Node/pnpm；release 运行时不能依赖用户机器安装开发环境。
 - release 下 notes 读 app data；debug 下仍可读 repo 内 notes 以便开发。
-- 不要切换旧 `/` 到 local-blog，除非 Hardy 明确把入口切换作为当前任务。
+- `/` 已切换到 Local Blog v2；后续不要继续美化或扩展旧 Rust HTML blog，只保留必要 fallback。

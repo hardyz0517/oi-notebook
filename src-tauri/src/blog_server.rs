@@ -18,11 +18,27 @@ const API_NOTES_ROUTE: &str = "/api/notes";
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const LOCAL_BLOG_ROUTE: &str = "/local-blog";
 const LOCAL_BLOG_ROUTE_PREFIX: &str = "/local-blog/";
+const LEGACY_BLOG_ROUTE: &str = "/legacy-blog";
+const LEGACY_BLOG_ROUTE_PREFIX: &str = "/legacy-blog/";
 const NOTE_ROUTE_PREFIX: &str = "/note/";
 const KATEX_CSS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css";
 const KATEX_JS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js";
 const KATEX_AUTO_RENDER_JS_URL: &str =
     "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js";
+
+#[derive(Debug, PartialEq, Eq)]
+enum BlogRoute {
+    NotesApi,
+    NoteApi,
+    NotesAsset,
+    LocalBlogRedirect,
+    LocalBlogStatic,
+    LegacyBlogRedirect,
+    LegacyBlogIndex,
+    LegacyNoteDetail,
+    LocalBlogIndex,
+    NotFound,
+}
 
 #[derive(PartialEq)]
 enum ListKind {
@@ -173,35 +189,22 @@ fn handle_connection(mut stream: TcpStream) {
     };
     let path = target_path(target);
 
-    if path == API_NOTES_ROUTE {
-        match render_notes_api_json() {
+    match blog_route_for_path(path) {
+        BlogRoute::NotesApi => match render_notes_api_json() {
             Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
             Err(message) => {
                 let body = render_json_error(&message);
                 write_json_response(&mut stream, 500, "Internal Server Error", &body);
             }
-        }
-        return;
-    }
-
-    if path == API_NOTE_ROUTE {
-        match render_note_api_json(target) {
+        },
+        BlogRoute::NoteApi => match render_note_api_json(target) {
             Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
             Err(message) => {
                 let body = render_json_error(&message);
                 write_json_response(&mut stream, 404, "Not Found", &body);
             }
-        }
-        return;
-    }
-
-    if path == LOCAL_BLOG_ROUTE {
-        write_redirect_response(&mut stream, LOCAL_BLOG_ROUTE_PREFIX);
-        return;
-    }
-
-    if path.starts_with(LOCAL_BLOG_ROUTE_PREFIX) {
-        match read_local_blog_static_response(path) {
+        },
+        BlogRoute::NotesAsset => match read_asset_response(path) {
             Ok((content_type, body)) => {
                 write_binary_response(&mut stream, 200, "OK", content_type, &body)
             }
@@ -209,18 +212,11 @@ fn handle_connection(mut stream: TcpStream) {
                 let body = render_404_page(&message);
                 write_response(&mut stream, 404, "Not Found", &body);
             }
+        },
+        BlogRoute::LocalBlogRedirect => {
+            write_redirect_response(&mut stream, LOCAL_BLOG_ROUTE_PREFIX);
         }
-        return;
-    }
-
-    if path == "/" {
-        let body = render_index_page();
-        write_response(&mut stream, 200, "OK", &body);
-        return;
-    }
-
-    if path.starts_with(ASSET_ROUTE_PREFIX) {
-        match read_asset_response(path) {
+        BlogRoute::LocalBlogStatic => match read_local_blog_static_response(path) {
             Ok((content_type, body)) => {
                 write_binary_response(&mut stream, 200, "OK", content_type, &body)
             }
@@ -228,29 +224,48 @@ fn handle_connection(mut stream: TcpStream) {
                 let body = render_404_page(&message);
                 write_response(&mut stream, 404, "Not Found", &body);
             }
+        },
+        BlogRoute::LegacyBlogRedirect => {
+            write_redirect_response(&mut stream, LEGACY_BLOG_ROUTE_PREFIX);
         }
-        return;
-    }
-
-    if path.starts_with(NOTE_ROUTE_PREFIX) {
-        match render_note_detail_page(path) {
+        BlogRoute::LegacyBlogIndex => {
+            let body = render_index_page();
+            write_response(&mut stream, 200, "OK", &body);
+        }
+        BlogRoute::LegacyNoteDetail => match render_note_detail_page(path) {
             Ok(body) => write_response(&mut stream, 200, "OK", &body),
             Err(message) => {
                 let body = render_404_page(&message);
                 write_response(&mut stream, 404, "Not Found", &body);
             }
+        },
+        BlogRoute::LocalBlogIndex => match read_local_blog_static_response(LOCAL_BLOG_ROUTE_PREFIX)
+        {
+            Ok((content_type, body)) => {
+                write_binary_response(&mut stream, 200, "OK", content_type, &body)
+            }
+            Err(message) => {
+                let body = render_404_page(&message);
+                write_response(&mut stream, 404, "Not Found", &body);
+            }
+        },
+        BlogRoute::NotFound => {
+            let body = render_404_page(
+                "This preview server only serves /, /local-blog/, /legacy-blog/, /note/{path}, and /assets/{path}.",
+            );
+            write_response(&mut stream, 404, "Not Found", &body);
         }
-        return;
     }
-
-    let body =
-        render_404_page("This preview server only serves /, /note/{path}, and /assets/{path}.");
-    write_response(&mut stream, 404, "Not Found", &body);
 }
 
 #[cfg(test)]
 fn request_path(first_line: &str) -> Option<&str> {
     Some(target_path(request_target(first_line)?))
+}
+
+#[cfg(test)]
+fn request_route(first_line: &str) -> Option<BlogRoute> {
+    Some(blog_route_for_path(request_path(first_line)?))
 }
 
 fn request_target(first_line: &str) -> Option<&str> {
@@ -267,6 +282,46 @@ fn request_target(first_line: &str) -> Option<&str> {
 
 fn target_path(target: &str) -> &str {
     target.split('?').next().unwrap_or(target)
+}
+
+fn blog_route_for_path(path: &str) -> BlogRoute {
+    if path == API_NOTES_ROUTE {
+        return BlogRoute::NotesApi;
+    }
+
+    if path == API_NOTE_ROUTE {
+        return BlogRoute::NoteApi;
+    }
+
+    if path.starts_with(ASSET_ROUTE_PREFIX) {
+        return BlogRoute::NotesAsset;
+    }
+
+    if path == LOCAL_BLOG_ROUTE {
+        return BlogRoute::LocalBlogRedirect;
+    }
+
+    if path.starts_with(LOCAL_BLOG_ROUTE_PREFIX) {
+        return BlogRoute::LocalBlogStatic;
+    }
+
+    if path == LEGACY_BLOG_ROUTE {
+        return BlogRoute::LegacyBlogRedirect;
+    }
+
+    if path == LEGACY_BLOG_ROUTE_PREFIX {
+        return BlogRoute::LegacyBlogIndex;
+    }
+
+    if path.starts_with(NOTE_ROUTE_PREFIX) {
+        return BlogRoute::LegacyNoteDetail;
+    }
+
+    if path == "/" {
+        return BlogRoute::LocalBlogIndex;
+    }
+
+    BlogRoute::NotFound
 }
 
 fn render_index_page() -> String {
@@ -2025,29 +2080,44 @@ Inline body excerpt.
     #[test]
     fn api_route_does_not_shadow_existing_routes() {
         assert_eq!(
-            request_path("GET /api/notes HTTP/1.1"),
-            Some(API_NOTES_ROUTE)
+            request_route("GET /api/notes HTTP/1.1"),
+            Some(BlogRoute::NotesApi)
         );
         assert_eq!(
-            request_path("GET /api/note?path=tricks/demo.md HTTP/1.1"),
-            Some(API_NOTE_ROUTE)
-        );
-        assert_eq!(request_path("GET / HTTP/1.1"), Some("/"));
-        assert_eq!(
-            request_path("GET /note/tricks/demo.md HTTP/1.1"),
-            Some("/note/tricks/demo.md")
+            request_route("GET /api/note?path=tricks/demo.md HTTP/1.1"),
+            Some(BlogRoute::NoteApi)
         );
         assert_eq!(
-            request_path("GET /assets/demo.png HTTP/1.1"),
-            Some("/assets/demo.png")
+            request_route("GET /assets/demo.png HTTP/1.1"),
+            Some(BlogRoute::NotesAsset)
         );
         assert_eq!(
-            request_path("GET /local-blog/ HTTP/1.1"),
-            Some(LOCAL_BLOG_ROUTE_PREFIX)
+            request_route("GET /local-blog HTTP/1.1"),
+            Some(BlogRoute::LocalBlogRedirect)
         );
         assert_eq!(
-            request_path("GET /local-blog/assets/index.js HTTP/1.1"),
-            Some("/local-blog/assets/index.js")
+            request_route("GET /local-blog/ HTTP/1.1"),
+            Some(BlogRoute::LocalBlogStatic)
+        );
+        assert_eq!(
+            request_route("GET /local-blog/assets/index.js HTTP/1.1"),
+            Some(BlogRoute::LocalBlogStatic)
+        );
+        assert_eq!(
+            request_route("GET /legacy-blog HTTP/1.1"),
+            Some(BlogRoute::LegacyBlogRedirect)
+        );
+        assert_eq!(
+            request_route("GET /legacy-blog/ HTTP/1.1"),
+            Some(BlogRoute::LegacyBlogIndex)
+        );
+        assert_eq!(
+            request_route("GET /note/tricks/demo.md HTTP/1.1"),
+            Some(BlogRoute::LegacyNoteDetail)
+        );
+        assert_eq!(
+            request_route("GET / HTTP/1.1"),
+            Some(BlogRoute::LocalBlogIndex)
         );
         assert_eq!(request_path("POST /api/notes HTTP/1.1"), None);
     }
