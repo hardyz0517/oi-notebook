@@ -70,6 +70,17 @@ export interface PreviewLuoguSubmissionsResult {
   submissions: PreviewLuoguSubmission[];
 }
 
+export interface PreviewLuoguSubmissionPageResult {
+  page: number;
+  fetchedCount: number;
+  hasMore: boolean;
+  uidConfigured: boolean;
+  clientIdConfigured: boolean;
+  aiConfigured: boolean;
+  lastSubmissionId: number | null;
+  submissions: PreviewLuoguSubmission[];
+}
+
 export interface ImportLuoguSubmissionResult {
   submissionId: string;
   problemId: string;
@@ -324,6 +335,16 @@ export async function previewLuoguSubmissions(
 ): Promise<PreviewLuoguSubmissionsResult> {
   try {
     return await invoke<PreviewLuoguSubmissionsResult>("preview_luogu_submissions", { limit });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function previewLuoguSubmissionPage(
+  page = 1,
+): Promise<PreviewLuoguSubmissionPageResult> {
+  try {
+    return await invoke<PreviewLuoguSubmissionPageResult>("preview_luogu_submission_page", { page });
   } catch (e) {
     throw toError(e);
   }

@@ -21,6 +21,7 @@ const LUOGU_SYNC_PAGE_INTERVAL: Duration = Duration::from_secs(1);
 const LUOGU_SYNC_DETAIL_INTERVAL: Duration = Duration::from_secs(3);
 const LUOGU_PREVIEW_DEFAULT_LIMIT: usize = 20;
 const LUOGU_PREVIEW_MAX_LIMIT: usize = 100;
+const LUOGU_PREVIEW_MAX_PAGE: u32 = 50;
 const LUOGU_COOKIE_EXPIRED_MESSAGE: &str =
     "洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。";
 
@@ -86,6 +87,19 @@ pub struct PreviewLuoguSubmission {
 pub struct PreviewLuoguSubmissionsResult {
     pub fetched_count: usize,
     pub limit: usize,
+    pub uid_configured: bool,
+    pub client_id_configured: bool,
+    pub ai_configured: bool,
+    pub last_submission_id: Option<u64>,
+    pub submissions: Vec<PreviewLuoguSubmission>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLuoguSubmissionPageResult {
+    pub page: u32,
+    pub fetched_count: usize,
+    pub has_more: bool,
     pub uid_configured: bool,
     pub client_id_configured: bool,
     pub ai_configured: bool,
@@ -1426,6 +1440,36 @@ pub fn preview_luogu_submissions(
     Ok(PreviewLuoguSubmissionsResult {
         fetched_count: records.len(),
         limit,
+        uid_configured: !config.luogu.uid.trim().is_empty(),
+        client_id_configured: !config.luogu.client_id.trim().is_empty(),
+        ai_configured: is_ai_configured(&config.ai),
+        last_submission_id,
+        submissions,
+    })
+}
+
+#[tauri::command]
+pub fn preview_luogu_submission_page(
+    page: Option<u32>,
+) -> Result<PreviewLuoguSubmissionPageResult, String> {
+    let config = read_config()?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
+    let page = page.unwrap_or(1).clamp(1, LUOGU_PREVIEW_MAX_PAGE);
+    let last_submission_id = config.luogu.last_submission_id;
+
+    let records = fetch_luogu_submission_records(&uid, &client_id, page)?;
+    let fetched_count = records.len();
+    let submissions = records
+        .iter()
+        .map(|record| submission_scan_preview(record, last_submission_id))
+        .collect();
+
+    Ok(PreviewLuoguSubmissionPageResult {
+        page,
+        fetched_count,
+        has_more: fetched_count > 0 && page < LUOGU_PREVIEW_MAX_PAGE,
         uid_configured: !config.luogu.uid.trim().is_empty(),
         client_id_configured: !config.luogu.client_id.trim().is_empty(),
         ai_configured: is_ai_configured(&config.ai),

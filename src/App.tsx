@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, importLuoguSubmission, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissions, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, importLuoguSubmission, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { ImportLuoguSubmissionResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
@@ -57,6 +57,29 @@ const AI_CONFIG_MISSING_MESSAGE =
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
 type LuoguImportCenterTab = "scan" | "manual" | "advanced";
+type LuoguScanMode = "count" | "days";
+type LuoguScanCountLimit = 20 | 50 | 100 | 200;
+type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
+
+const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
+const LUOGU_SCAN_MAX_PAGES = 50;
+const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
+const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
+
+interface LuoguScanProgress {
+  currentPage: number;
+  foundCount: number;
+  rangeLabel: string;
+  waiting: boolean;
+}
+
+interface LuoguScanSummary {
+  scannedPages: number;
+  foundCount: number;
+  candidateCount: number;
+  skippedCount: number;
+  rangeLabel: string;
+}
 
 function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTemplateId {
   return directory === "tricks" ? "trick" : "solution";
@@ -83,8 +106,36 @@ function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function isLuoguImportCandidate(submission: PreviewLuoguSubmission): boolean {
   return submission.statusLabel === "可候选";
+}
+
+function getLuoguScanRangeLabel(
+  mode: LuoguScanMode,
+  countLimit: LuoguScanCountLimit,
+  daysLimit: LuoguScanDaysLimit,
+): string {
+  return mode === "count" ? `最近 ${countLimit} 条` : `最近 ${daysLimit} 天`;
+}
+
+function parseLuoguSubmitTimeMs(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) return null;
+    const milliseconds = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
+    return Number.isNaN(milliseconds) ? null : milliseconds;
+  }
+
+  const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  const parsed = new Date(normalized).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function getLuoguImportStatusText(
@@ -255,6 +306,11 @@ export default function App() {
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
   const [isScanningLuoguPreview, setIsScanningLuoguPreview] = useState(false);
   const [luoguPreviewResult, setLuoguPreviewResult] = useState<PreviewLuoguSubmissionsResult | null>(null);
+  const [luoguScanMode, setLuoguScanMode] = useState<LuoguScanMode>("count");
+  const [luoguScanCountLimit, setLuoguScanCountLimit] = useState<LuoguScanCountLimit>(20);
+  const [luoguScanDaysLimit, setLuoguScanDaysLimit] = useState<LuoguScanDaysLimit>(30);
+  const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
+  const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
   const [isImportingSelectedLuogu, setIsImportingSelectedLuogu] = useState(false);
   const [luoguImportResultsById, setLuoguImportResultsById] = useState<Record<string, ImportLuoguSubmissionResult>>({});
@@ -562,15 +618,100 @@ export default function App() {
   };
 
   const handlePreviewLuoguSubmissions = async () => {
+    const rangeLabel = getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
+    const cutoffMs =
+      luoguScanMode === "days" ? Date.now() - luoguScanDaysLimit * 24 * 60 * 60 * 1000 : null;
     setIsScanningLuoguPreview(true);
     setLuoguPreviewResult(null);
+    setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
+    setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
     setLuoguImportResultsById({});
     setCurrentlyImportingLuoguId(null);
     setLuoguImportProgress(null);
     try {
-      const result = await previewLuoguSubmissions(20);
+      const submissions: PreviewLuoguSubmission[] = [];
+      const seenSubmissionIds = new Set<string>();
+      let latestPageResult: Awaited<ReturnType<typeof previewLuoguSubmissionPage>> | null = null;
+      let scannedPages = 0;
+      let shouldStop = false;
+
+      for (let page = 1; page <= LUOGU_SCAN_MAX_PAGES; page += 1) {
+        setLuoguScanProgress({
+          currentPage: page,
+          foundCount: submissions.length,
+          rangeLabel,
+          waiting: false,
+        });
+
+        const pageResult = await previewLuoguSubmissionPage(page);
+        latestPageResult = pageResult;
+        scannedPages = page;
+
+        if (pageResult.submissions.length === 0) {
+          shouldStop = true;
+        }
+
+        for (const submission of pageResult.submissions) {
+          if (seenSubmissionIds.has(submission.submissionId)) continue;
+
+          if (cutoffMs !== null) {
+            const submitTimeMs = parseLuoguSubmitTimeMs(submission.submitTime);
+            if (submitTimeMs !== null && submitTimeMs < cutoffMs) {
+              shouldStop = true;
+              continue;
+            }
+          }
+
+          seenSubmissionIds.add(submission.submissionId);
+          submissions.push(submission);
+
+          if (luoguScanMode === "count" && submissions.length >= luoguScanCountLimit) {
+            shouldStop = true;
+            break;
+          }
+        }
+
+        setLuoguScanProgress({
+          currentPage: page,
+          foundCount: submissions.length,
+          rangeLabel,
+          waiting: !shouldStop && pageResult.hasMore && page < LUOGU_SCAN_MAX_PAGES,
+        });
+
+        if (shouldStop || !pageResult.hasMore || page >= LUOGU_SCAN_MAX_PAGES) {
+          break;
+        }
+
+        await sleepMs(LUOGU_SCAN_PAGE_DELAY_MS);
+      }
+
+      if (!latestPageResult) {
+        throw new Error("洛谷扫描没有返回任何页面");
+      }
+
+      const limitedSubmissions =
+        luoguScanMode === "count" ? submissions.slice(0, luoguScanCountLimit) : submissions;
+      const result: PreviewLuoguSubmissionsResult = {
+        fetchedCount: limitedSubmissions.length,
+        limit: luoguScanMode === "count" ? luoguScanCountLimit : limitedSubmissions.length,
+        uidConfigured: latestPageResult.uidConfigured,
+        clientIdConfigured: latestPageResult.clientIdConfigured,
+        aiConfigured: latestPageResult.aiConfigured,
+        lastSubmissionId: latestPageResult.lastSubmissionId,
+        submissions: limitedSubmissions,
+      };
+      const candidateCount = result.submissions.filter(isLuoguImportCandidate).length;
+      const skippedCount = result.submissions.length - candidateCount;
+
       setLuoguPreviewResult(result);
+      setLuoguScanSummary({
+        scannedPages,
+        foundCount: result.submissions.length,
+        candidateCount,
+        skippedCount,
+        rangeLabel,
+      });
       setSelectedLuoguSubmissionIds(
         new Set(
           result.submissions
@@ -582,10 +723,11 @@ export default function App() {
       setLuoguConfigLastSubmissionId(
         result.lastSubmissionId === null ? "" : String(result.lastSubmissionId),
       );
-      toast.success(`扫描完成：拉到 ${result.fetchedCount} 条提交，展示 ${result.submissions.length} 条`);
+      toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${candidateCount} 条`);
     } catch (e) {
       toast.error(`洛谷扫描失败：${getErrorMessage(e)}`);
     } finally {
+      setLuoguScanProgress(null);
       setIsScanningLuoguPreview(false);
     }
   };
@@ -774,6 +916,8 @@ export default function App() {
     if (isImportingLuogu || isImportingSelectedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
     setIsLuoguDialogOpen(false);
     setLuoguPreviewResult(null);
+    setLuoguScanProgress(null);
+    setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
     setLuoguImportResultsById({});
     setCurrentlyImportingLuoguId(null);
@@ -1993,9 +2137,66 @@ export default function App() {
                       </div>
                     </section>
 
+                    <section className="grid shrink-0 gap-3 rounded-md border border-border bg-card/70 p-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-foreground">扫描范围</div>
+                          <div className="mt-1 text-muted-foreground">默认最近 20 条；按时间扫描最长只允许最近一年。</div>
+                        </div>
+                        <div className="flex rounded-md border border-border bg-muted/20 p-1">
+                          <button
+                            type="button"
+                            className={luoguScanMode === "count" ? "rounded-sm bg-background px-3 py-1.5 text-foreground shadow-sm" : "px-3 py-1.5 text-muted-foreground hover:text-foreground"}
+                            onClick={() => setLuoguScanMode("count")}
+                            disabled={isScanningLuoguPreview}
+                          >
+                            按数量
+                          </button>
+                          <button
+                            type="button"
+                            className={luoguScanMode === "days" ? "rounded-sm bg-background px-3 py-1.5 text-foreground shadow-sm" : "px-3 py-1.5 text-muted-foreground hover:text-foreground"}
+                            onClick={() => setLuoguScanMode("days")}
+                            disabled={isScanningLuoguPreview}
+                          >
+                            按时间
+                          </button>
+                        </div>
+                      </div>
+                      {luoguScanMode === "count" ? (
+                        <div className="flex flex-wrap gap-2">
+                          {LUOGU_SCAN_COUNT_OPTIONS.map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              className={luoguScanCountLimit === option ? "rounded-md border border-primary/60 bg-primary/15 px-3 py-1.5 text-foreground" : "rounded-md border border-border bg-background/50 px-3 py-1.5 text-muted-foreground hover:text-foreground"}
+                              onClick={() => setLuoguScanCountLimit(option)}
+                              disabled={isScanningLuoguPreview}
+                            >
+                              最近 {option} 条
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {LUOGU_SCAN_DAYS_OPTIONS.map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              className={luoguScanDaysLimit === option ? "rounded-md border border-primary/60 bg-primary/15 px-3 py-1.5 text-foreground" : "rounded-md border border-border bg-background/50 px-3 py-1.5 text-muted-foreground hover:text-foreground"}
+                              onClick={() => setLuoguScanDaysLimit(option)}
+                              disabled={isScanningLuoguPreview}
+                            >
+                              最近 {option} 天
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
                     <section className="shrink-0 rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
                       <div className="font-medium text-foreground">扫描最近提交前先预览。</div>
                       <div>扫描只读取最近提交列表，不抓源码，不调用 AI，不写 notes，不 commit，也不会推进 last_submission_id。</div>
+                      <div>多页扫描会自动放慢请求，每页之间短暂停顿；前端最多扫描 {LUOGU_SCAN_MAX_PAGES} 页，避免无限爬取。</div>
                     </section>
 
                     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card/70">
@@ -2003,9 +2204,18 @@ export default function App() {
                         <div className="min-w-0">
                           <div className="text-sm font-medium">扫描结果</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {luoguPreviewResult
-                              ? `本次拉到 ${luoguPreviewResult.fetchedCount} 条，展示 ${luoguPreviewResult.submissions.length} 条；last_submission_id: ${luoguPreviewResult.lastSubmissionId ?? "未设置"}`
-                              : "默认读取第一页，最多展示 20 条。"}
+                            {luoguScanProgress
+                              ? `正在扫描第 ${luoguScanProgress.currentPage} 页，已发现 ${luoguScanProgress.foundCount} 条提交；范围：${luoguScanProgress.rangeLabel}`
+                              : luoguScanSummary
+                                ? `扫描 ${luoguScanSummary.scannedPages} 页，找到 ${luoguScanSummary.foundCount} 条，可候选 ${luoguScanSummary.candidateCount} 条，非 AC / 旧提交 ${luoguScanSummary.skippedCount} 条；范围：${luoguScanSummary.rangeLabel}`
+                                : luoguPreviewResult
+                                  ? `本次找到 ${luoguPreviewResult.fetchedCount} 条；last_submission_id: ${luoguPreviewResult.lastSubmissionId ?? "未设置"}`
+                                  : `默认最近 20 条；多页扫描每页间隔 ${LUOGU_SCAN_PAGE_DELAY_MS}ms。`}
+                            {luoguScanProgress?.waiting && (
+                              <span className="ml-2 text-foreground">
+                                每页请求之间会短暂停顿，避免过快访问洛谷
+                              </span>
+                            )}
                             {luoguImportProgress && (
                               <span className="ml-2 text-foreground">
                                 正在导入 {luoguImportProgress.current} / {luoguImportProgress.total}
@@ -2174,6 +2384,8 @@ export default function App() {
               <div className="min-w-0 truncate text-xs text-muted-foreground">
                 {luoguImportCenterTab === "scan" && luoguImportProgress
                   ? `正在导入 ${luoguImportProgress.current} / ${luoguImportProgress.total}`
+                  : luoguImportCenterTab === "scan" && luoguScanProgress
+                    ? `正在扫描第 ${luoguScanProgress.currentPage} 页，已发现 ${luoguScanProgress.foundCount} 条；范围：${luoguScanProgress.rangeLabel}`
                   : luoguImportCenterTab === "scan"
                     ? `已选 ${selectedLuoguImportCount} 条`
                     : luoguImportCenterTab === "manual"
@@ -2188,7 +2400,9 @@ export default function App() {
                       onClick={handlePreviewLuoguSubmissions}
                       disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isImportingSelectedLuogu || isSyncingLuogu}
                     >
-                      {isScanningLuoguPreview ? "扫描中..." : "扫描最近提交"}
+                      {isScanningLuoguPreview
+                        ? "扫描中..."
+                        : `扫描${getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit)}`}
                     </Button>
                     <Button
                       onClick={handleImportSelectedLuoguSubmissions}
