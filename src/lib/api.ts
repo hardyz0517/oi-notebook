@@ -70,6 +70,19 @@ export interface PreviewLuoguSubmissionsResult {
   submissions: PreviewLuoguSubmission[];
 }
 
+export interface ImportLuoguSubmissionResult {
+  submissionId: string;
+  problemId: string;
+  problemTitle: string;
+  relativePath: string | null;
+  skipped: boolean;
+  skipReason: string | null;
+  failed: boolean;
+  error: string | null;
+  committed: boolean;
+  commitStatus: "committed" | "noChanges" | "skipped" | "failed" | string;
+}
+
 export interface TestAiConnectionResult {
   model: string;
   ok: boolean;
@@ -310,6 +323,20 @@ export async function previewLuoguSubmissions(
 ): Promise<PreviewLuoguSubmissionsResult> {
   try {
     return await invoke<PreviewLuoguSubmissionsResult>("preview_luogu_submissions", { limit });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function importLuoguSubmission(
+  submissionId: string,
+  autoCommit = true,
+): Promise<ImportLuoguSubmissionResult> {
+  try {
+    return await invoke<ImportLuoguSubmissionResult>("import_luogu_submission", {
+      submissionId,
+      autoCommit,
+    });
   } catch (e) {
     throw toError(e);
   }

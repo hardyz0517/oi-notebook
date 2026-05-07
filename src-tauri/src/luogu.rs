@@ -114,6 +114,21 @@ pub struct SyncLuoguInsightsResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportLuoguSubmissionResult {
+    pub submission_id: String,
+    pub problem_id: String,
+    pub problem_title: String,
+    pub relative_path: Option<String>,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
+    pub failed: bool,
+    pub error: Option<String>,
+    pub committed: bool,
+    pub commit_status: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LuoguSubmissionRecord {
     submission_id: u64,
@@ -947,6 +962,164 @@ fn import_luogu_insight_to_notes_dir(
     .map(LuoguAiImportOutcome::Imported)
 }
 
+fn luogu_submission_import_failed(
+    submission_id: &str,
+    problem_id: &str,
+    problem_title: &str,
+    relative_path: Option<String>,
+    error: String,
+    commit_status: &str,
+) -> ImportLuoguSubmissionResult {
+    ImportLuoguSubmissionResult {
+        submission_id: submission_id.to_string(),
+        problem_id: problem_id.to_string(),
+        problem_title: problem_title.to_string(),
+        relative_path,
+        skipped: false,
+        skip_reason: None,
+        failed: true,
+        error: Some(error),
+        committed: false,
+        commit_status: commit_status.to_string(),
+    }
+}
+
+fn luogu_submission_import_skipped(
+    record: &LuoguSubmissionRecord,
+    reason: String,
+) -> ImportLuoguSubmissionResult {
+    ImportLuoguSubmissionResult {
+        submission_id: record.submission_id.to_string(),
+        problem_id: record.problem_id.clone(),
+        problem_title: record.problem_title.clone(),
+        relative_path: None,
+        skipped: true,
+        skip_reason: Some(reason),
+        failed: false,
+        error: None,
+        committed: false,
+        commit_status: "skipped".to_string(),
+    }
+}
+
+fn import_luogu_submission_record(
+    client: &reqwest::blocking::Client,
+    uid: &str,
+    client_id: &str,
+    notes_dir: &Path,
+    ai_config: &AiConfigFields,
+    record: &LuoguSubmissionRecord,
+    auto_commit: bool,
+) -> ImportLuoguSubmissionResult {
+    if !is_ac_status(&record.status) {
+        return luogu_submission_import_skipped(
+            record,
+            format!("非 AC 提交，当前 verdict 为 {}", record.status),
+        );
+    }
+
+    let source_code =
+        match fetch_luogu_submission_source(client, uid, client_id, record.submission_id) {
+            Ok(source_code) => source_code,
+            Err(error) => {
+                return luogu_submission_import_failed(
+                    &record.submission_id.to_string(),
+                    &record.problem_id,
+                    &record.problem_title,
+                    None,
+                    error,
+                    "skipped",
+                );
+            }
+        };
+
+    let imported = match import_luogu_insight_to_notes_dir(
+        notes_dir,
+        &record.problem_id,
+        &record.problem_title,
+        &record.submission_id.to_string(),
+        &source_code,
+        ai_config,
+    ) {
+        Ok(LuoguAiImportOutcome::Imported(imported)) => imported,
+        Ok(LuoguAiImportOutcome::NoCandidate) => {
+            return luogu_submission_import_skipped(
+                record,
+                "源码中没有可导入的 insight 注释候选".to_string(),
+            );
+        }
+        Ok(LuoguAiImportOutcome::AiSkipped) => {
+            return luogu_submission_import_skipped(
+                record,
+                "AI 判断这条注释暂不适合导入".to_string(),
+            );
+        }
+        Err(error) if error.contains("already exists") => {
+            return luogu_submission_import_skipped(record, format!("已存在：{error}"));
+        }
+        Err(error) => {
+            return luogu_submission_import_failed(
+                &record.submission_id.to_string(),
+                &record.problem_id,
+                &record.problem_title,
+                None,
+                error,
+                "skipped",
+            );
+        }
+    };
+
+    if !auto_commit {
+        return ImportLuoguSubmissionResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            relative_path: Some(imported.relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: false,
+            commit_status: "skipped".to_string(),
+        };
+    }
+
+    match commit_note(imported.relative_path.clone(), None) {
+        Ok(CommitNoteStatus::Committed) => ImportLuoguSubmissionResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            relative_path: Some(imported.relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: true,
+            commit_status: "committed".to_string(),
+        },
+        Ok(CommitNoteStatus::NoChanges) => ImportLuoguSubmissionResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            relative_path: Some(imported.relative_path),
+            skipped: false,
+            skip_reason: None,
+            failed: false,
+            error: None,
+            committed: false,
+            commit_status: "noChanges".to_string(),
+        },
+        Err(error) => luogu_submission_import_failed(
+            &record.submission_id.to_string(),
+            &record.problem_id,
+            &record.problem_title,
+            Some(imported.relative_path),
+            format!("Git 提交失败：{error}"),
+            "failed",
+        ),
+    }
+}
+
 #[tauri::command]
 pub fn import_luogu_insight(
     problem_id: String,
@@ -977,6 +1150,61 @@ pub fn import_luogu_insight(
                 .to_string(),
         ),
     }
+}
+
+#[tauri::command]
+pub fn import_luogu_submission(
+    submission_id: String,
+    auto_commit: Option<bool>,
+) -> Result<ImportLuoguSubmissionResult, String> {
+    let submission_id = submission_id.trim();
+    let parsed_submission_id = match submission_id.parse::<u64>() {
+        Ok(value) if value > 0 => value,
+        _ => {
+            return Ok(luogu_submission_import_failed(
+                submission_id,
+                "",
+                "",
+                None,
+                "submission_id 必须是正整数".to_string(),
+                "skipped",
+            ));
+        }
+    };
+
+    let config = read_config()?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
+    let records = fetch_luogu_submission_records(&uid, &client_id, 1)?;
+    let Some(record) = records
+        .into_iter()
+        .find(|record| record.submission_id == parsed_submission_id)
+    else {
+        return Ok(luogu_submission_import_failed(
+            submission_id,
+            "",
+            "",
+            None,
+            "未在最近提交列表中找到这条 submission".to_string(),
+            "skipped",
+        ));
+    };
+
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir)
+        .map_err(|e| format!("Luogu import failed: cannot create notes directory: {e}"))?;
+    let client = luogu_http_client()?;
+
+    Ok(import_luogu_submission_record(
+        &client,
+        &uid,
+        &client_id,
+        &notes_dir,
+        &config.ai,
+        &record,
+        auto_commit.unwrap_or(true),
+    ))
 }
 
 #[tauri::command]

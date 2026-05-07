@@ -212,6 +212,7 @@ pub fn run() {
             git::commit_renamed_note,
             git::push_git,
             luogu::import_luogu_insight,
+            luogu::import_luogu_submission,
             luogu::get_luogu_config,
             luogu::save_luogu_config,
             luogu::test_luogu_connection,
