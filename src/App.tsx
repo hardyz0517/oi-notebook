@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload } from "lucide-react";
+import { Bot, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -102,6 +102,56 @@ function isAiConfigMissingError(message: string): boolean {
     message.includes("api_key is missing") ||
     message.includes("model is missing")
   );
+}
+
+interface PromptUsageInfo {
+  purpose: string;
+  variables: string[];
+  notes: string[];
+}
+
+function getPromptUsageInfo(fileName: string): PromptUsageInfo {
+  if (fileName === "luogu-insight.md") {
+    return {
+      purpose: "用于把洛谷提交里的候选 insight、trick、坑点或总结整理成结构化笔记。",
+      variables: ["{{problem_id}}", "{{problem_title}}", "{{submission_id}}", "{{candidate_comment}}"],
+      notes: [
+        "只编辑 Prompt 文本本身，不要写入 API Key、Base URL、Cookie 等密钥。",
+        "这个模板会参与洛谷 insight 整理流程，返回格式要求请保留在 Prompt 内容里。",
+      ],
+    };
+  }
+
+  if (fileName === "note-metadata.md") {
+    return {
+      purpose: "用于根据当前笔记正文生成 title、tags、summary 等元信息建议。",
+      variables: ["{{note_path}}", "{{content}}"],
+      notes: [
+        "这个模板只负责元数据补全，不应该要求 AI 改写正文。",
+        "保存后会影响后续 AI 元数据整理请求，但不会自动改动当前笔记。",
+      ],
+    };
+  }
+
+  if (fileName === "note-polish.md") {
+    return {
+      purpose: "用于润色当前笔记正文 body，并先生成可预览的润色结果。",
+      variables: ["{{note_path}}", "{{body}}"],
+      notes: [
+        "这个模板面向正文润色，不处理 frontmatter。",
+        "建议保留代码块、公式、链接和表格的保护约束，避免 AI 误改关键内容。",
+      ],
+    };
+  }
+
+  return {
+    purpose: "用于配置本地 AI Prompt 模板。",
+    variables: [],
+    notes: [
+      "Prompt 保存在本地 .oinb/prompts/，不会提交到 Git。",
+      "不要把 API Key、Base URL、Cookie 或其它密钥写进 Prompt。",
+    ],
+  };
 }
 
 interface LoadedMarkdownParts {
@@ -215,6 +265,10 @@ export default function App() {
   const selectedPrompt = useMemo(
     () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
     [promptTemplates, selectedPromptFileName],
+  );
+  const selectedPromptUsage = useMemo(
+    () => getPromptUsageInfo(selectedPromptFileName),
+    [selectedPromptFileName],
   );
   const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
 
@@ -1515,59 +1569,148 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={isPromptDialogOpen} onOpenChange={(open) => !open && closePromptDialog()}>
-      <DialogContent className="grid h-[82vh] max-h-[90vh] w-[min(90vw,1100px)] max-w-none grid-rows-[auto_minmax(0,1fr)_auto]">
-        <DialogHeader>
-          <DialogTitle>AI Prompt</DialogTitle>
-        </DialogHeader>
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 py-2">
-          <div className="rounded-md border border-border bg-muted/20 p-2.5 text-xs leading-5 text-muted-foreground">
-            <div>Prompt 保存在本地 .oinb/prompts/，不会提交到 Git。</div>
-            <div>支持变量：{"{{problem_id}}"}、{"{{problem_title}}"}、{"{{submission_id}}"}、{"{{candidate_comment}}"}、{"{{note_path}}"}、{"{{content}}"}、{"{{body}}"}。</div>
-            <div>不要把 API Key、Base URL、Cookie 或其它密钥写进 Prompt。</div>
-          </div>
-          <div className="grid min-h-0 grid-cols-1 gap-3 sm:grid-cols-[13.75rem_minmax(0,1fr)]">
-            <div className="grid content-start gap-2 overflow-y-auto pr-1">
-              {promptTemplates.map((prompt) => (
-                <Button
-                  key={prompt.fileName}
-                  variant={prompt.fileName === selectedPromptFileName ? "secondary" : "outline"}
-                  className="h-auto justify-start px-3 py-2 text-left text-xs"
-                  disabled={isLoadingPrompt || isSavingPrompt}
-                  onClick={() => handleSelectPrompt(prompt.fileName)}
-                >
-                  <span className="grid gap-0.5">
-                    <span className="font-medium">{prompt.fileName}</span>
-                    <span className="text-[10px] text-muted-foreground">{prompt.displayName}</span>
-                  </span>
-                </Button>
-              ))}
+    {isPromptDialogOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-8">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ai-prompt-editor-title"
+          className="grid overflow-hidden border border-border bg-popover text-popover-foreground shadow-2xl"
+          style={{
+            width: "min(1280px, calc(100vw - 64px))",
+            maxWidth: "1280px",
+            height: "min(86vh, 860px)",
+            maxHeight: "860px",
+            gridTemplateColumns: "clamp(220px, 22vw, 280px) minmax(0, 1fr)",
+          }}
+        >
+          <aside className="flex min-h-0 min-w-0 flex-col border-r border-border bg-muted/10">
+            <div className="shrink-0 border-b border-border px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Prompt 模板
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                选择要编辑的本地模板
+              </div>
             </div>
-            <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-              <Label htmlFor="ai-prompt-content">
-                {selectedPrompt ? selectedPrompt.fileName : "Prompt"}
+            <div className="grid min-h-0 content-start gap-2 overflow-y-auto p-3">
+              {promptTemplates.map((prompt) => {
+                const isSelected = prompt.fileName === selectedPromptFileName;
+                const promptUsage = getPromptUsageInfo(prompt.fileName);
+                return (
+                  <Button
+                    key={prompt.fileName}
+                    variant="ghost"
+                    className={`h-auto min-w-0 justify-start rounded-none border px-3 py-2.5 text-left text-xs ${
+                      isSelected
+                        ? "border-primary/70 bg-primary/15 text-foreground shadow-[inset_3px_0_0_hsl(var(--primary))]"
+                        : "border-border bg-background/40 hover:bg-accent/50"
+                    }`}
+                    disabled={isLoadingPrompt || isSavingPrompt}
+                    onClick={() => handleSelectPrompt(prompt.fileName)}
+                  >
+                    <span className="grid min-w-0 gap-1">
+                      <span className="truncate font-medium">{prompt.displayName}</span>
+                      <span className="truncate font-mono text-[10px] text-muted-foreground">{prompt.fileName}</span>
+                      <span className="truncate text-[10px] font-normal text-muted-foreground">
+                        {promptUsage.purpose}
+                      </span>
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <section className="grid min-h-0 min-w-0 grid-rows-[64px_auto_minmax(0,1fr)_56px]">
+            <header className="flex min-h-0 items-center justify-between gap-4 border-b border-border px-5">
+              <div className="grid min-w-0 gap-0.5">
+                <h2 id="ai-prompt-editor-title" className="text-base font-semibold">
+                  编辑 AI Prompt
+                </h2>
+                <div className="truncate font-mono text-[11px] text-muted-foreground">
+                  {selectedPrompt ? selectedPrompt.fileName : "请选择一个 Prompt 模板"}
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={isLoadingPrompt || isSavingPrompt}
+                aria-label="关闭 AI Prompt 编辑器"
+                onClick={closePromptDialog}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </header>
+
+            <div className="max-h-[108px] min-w-0 overflow-hidden border-b border-border bg-muted/10 px-5 py-3">
+              <div className="grid gap-2 text-xs leading-5">
+                <div className="min-w-0 truncate text-foreground">{selectedPromptUsage.purpose}</div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    变量
+                  </span>
+                  <div className="flex min-w-0 flex-wrap gap-1.5 overflow-hidden">
+                    {selectedPromptUsage.variables.length > 0 ? (
+                      selectedPromptUsage.variables.map((variable) => (
+                        <code
+                          key={variable}
+                          className="shrink-0 border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
+                        >
+                          {variable}
+                        </code>
+                      ))
+                    ) : (
+                      <span className="text-muted-foreground">暂无可展示变量</span>
+                    )}
+                  </div>
+                </div>
+                <div className="truncate text-muted-foreground">
+                  {selectedPromptUsage.notes[0]}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 p-5">
+              <Label htmlFor="ai-prompt-content" className="flex items-center justify-between gap-3">
+                <span>Prompt 内容</span>
+                {selectedPrompt && (
+                  <span className="truncate font-mono text-[10px] font-normal text-muted-foreground">
+                    {selectedPrompt.fileName}
+                  </span>
+                )}
               </Label>
               <textarea
                 id="ai-prompt-content"
                 value={promptContent}
                 disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}
-                rows={18}
-                className="h-full min-h-[60vh] w-full resize-none overflow-auto rounded-none border border-input bg-transparent px-3 py-2.5 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80 sm:min-h-0"
+                rows={30}
+                className="h-full min-h-[460px] w-full min-w-0 resize-none overflow-auto rounded-none border border-input bg-background px-4 py-3 font-mono text-sm leading-6 outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                style={{
+                  width: "100%",
+                  minWidth: 0,
+                }}
                 onChange={(e) => setPromptContent(e.target.value)}
               />
             </div>
-          </div>
+
+            <footer className="flex min-w-0 items-center justify-between gap-3 border-t border-border px-5">
+              <div className="min-w-0 truncate text-[11px] text-muted-foreground">
+                本地路径：.oinb/prompts/{selectedPromptFileName || "*.md"}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="outline" onClick={closePromptDialog} disabled={isLoadingPrompt || isSavingPrompt}>
+                  取消
+                </Button>
+                <Button onClick={handleSavePrompt} disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}>
+                  保存
+                </Button>
+              </div>
+            </footer>
+          </section>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={closePromptDialog} disabled={isLoadingPrompt || isSavingPrompt}>
-            取消
-          </Button>
-          <Button onClick={handleSavePrompt} disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}>
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    )}
     <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
