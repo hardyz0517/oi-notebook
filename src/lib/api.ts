@@ -75,6 +75,7 @@ export interface ImportLuoguSubmissionResult {
   problemId: string;
   problemTitle: string;
   relativePath: string | null;
+  draftFallback: boolean;
   skipped: boolean;
   skipReason: string | null;
   failed: boolean;

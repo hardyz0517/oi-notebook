@@ -121,6 +121,7 @@ pub struct ImportLuoguSubmissionResult {
     pub problem_id: String,
     pub problem_title: String,
     pub relative_path: Option<String>,
+    pub draft_fallback: bool,
     pub skipped: bool,
     pub skip_reason: Option<String>,
     pub failed: bool,
@@ -918,6 +919,125 @@ fn write_ai_luogu_note_to_notes_dir(
     })
 }
 
+fn build_raw_luogu_draft_markdown(
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    source_code: &str,
+    fallback_reason: &str,
+) -> String {
+    let candidate_comment = extract_luogu_ai_candidate_comment(source_code)
+        .or_else(|| extract_oinb_insight(source_code).ok());
+    let title = if problem_title.trim().is_empty() {
+        format!("{problem_id} raw Luogu draft")
+    } else {
+        format!("{problem_id} - {} raw Luogu draft", problem_title.trim())
+    };
+
+    let mut markdown = format!(
+        "---\ntitle: {}\ntags: [洛谷, 待整理]\ndifficulty: \"\"\nsource: {}\nsummary: {}\ndraft: true\nluogu_submission: {}\nai_generated: false\nai_status: {}\n---\n\n",
+        yaml_quote(&title),
+        yaml_quote(&format!("luogu-{problem_id}")),
+        yaml_quote("AI was unavailable or did not produce an organized note; this is a raw draft."),
+        yaml_quote(submission_id.trim()),
+        yaml_quote("raw_draft_fallback"),
+    );
+
+    markdown.push_str("# Raw Luogu Draft\n\n");
+    markdown.push_str("## Submission\n\n");
+    markdown.push_str(&format!("- Submission ID: {}\n", submission_id.trim()));
+    markdown.push_str(&format!("- Problem: {problem_id}"));
+    if !problem_title.trim().is_empty() {
+        markdown.push_str(&format!(" - {}", problem_title.trim()));
+    }
+    markdown.push('\n');
+    markdown.push_str(&format!(
+        "- Problem URL: https://www.luogu.com.cn/problem/{problem_id}\n"
+    ));
+    markdown.push_str(&format!(
+        "- Submission URL: https://www.luogu.com.cn/record/{}\n\n",
+        submission_id.trim()
+    ));
+
+    markdown.push_str("## AI Status\n\n");
+    markdown.push_str(fallback_reason.trim());
+    markdown.push_str("\n\n");
+
+    markdown.push_str("## Raw @oinb-insight Candidate\n\n");
+    if let Some(candidate_comment) = candidate_comment {
+        markdown.push_str("```text\n");
+        markdown.push_str(candidate_comment.trim());
+        markdown.push_str("\n```\n\n");
+    } else {
+        markdown.push_str("No @oinb-insight or reusable tail comment candidate was found.\n\n");
+    }
+
+    markdown.push_str("## Source Code\n\n");
+    markdown.push_str("```cpp\n");
+    markdown.push_str(source_code.trim());
+    markdown.push_str("\n```\n");
+
+    markdown
+}
+
+fn write_raw_luogu_draft_to_notes_dir(
+    notes_dir: &Path,
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    source_code: &str,
+    fallback_reason: &str,
+) -> Result<ImportLuoguInsightResult, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    let safe_title = safe_title_for_filename(problem_title.trim(), "raw-draft");
+    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let target_path = notes_dir.join(&relative_path);
+
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Luogu import failed: cannot create notes/luogu directory: {e}")
+        })?;
+    }
+
+    let markdown = build_raw_luogu_draft_markdown(
+        &problem_id,
+        problem_title,
+        submission_id,
+        source_code,
+        fallback_reason,
+    );
+    let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
+    if let Some(warning) = warning {
+        return Err(format!(
+            "Luogu import failed: generated raw draft frontmatter warning for {relative_path}: {warning}"
+        ));
+    }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target_path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("Luogu import failed: note already exists: {relative_path}")
+            } else {
+                format!("Luogu import failed: cannot create note {relative_path}: {e}")
+            }
+        })?;
+
+    file.write_all(final_content.as_bytes())
+        .map_err(|e| format!("Luogu import failed: cannot write note {relative_path}: {e}"))?;
+
+    Ok(ImportLuoguInsightResult {
+        relative_path,
+        ai_model: String::new(),
+    })
+}
+
+fn should_fallback_to_raw_draft(error: &str) -> bool {
+    error.starts_with("AI connection failed") || error.starts_with("Luogu AI insight failed")
+}
+
 fn import_luogu_insight_to_notes_dir(
     notes_dir: &Path,
     problem_id: &str,
@@ -975,6 +1095,7 @@ fn luogu_submission_import_failed(
         problem_id: problem_id.to_string(),
         problem_title: problem_title.to_string(),
         relative_path,
+        draft_fallback: false,
         skipped: false,
         skip_reason: None,
         failed: true,
@@ -993,6 +1114,7 @@ fn luogu_submission_import_skipped(
         problem_id: record.problem_id.clone(),
         problem_title: record.problem_title.clone(),
         relative_path: None,
+        draft_fallback: false,
         skipped: true,
         skip_reason: Some(reason),
         failed: false,
@@ -1033,6 +1155,7 @@ fn import_luogu_submission_record(
             }
         };
 
+    let mut draft_fallback = false;
     let imported = match import_luogu_insight_to_notes_dir(
         notes_dir,
         &record.problem_id,
@@ -1043,10 +1166,30 @@ fn import_luogu_submission_record(
     ) {
         Ok(LuoguAiImportOutcome::Imported(imported)) => imported,
         Ok(LuoguAiImportOutcome::NoCandidate) => {
-            return luogu_submission_import_skipped(
-                record,
-                "源码中没有可导入的 insight 注释候选".to_string(),
-            );
+            draft_fallback = true;
+            match write_raw_luogu_draft_to_notes_dir(
+                notes_dir,
+                &record.problem_id,
+                &record.problem_title,
+                &record.submission_id.to_string(),
+                &source_code,
+                "没有找到 @oinb-insight 候选内容，已生成待整理源码草稿。",
+            ) {
+                Ok(imported) => imported,
+                Err(error) if error.contains("already exists") => {
+                    return luogu_submission_import_skipped(record, format!("已存在：{error}"));
+                }
+                Err(error) => {
+                    return luogu_submission_import_failed(
+                        &record.submission_id.to_string(),
+                        &record.problem_id,
+                        &record.problem_title,
+                        None,
+                        error,
+                        "skipped",
+                    );
+                }
+            }
         }
         Ok(LuoguAiImportOutcome::AiSkipped) => {
             return luogu_submission_import_skipped(
@@ -1056,6 +1199,32 @@ fn import_luogu_submission_record(
         }
         Err(error) if error.contains("already exists") => {
             return luogu_submission_import_skipped(record, format!("已存在：{error}"));
+        }
+        Err(error) if should_fallback_to_raw_draft(&error) => {
+            draft_fallback = true;
+            match write_raw_luogu_draft_to_notes_dir(
+                notes_dir,
+                &record.problem_id,
+                &record.problem_title,
+                &record.submission_id.to_string(),
+                &source_code,
+                &format!("AI 未整理原因：{error}"),
+            ) {
+                Ok(imported) => imported,
+                Err(error) if error.contains("already exists") => {
+                    return luogu_submission_import_skipped(record, format!("已存在：{error}"));
+                }
+                Err(error) => {
+                    return luogu_submission_import_failed(
+                        &record.submission_id.to_string(),
+                        &record.problem_id,
+                        &record.problem_title,
+                        None,
+                        error,
+                        "skipped",
+                    );
+                }
+            }
         }
         Err(error) => {
             return luogu_submission_import_failed(
@@ -1075,6 +1244,7 @@ fn import_luogu_submission_record(
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
             relative_path: Some(imported.relative_path),
+            draft_fallback,
             skipped: false,
             skip_reason: None,
             failed: false,
@@ -1090,6 +1260,7 @@ fn import_luogu_submission_record(
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
             relative_path: Some(imported.relative_path),
+            draft_fallback,
             skipped: false,
             skip_reason: None,
             failed: false,
@@ -1102,6 +1273,7 @@ fn import_luogu_submission_record(
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
             relative_path: Some(imported.relative_path),
+            draft_fallback,
             skipped: false,
             skip_reason: None,
             failed: false,
@@ -1109,17 +1281,20 @@ fn import_luogu_submission_record(
             committed: false,
             commit_status: "noChanges".to_string(),
         },
-        Err(error) => luogu_submission_import_failed(
-            &record.submission_id.to_string(),
-            &record.problem_id,
-            &record.problem_title,
-            Some(imported.relative_path),
-            format!("Git 提交失败：{error}"),
-            "failed",
-        ),
+        Err(error) => {
+            let mut result = luogu_submission_import_failed(
+                &record.submission_id.to_string(),
+                &record.problem_id,
+                &record.problem_title,
+                Some(imported.relative_path),
+                format!("Git 提交失败：{error}"),
+                "failed",
+            );
+            result.draft_fallback = draft_fallback;
+            result
+        }
     }
 }
-
 #[tauri::command]
 pub fn import_luogu_insight(
     problem_id: String,
@@ -1661,6 +1836,43 @@ Keep one sentinel item to avoid special casing.
         assert!(!markdown.contains("api_key"));
         assert!(!markdown.contains("base_url"));
         assert!(markdown.contains("## Insight"));
+    }
+
+    #[test]
+    fn generated_raw_draft_keeps_source_and_is_draft() {
+        let markdown = build_raw_luogu_draft_markdown(
+            "P1234",
+            "Interval Coverage",
+            "987654",
+            &sample_source(),
+            "AI unavailable",
+        );
+
+        assert!(markdown.contains("tags: [洛谷, 待整理]"));
+        assert!(markdown.contains("draft: true"));
+        assert!(markdown.contains("ai_status: raw_draft_fallback"));
+        assert!(markdown.contains("Submission ID: 987654"));
+        assert!(markdown.contains("Problem: P1234 - Interval Coverage"));
+        assert!(markdown.contains("AI unavailable"));
+        assert!(markdown.contains("## Raw @oinb-insight Candidate"));
+        assert!(markdown.contains("title: Interval Coverage"));
+        assert!(markdown.contains("## Source Code"));
+        assert!(markdown.contains("int main() { return 0; }"));
+    }
+
+    #[test]
+    fn generated_raw_draft_allows_missing_insight_candidate() {
+        let markdown = build_raw_luogu_draft_markdown(
+            "P1000",
+            "A+B Problem",
+            "123456",
+            "int main() { return 0; }",
+            "No candidate",
+        );
+
+        assert!(markdown.contains("tags: [洛谷, 待整理]"));
+        assert!(markdown.contains("No @oinb-insight or reusable tail comment candidate was found."));
+        assert!(markdown.contains("```cpp\nint main() { return 0; }\n```"));
     }
 
     #[test]

@@ -96,9 +96,13 @@ function getLuoguImportStatusText(
   if (result) {
     if (result.skipped) return `跳过：${result.skipReason ?? "未说明原因"}`;
     if (result.failed && result.relativePath && result.commitStatus === "failed") {
+      if (result.draftFallback) {
+        return `已生成草稿，但 Git 提交失败：${result.error ?? "未说明原因"}`;
+      }
       return `已生成，但 Git 提交失败：${result.error ?? "未说明原因"}`;
     }
     if (result.failed) return `失败：${result.error ?? "未说明原因"}`;
+    if (result.relativePath && result.draftFallback) return `已生成草稿：${result.relativePath}`;
     if (result.relativePath) return `已生成：${result.relativePath}`;
     return "已生成";
   }
@@ -850,6 +854,7 @@ export default function App() {
               problemId: submission.problemId,
               problemTitle: submission.problemTitle,
               relativePath: null,
+              draftFallback: false,
               skipped: false,
               skipReason: null,
               failed: true,
