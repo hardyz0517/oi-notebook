@@ -20,6 +20,33 @@ type MarkdownRendererProps = {
 const safeExternalProtocols = new Set(["http:", "https:", "mailto:"]);
 const copyResetDelay = 1400;
 
+function CopyIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <rect x="7" y="6" width="9" height="11" rx="2" />
+      <path d="M4 13V5a2 2 0 0 1 2-2h7" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="m4.5 10.5 3.4 3.4 7.6-8.2" />
+    </svg>
+  );
+}
+
+function WarningIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M10 3.5 17 16H3L10 3.5Z" />
+      <path d="M10 8v3.2" />
+      <path d="M10 14.2h.01" />
+    </svg>
+  );
+}
+
 function isExternalUrl(value: string) {
   try {
     const url = new URL(value);
@@ -151,17 +178,27 @@ function CodeBlock({ children }: { children: ReactNode }) {
     window.setTimeout(() => setCopyState("idle"), copyResetDelay);
   };
 
-  const label =
-    copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : "复制";
+  const copyLabel =
+    copyState === "copied" ? "Code copied" : copyState === "failed" ? "Copy failed" : "Copy code";
 
   return (
     <div className="code-block">
-      <div className="code-block-bar">
-        <span>{language ?? "text"}</span>
-        <button type="button" onClick={copyCode}>
-          {label}
-        </button>
-      </div>
+      {language ? <span className="code-block-language">{language}</span> : null}
+      <button
+        type="button"
+        className={`code-copy-button code-copy-button-${copyState}`}
+        onClick={copyCode}
+        aria-label={copyLabel}
+        title={copyLabel}
+      >
+        {copyState === "copied" ? (
+          <CheckIcon />
+        ) : copyState === "failed" ? (
+          <WarningIcon />
+        ) : (
+          <CopyIcon />
+        )}
+      </button>
       {highlightedHtml ? (
         <div
           className="code-block-highlight"

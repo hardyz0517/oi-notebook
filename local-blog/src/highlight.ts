@@ -1,4 +1,4 @@
-import type { HighlighterCore } from "shiki/core";
+import type { HighlighterCore, ThemeRegistration } from "shiki/core";
 
 type HighlightLanguage = "bash" | "c" | "cpp" | "java" | "javascript" | "python" | "rust" | "typescript";
 
@@ -26,6 +26,93 @@ const supportedLanguages = new Map<string, HighlightLanguage | null>([
 const highlightedCodeCache = new Map<string, Promise<string | null>>();
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 
+const oiLightTheme = {
+  name: "oi-light",
+  type: "light",
+  colors: {
+    "editor.background": "#00000000",
+    "editor.foreground": "#24292f",
+  },
+  tokenColors: [
+    {
+      scope: ["comment", "punctuation.definition.comment", "string.comment"],
+      settings: { foreground: "#6e7781" },
+    },
+    {
+      scope: [
+        "keyword",
+        "keyword.control",
+        "keyword.operator.expression",
+        "storage",
+        "storage.modifier",
+        "storage.type",
+      ],
+      settings: { foreground: "#cf222e" },
+    },
+    {
+      scope: [
+        "keyword.control.directive",
+        "meta.preprocessor",
+        "entity.name.function.preprocessor",
+        "punctuation.definition.directive",
+      ],
+      settings: { foreground: "#cf222e" },
+    },
+    {
+      scope: ["string", "punctuation.definition.string"],
+      settings: { foreground: "#0a7f37" },
+    },
+    {
+      scope: [
+        "constant",
+        "constant.numeric",
+        "constant.language",
+        "constant.character",
+        "variable.other.enummember",
+      ],
+      settings: { foreground: "#0550ae" },
+    },
+    {
+      scope: [
+        "entity.name.function",
+        "support.function",
+        "variable.function",
+        "meta.function-call entity.name.function",
+      ],
+      settings: { foreground: "#8250df" },
+    },
+    {
+      scope: [
+        "entity.name.type",
+        "entity.name.class",
+        "entity.name.struct",
+        "entity.name.namespace",
+        "support.type",
+        "support.class",
+      ],
+      settings: { foreground: "#953800" },
+    },
+    {
+      scope: ["entity.name", "support"],
+      settings: { foreground: "#0550ae" },
+    },
+    {
+      scope: [
+        "variable.parameter",
+        "variable.other",
+        "punctuation",
+        "keyword.operator",
+        "storage.modifier.reference",
+      ],
+      settings: { foreground: "#24292f" },
+    },
+    {
+      scope: ["invalid", "message.error"],
+      settings: { foreground: "#b42318" },
+    },
+  ],
+} satisfies ThemeRegistration;
+
 function getHighlighter() {
   highlighterPromise ??= Promise.all([
     import("shiki/core"),
@@ -38,7 +125,6 @@ function getHighlighter() {
     import("shiki/langs/python.mjs"),
     import("shiki/langs/rust.mjs"),
     import("shiki/langs/typescript.mjs"),
-    import("shiki/themes/github-light.mjs"),
   ]).then(
     ([
       { createHighlighterCore },
@@ -51,10 +137,9 @@ function getHighlighter() {
       { default: python },
       { default: rust },
       { default: typescript },
-      { default: githubLight },
     ]) =>
       createHighlighterCore({
-        themes: [githubLight],
+        themes: [oiLightTheme],
         langs: [bash, c, cpp, java, javascript, python, rust, typescript],
         engine: createJavaScriptRegexEngine(),
       }),
@@ -91,7 +176,7 @@ export function highlightCode(code: string, language: string | undefined) {
     .then((highlighter) =>
       highlighter.codeToHtml(code, {
         lang: normalizedLanguage,
-        theme: "github-light",
+        theme: "oi-light",
       }),
     )
     .catch((error) => {

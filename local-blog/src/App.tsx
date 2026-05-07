@@ -191,6 +191,11 @@ function getNoteExcerpt(note: NoteSummary) {
   );
 }
 
+function getShortNoteExcerpt(note: NoteSummary) {
+  const excerpt = getNoteExcerpt(note);
+  return excerpt.length > 64 ? `${excerpt.slice(0, 64)}...` : excerpt;
+}
+
 function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase("zh-CN");
 }
@@ -320,7 +325,7 @@ export default function App() {
       </header>
 
       {route.name === "note" ? (
-        <NoteDetailView relativePath={route.relativePath} />
+        <NoteDetailView relativePath={route.relativePath} notes={notes} />
       ) : (
         <IndexView
           route={route}
@@ -421,13 +426,17 @@ function IndexView({
     );
   }
 
+  const recentNotes = notes.slice(0, 4);
+
   return (
     <>
-      <section className="hero" id="top">
-        <p className="eyebrow">Local Blog</p>
+      <section className="page-header hero" id="top">
+        <p className="eyebrow">LOCAL BLOG</p>
         <h1>OI Notebook</h1>
         <p className="subtitle">本地算法笔记与题解博客</p>
       </section>
+
+      <RecentUpdates notes={recentNotes} />
 
       <section className="home-posts" aria-label="文章摘要流">
         <PostResults notes={notes} isLoading={isLoading} error={error} onRetry={onRetry} />
@@ -449,7 +458,7 @@ function ListingPage({
 }) {
   return (
     <>
-      <section className="listing-header">
+      <section className="page-header listing-header">
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
         <p>{description}</p>
@@ -586,6 +595,41 @@ function PostResults({
   return <PostGrid notes={notes} />;
 }
 
+function RecentUpdates({ notes }: { notes: NoteSummary[] }) {
+  if (notes.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="recent-updates" aria-label="最近更新">
+      <div className="recent-heading">
+        <p className="eyebrow">Recent Updates</p>
+        <h2>最近更新</h2>
+      </div>
+      <div className="recent-strip">
+        {notes.map((note) => {
+          const displayDate = formatOptionalDate(note.date, note.updated, note.created);
+
+          return (
+            <article className="recent-card" key={note.relativePath}>
+              <a href={getNoteHref(note.relativePath)}>
+                <div className="post-meta">
+                  <span>{getCategoryLabel(note.category)}</span>
+                  {displayDate ? (
+                    <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time>
+                  ) : null}
+                </div>
+                <h3>{note.title}</h3>
+                <p>{getShortNoteExcerpt(note)}</p>
+              </a>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function PostGrid({ notes }: { notes: NoteSummary[] }) {
   return (
     <div className="post-grid">
@@ -611,7 +655,7 @@ function PostGrid({ notes }: { notes: NoteSummary[] }) {
   );
 }
 
-function NoteDetailView({ relativePath }: { relativePath: string }) {
+function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: NoteSummary[] }) {
   const [note, setNote] = useState<NoteDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -694,6 +738,9 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
 
   const displayDate = formatOptionalDate(note.updated, note.created, note.date);
   const summary = note.summary?.trim() || note.metadata.summary?.trim();
+  const currentIndex = notes.findIndex((summaryNote) => summaryNote.relativePath === note.relativePath);
+  const previousNote = currentIndex > 0 ? notes[currentIndex - 1] : null;
+  const nextNote = currentIndex !== -1 && currentIndex < notes.length - 1 ? notes[currentIndex + 1] : null;
 
   return (
     <article className="note-page">
@@ -721,7 +768,69 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
       </header>
 
       <MarkdownRenderer markdown={note.body} />
+
+      {currentIndex !== -1 ? <NoteNavigation previousNote={previousNote} nextNote={nextNote} /> : null}
     </article>
+  );
+}
+
+function NoteNavigation({
+  previousNote,
+  nextNote,
+}: {
+  previousNote: NoteSummary | null;
+  nextNote: NoteSummary | null;
+}) {
+  return (
+    <nav className="note-navigation" aria-label={"\u6587\u7ae0\u5bfc\u822a"}>
+      <NoteNavigationItem
+        label={"\u4e0a\u4e00\u7bc7"}
+        note={previousNote}
+        emptyLabel={"\u5df2\u7ecf\u662f\u6700\u65b0\u6587\u7ae0"}
+      />
+      <NoteNavigationItem
+        label={"\u4e0b\u4e00\u7bc7"}
+        note={nextNote}
+        emptyLabel={"\u6ca1\u6709\u66f4\u65e9\u6587\u7ae0"}
+        align="next"
+      />
+    </nav>
+  );
+}
+
+function NoteNavigationItem({
+  label,
+  note,
+  emptyLabel,
+  align = "previous",
+}: {
+  label: string;
+  note: NoteSummary | null;
+  emptyLabel: string;
+  align?: "previous" | "next";
+}) {
+  const className = `note-nav-card note-nav-${align}${note ? "" : " note-nav-card-disabled"}`;
+
+  if (!note) {
+    return (
+      <div className={className} aria-disabled="true">
+        <span className="note-nav-label">{label}</span>
+        <p>{emptyLabel}</p>
+      </div>
+    );
+  }
+
+  const displayDate = formatOptionalDate(note.date, note.updated, note.created);
+
+  return (
+    <a className={className} href={getNoteHref(note.relativePath)}>
+      <span className="note-nav-label">{label}</span>
+      <h2>{note.title}</h2>
+      <div className="note-nav-meta">
+        <span>{getCategoryLabel(note.category)}</span>
+        {displayDate ? <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time> : null}
+      </div>
+    </a>
   );
 }
 
