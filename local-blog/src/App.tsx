@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 type NoteSummary = {
@@ -40,12 +40,6 @@ type NoteDetail = {
 
 type NotesResponse = {
   notes: NoteSummary[];
-};
-
-type CountItem = {
-  name: string;
-  label: string;
-  count: number;
 };
 
 type Route =
@@ -122,33 +116,6 @@ function getNoteExcerpt(note: NoteSummary) {
     note.excerpt?.trim() ||
     "这篇笔记还没有摘要，打开文章页后可以继续补全正文与 frontmatter。"
   );
-}
-
-function countBy<T>(
-  items: T[],
-  getKeys: (item: T) => string[],
-  getLabel: (key: string) => string = (key) => key,
-) {
-  const counts = new Map<string, number>();
-
-  for (const item of items) {
-    for (const key of getKeys(item)) {
-      const normalized = key.trim();
-      if (!normalized) {
-        continue;
-      }
-
-      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
-    }
-  }
-
-  return Array.from(counts.entries())
-    .map<CountItem>(([name, count]) => ({
-      name,
-      label: getLabel(name),
-      count,
-    }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh-CN"));
 }
 
 export default function App() {
@@ -232,16 +199,6 @@ function HomeView() {
     return () => controller.abort();
   }, []);
 
-  const tagStats = useMemo(
-    () => countBy(notes, (note) => note.tags).slice(0, 12),
-    [notes],
-  );
-  const categoryStats = useMemo(
-    () =>
-      countBy(notes, (note) => [note.category], getCategoryLabel).slice(0, 8),
-    [notes],
-  );
-
   return (
     <>
       <section className="hero" id="top">
@@ -250,79 +207,33 @@ function HomeView() {
         <p className="subtitle">本地算法笔记与题解博客</p>
       </section>
 
-      <section className="content-grid" aria-label="文章摘要流">
-        <div className="article-flow">
-          {isLoading ? (
-            <LoadingState />
-          ) : error ? (
-            <ErrorState onRetry={() => void loadNotes()} />
-          ) : notes.length === 0 ? (
-            <EmptyState />
-          ) : (
-            notes.map((note) => (
+      <section className="home-posts" aria-label="文章摘要流">
+        {isLoading ? (
+          <LoadingState />
+        ) : error ? (
+          <ErrorState onRetry={() => void loadNotes()} />
+        ) : notes.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="post-grid">
+            {notes.map((note) => (
               <article className="post-card" key={note.relativePath}>
-                <div className="post-meta">
-                  <span>{getCategoryLabel(note.category)}</span>
-                  <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
-                    {formatDate(note.date ?? note.updated ?? note.created)}
-                  </time>
-                  {note.draft ? <span className="draft-badge">草稿</span> : null}
-                </div>
-                <h2>
-                  <a href={getNoteHref(note.relativePath)}>{note.title}</a>
-                </h2>
-                <p>{getNoteExcerpt(note)}</p>
-                {note.tags.length > 0 ? (
-                  <div className="tag-row" aria-label={`${note.title} 标签`}>
-                    {note.tags.map((tag) => (
-                      <span key={tag}>{tag}</span>
-                    ))}
+                <a className="post-card-link" href={getNoteHref(note.relativePath)}>
+                  <div className="post-meta">
+                    <span>{getCategoryLabel(note.category)}</span>
+                    <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
+                      {formatDate(note.date ?? note.updated ?? note.created)}
+                    </time>
+                    {note.draft ? <span className="draft-badge">草稿</span> : null}
                   </div>
-                ) : null}
-                <p className="post-path">{note.relativePath}</p>
+                  <h2>{note.title}</h2>
+                  <p>{getNoteExcerpt(note)}</p>
+                  <span className="read-more">阅读全文</span>
+                </a>
               </article>
-            ))
-          )}
-        </div>
-
-        <aside className="side-panel" aria-label="博客入口">
-          <section>
-            <h2>标签</h2>
-            {tagStats.length > 0 ? (
-              <div className="compact-links">
-                {tagStats.map((tag) => (
-                  <a href="#/" key={tag.name}>
-                    {tag.label}
-                    <span>{tag.count}</span>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <p>保存带有 tags 的笔记后，这里会汇总标签入口。</p>
-            )}
-          </section>
-
-          <section>
-            <h2>分类</h2>
-            {categoryStats.length > 0 ? (
-              <div className="compact-links">
-                {categoryStats.map((category) => (
-                  <a href="#/" key={category.name}>
-                    {category.label}
-                    <span>{category.count}</span>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <p>题解、技巧、洛谷和收件箱会在这里形成文章入口。</p>
-            )}
-          </section>
-
-          <section className="empty-state">
-            <h2>搜索</h2>
-            <p>搜索页会在后续阶段接入；现在先展示真实文章流与标签分类摘要。</p>
-          </section>
-        </aside>
+            ))}
+          </div>
+        )}
       </section>
     </>
   );
