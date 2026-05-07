@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 type NoteSummary = {
@@ -44,9 +45,17 @@ type NotesResponse = {
 
 type Route =
   | { name: "home" }
+  | { name: "tags" }
+  | { name: "tag"; tag: string }
+  | { name: "categories" }
+  | { name: "category"; category: string }
+  | { name: "search"; query: string }
   | { name: "note"; encodedPath: string; relativePath: string };
 
-const navItems = ["首页", "文章", "标签", "分类", "搜索"];
+type CountItem = {
+  name: string;
+  count: number;
+};
 
 const categoryLabels: Record<string, string> = {
   tricks: "技巧",
@@ -62,35 +71,88 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 function getRouteFromHash(): Route {
-  const hash = window.location.hash;
+  const hash = window.location.hash || "#/";
   const notePrefix = "#/note/";
+  const tagPrefix = "#/tag/";
+  const categoryPrefix = "#/category/";
+  const searchPrefix = "#/search";
 
-  if (!hash.startsWith(notePrefix)) {
-    return { name: "home" };
+  if (hash.startsWith(notePrefix)) {
+    const encodedPath = hash.slice(notePrefix.length);
+    if (!encodedPath) {
+      return { name: "home" };
+    }
+
+    try {
+      return {
+        name: "note",
+        encodedPath,
+        relativePath: decodeURIComponent(encodedPath),
+      };
+    } catch {
+      return {
+        name: "note",
+        encodedPath,
+        relativePath: "",
+      };
+    }
   }
 
-  const encodedPath = hash.slice(notePrefix.length);
-  if (!encodedPath) {
-    return { name: "home" };
+  if (hash === "#/tags") {
+    return { name: "tags" };
   }
 
-  try {
-    return {
-      name: "note",
-      encodedPath,
-      relativePath: decodeURIComponent(encodedPath),
-    };
-  } catch {
-    return {
-      name: "note",
-      encodedPath,
-      relativePath: "",
-    };
+  if (hash.startsWith(tagPrefix)) {
+    try {
+      return { name: "tag", tag: decodeURIComponent(hash.slice(tagPrefix.length)) };
+    } catch {
+      return { name: "tags" };
+    }
   }
+
+  if (hash === "#/categories") {
+    return { name: "categories" };
+  }
+
+  if (hash.startsWith(categoryPrefix)) {
+    try {
+      return {
+        name: "category",
+        category: decodeURIComponent(hash.slice(categoryPrefix.length)),
+      };
+    } catch {
+      return { name: "categories" };
+    }
+  }
+
+  if (hash.startsWith(searchPrefix)) {
+    const queryStart = hash.indexOf("?");
+    if (queryStart === -1) {
+      return { name: "search", query: "" };
+    }
+
+    const params = new URLSearchParams(hash.slice(queryStart + 1));
+    return { name: "search", query: params.get("q")?.trim() ?? "" };
+  }
+
+  return { name: "home" };
 }
 
 function getNoteHref(relativePath: string) {
   return `#/note/${encodeURIComponent(relativePath)}`;
+}
+
+function getTagHref(tag: string) {
+  return `#/tag/${encodeURIComponent(tag)}`;
+}
+
+function getCategoryHref(category: string) {
+  return `#/category/${encodeURIComponent(category)}`;
+}
+
+function getSearchHref(query: string) {
+  const trimmed = query.trim();
+  return trimmed ? `#/search?q=${encodeURIComponent(trimmed)}` : "#/search";
 }
 
 function getCategoryLabel(category: string) {
@@ -99,12 +161,12 @@ function getCategoryLabel(category: string) {
 
 function formatDate(value: string | null) {
   if (!value) {
-    return "日期待整理";
+    return null;
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "日期待整理";
+    return null;
   }
 
   return dateFormatter.format(date);
@@ -112,13 +174,9 @@ function formatDate(value: string | null) {
 
 function formatOptionalDate(...values: Array<string | null | undefined>) {
   for (const value of values) {
-    if (!value) {
-      continue;
-    }
-
-    const date = new Date(value);
-    if (!Number.isNaN(date.getTime())) {
-      return dateFormatter.format(date);
+    const formatted = formatDate(value ?? null);
+    if (formatted) {
+      return formatted;
     }
   }
 
@@ -129,52 +187,74 @@ function getNoteExcerpt(note: NoteSummary) {
   return (
     note.summary?.trim() ||
     note.excerpt?.trim() ||
-    "这篇笔记还没有摘要，打开文章页后可以继续补全正文与 frontmatter。"
+    "这篇笔记还没有摘要，打开文章页后可以继续阅读正文。"
   );
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLocaleLowerCase("zh-CN");
+}
+
+function getTagCounts(notes: NoteSummary[]) {
+  const counts = new Map<string, number>();
+
+  for (const note of notes) {
+    for (const tag of note.tags) {
+      const trimmed = tag.trim();
+      if (trimmed) {
+        counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+      }
+    }
+  }
+
+  return Array.from(counts, ([name, count]) => ({ name, count })).sort(
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"),
+  );
+}
+
+function getCategoryCounts(notes: NoteSummary[]) {
+  const counts = new Map<string, number>();
+
+  for (const note of notes) {
+    const category = note.category.trim() || "uncategorized";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+
+  return Array.from(counts, ([name, count]) => ({ name, count })).sort(
+    (a, b) => b.count - a.count || getCategoryLabel(a.name).localeCompare(getCategoryLabel(b.name), "zh-CN"),
+  );
+}
+
+function searchNotes(notes: NoteSummary[], query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return notes;
+  }
+
+  return notes.filter((note) => {
+    const fields = [
+      note.title,
+      note.summary ?? "",
+      note.excerpt ?? "",
+      note.category,
+      getCategoryLabel(note.category),
+      note.relativePath,
+      ...note.tags,
+    ];
+
+    return fields.some((field) => normalizeSearchText(field).includes(normalizedQuery));
+  });
 }
 
 export default function App() {
   const [route, setRoute] = useState<Route>(() => getRouteFromHash());
-
-  useEffect(() => {
-    const handleHashChange = () => setRoute(getRouteFromHash());
-
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
-
-  return (
-    <main className="site-shell">
-      <header className="site-header">
-        <a className="brand" href="#/" aria-label="OI Notebook 首页">
-          OI Notebook
-        </a>
-        <nav className="nav-links" aria-label="博客导航">
-          {navItems.map((item) => (
-            <a href="#/" key={item}>
-              {item}
-            </a>
-          ))}
-        </nav>
-      </header>
-
-      {route.name === "note" ? (
-        <NoteDetailView relativePath={route.relativePath} />
-      ) : (
-        <HomeView />
-      )}
-    </main>
-  );
-}
-
-function HomeView() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoadingNotes, setIsLoadingNotes] = useState(true);
+  const [notesError, setNotesError] = useState<string | null>(null);
 
   const loadNotes = async (signal?: AbortSignal) => {
-    setIsLoading(true);
-    setError(null);
+    setIsLoadingNotes(true);
+    setNotesError(null);
 
     try {
       const response = await fetch("/api/notes", {
@@ -198,14 +278,21 @@ function HomeView() {
       }
 
       console.error("Failed to load local blog notes", err);
-      setError("无法读取本地笔记");
+      setNotesError("无法读取本地笔记");
       setNotes([]);
     } finally {
       if (!signal?.aborted) {
-        setIsLoading(false);
+        setIsLoadingNotes(false);
       }
     }
   };
+
+  useEffect(() => {
+    const handleHashChange = () => setRoute(getRouteFromHash());
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -213,6 +300,126 @@ function HomeView() {
 
     return () => controller.abort();
   }, []);
+
+  const tagCounts = useMemo(() => getTagCounts(notes), [notes]);
+  const categoryCounts = useMemo(() => getCategoryCounts(notes), [notes]);
+
+  return (
+    <main className="site-shell">
+      <header className="site-header">
+        <a className="brand" href="#/" aria-label="OI Notebook 首页">
+          OI Notebook
+        </a>
+        <nav className="nav-links" aria-label="博客导航">
+          <a href="#/">首页</a>
+          <a href="#/">文章</a>
+          <a href="#/tags">标签</a>
+          <a href="#/categories">分类</a>
+          <a href="#/search">搜索</a>
+        </nav>
+      </header>
+
+      {route.name === "note" ? (
+        <NoteDetailView relativePath={route.relativePath} />
+      ) : (
+        <IndexView
+          route={route}
+          notes={notes}
+          tagCounts={tagCounts}
+          categoryCounts={categoryCounts}
+          isLoading={isLoadingNotes}
+          error={notesError}
+          onRetry={() => void loadNotes()}
+        />
+      )}
+    </main>
+  );
+}
+
+function IndexView({
+  route,
+  notes,
+  tagCounts,
+  categoryCounts,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  route: Exclude<Route, { name: "note"; encodedPath: string; relativePath: string }>;
+  notes: NoteSummary[];
+  tagCounts: CountItem[];
+  categoryCounts: CountItem[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (route.name === "tags") {
+    return (
+      <ListingPage eyebrow="Tags" title="标签" description="按算法主题和训练关键词浏览笔记。">
+        <TagCloud tags={tagCounts} />
+        <PostResults
+          notes={notes}
+          isLoading={isLoading}
+          error={error}
+          onRetry={onRetry}
+          emptyTitle="还没有可展示的标签"
+          emptyDescription="给笔记添加 tags 后，这里会自动汇总标签入口。"
+        />
+      </ListingPage>
+    );
+  }
+
+  if (route.name === "tag") {
+    const filteredNotes = notes.filter((note) => note.tags.includes(route.tag));
+
+    return (
+      <ListingPage eyebrow="Tag" title={`标签：${route.tag}`} description="这个标签下的全部文章。">
+        <PostResults notes={filteredNotes} isLoading={isLoading} error={error} onRetry={onRetry} />
+      </ListingPage>
+    );
+  }
+
+  if (route.name === "categories") {
+    return (
+      <ListingPage eyebrow="Categories" title="分类" description="按笔记所在目录浏览文章。">
+        <CategoryList categories={categoryCounts} />
+        <PostResults
+          notes={notes}
+          isLoading={isLoading}
+          error={error}
+          onRetry={onRetry}
+          emptyTitle="还没有可展示的分类"
+          emptyDescription="保存第一篇笔记后，这里会自动按目录汇总分类。"
+        />
+      </ListingPage>
+    );
+  }
+
+  if (route.name === "category") {
+    const filteredNotes = notes.filter((note) => note.category === route.category);
+
+    return (
+      <ListingPage
+        eyebrow="Category"
+        title={`分类：${getCategoryLabel(route.category)}`}
+        description="这个分类下的全部文章。"
+      >
+        <PostResults notes={filteredNotes} isLoading={isLoading} error={error} onRetry={onRetry} />
+      </ListingPage>
+    );
+  }
+
+  if (route.name === "search") {
+    return (
+      <SearchView
+        query={route.query}
+        notes={notes}
+        isLoading={isLoading}
+        error={error}
+        onRetry={onRetry}
+      />
+    );
+  }
 
   return (
     <>
@@ -223,34 +430,184 @@ function HomeView() {
       </section>
 
       <section className="home-posts" aria-label="文章摘要流">
-        {isLoading ? (
-          <LoadingState />
-        ) : error ? (
-          <ErrorState onRetry={() => void loadNotes()} />
-        ) : notes.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="post-grid">
-            {notes.map((note) => (
-              <article className="post-card" key={note.relativePath}>
-                <a className="post-card-link" href={getNoteHref(note.relativePath)}>
-                  <div className="post-meta">
-                    <span>{getCategoryLabel(note.category)}</span>
-                    <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
-                      {formatDate(note.date ?? note.updated ?? note.created)}
-                    </time>
-                    {note.draft ? <span className="draft-badge">草稿</span> : null}
-                  </div>
-                  <h2>{note.title}</h2>
-                  <p>{getNoteExcerpt(note)}</p>
-                  <span className="read-more">阅读全文</span>
-                </a>
-              </article>
-            ))}
-          </div>
-        )}
+        <PostResults notes={notes} isLoading={isLoading} error={error} onRetry={onRetry} />
       </section>
     </>
+  );
+}
+
+function ListingPage({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <section className="listing-header">
+        <p className="eyebrow">{eyebrow}</p>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </section>
+      <section className="listing-content">{children}</section>
+    </>
+  );
+}
+
+function TagCloud({ tags }: { tags: CountItem[] }) {
+  if (tags.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="term-list" aria-label="标签列表">
+      {tags.map((tag) => (
+        <a className="term-pill" href={getTagHref(tag.name)} key={tag.name}>
+          <span>{tag.name}</span>
+          <small>{tag.count}</small>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function CategoryList({ categories }: { categories: CountItem[] }) {
+  if (categories.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="category-list" aria-label="分类列表">
+      {categories.map((category) => (
+        <a className="category-item" href={getCategoryHref(category.name)} key={category.name}>
+          <span>{getCategoryLabel(category.name)}</span>
+          <small>{category.count} 篇文章</small>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function SearchView({
+  query,
+  notes,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  query: string;
+  notes: NoteSummary[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const [draftQuery, setDraftQuery] = useState(query);
+  const results = useMemo(() => searchNotes(notes, query), [notes, query]);
+
+  useEffect(() => {
+    setDraftQuery(query);
+  }, [query]);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    window.location.hash = getSearchHref(draftQuery);
+  };
+
+  return (
+    <ListingPage eyebrow="Search" title="搜索" description="在标题、摘要、标签、分类和路径中查找文章。">
+      <form className="search-form" onSubmit={handleSubmit}>
+        <input
+          aria-label="搜索文章"
+          placeholder="搜索 title、tag、summary..."
+          type="search"
+          value={draftQuery}
+          onChange={(event) => setDraftQuery(event.target.value)}
+        />
+        <button type="submit">搜索</button>
+        {query ? (
+          <a className="clear-search" href="#/search">
+            清除
+          </a>
+        ) : null}
+      </form>
+
+      <p className="result-count">
+        {query ? `找到 ${results.length} 篇相关文章` : "输入关键词开始搜索"}
+      </p>
+
+      <PostResults
+        notes={query ? results : []}
+        isLoading={isLoading}
+        error={error}
+        onRetry={onRetry}
+        emptyTitle={query ? "没有找到相关文章" : "还没有输入搜索词"}
+        emptyDescription={
+          query
+            ? "换一个标题、标签、分类或摘要里的关键词再试试。"
+            : "可以搜索中文标题、tag、summary、excerpt、分类名或相对路径。"
+        }
+      />
+    </ListingPage>
+  );
+}
+
+function PostResults({
+  notes,
+  isLoading,
+  error,
+  onRetry,
+  emptyTitle,
+  emptyDescription,
+}: {
+  notes: NoteSummary[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  emptyTitle?: string;
+  emptyDescription?: string;
+}) {
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return <ErrorState onRetry={onRetry} />;
+  }
+
+  if (notes.length === 0) {
+    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+  }
+
+  return <PostGrid notes={notes} />;
+}
+
+function PostGrid({ notes }: { notes: NoteSummary[] }) {
+  return (
+    <div className="post-grid">
+      {notes.map((note) => (
+        <article className="post-card" key={note.relativePath}>
+          <a className="post-card-link" href={getNoteHref(note.relativePath)}>
+            <div className="post-meta">
+              <span>{getCategoryLabel(note.category)}</span>
+              {formatOptionalDate(note.date, note.updated, note.created) ? (
+                <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
+                  {formatOptionalDate(note.date, note.updated, note.created)}
+                </time>
+              ) : null}
+              {note.draft ? <span className="draft-badge">草稿</span> : null}
+            </div>
+            <h2>{note.title}</h2>
+            <p>{getNoteExcerpt(note)}</p>
+            <span className="read-more">阅读全文</span>
+          </a>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -313,7 +670,7 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
     return (
       <article className="note-page">
         <a className="back-link" href="#/">
-          返回首页
+          返回文章
         </a>
         <LoadingState title="正在打开笔记" description="Local Blog 正在读取这篇 Markdown 笔记。" />
       </article>
@@ -324,7 +681,7 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
     return (
       <article className="note-page">
         <a className="back-link" href="#/">
-          返回首页
+          返回文章
         </a>
         <ErrorState
           title="无法读取这篇笔记"
@@ -341,12 +698,12 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
   return (
     <article className="note-page">
       <a className="back-link" href="#/">
-        返回首页
+        返回文章
       </a>
 
       <header className="note-header">
         <div className="post-meta">
-          <span>{getCategoryLabel(note.category)}</span>
+          <a href={getCategoryHref(note.category)}>{getCategoryLabel(note.category)}</a>
           {displayDate ? <time>{displayDate}</time> : null}
           {note.draft ? <span className="draft-badge">草稿</span> : null}
         </div>
@@ -355,7 +712,9 @@ function NoteDetailView({ relativePath }: { relativePath: string }) {
         {note.tags.length > 0 ? (
           <div className="tag-row" aria-label={`${note.title} 标签`}>
             {note.tags.map((tag) => (
-              <span key={tag}>{tag}</span>
+              <a href={getTagHref(tag)} key={tag}>
+                {tag}
+              </a>
             ))}
           </div>
         ) : null}
@@ -406,12 +765,18 @@ function ErrorState({
   );
 }
 
-function EmptyState() {
+function EmptyState({
+  title = "还没有可展示的笔记",
+  description = "回到桌面端写下第一篇 Markdown 笔记，保存后刷新这里就能看到文章摘要流。",
+}: {
+  title?: string;
+  description?: string;
+}) {
   return (
     <section className="status-panel">
       <p className="eyebrow">Empty</p>
-      <h2>还没有可展示的笔记</h2>
-      <p>回到桌面端写下第一篇 Markdown 笔记，保存后刷新这里就能看到文章摘要流。</p>
+      <h2>{title}</h2>
+      <p>{description}</p>
     </section>
   );
 }
