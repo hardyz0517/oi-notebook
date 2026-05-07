@@ -50,6 +50,26 @@ export interface TestLuoguConnectionResult {
   submissions: LuoguSubmissionPreview[];
 }
 
+export interface PreviewLuoguSubmission {
+  submissionId: string;
+  problemId: string;
+  problemTitle: string;
+  status: string;
+  isAc: boolean;
+  submitTime: string;
+  statusLabel: string;
+}
+
+export interface PreviewLuoguSubmissionsResult {
+  fetchedCount: number;
+  limit: number;
+  uidConfigured: boolean;
+  clientIdConfigured: boolean;
+  aiConfigured: boolean;
+  lastSubmissionId: number | null;
+  submissions: PreviewLuoguSubmission[];
+}
+
 export interface TestAiConnectionResult {
   model: string;
   ok: boolean;
@@ -280,6 +300,16 @@ export async function saveLuoguConfig(config: Pick<LuoguConfig, "luogu">): Promi
 export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> {
   try {
     return await invoke<TestLuoguConnectionResult>("test_luogu_connection");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function previewLuoguSubmissions(
+  limit = 20,
+): Promise<PreviewLuoguSubmissionsResult> {
+  try {
+    return await invoke<PreviewLuoguSubmissionsResult>("preview_luogu_submissions", { limit });
   } catch (e) {
     throw toError(e);
   }

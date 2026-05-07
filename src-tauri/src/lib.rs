@@ -215,6 +215,7 @@ pub fn run() {
             luogu::get_luogu_config,
             luogu::save_luogu_config,
             luogu::test_luogu_connection,
+            luogu::preview_luogu_submissions,
             luogu::sync_luogu_insights,
             ai::get_ai_config,
             ai::save_ai_config,

@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
-import type { NoteSearchResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissions, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import type { NoteSearchResult, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
@@ -223,11 +223,14 @@ export default function App() {
   const [isSavingLuoguConfig, setIsSavingLuoguConfig] = useState(false);
   const [isTestingLuoguConnection, setIsTestingLuoguConnection] = useState(false);
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
+  const [isScanningLuoguPreview, setIsScanningLuoguPreview] = useState(false);
+  const [luoguPreviewResult, setLuoguPreviewResult] = useState<PreviewLuoguSubmissionsResult | null>(null);
   const [isSyncingLuogu, setIsSyncingLuogu] = useState(false);
   const [luoguSyncResult, setLuoguSyncResult] = useState<SyncLuoguInsightsResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
+  const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
@@ -460,6 +463,11 @@ export default function App() {
       setLuoguConfigLastSubmissionId(
         config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
       );
+      setLuoguConfigAiConfigured(
+        config.ai.base_url.trim() !== "" &&
+        config.ai.api_key.trim() !== "" &&
+        config.ai.model.trim() !== "",
+      );
     } catch (e) {
       toast.error(`洛谷配置读取失败：${e}`);
     } finally {
@@ -513,6 +521,24 @@ export default function App() {
       toast.error(`洛谷连接测试失败：${getErrorMessage(e)}`);
     } finally {
       setIsTestingLuoguConnection(false);
+    }
+  };
+
+  const handlePreviewLuoguSubmissions = async () => {
+    setIsScanningLuoguPreview(true);
+    setLuoguPreviewResult(null);
+    try {
+      const result = await previewLuoguSubmissions(20);
+      setLuoguPreviewResult(result);
+      setLuoguConfigAiConfigured(result.aiConfigured);
+      setLuoguConfigLastSubmissionId(
+        result.lastSubmissionId === null ? "" : String(result.lastSubmissionId),
+      );
+      toast.success(`扫描完成：拉到 ${result.fetchedCount} 条提交，展示 ${result.submissions.length} 条`);
+    } catch (e) {
+      toast.error(`洛谷扫描失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsScanningLuoguPreview(false);
     }
   };
 
@@ -673,13 +699,32 @@ export default function App() {
     }
   };
 
-  const openLuoguDialog = () => {
+  const openLuoguDialog = async () => {
     setIsLuoguDialogOpen(true);
+    setIsLoadingLuoguConfig(true);
+    try {
+      const config = await getLuoguConfig();
+      setLuoguConfigUid(config.luogu.uid);
+      setLuoguConfigClientId(config.luogu.client_id);
+      setLuoguConfigLastSubmissionId(
+        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
+      );
+      setLuoguConfigAiConfigured(
+        config.ai.base_url.trim() !== "" &&
+        config.ai.api_key.trim() !== "" &&
+        config.ai.model.trim() !== "",
+      );
+    } catch (e) {
+      toast.error(`洛谷配置读取失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsLoadingLuoguConfig(false);
+    }
   };
 
   const closeLuoguDialog = () => {
-    if (isImportingLuogu) return;
+    if (isImportingLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
     setIsLuoguDialogOpen(false);
+    setLuoguPreviewResult(null);
     setLuoguProblemId("");
     setLuoguProblemTitle("");
     setLuoguSubmissionId("");
@@ -1470,10 +1515,13 @@ export default function App() {
           </Button>
           <Button
             variant="outline"
-            onClick={handleSyncLuoguInsights}
+            onClick={() => {
+              setIsLuoguSettingsOpen(false);
+              void openLuoguDialog();
+            }}
             disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
           >
-            同步洛谷
+            打开导入中心
           </Button>
           <Button
             onClick={handleSaveLuoguConfig}
@@ -1712,62 +1760,193 @@ export default function App() {
       </div>
     )}
     <Dialog open={isLuoguDialogOpen} onOpenChange={(open) => !open && closeLuoguDialog()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
-          <DialogTitle>导入洛谷</DialogTitle>
+          <DialogTitle>洛谷导入中心</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 py-2">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="luogu-problem-id">problem id</Label>
-              <Input
-                id="luogu-problem-id"
-                value={luoguProblemId}
-                placeholder="P1234 或 1234"
-                disabled={isImportingLuogu}
-                onChange={(e) => setLuoguProblemId(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="luogu-submission-id">submission id</Label>
-              <Input
-                id="luogu-submission-id"
-                value={luoguSubmissionId}
-                placeholder="12345678"
-                disabled={isImportingLuogu}
-                onChange={(e) => setLuoguSubmissionId(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="luogu-problem-title">problem title</Label>
-              <Input
-                id="luogu-problem-title"
-                value={luoguProblemTitle}
-                placeholder="题目标题"
-                disabled={isImportingLuogu}
-                onChange={(e) => setLuoguProblemTitle(e.target.value)}
-              />
+        <div className="grid max-h-[72vh] gap-4 overflow-y-auto py-2 pr-1">
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+            <div className="font-medium text-foreground">当前流程：先扫描最近提交。</div>
+            <div>扫描只读取洛谷提交列表，不会抓源码、不会调用 AI、不会写入 notes、不会 Git commit，也不会推进 last_submission_id。</div>
+            <div>AI 整理稍后用于导入阶段；这一刀先做候选预览。</div>
+          </div>
+
+          <div className="grid gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">配置状态</div>
+            <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-muted-foreground">_uid</div>
+                <div className={luoguConfigUid.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                  {isLoadingLuoguConfig ? "读取中" : luoguConfigUid.trim() ? "已配置" : "未配置"}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-muted-foreground">__client_id</div>
+                <div className={luoguConfigClientId.trim() ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                  {isLoadingLuoguConfig ? "读取中" : luoguConfigClientId.trim() ? "已配置" : "未配置"}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-muted-foreground">AI</div>
+                <div className={luoguConfigAiConfigured ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-amber-400"}>
+                  {isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置"}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">稍后用于导入阶段</div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-muted-foreground">last_submission_id</div>
+                <div className="mt-1 font-mono text-foreground">
+                  {isLoadingLuoguConfig ? "读取中" : luoguConfigLastSubmissionId.trim() || "未设置"}
+                </div>
+              </div>
             </div>
           </div>
+
           <div className="grid gap-2">
-            <Label htmlFor="luogu-source-code">source code</Label>
-            <textarea
-              id="luogu-source-code"
-              value={luoguSourceCode}
-              disabled={isImportingLuogu}
-              rows={14}
-              className="min-h-64 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
-              placeholder={`int main() {\n  return 0;\n}\n\n/*\n启示：\n这题的关键观察是 ...\n\n坑点：\n边界需要额外处理 ...\n*/`}
-              onChange={(e) => setLuoguSourceCode(e.target.value)}
-            />
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">最近提交扫描</div>
+                <div className="text-xs text-muted-foreground">默认读取第一页，最多展示 20 条。</div>
+              </div>
+              <Button
+                onClick={handlePreviewLuoguSubmissions}
+                disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isSyncingLuogu}
+              >
+                {isScanningLuoguPreview ? "扫描中..." : "扫描最近提交"}
+              </Button>
+            </div>
+            {luoguPreviewResult && (
+              <div className="overflow-hidden rounded-md border border-border">
+                <div className="border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  本次拉到 {luoguPreviewResult.fetchedCount} 条，展示 {luoguPreviewResult.submissions.length} 条；last_submission_id: {luoguPreviewResult.lastSubmissionId ?? "未设置"}
+                </div>
+                {luoguPreviewResult.submissions.length === 0 ? (
+                  <div className="p-3 text-xs text-muted-foreground">暂无提交预览</div>
+                ) : (
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="sticky top-0 bg-background text-muted-foreground">
+                        <tr className="border-b border-border">
+                          <th className="px-3 py-2 font-medium">submission_id</th>
+                          <th className="px-3 py-2 font-medium">problem</th>
+                          <th className="px-3 py-2 font-medium">verdict</th>
+                          <th className="px-3 py-2 font-medium">submit time</th>
+                          <th className="px-3 py-2 font-medium">状态</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {luoguPreviewResult.submissions.map((submission) => (
+                          <tr key={submission.submissionId} className="border-b border-border/60 last:border-0">
+                            <td className="px-3 py-2 font-mono">{submission.submissionId}</td>
+                            <td className="px-3 py-2">
+                              <div className="font-mono text-foreground">{submission.problemId || "未知题号"}</div>
+                              <div className="mt-0.5 max-w-72 truncate text-muted-foreground">{submission.problemTitle || "未读取到标题"}</div>
+                            </td>
+                            <td className={submission.isAc ? "px-3 py-2 text-emerald-400" : "px-3 py-2 text-muted-foreground"}>
+                              {submission.status || "unknown"}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-muted-foreground">{submission.submitTime || "未知"}</td>
+                            <td className="px-3 py-2">{submission.statusLabel}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-3 border-t border-border pt-4">
+            <div>
+              <div className="text-sm font-medium">高级：执行旧版一键同步</div>
+              <div className="mt-1 text-xs leading-5 text-amber-300">
+                警告：旧版同步会抓源码、会调用 AI、会写入 notes/luogu，并且可能自动 commit。
+              </div>
+            </div>
+            {luoguSyncResult && (
+              <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div className="font-medium text-foreground">
+                  旧版同步：扫描 {luoguSyncResult.scannedPages} 页 / {luoguSyncResult.scannedCount} 条，AI 导入 {luoguSyncResult.aiImportedCount} 篇
+                </div>
+                <div>
+                  AI 跳过 {luoguSyncResult.aiSkippedCount} 条，AI 失败 {luoguSyncResult.aiFailedCount} 条，总失败 {luoguSyncResult.failedCount} 条，last_submission_id: {luoguSyncResult.updatedLastSubmissionId ?? "未更新"}
+                </div>
+                {luoguSyncResult.importedPaths.map((path) => (
+                  <div key={path} className="font-mono">{path}</div>
+                ))}
+                {luoguSyncResult.warnings.slice(0, 3).map((warning) => (
+                  <div key={warning} className="text-amber-400">{warning}</div>
+                ))}
+              </div>
+            )}
+            <Button
+              variant="outline"
+              className="w-fit"
+              onClick={handleSyncLuoguInsights}
+              disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isSyncingLuogu}
+            >
+              {isSyncingLuogu ? "旧版同步中..." : "高级：执行旧版一键同步"}
+            </Button>
+          </div>
+
+          <div className="grid gap-3 border-t border-border pt-4">
+            <div>
+              <div className="text-sm font-medium">高级：手动粘贴源码导入</div>
+              <div className="mt-1 text-xs text-muted-foreground">保留原来的手动导入入口；它会调用 AI、写入 notes/luogu，确认后仍会提交单篇笔记。</div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="luogu-problem-id">problem id</Label>
+                <Input
+                  id="luogu-problem-id"
+                  value={luoguProblemId}
+                  placeholder="P1234 或 1234"
+                  disabled={isImportingLuogu}
+                  onChange={(e) => setLuoguProblemId(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="luogu-submission-id">submission id</Label>
+                <Input
+                  id="luogu-submission-id"
+                  value={luoguSubmissionId}
+                  placeholder="12345678"
+                  disabled={isImportingLuogu}
+                  onChange={(e) => setLuoguSubmissionId(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="luogu-problem-title">problem title</Label>
+                <Input
+                  id="luogu-problem-title"
+                  value={luoguProblemTitle}
+                  placeholder="题目标题"
+                  disabled={isImportingLuogu}
+                  onChange={(e) => setLuoguProblemTitle(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="luogu-source-code">source code</Label>
+              <textarea
+                id="luogu-source-code"
+                value={luoguSourceCode}
+                disabled={isImportingLuogu}
+                rows={10}
+                className="min-h-52 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                placeholder={`int main() {\n  return 0;\n}\n\n/*\n启示：\n这题的关键观察是 ...\n\n坑点：\n边界需要额外处理 ...\n*/`}
+                onChange={(e) => setLuoguSourceCode(e.target.value)}
+              />
+            </div>
+            <Button className="w-fit" onClick={handleImportLuogu} disabled={isImportingLuogu || isScanningLuoguPreview || isSyncingLuogu}>
+              {isImportingLuogu ? "导入中..." : "手动导入"}
+            </Button>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={closeLuoguDialog} disabled={isImportingLuogu}>
-            取消
-          </Button>
-          <Button onClick={handleImportLuogu} disabled={isImportingLuogu}>
-            导入
+          <Button variant="outline" onClick={closeLuoguDialog} disabled={isImportingLuogu || isScanningLuoguPreview || isSyncingLuogu}>
+            关闭
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1806,11 +1985,11 @@ export default function App() {
             className="justify-start gap-2"
             onClick={() => {
               setIsAdvancedActionsOpen(false);
-              openLuoguDialog();
+              void openLuoguDialog();
             }}
           >
             <Download className="h-3.5 w-3.5" />
-            导入洛谷
+            洛谷导入中心
           </Button>
           <Button
             variant="outline"
@@ -1939,11 +2118,11 @@ export default function App() {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 px-2 text-xs"
-              onClick={handleSyncLuoguInsights}
-              disabled={isTestingLuoguConnection || isSyncingLuogu}
+              onClick={() => void openLuoguDialog()}
+              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isSyncingLuogu}
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              同步洛谷
+              洛谷
             </Button>
           </div>
           <Separator orientation="vertical" className="h-6" />

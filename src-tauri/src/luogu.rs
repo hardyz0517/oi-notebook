@@ -19,6 +19,8 @@ use crate::paths;
 const LUOGU_SYNC_MAX_PAGES: u32 = 5;
 const LUOGU_SYNC_PAGE_INTERVAL: Duration = Duration::from_secs(1);
 const LUOGU_SYNC_DETAIL_INTERVAL: Duration = Duration::from_secs(3);
+const LUOGU_PREVIEW_DEFAULT_LIMIT: usize = 20;
+const LUOGU_PREVIEW_MAX_LIMIT: usize = 100;
 const LUOGU_COOKIE_EXPIRED_MESSAGE: &str =
     "洛谷 Cookie 可能已失效，请重新复制 _uid 和 __client_id。";
 
@@ -65,6 +67,30 @@ pub struct LuoguSubmissionPreview {
 pub struct TestLuoguConnectionResult {
     pub fetched_count: usize,
     pub submissions: Vec<LuoguSubmissionPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLuoguSubmission {
+    pub submission_id: String,
+    pub problem_id: String,
+    pub problem_title: String,
+    pub status: String,
+    pub is_ac: bool,
+    pub submit_time: String,
+    pub status_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLuoguSubmissionsResult {
+    pub fetched_count: usize,
+    pub limit: usize,
+    pub uid_configured: bool,
+    pub client_id_configured: bool,
+    pub ai_configured: bool,
+    pub last_submission_id: Option<u64>,
+    pub submissions: Vec<PreviewLuoguSubmission>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -386,6 +412,42 @@ fn fetch_luogu_submission_list(
 fn is_ac_status(status: &str) -> bool {
     let normalized = status.trim().to_ascii_lowercase();
     matches!(normalized.as_str(), "12" | "accepted" | "ac")
+}
+
+fn is_ai_configured(config: &AiConfigFields) -> bool {
+    !config.base_url.trim().is_empty()
+        && !config.api_key.trim().is_empty()
+        && !config.model.trim().is_empty()
+}
+
+fn preview_status_label(record: &LuoguSubmissionRecord, last_submission_id: Option<u64>) -> String {
+    if last_submission_id
+        .map(|last_id| record.submission_id <= last_id)
+        .unwrap_or(false)
+    {
+        return "旧提交".to_string();
+    }
+
+    if !is_ac_status(&record.status) {
+        return "跳过：非 AC".to_string();
+    }
+
+    "可候选".to_string()
+}
+
+fn submission_scan_preview(
+    record: &LuoguSubmissionRecord,
+    last_submission_id: Option<u64>,
+) -> PreviewLuoguSubmission {
+    PreviewLuoguSubmission {
+        submission_id: record.submission_id.to_string(),
+        problem_id: record.problem_id.clone(),
+        problem_title: record.problem_title.clone(),
+        status: record.status.clone(),
+        is_ac: is_ac_status(&record.status),
+        submit_time: record.submit_time.clone(),
+        status_label: preview_status_label(record, last_submission_id),
+    }
 }
 
 fn json_string_at<'a>(value: &'a JsonValue, pointers: &[&str]) -> Option<&'a str> {
@@ -936,6 +998,37 @@ pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
     let uid = uid.to_string();
     let client_id = client_id.to_string();
     fetch_luogu_submission_list(&uid, &client_id)
+}
+
+#[tauri::command]
+pub fn preview_luogu_submissions(
+    limit: Option<usize>,
+) -> Result<PreviewLuoguSubmissionsResult, String> {
+    let config = read_config()?;
+    let (uid, client_id) = require_luogu_config(&config)?;
+    let uid = uid.to_string();
+    let client_id = client_id.to_string();
+    let limit = limit
+        .unwrap_or(LUOGU_PREVIEW_DEFAULT_LIMIT)
+        .clamp(1, LUOGU_PREVIEW_MAX_LIMIT);
+    let last_submission_id = config.luogu.last_submission_id;
+
+    let records = fetch_luogu_submission_records(&uid, &client_id, 1)?;
+    let submissions = records
+        .iter()
+        .take(limit)
+        .map(|record| submission_scan_preview(record, last_submission_id))
+        .collect();
+
+    Ok(PreviewLuoguSubmissionsResult {
+        fetched_count: records.len(),
+        limit,
+        uid_configured: !config.luogu.uid.trim().is_empty(),
+        client_id_configured: !config.luogu.client_id.trim().is_empty(),
+        ai_configured: is_ai_configured(&config.ai),
+        last_submission_id,
+        submissions,
+    })
 }
 
 #[tauri::command]
