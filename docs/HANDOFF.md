@@ -7,7 +7,7 @@
 3. `docs/HANDOFF.md`
 4. `docs/OI-Notebook-PRD-v1.md`
 
-**最后更新**：2026-05-05（记录 AI 缓存第一版完成）  
+**最后更新**：2026-05-07（同步桌面 UI pass 与 Local Blog v2 Phase 8 状态）  
 **项目仓库**：https://github.com/hardyz0517/oi-notebook
 
 ---
@@ -763,3 +763,74 @@ Phase 5 已从“第一刀初始化”推进到本地开发闭环，并完成 Gi
 - 启动/定时自动同步还没做。
 - AI 关联推荐还没做。
 - 博客视觉仍可继续打磨。
+
+---
+
+## 2026-05-07 最新交接：v0.1 preview、桌面 UI pass 与 Local Blog v2
+
+### 当前总体状态
+
+- v0.1 classmates preview 已能打包；release 下 notes 读取 app data，不再依赖同学机器上的 repo 内 `notes/`。
+- 桌面主界面已完成一轮集中 UI pass，当前重点已从桌面外观转向 Local Blog v2 迁移与发版前 smoke test。
+- Local Blog v2 已进入 SPA 架构迁移：Rust 负责 JSON API、assets 与 static shell，`local-blog/` React SPA 负责博客 UI、Markdown 渲染和交互。
+- 旧 Rust HTML blog 仍未被默认 `/` 替换；当前 `/` 还是旧 Rust HTML blog，`/local-blog/` 才是新版 SPA 入口。
+
+### 已完成的桌面 UI pass
+
+- Header 动作已重新分组，减少顶部工具栏的拥挤感。
+- Welcome View 已加入首屏引导和保存入口。
+- 文件树目录名已中文化，`tricks/problems/luogu/inbox` 等分类在 UI 中更易读。
+- 编辑器与预览的滚动、溢出和窄宽度布局已做修正。
+- 右侧 Markdown 预览代码块已加入复制按钮，并保留短暂复制状态反馈。
+- Markdown 工具栏已调整为更接近洛谷编辑器的写作入口。
+- 编辑器/预览内容区已支持 Ctrl+滚轮内容缩放。
+
+### Local Blog v2 已完成阶段
+
+PRD 位于 `docs/LOCAL_BLOG_V2_PRD.md`。最近相关提交可从 `f4b8ff9` 到 `05319f7` 查看。
+
+- Phase 1: `GET /api/notes` 已完成。
+- Phase 2: `GET /api/note?path=...` 已完成。
+- Phase 3: `local-blog/` skeleton 已完成。
+- Phase 4: Rust 已能 serve `/local-blog/` static shell。
+- Phase 5: local-blog 首页已接入 `/api/notes`。
+- Phase 6: local-blog 详情页已接入 `/api/note`。
+- Phase 7: Markdown / KaTeX / 图片 / 代码复制已接入。
+- Shiki 代码高亮已接入，使用 `shiki@4.0.2` 与 `github-light` 主题。
+- 首页已改成多列博客卡片布局。
+- 详情页视觉和路径展示已修复：代码块变为克制浅色阅读区，长标题尺寸受控，无效日期不再显示突兀 fallback，本机绝对路径不会出现在页面。
+- Phase 8: 标签 / 分类 / 搜索最小可用已完成；顶部导航不再是假入口。
+
+### 当前博客入口状态
+
+- 新版 Local Blog v2 入口：`http://127.0.0.1:4321/local-blog/`
+- 旧 `/` 入口仍是旧 Rust HTML blog。
+- 还没有正式切换旧 `/` 到 local-blog；不要在无明确任务时顺手切换。
+- `local-blog` build 已纳入 Tauri `beforeBuildCommand`，release 打包前会先构建 bundled SPA。
+
+### Local Blog v2 Phase 8 行为
+
+- 使用 hash route：`#/`、`#/tags`、`#/tag/{encodedTag}`、`#/categories`、`#/category/{category}`、`#/search?q=...`。
+- `/api/notes` 仍只 fetch 一次，标签、分类、搜索都基于内存中的 notes 派生。
+- 标签聚合来自每篇 note 的 `tags`，会统计文章数并按数量与名称排序。
+- 分类聚合来自 `category`，中文显示为：`tricks` -> 技巧，`problems` -> 题解，`luogu` -> 洛谷，`inbox` -> 收件箱。
+- 搜索匹配字段：`title`、`summary`、`excerpt`、`tags`、`category`、中文分类名、`relativePath`。
+- 标签/分类详情页复用文章卡片网格；文章详情页的标签和分类也可点击跳转。
+- 搜索页已有输入框、结果数量、无结果状态和清除搜索入口。
+
+### 下一步建议
+
+- Phase 8 已提交为 `05319f7 feat(blog): add local blog discovery views`；如果新窗口看到该提交未在远端，先按 Hardy 指令决定是否 push。
+- 先肉眼验证 `http://127.0.0.1:4321/local-blog/` 的首页、详情、标签、分类、搜索。
+- 验证通过后，再单独做入口切换：让 `/` 默认进入 local-blog。
+- 入口切换后重新 build preview 包。
+- 发给同学前做 smoke test：启动应用、打开博客、刷新 local-blog、打开一篇含代码/公式/图片的文章，确认无 Node/pnpm 运行时要求。
+
+### 注意事项
+
+- 不要碰 `notes/**` 本地未跟踪测试笔记；它们是 Hardy 的 UI/博客验收素材，不要删、不要改、不要提交。
+- 不要继续美化旧 Rust HTML blog；它只是迁移期 fallback，不是长期方向。
+- 不要把 Rust HTML renderer 当长期方向；新博客前端应继续落在 `local-blog/` SPA。
+- 不要要求用户运行 Node/pnpm；release 运行时不能依赖用户机器安装开发环境。
+- release 下 notes 读 app data；debug 下仍可读 repo 内 notes 以便开发。
+- 不要切换旧 `/` 到 local-blog，除非 Hardy 明确把入口切换作为当前任务。
