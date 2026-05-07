@@ -77,19 +77,30 @@ export default function MarkdownPreview({
 
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = "复制";
       button.dataset.codeCopyButton = "true";
-      button.setAttribute("aria-label", "复制代码块");
+      button.setAttribute("aria-label", "复制代码");
+      button.title = "复制代码";
       button.className =
-        "absolute right-2 top-2 z-10 rounded-sm border border-border/70 bg-background/85 px-2 py-1 text-[11px] leading-none text-muted-foreground shadow-sm backdrop-blur transition hover:border-border hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+        "code-copy-button absolute right-3 top-3 z-50 grid h-8 w-8 place-items-center rounded-sm border border-white/80 bg-white text-zinc-950 shadow-xl ring-1 ring-black/30 backdrop-blur transition hover:scale-105 hover:border-white hover:bg-zinc-100 hover:text-black hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+      setCodeCopyButtonIcon(button, "copy");
 
       pre.append(button);
     }
 
-    const setButtonStatus = (button: HTMLButtonElement, label: string) => {
-      button.textContent = label;
+    const setButtonStatus = (button: HTMLButtonElement, status: "copied" | "failed") => {
+      if (status === "copied") {
+        setCodeCopyButtonIcon(button, "check");
+        button.title = "已复制";
+        button.setAttribute("aria-label", "已复制");
+      } else {
+        button.title = "复制失败";
+        button.setAttribute("aria-label", "复制失败");
+      }
+
       const timeoutId = window.setTimeout(() => {
-        button.textContent = "复制";
+        setCodeCopyButtonIcon(button, "copy");
+        button.title = "复制代码";
+        button.setAttribute("aria-label", "复制代码");
         timeoutIds.delete(timeoutId);
       }, 1400);
       timeoutIds.add(timeoutId);
@@ -107,10 +118,10 @@ export default function MarkdownPreview({
 
       try {
         await navigator.clipboard.writeText(text);
-        setButtonStatus(button, "已复制");
+        setButtonStatus(button, "copied");
       } catch (error) {
         console.warn("Copy code block failed:", error);
-        setButtonStatus(button, "复制失败");
+        setButtonStatus(button, "failed");
       }
     };
 
@@ -236,4 +247,41 @@ async function rewritePreviewImageSources(
   );
 
   return doc.body.innerHTML;
+}
+
+function setCodeCopyButtonIcon(button: HTMLButtonElement, icon: "copy" | "check") {
+  button.replaceChildren(createCodeCopyIcon(icon));
+}
+
+function createCodeCopyIcon(icon: "copy" | "check") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "h-4 w-4");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2.25");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+
+  if (icon === "check") {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M20 6 9 17l-5-5");
+    svg.append(path);
+    return svg;
+  }
+
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("width", "14");
+  rect.setAttribute("height", "14");
+  rect.setAttribute("x", "8");
+  rect.setAttribute("y", "8");
+  rect.setAttribute("rx", "2");
+  rect.setAttribute("ry", "2");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2");
+
+  svg.append(rect, path);
+  return svg;
 }
