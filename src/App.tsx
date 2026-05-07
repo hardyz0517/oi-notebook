@@ -13,7 +13,7 @@ import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, getLuoguConfig, saveLuoguConfig, testLuoguConnection, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { NoteSearchResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
-import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields } from "@/lib/frontmatter";
+import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -104,22 +104,40 @@ function isAiConfigMissingError(message: string): boolean {
   );
 }
 
-interface MarkdownBodyParts {
+interface LoadedMarkdownParts {
   frontmatterPrefix: string;
   body: string;
+  warning: string | null;
 }
 
-function splitMarkdownBody(markdown: string): MarkdownBodyParts {
-  const match = markdown.match(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
-  if (!match) {
-    return { frontmatterPrefix: "", body: markdown };
+function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
+  const split = splitFrontmatter(markdown);
+
+  if (split.kind === "found") {
+    return {
+      frontmatterPrefix: markdown.slice(0, markdown.length - split.body.length),
+      body: split.body,
+      warning: null,
+    };
   }
 
-  const frontmatterPrefix = match[0];
+  if (split.kind === "unclosed") {
+    return {
+      frontmatterPrefix: "",
+      body: markdown,
+      warning: "frontmatter 缺少闭合 ---，已作为正文载入以避免丢数据",
+    };
+  }
+
   return {
-    frontmatterPrefix,
-    body: markdown.slice(frontmatterPrefix.length),
+    frontmatterPrefix: "",
+    body: split.body,
+    warning: null,
   };
+}
+
+function combineMarkdown(frontmatterPrefix: string, body: string): string {
+  return `${frontmatterPrefix}${body}`;
 }
 
 function formatSearchDate(value: string): string {
@@ -134,8 +152,9 @@ function formatSearchDate(value: string): string {
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  // null 时显示欢迎内容，选中文件后显示文件实际内容
+  // null 时显示欢迎内容，选中文件后只把正文 body 放进主编辑器。
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
+  const [frontmatterPrefix, setFrontmatterPrefix] = useState("");
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
@@ -188,7 +207,11 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const frontmatter = useMemo(() => parseFrontmatterFields(markdown), [markdown]);
+  const fullMarkdown = useMemo(
+    () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
+    [currentFilePath, frontmatterPrefix, markdown],
+  );
+  const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
   const selectedPrompt = useMemo(
     () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
     [promptTemplates, selectedPromptFileName],
@@ -672,6 +695,15 @@ export default function App() {
     setIsDirty(true);
   };
 
+  const applyLoadedMarkdown = (content: string) => {
+    const loaded = splitLoadedMarkdown(content);
+    setFrontmatterPrefix(loaded.frontmatterPrefix);
+    setMarkdown(loaded.body);
+    if (loaded.warning) {
+      toast.warning(loaded.warning);
+    }
+  };
+
   const handlePasteImage = async (file: File) => {
     if (!currentFilePath) {
       const message = "请先打开一个笔记后再粘贴图片";
@@ -709,9 +741,11 @@ export default function App() {
     }
 
     const nextFields = { ...frontmatter.fields, ...patch };
-    const nextMarkdown = mergeFrontmatterFields(markdown, nextFields);
-    if (nextMarkdown === markdown) return;
-    setMarkdown(nextMarkdown);
+    const nextMarkdown = mergeFrontmatterFields(fullMarkdown, nextFields);
+    if (nextMarkdown === fullMarkdown) return;
+    const loaded = splitLoadedMarkdown(nextMarkdown);
+    setFrontmatterPrefix(loaded.frontmatterPrefix);
+    setMarkdown(loaded.body);
     setIsDirty(true);
   };
 
@@ -740,9 +774,11 @@ export default function App() {
     setIsGeneratingNoteMetadata(true);
     try {
       const metadata = await generateNoteMetadata(currentFilePath, markdown);
-      const nextMarkdown = mergeFrontmatterMetadata(markdown, metadata);
-      if (nextMarkdown !== markdown) {
-        setMarkdown(nextMarkdown);
+      const nextMarkdown = mergeFrontmatterMetadata(fullMarkdown, metadata);
+      if (nextMarkdown !== fullMarkdown) {
+        const loaded = splitLoadedMarkdown(nextMarkdown);
+        setFrontmatterPrefix(loaded.frontmatterPrefix);
+        setMarkdown(loaded.body);
         setIsDirty(true);
       }
       toast.success("AI 元数据已生成，请确认后保存");
@@ -764,8 +800,7 @@ export default function App() {
       return;
     }
 
-    const { body } = splitMarkdownBody(markdown);
-    if (!body.trim()) {
+    if (!markdown.trim()) {
       toast.warning("当前笔记正文为空，无法润色");
       return;
     }
@@ -789,8 +824,7 @@ export default function App() {
   const handleApplyPolishedBody = () => {
     if (polishedBodyPreview === null) return;
 
-    const { frontmatterPrefix } = splitMarkdownBody(markdown);
-    setMarkdown(`${frontmatterPrefix}${polishedBodyPreview}`);
+    setMarkdown(polishedBodyPreview);
     setIsDirty(true);
     setPolishedBodyPreview(null);
     toast.success("润色稿已应用，请确认后保存");
@@ -833,7 +867,13 @@ export default function App() {
 
     setIsSavingNote(true);
     try {
-      const warning = await writeNote(currentFilePath, markdown);
+      const warning = await writeNote(currentFilePath, fullMarkdown);
+      try {
+        const savedContent = await readNote(currentFilePath);
+        applyLoadedMarkdown(savedContent);
+      } catch (readError) {
+        console.warn("Reload saved note failed:", readError);
+      }
       try {
         const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
         const commitStatus = await commitNote(currentFilePath, pendingAssets);
@@ -1005,6 +1045,7 @@ export default function App() {
   useEffect(() => {
     if (currentFilePath === null) {
       // 无选中文件时恢复欢迎内容
+      setFrontmatterPrefix("");
       setMarkdown(INITIAL_MARKDOWN);
       setIsDirty(false);
       return;
@@ -1015,7 +1056,7 @@ export default function App() {
     readNote(currentFilePath)
       .then((content) => {
         if (!cancelled) {
-          setMarkdown(content);
+          applyLoadedMarkdown(content);
           setIsDirty(false);
         }
       })
