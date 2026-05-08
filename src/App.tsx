@@ -56,12 +56,13 @@ const AI_CONFIG_MISSING_MESSAGE =
 
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
-type LuoguImportCenterTab = "scan" | "account" | "manual" | "advanced";
+type LuoguImportCenterTab = "scan" | "rules" | "account" | "manual" | "advanced";
 type LuoguImportStep = "scan" | "preview";
 type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
+type LuoguMissingInsightStrategy = "skip" | "draft";
 
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
@@ -82,6 +83,23 @@ interface LuoguScanSummary {
   skippedCount: number;
   rangeLabel: string;
 }
+
+interface LuoguImportRules {
+  requireAc: boolean;
+  keepLatestAcOnly: boolean;
+  missingInsightStrategy: LuoguMissingInsightStrategy;
+}
+
+interface LuoguSubmissionCandidateState {
+  canSelect: boolean;
+  statusLabel: string;
+}
+
+const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
+  requireAc: true,
+  keepLatestAcOnly: true,
+  missingInsightStrategy: "draft",
+};
 
 function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTemplateId {
   return directory === "tricks" ? "trick" : "solution";
@@ -114,6 +132,58 @@ function sleepMs(ms: number): Promise<void> {
 
 function isLuoguImportCandidate(submission: PreviewLuoguSubmission): boolean {
   return submission.statusLabel === "可候选";
+}
+
+function parseLuoguSubmissionId(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getLuoguSubmissionCandidateState(
+  submission: PreviewLuoguSubmission,
+  submissions: PreviewLuoguSubmission[],
+  rules: LuoguImportRules,
+  lastSubmissionId: number | null,
+): LuoguSubmissionCandidateState {
+  const submissionId = parseLuoguSubmissionId(submission.submissionId);
+  if (lastSubmissionId !== null && submissionId !== null && submissionId <= lastSubmissionId) {
+    return { canSelect: false, statusLabel: "跳过：旧提交" };
+  }
+
+  if (rules.requireAc && !submission.isAc) {
+    return { canSelect: false, statusLabel: "跳过：非 AC" };
+  }
+
+  if (!submission.isAc) {
+    return { canSelect: false, statusLabel: "跳过：非 AC" };
+  }
+
+  if (rules.keepLatestAcOnly) {
+    const latestSameProblemAcId = submissions.reduce<number | null>((latest, item) => {
+      if (!item.isAc || item.problemId !== submission.problemId) return latest;
+      const itemId = parseLuoguSubmissionId(item.submissionId);
+      if (itemId === null) return latest;
+      return latest === null ? itemId : Math.max(latest, itemId);
+    }, null);
+
+    if (latestSameProblemAcId !== null && submissionId !== null && submissionId < latestSameProblemAcId) {
+      return { canSelect: false, statusLabel: "跳过：同题旧 AC" };
+    }
+  }
+
+  return {
+    canSelect: isLuoguImportCandidate(submission) || submission.isAc,
+    statusLabel: "可候选",
+  };
+}
+
+function getLuoguImportRuleSummary(rules: LuoguImportRules): string {
+  const parts = [
+    rules.requireAc ? "只处理 AC" : "显示非 AC",
+    rules.keepLatestAcOnly ? "同题只保留最新 AC" : "同题 AC 全部候选",
+    rules.missingInsightStrategy === "draft" ? "无 insight 时生成草稿" : "无 insight 时跳过",
+  ];
+  return `规则：${parts.join("；")}`;
 }
 
 function getLuoguScanRangeLabel(
@@ -320,6 +390,7 @@ export default function App() {
   const [luoguScanMode, setLuoguScanMode] = useState<LuoguScanMode>("count");
   const [luoguScanCountLimit, setLuoguScanCountLimit] = useState<LuoguScanCountLimit>(20);
   const [luoguScanDaysLimit, setLuoguScanDaysLimit] = useState<LuoguScanDaysLimit>(30);
+  const [luoguImportRules, setLuoguImportRules] = useState<LuoguImportRules>(DEFAULT_LUOGU_IMPORT_RULES);
   const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
   const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
@@ -385,6 +456,27 @@ export default function App() {
     [selectedPromptFileName],
   );
   const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
+  const luoguRuleSummary = useMemo(
+    () => getLuoguImportRuleSummary(luoguImportRules),
+    [luoguImportRules],
+  );
+  const luoguSubmissionCandidateStates = useMemo(() => {
+    const submissions = luoguPreviewResult?.submissions ?? [];
+    return Object.fromEntries(
+      submissions.map((submission) => [
+        submission.submissionId,
+        getLuoguSubmissionCandidateState(
+          submission,
+          submissions,
+          luoguImportRules,
+          luoguPreviewResult?.lastSubmissionId ?? null,
+        ),
+      ]),
+    ) as Record<string, LuoguSubmissionCandidateState>;
+  }, [luoguImportRules, luoguPreviewResult]);
+  const luoguCurrentCandidateCount = Object.values(luoguSubmissionCandidateStates).filter(
+    (state) => state.canSelect,
+  ).length;
   const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
   const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
     (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
@@ -741,7 +833,14 @@ export default function App() {
         lastSubmissionId: latestPageResult.lastSubmissionId,
         submissions: limitedSubmissions,
       };
-      const candidateCount = result.submissions.filter(isLuoguImportCandidate).length;
+      const candidateCount = result.submissions.filter((submission) =>
+        getLuoguSubmissionCandidateState(
+          submission,
+          result.submissions,
+          luoguImportRules,
+          result.lastSubmissionId,
+        ).canSelect,
+      ).length;
       const skippedCount = result.submissions.length - candidateCount;
 
       setLuoguPreviewResult(result);
@@ -755,7 +854,14 @@ export default function App() {
       setSelectedLuoguSubmissionIds(
         new Set(
           result.submissions
-            .filter(isLuoguImportCandidate)
+            .filter((submission) =>
+              getLuoguSubmissionCandidateState(
+                submission,
+                result.submissions,
+                luoguImportRules,
+                result.lastSubmissionId,
+              ).canSelect,
+            )
             .map((submission) => submission.submissionId),
         ),
       );
@@ -977,8 +1083,44 @@ export default function App() {
     setLuoguImportStep("scan");
   };
 
+  const updateLuoguImportRules = (patch: Partial<LuoguImportRules>) => {
+    if (isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+
+    setLuoguImportRules((current) => {
+      const next = { ...current, ...patch };
+      const submissions = luoguPreviewResult?.submissions ?? [];
+      setSelectedLuoguSubmissionIds(
+        new Set(
+          submissions
+            .filter((submission) =>
+              getLuoguSubmissionCandidateState(
+                submission,
+                submissions,
+                next,
+                luoguPreviewResult?.lastSubmissionId ?? null,
+              ).canSelect,
+            )
+            .map((submission) => submission.submissionId),
+        ),
+      );
+      return next;
+    });
+
+    setLuoguPreparedNotesById({});
+    setLuoguPrepareErrorsById({});
+    setCurrentlyPreparingLuoguId(null);
+    setLuoguPrepareProgress(null);
+    setLuoguWriteResultsById({});
+    setCurrentlyWritingLuoguId(null);
+    setLuoguWriteProgress(null);
+    setActiveLuoguPreparedPreviewId(null);
+    setActiveLuoguPreviewDetailTab("rendered");
+    setLuoguImportStep("scan");
+  };
+
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {
-    if (!isLuoguImportCandidate(submission) || isPreparingSelectedLuogu || isWritingPreparedLuogu) return;
+    const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
+    if (!candidateState?.canSelect || isPreparingSelectedLuogu || isWritingPreparedLuogu) return;
     setSelectedLuoguSubmissionIds((current) => {
       const next = new Set(current);
       if (next.has(submission.submissionId)) {
@@ -1017,7 +1159,10 @@ export default function App() {
         setLuoguPrepareProgress({ current: index + 1, total: selectedSubmissions.length });
 
         try {
-          const prepared = await prepareLuoguSubmissionNote(submission.submissionId);
+          const prepared = await prepareLuoguSubmissionNote(submission.submissionId, {
+            requireAc: luoguImportRules.requireAc,
+            allowRawDraftWithoutInsight: luoguImportRules.missingInsightStrategy === "draft",
+          });
           setLuoguPreparedNotesById((current) => ({
             ...current,
             [submission.submissionId]: prepared,
@@ -2189,7 +2334,8 @@ export default function App() {
             <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
               <aside className="border-r border-border bg-muted/10 p-3">
                 {[
-                  { id: "scan" as const, label: "提交导入", description: "扫描、预览、写入" },
+                  { id: "scan" as const, label: "提交导入", description: "扫描、预览、写入" },                  { id: "rules" as const, label: "导入规则", description: "候选、去重、草稿" },
+
                   { id: "account" as const, label: "账户状态", description: "Cookie、AI、进度" },
                   { id: "manual" as const, label: "手动导入", description: "粘贴源码导入" },
                   { id: "advanced" as const, label: "高级操作", description: "旧版一键同步" },
@@ -2306,7 +2452,7 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">已选 {selectedLuoguImportCount} 条</div>
+                        <div className="text-right text-xs text-muted-foreground"><div>{luoguRuleSummary}</div><div>已选 {selectedLuoguImportCount} 条</div></div>
                       </div>
 
                       {!luoguPreviewResult ? (
@@ -2330,7 +2476,8 @@ export default function App() {
                             </thead>
                             <tbody>
                               {luoguPreviewResult.submissions.map((submission) => {
-                                const canSelect = isLuoguImportCandidate(submission);
+                                const candidateState = luoguSubmissionCandidateStates[submission.submissionId] ?? { canSelect: false, statusLabel: submission.statusLabel };
+                                const canSelect = candidateState.canSelect;
                                 const prepared = luoguPreparedNotesById[submission.submissionId];
                                 const prepareError = luoguPrepareErrorsById[submission.submissionId];
                                 const writeResult = luoguWriteResultsById[submission.submissionId];
@@ -2343,6 +2490,7 @@ export default function App() {
                                   currentlyWritingLuoguId,
                                   selectedLuoguSubmissionIds,
                                 );
+                                const visibleStatusText = statusText === submission.statusLabel ? candidateState.statusLabel : statusText;
                                 return (
                                   <tr
                                     key={submission.submissionId}
@@ -2373,7 +2521,7 @@ export default function App() {
                                     </td>
                                     <td className="px-3 py-3 font-mono text-muted-foreground">{submission.submitTime || "未知"}</td>
                                     <td className={(writeResult?.failed || prepareError || prepared?.aiStatus === "failed") ? "px-3 py-3 text-amber-400" : "px-3 py-3 text-foreground"}>
-                                      <div className="max-w-[360px] truncate" title={statusText}>{statusText}</div>
+                                      <div className="max-w-[360px] truncate" title={visibleStatusText}>{visibleStatusText}</div>
                                     </td>
                                   </tr>
                                 );
@@ -2553,6 +2701,86 @@ export default function App() {
                   )
                 )}
 
+                {luoguImportCenterTab === "rules" && (
+                  <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-5">
+                    <section className="rounded-md border border-border bg-card/70 p-4">
+                      <div className="text-sm font-medium text-foreground">导入规则</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        这些规则只在当前导入中心会话内生效，不会写入配置文件。
+                      </div>
+                      <div className="mt-4 grid gap-4 text-sm">
+                        <label className="flex items-start gap-3 rounded-md border border-border bg-background/50 p-3">
+                          <input
+                            type="checkbox"
+                            checked={luoguImportRules.requireAc}
+                            disabled
+                            className="mt-0.5 h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
+                            onChange={() => undefined}
+                          />
+                          <span>
+                            <span className="block font-medium text-foreground">只处理 AC 提交</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              当前后端仍只支持 AC 导入，因此本规则保持开启。
+                            </span>
+                          </span>
+                        </label>
+
+                        <label className="flex items-start gap-3 rounded-md border border-border bg-background/50 p-3">
+                          <input
+                            type="checkbox"
+                            checked={luoguImportRules.keepLatestAcOnly}
+                            disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                            className="mt-0.5 h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
+                            onChange={(e) => updateLuoguImportRules({ keepLatestAcOnly: e.target.checked })}
+                          />
+                          <span>
+                            <span className="block font-medium text-foreground">同一道题只保留最新 AC 提交</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              扫描结果中旧 AC 会保留在表格里，但不可勾选，并显示“跳过：同题旧 AC”。
+                            </span>
+                          </span>
+                        </label>
+
+                        <div className="rounded-md border border-border bg-background/50 p-3">
+                          <div className="font-medium text-foreground">没有 insight / 启示注释时</div>
+                          <div className="mt-3 grid gap-2">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="luogu-missing-insight-strategy"
+                                checked={luoguImportRules.missingInsightStrategy === "skip"}
+                                disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                                className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
+                                onChange={() => updateLuoguImportRules({ missingInsightStrategy: "skip" })}
+                              />
+                              跳过，不生成笔记
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="luogu-missing-insight-strategy"
+                                checked={luoguImportRules.missingInsightStrategy === "draft"}
+                                disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                                className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
+                                onChange={() => updateLuoguImportRules({ missingInsightStrategy: "draft" })}
+                              />
+                              生成待整理源码草稿
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+                      <div className="font-medium text-foreground">{luoguRuleSummary}</div>
+                      <div>切换规则不会清空当前扫描列表，但会重新计算候选状态和默认勾选，并清空已生成预览与写入结果。</div>
+                      {luoguPreviewResult && (
+                        <div>当前扫描列表：{luoguPreviewResult.submissions.length} 条，可候选 {luoguCurrentCandidateCount} 条。</div>
+                      )}
+                    </section>
+                  </div>
+                )}
+
                 {luoguImportCenterTab === "account" && (
                   <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-5">
                     <section className="grid shrink-0 grid-cols-2 gap-3 text-xs">
@@ -2726,6 +2954,8 @@ export default function App() {
                     ? `正在扫描第 ${luoguScanProgress.currentPage} 页，已发现 ${luoguScanProgress.foundCount} 条；范围：${luoguScanProgress.rangeLabel}`
                   : luoguImportCenterTab === "scan"
                     ? `已选 ${selectedLuoguImportCount} 条，生成预览后进入下一步`
+                    : luoguImportCenterTab === "rules"
+                      ? luoguRuleSummary
                     : luoguImportCenterTab === "account"
                       ? "账户状态只展示配置与最近结果，不扫描、不写入"
                     : luoguImportCenterTab === "manual"

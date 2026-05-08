@@ -110,6 +110,11 @@ export interface PrepareLuoguSubmissionNoteResult {
   skipReason: string | null;
 }
 
+export interface LuoguPrepareRules {
+  requireAc: boolean;
+  allowRawDraftWithoutInsight: boolean;
+}
+
 export interface WriteLuoguPreparedNoteResult {
   relativePath: string | null;
   skipped: boolean;
@@ -391,10 +396,12 @@ export async function importLuoguSubmission(
 
 export async function prepareLuoguSubmissionNote(
   submissionId: string,
+  rules?: LuoguPrepareRules,
 ): Promise<PrepareLuoguSubmissionNoteResult> {
   try {
     return await invoke<PrepareLuoguSubmissionNoteResult>("prepare_luogu_submission_note", {
       submissionId,
+      rules,
     });
   } catch (e) {
     throw toError(e);

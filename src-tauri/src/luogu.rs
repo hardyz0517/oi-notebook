@@ -162,6 +162,22 @@ pub struct PrepareLuoguSubmissionNoteResult {
     pub skip_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LuoguPrepareRules {
+    pub require_ac: bool,
+    pub allow_raw_draft_without_insight: bool,
+}
+
+impl Default for LuoguPrepareRules {
+    fn default() -> Self {
+        Self {
+            require_ac: true,
+            allow_raw_draft_without_insight: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteLuoguPreparedNoteResult {
@@ -1253,9 +1269,10 @@ fn prepare_luogu_submission_record_note(
     client_id: &str,
     notes_dir: &Path,
     ai_config: &AiConfigFields,
+    rules: &LuoguPrepareRules,
     record: &LuoguSubmissionRecord,
 ) -> PrepareLuoguSubmissionNoteResult {
-    if !is_ac_status(&record.status) {
+    if rules.require_ac && !is_ac_status(&record.status) {
         return PrepareLuoguSubmissionNoteResult {
             submission_id: record.submission_id.to_string(),
             problem_id: record.problem_id.clone(),
@@ -1269,6 +1286,29 @@ fn prepare_luogu_submission_record_note(
             existing: false,
             skipped: true,
             skip_reason: Some(format!("非 AC 提交，当前 verdict 为 {}", record.status)),
+        };
+    }
+
+    if !is_ac_status(&record.status) {
+        return PrepareLuoguSubmissionNoteResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            suggested_relative_path: String::new(),
+            markdown: String::new(),
+            source_code: String::new(),
+            draft_fallback: false,
+            ai_status: "skipped".to_string(),
+            reason: Some(format!(
+                "当前后端只支持 AC 提交导入，当前 verdict 为 {}",
+                record.status
+            )),
+            existing: false,
+            skipped: true,
+            skip_reason: Some(format!(
+                "当前后端只支持 AC 提交导入，当前 verdict 为 {}",
+                record.status
+            )),
         };
     }
 
@@ -1292,6 +1332,25 @@ fn prepare_luogu_submission_record_note(
                 };
             }
         };
+
+    if !rules.allow_raw_draft_without_insight
+        && extract_luogu_ai_candidate_comment(&source_code).is_none()
+    {
+        return PrepareLuoguSubmissionNoteResult {
+            submission_id: record.submission_id.to_string(),
+            problem_id: record.problem_id.clone(),
+            problem_title: record.problem_title.clone(),
+            suggested_relative_path: String::new(),
+            markdown: String::new(),
+            source_code,
+            draft_fallback: false,
+            ai_status: "skipped".to_string(),
+            reason: Some("未找到 insight / 启示注释，按规则跳过".to_string()),
+            existing: false,
+            skipped: true,
+            skip_reason: Some("未找到 insight / 启示注释，按规则跳过".to_string()),
+        };
+    }
 
     let prepared = match prepare_ai_first_luogu_note(
         &record.problem_id,
@@ -1741,6 +1800,7 @@ pub fn import_luogu_submission(
 #[tauri::command]
 pub fn prepare_luogu_submission_note(
     submission_id: String,
+    rules: Option<LuoguPrepareRules>,
 ) -> Result<PrepareLuoguSubmissionNoteResult, String> {
     let submission_id = submission_id.trim();
     let parsed_submission_id = match submission_id.parse::<u64>() {
@@ -1761,6 +1821,7 @@ pub fn prepare_luogu_submission_note(
 
     let notes_dir = get_notes_dir()?;
     let client = luogu_http_client()?;
+    let rules = rules.unwrap_or_default();
 
     Ok(prepare_luogu_submission_record_note(
         &client,
@@ -1768,6 +1829,7 @@ pub fn prepare_luogu_submission_note(
         &client_id,
         &notes_dir,
         &config.ai,
+        &rules,
         &record,
     ))
 }
