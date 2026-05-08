@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type AnchorHTMLAttributes,
   type HTMLAttributes,
@@ -7,11 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkDirective from "remark-directive";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { highlightCode } from "./highlight";
+import { remarkLuoguCallouts } from "./markdownCallouts";
 
 type MarkdownRendererProps = {
   markdown: string;
@@ -246,15 +249,98 @@ const components: Components = {
 };
 
 export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    for (const callout of root.querySelectorAll<HTMLElement>(
+      ".oi-callout[data-callout-collapsible='true']",
+    )) {
+      const isOpen = callout.dataset.open === "true";
+      setCalloutExpanded(callout, isOpen);
+
+      const title = getDirectCalloutTitle(callout);
+      if (!title) continue;
+
+      title.setAttribute("role", "button");
+      title.tabIndex = 0;
+
+      if (!title.querySelector(":scope > .oi-callout-chevron")) {
+        const chevron = document.createElement("span");
+        chevron.className = "oi-callout-chevron";
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.textContent = ">";
+        title.prepend(chevron);
+      }
+    }
+
+    const toggleFromTitle = (title: HTMLElement) => {
+      const callout = title.closest<HTMLElement>(".oi-callout[data-callout-collapsible='true']");
+      if (!callout || !root.contains(callout) || getDirectCalloutTitle(callout) !== title) {
+        return;
+      }
+
+      setCalloutExpanded(callout, callout.dataset.state !== "open");
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const title = target.closest<HTMLElement>(".oi-callout-title");
+      if (!title || !root.contains(title)) return;
+
+      toggleFromTitle(title);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains("oi-callout-title")) {
+        return;
+      }
+
+      event.preventDefault();
+      toggleFromTitle(target);
+    };
+
+    root.addEventListener("click", handleClick);
+    root.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      root.removeEventListener("click", handleClick);
+      root.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [markdown]);
+
   return (
-    <div className="prose-content">
+    <div ref={rootRef} className="prose-content">
       <ReactMarkdown
         components={components}
         rehypePlugins={[rehypeKatex]}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkDirective, remarkLuoguCallouts, remarkMath]}
       >
         {markdown}
       </ReactMarkdown>
     </div>
   );
+}
+
+function getDirectCalloutTitle(callout: HTMLElement): HTMLElement | null {
+  return callout.querySelector<HTMLElement>(":scope > .oi-callout-title");
+}
+
+function setCalloutExpanded(callout: HTMLElement, expanded: boolean) {
+  const title = getDirectCalloutTitle(callout);
+  const body = callout.querySelector<HTMLElement>(":scope > .oi-callout-body");
+
+  callout.dataset.state = expanded ? "open" : "collapsed";
+  title?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (body) {
+    body.hidden = !expanded;
+    body.toggleAttribute("hidden", !expanded);
+    body.style.display = expanded ? "" : "none";
+  }
 }

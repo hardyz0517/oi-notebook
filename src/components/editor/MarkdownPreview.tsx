@@ -135,6 +135,70 @@ export default function MarkdownPreview({
     };
   }, [renderedHtml]);
 
+  useEffect(() => {
+    const root = containerRef.current?.querySelector<HTMLElement>("[data-markdown-preview-content]");
+    if (!root) return;
+
+    for (const callout of root.querySelectorAll<HTMLElement>(
+      ".oi-callout[data-callout-collapsible='true']",
+    )) {
+      const isOpen = callout.dataset.open === "true";
+      setCalloutExpanded(callout, isOpen);
+
+      const title = getDirectCalloutTitle(callout);
+      if (!title) continue;
+
+      title.setAttribute("role", "button");
+      title.tabIndex = 0;
+
+      if (!title.querySelector(":scope > .oi-callout-chevron")) {
+        const chevron = document.createElement("span");
+        chevron.className = "oi-callout-chevron";
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.textContent = ">";
+        title.prepend(chevron);
+      }
+    }
+
+    const toggleFromTitle = (title: HTMLElement) => {
+      const callout = title.closest<HTMLElement>(".oi-callout[data-callout-collapsible='true']");
+      if (!callout || !root.contains(callout) || getDirectCalloutTitle(callout) !== title) {
+        return;
+      }
+
+      setCalloutExpanded(callout, callout.dataset.state !== "open");
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const title = target.closest<HTMLElement>(".oi-callout-title");
+      if (!title || !root.contains(title)) return;
+
+      toggleFromTitle(title);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains("oi-callout-title")) {
+        return;
+      }
+
+      event.preventDefault();
+      toggleFromTitle(target);
+    };
+
+    root.addEventListener("click", handleClick);
+    root.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      root.removeEventListener("click", handleClick);
+      root.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [renderedHtml]);
+
   return (
     // 外层容器：支持 className 覆盖，负责滚动
     <div ref={containerRef} className={cn("h-full w-full min-w-0 overflow-auto", className)}>
@@ -174,6 +238,20 @@ export default function MarkdownPreview({
           // ── 引用块 ────────────────────────────────────────────────────
           "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
 
+          // Luogu-style directive callouts.
+          "[&_.oi-callout]:my-4 [&_.oi-callout]:overflow-hidden [&_.oi-callout]:rounded-sm [&_.oi-callout]:border [&_.oi-callout]:bg-muted/35",
+          "[&_.oi-callout-title]:flex [&_.oi-callout-title]:cursor-pointer [&_.oi-callout-title]:select-none [&_.oi-callout-title]:items-center [&_.oi-callout-title]:gap-2 [&_.oi-callout-title]:border-b [&_.oi-callout-title]:px-4 [&_.oi-callout-title]:py-2.5 [&_.oi-callout-title]:text-sm [&_.oi-callout-title]:font-semibold [&_.oi-callout-title]:not-italic [&_.oi-callout-title]:outline-none [&_.oi-callout-title]:transition-colors [&_.oi-callout-title]:focus-visible:ring-2 [&_.oi-callout-title]:focus-visible:ring-ring",
+          "[&_.oi-callout-chevron]:inline-flex [&_.oi-callout-chevron]:h-4 [&_.oi-callout-chevron]:w-4 [&_.oi-callout-chevron]:shrink-0 [&_.oi-callout-chevron]:items-center [&_.oi-callout-chevron]:justify-center [&_.oi-callout-chevron]:text-base [&_.oi-callout-chevron]:leading-none [&_.oi-callout-chevron]:opacity-75 [&_.oi-callout-chevron]:transition-transform",
+          "[&_.oi-callout[data-state='open']>.oi-callout-title>.oi-callout-chevron]:rotate-90",
+          "[&_.oi-callout[data-state='collapsed']>.oi-callout-body]:hidden",
+          "[&_.oi-callout-body]:px-4 [&_.oi-callout-body]:py-3",
+          "[&_.oi-callout-body>*:first-child]:mt-0 [&_.oi-callout-body>*:last-child]:mb-0",
+          "[&_.oi-callout-info]:border-sky-500/45 [&_.oi-callout-info_.oi-callout-title]:border-sky-500/30 [&_.oi-callout-info_.oi-callout-title]:bg-sky-500/10 [&_.oi-callout-info_.oi-callout-title]:text-sky-200",
+          "[&_.oi-callout-success]:border-emerald-500/45 [&_.oi-callout-success_.oi-callout-title]:border-emerald-500/30 [&_.oi-callout-success_.oi-callout-title]:bg-emerald-500/10 [&_.oi-callout-success_.oi-callout-title]:text-emerald-200",
+          "[&_.oi-callout-warning]:border-amber-500/45 [&_.oi-callout-warning_.oi-callout-title]:border-amber-500/30 [&_.oi-callout-warning_.oi-callout-title]:bg-amber-500/10 [&_.oi-callout-warning_.oi-callout-title]:text-amber-200",
+          "[&_.oi-callout-error]:border-rose-500/45 [&_.oi-callout-error_.oi-callout-title]:border-rose-500/30 [&_.oi-callout-error_.oi-callout-title]:bg-rose-500/10 [&_.oi-callout-error_.oi-callout-title]:text-rose-200",
+          "[&_.oi-callout[data-open='true']>.oi-callout-title]:after:ml-1 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:rounded [&_.oi-callout[data-open='true']>.oi-callout-title]:after:border [&_.oi-callout[data-open='true']>.oi-callout-title]:after:border-current/30 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:px-1.5 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:py-0.5 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:text-[10px] [&_.oi-callout[data-open='true']>.oi-callout-title]:after:font-medium [&_.oi-callout[data-open='true']>.oi-callout-title]:after:text-current/75 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:content-['open']",
+
           // ── 列表 ──────────────────────────────────────────────────────
           "[&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
           "[&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6",
@@ -204,6 +282,24 @@ export default function MarkdownPreview({
       />
     </div>
   );
+}
+
+function getDirectCalloutTitle(callout: HTMLElement): HTMLElement | null {
+  const title = callout.querySelector<HTMLElement>(":scope > .oi-callout-title");
+  return title;
+}
+
+function setCalloutExpanded(callout: HTMLElement, expanded: boolean) {
+  const title = getDirectCalloutTitle(callout);
+  const body = callout.querySelector<HTMLElement>(":scope > .oi-callout-body");
+
+  callout.dataset.state = expanded ? "open" : "collapsed";
+  title?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (body) {
+    body.hidden = !expanded;
+    body.toggleAttribute("hidden", !expanded);
+    body.style.display = expanded ? "" : "none";
+  }
 }
 
 function shouldResolveNoteAsset(src: string): boolean {
