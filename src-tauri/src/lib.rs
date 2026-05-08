@@ -217,6 +217,7 @@ pub fn run() {
             luogu::write_luogu_prepared_note,
             luogu::get_luogu_config,
             luogu::save_luogu_config,
+            luogu::update_luogu_last_submission_id,
             luogu::test_luogu_connection,
             luogu::preview_luogu_submissions,
             luogu::preview_luogu_submission_page,

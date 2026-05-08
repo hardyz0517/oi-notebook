@@ -352,6 +352,16 @@ export async function saveLuoguConfig(config: Pick<LuoguConfig, "luogu">): Promi
   }
 }
 
+export async function updateLuoguLastSubmissionId(
+  lastSubmissionId: number | null,
+): Promise<void> {
+  try {
+    await invoke<void>("update_luogu_last_submission_id", { lastSubmissionId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> {
   try {
     return await invoke<TestLuoguConnectionResult>("test_luogu_connection");

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
@@ -139,12 +139,25 @@ function parseLuoguSubmissionId(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseLuoguLastSubmissionInput(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function getLuoguSubmissionCandidateState(
   submission: PreviewLuoguSubmission,
   submissions: PreviewLuoguSubmission[],
   rules: LuoguImportRules,
   lastSubmissionId: number | null,
+  skippedIds: Set<string>,
 ): LuoguSubmissionCandidateState {
+  if (skippedIds.has(submission.submissionId)) {
+    return { canSelect: false, statusLabel: "已跳过" };
+  }
+
   const submissionId = parseLuoguSubmissionId(submission.submissionId);
   if (lastSubmissionId !== null && submissionId !== null && submissionId <= lastSubmissionId) {
     return { canSelect: false, statusLabel: "跳过：旧提交" };
@@ -218,7 +231,10 @@ function getLuoguPreviewWorkflowStatusText(
   currentlyPreparingId: string | null,
   currentlyWritingId: string | null,
   selectedIds: Set<string>,
+  skippedIds: Set<string>,
 ): string {
+  if (skippedIds.has(submission.submissionId)) return "已跳过";
+
   if (writeResult) {
     if (writeResult.skipped) return `skip: ${writeResult.skipReason ?? "no reason"}`;
     if (writeResult.failed && writeResult.relativePath && writeResult.commitStatus === "failed") {
@@ -394,6 +410,7 @@ export default function App() {
   const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
   const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
+  const [skippedLuoguSubmissionIds, setSkippedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
   const [isPreparingSelectedLuogu, setIsPreparingSelectedLuogu] = useState(false);
   const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
   const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
@@ -413,6 +430,7 @@ export default function App() {
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
+  const [isUpdatingLuoguLastSubmissionId, setIsUpdatingLuoguLastSubmissionId] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
@@ -470,13 +488,21 @@ export default function App() {
           submissions,
           luoguImportRules,
           luoguPreviewResult?.lastSubmissionId ?? null,
+          skippedLuoguSubmissionIds,
         ),
       ]),
     ) as Record<string, LuoguSubmissionCandidateState>;
-  }, [luoguImportRules, luoguPreviewResult]);
+  }, [luoguImportRules, luoguPreviewResult, skippedLuoguSubmissionIds]);
   const luoguCurrentCandidateCount = Object.values(luoguSubmissionCandidateStates).filter(
     (state) => state.canSelect,
   ).length;
+  const luoguSelectableSubmissionIds = useMemo(
+    () =>
+      luoguPreviewResult?.submissions
+        .filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect)
+        .map((submission) => submission.submissionId) ?? [],
+    [luoguPreviewResult, luoguSubmissionCandidateStates],
+  );
   const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
   const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
     (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
@@ -694,7 +720,7 @@ export default function App() {
   };
 
   const closeLuoguSettings = () => {
-    if (isSavingLuoguConfig) return;
+    if (isSavingLuoguConfig || isUpdatingLuoguLastSubmissionId) return;
     setIsLuoguSettingsOpen(false);
   };
 
@@ -751,6 +777,7 @@ export default function App() {
     setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
     setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
+    setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
     setCurrentlyPreparingLuoguId(null);
@@ -839,6 +866,7 @@ export default function App() {
           result.submissions,
           luoguImportRules,
           result.lastSubmissionId,
+          new Set<string>(),
         ).canSelect,
       ).length;
       const skippedCount = result.submissions.length - candidateCount;
@@ -860,6 +888,7 @@ export default function App() {
                 result.submissions,
                 luoguImportRules,
                 result.lastSubmissionId,
+                new Set<string>(),
               ).canSelect,
             )
             .map((submission) => submission.submissionId),
@@ -876,6 +905,103 @@ export default function App() {
       setLuoguScanProgress(null);
       setIsScanningLuoguPreview(false);
     }
+  };
+
+  const resetLuoguPreparedWorkflow = () => {
+    setLuoguPreparedNotesById({});
+    setLuoguPrepareErrorsById({});
+    setCurrentlyPreparingLuoguId(null);
+    setLuoguPrepareProgress(null);
+    setLuoguWriteResultsById({});
+    setCurrentlyWritingLuoguId(null);
+    setLuoguWriteProgress(null);
+    setActiveLuoguPreparedPreviewId(null);
+    setActiveLuoguPreviewDetailTab("rendered");
+    setLuoguImportStep("scan");
+  };
+
+  const applyLuoguLastSubmissionIdState = (lastSubmissionId: number | null) => {
+    setLuoguConfigLastSubmissionId(lastSubmissionId === null ? "" : String(lastSubmissionId));
+    setSkippedLuoguSubmissionIds(new Set<string>());
+    setLuoguPreviewResult((current) => current ? { ...current, lastSubmissionId } : current);
+    setSelectedLuoguSubmissionIds(() => {
+      const submissions = luoguPreviewResult?.submissions ?? [];
+      return new Set(
+        submissions
+          .filter((submission) =>
+            getLuoguSubmissionCandidateState(
+              submission,
+              submissions,
+              luoguImportRules,
+              lastSubmissionId,
+              new Set<string>(),
+            ).canSelect,
+          )
+          .map((submission) => submission.submissionId),
+      );
+    });
+    setLuoguScanSummary((current) => {
+      const submissions = luoguPreviewResult?.submissions ?? [];
+      if (!current || submissions.length === 0) return current;
+      const candidateCount = submissions.filter((submission) =>
+        getLuoguSubmissionCandidateState(
+          submission,
+          submissions,
+          luoguImportRules,
+          lastSubmissionId,
+          new Set<string>(),
+        ).canSelect,
+      ).length;
+      return {
+        ...current,
+        candidateCount,
+        skippedCount: submissions.length - candidateCount,
+      };
+    });
+    resetLuoguPreparedWorkflow();
+  };
+
+  const saveLuoguLastSubmissionId = async (lastSubmissionId: number | null, successMessage: string) => {
+    setIsUpdatingLuoguLastSubmissionId(true);
+    try {
+      await updateLuoguLastSubmissionId(lastSubmissionId);
+      applyLuoguLastSubmissionIdState(lastSubmissionId);
+      toast.success(successMessage);
+    } catch (e) {
+      toast.error(`同步位置保存失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsUpdatingLuoguLastSubmissionId(false);
+    }
+  };
+
+  const handleSaveLuoguLastSubmissionId = async () => {
+    const parsedLastSubmissionId = parseLuoguLastSubmissionInput(luoguConfigLastSubmissionId);
+    if (parsedLastSubmissionId === undefined) {
+      toast.error("last_submission_id 必须是非负整数，留空表示清空");
+      return;
+    }
+
+    await saveLuoguLastSubmissionId(parsedLastSubmissionId, "同步位置已保存");
+  };
+
+  const handleClearLuoguLastSubmissionId = async () => {
+    await saveLuoguLastSubmissionId(null, "同步位置已清空；不会删除任何笔记，之后扫描可以重新看到旧提交");
+  };
+
+  const handleUseLatestScannedLuoguSubmissionId = async () => {
+    const submissions = luoguPreviewResult?.submissions ?? [];
+    const latestSubmissionId = submissions.reduce<number | null>((latest, submission) => {
+      const submissionId = parseLuoguSubmissionId(submission.submissionId);
+      if (submissionId === null) return latest;
+      return latest === null ? submissionId : Math.max(latest, submissionId);
+    }, null);
+
+    if (latestSubmissionId === null) {
+      toast.error("当前扫描结果里没有可用的 submission id");
+      return;
+    }
+
+    await saveLuoguLastSubmissionId(latestSubmissionId, `同步位置已设为本次扫描最新提交 ${latestSubmissionId}`);
   };
 
   const openAiSettings = async () => {
@@ -1066,6 +1192,7 @@ export default function App() {
     setLuoguScanProgress(null);
     setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
+    setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
     setCurrentlyPreparingLuoguId(null);
@@ -1098,6 +1225,7 @@ export default function App() {
                 submissions,
                 next,
                 luoguPreviewResult?.lastSubmissionId ?? null,
+                new Set<string>(),
               ).canSelect,
             )
             .map((submission) => submission.submissionId),
@@ -1106,6 +1234,7 @@ export default function App() {
       return next;
     });
 
+    setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
     setCurrentlyPreparingLuoguId(null);
@@ -1132,10 +1261,64 @@ export default function App() {
     });
   };
 
+  const handleSelectAllLuoguCandidates = () => {
+    if (luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+
+    setSelectedLuoguSubmissionIds(new Set(luoguSelectableSubmissionIds));
+    toast.success(`已选择 ${luoguSelectableSubmissionIds.length} 条可候选提交`);
+  };
+
+  const handleClearLuoguSelection = () => {
+    if (selectedLuoguImportCount === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+
+    setSelectedLuoguSubmissionIds(new Set<string>());
+    toast.success("已取消选择");
+  };
+
+  const handleSkipSelectedLuoguSubmissions = () => {
+    if (!luoguPreviewResult || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+
+    const idsToSkip = luoguPreviewResult.submissions
+      .filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId))
+      .filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect)
+      .map((submission) => submission.submissionId);
+
+    if (idsToSkip.length === 0) {
+      toast.error("没有可跳过的选中提交");
+      return;
+    }
+
+    const idsToSkipSet = new Set(idsToSkip);
+    setSkippedLuoguSubmissionIds((current) => new Set([...current, ...idsToSkip]));
+    setSelectedLuoguSubmissionIds((current) => {
+      const next = new Set(current);
+      idsToSkip.forEach((id) => next.delete(id));
+      return next;
+    });
+    setLuoguPreparedNotesById((current) => {
+      const next = { ...current };
+      idsToSkip.forEach((id) => delete next[id]);
+      return next;
+    });
+    setLuoguPrepareErrorsById((current) => {
+      const next = { ...current };
+      idsToSkip.forEach((id) => delete next[id]);
+      return next;
+    });
+    setLuoguWriteResultsById((current) => {
+      const next = { ...current };
+      idsToSkip.forEach((id) => delete next[id]);
+      return next;
+    });
+    setActiveLuoguPreparedPreviewId((current) => current && idsToSkipSet.has(current) ? null : current);
+    toast.success(`已跳过 ${idsToSkip.length} 条提交；不会写 notes、调用 AI 或提交 Git`);
+  };
+
   const handlePrepareSelectedLuoguSubmissions = async () => {
     if (!luoguPreviewResult) return;
     const selectedSubmissions = luoguPreviewResult.submissions.filter((submission) =>
-      selectedLuoguSubmissionIds.has(submission.submissionId),
+      selectedLuoguSubmissionIds.has(submission.submissionId) &&
+      !skippedLuoguSubmissionIds.has(submission.submissionId),
     );
     if (selectedSubmissions.length === 0) {
       toast.error("Please select Luogu submissions to preview");
@@ -2489,6 +2672,7 @@ export default function App() {
                                   currentlyPreparingLuoguId,
                                   currentlyWritingLuoguId,
                                   selectedLuoguSubmissionIds,
+                                  skippedLuoguSubmissionIds,
                                 );
                                 const visibleStatusText = statusText === submission.statusLabel ? candidateState.statusLabel : statusText;
                                 return (
@@ -2577,6 +2761,7 @@ export default function App() {
                                   currentlyPreparingLuoguId,
                                   currentlyWritingLuoguId,
                                   selectedLuoguSubmissionIds,
+                                  skippedLuoguSubmissionIds,
                                 );
                                 const canPreview = prepared && !prepared.skipped && prepared.markdown.trim();
                                 return (
@@ -2812,6 +2997,58 @@ export default function App() {
                       </div>
                     </section>
 
+                    <section className="grid gap-3 rounded-md border border-border bg-card/70 p-4 text-xs">
+                      <div>
+                        <div className="text-sm font-medium text-foreground">同步位置</div>
+                        <div className="mt-1 text-muted-foreground">
+                          这里只更新 .oinb/config.json 里的 last_submission_id，不会写 notes、调用 AI 或提交 Git。
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="luogu-last-submission-id">last_submission_id</Label>
+                        <Input
+                          id="luogu-last-submission-id"
+                          value={luoguConfigLastSubmissionId}
+                          disabled={isLoadingLuoguConfig || isUpdatingLuoguLastSubmissionId}
+                          placeholder="留空表示清空"
+                          onChange={(e) => setLuoguConfigLastSubmissionId(e.target.value)}
+                        />
+                        <div className="text-[11px] text-muted-foreground">
+                          当前值：{isLoadingLuoguConfig ? "读取中" : luoguConfigLastSubmissionId.trim() || "未设置"}。空值表示清空；非空必须是非负整数。
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleSaveLuoguLastSubmissionId}
+                          disabled={isLoadingLuoguConfig || isUpdatingLuoguLastSubmissionId}
+                        >
+                          {isUpdatingLuoguLastSubmissionId ? "保存中..." : "保存同步位置"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleClearLuoguLastSubmissionId}
+                          disabled={isLoadingLuoguConfig || isUpdatingLuoguLastSubmissionId}
+                        >
+                          清空同步位置
+                        </Button>
+                        {luoguPreviewResult && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleUseLatestScannedLuoguSubmissionId}
+                            disabled={isLoadingLuoguConfig || isUpdatingLuoguLastSubmissionId || luoguPreviewResult.submissions.length === 0}
+                          >
+                            设为本次扫描最新提交
+                          </Button>
+                        )}
+                      </div>
+                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] leading-5 text-amber-100">
+                        清空后不会删除任何笔记，只是让之后扫描可以重新看到旧提交。设为本次扫描最新提交会让下次默认不再显示这些提交及更早提交。
+                      </div>
+                    </section>
+
                     <section className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
                       <div className="font-medium text-foreground">洛谷账户配置状态</div>
                       <div>需要从浏览器洛谷 Cookie 中复制 _uid 和 __client_id。</div>
@@ -2974,6 +3211,48 @@ export default function App() {
                         {isScanningLuoguPreview
                           ? "扫描中..."
                           : `扫描${getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit)}`}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleSelectAllLuoguCandidates}
+                        disabled={
+                          luoguSelectableSubmissionIds.length === 0 ||
+                          isLoadingLuoguConfig ||
+                          isScanningLuoguPreview ||
+                          isPreparingSelectedLuogu ||
+                          isWritingPreparedLuogu ||
+                          isSyncingLuogu
+                        }
+                      >
+                        全选可候选
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleClearLuoguSelection}
+                        disabled={
+                          selectedLuoguImportCount === 0 ||
+                          isLoadingLuoguConfig ||
+                          isScanningLuoguPreview ||
+                          isPreparingSelectedLuogu ||
+                          isWritingPreparedLuogu ||
+                          isSyncingLuogu
+                        }
+                      >
+                        取消全选
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleSkipSelectedLuoguSubmissions}
+                        disabled={
+                          selectedLuoguImportCount === 0 ||
+                          isLoadingLuoguConfig ||
+                          isScanningLuoguPreview ||
+                          isPreparingSelectedLuogu ||
+                          isWritingPreparedLuogu ||
+                          isSyncingLuogu
+                        }
+                      >
+                        跳过选中 {selectedLuoguImportCount}
                       </Button>
                       <Button
                         onClick={handlePrepareSelectedLuoguSubmissions}

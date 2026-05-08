@@ -1958,6 +1958,13 @@ pub fn save_luogu_config(config: LuoguConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn update_luogu_last_submission_id(last_submission_id: Option<u64>) -> Result<(), String> {
+    let mut config = read_config()?;
+    config.luogu.last_submission_id = last_submission_id;
+    write_config(&config)
+}
+
+#[tauri::command]
 pub fn test_luogu_connection() -> Result<TestLuoguConnectionResult, String> {
     let config = read_config()?;
     let (uid, client_id) = require_luogu_config(&config)?;
