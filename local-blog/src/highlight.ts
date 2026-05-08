@@ -1,6 +1,9 @@
-import type { HighlighterCore, ThemeRegistration } from "shiki/core";
+import type { HighlighterCore, ShikiTransformer, ThemeRegistration } from "shiki/core";
 
 type HighlightLanguage = "bash" | "c" | "cpp" | "java" | "javascript" | "python" | "rust" | "typescript";
+type CodeMeta = {
+  highlightLines?: Set<number>;
+};
 
 const supportedLanguages = new Map<string, HighlightLanguage | null>([
   ["c", "c"],
@@ -25,6 +28,18 @@ const supportedLanguages = new Map<string, HighlightLanguage | null>([
 
 const highlightedCodeCache = new Map<string, Promise<string | null>>();
 let highlighterPromise: Promise<HighlighterCore> | null = null;
+const defaultCodeLanguage: HighlightLanguage = "cpp";
+
+const luoguCodeLineTransformer: ShikiTransformer = {
+  name: "oi-luogu-code-lines",
+  line(node, lineNumber) {
+    const meta = this.options.meta as CodeMeta | undefined;
+
+    if (meta?.highlightLines?.has(lineNumber)) {
+      this.addClassToHast(node, "oi-code-line-highlight");
+    }
+  },
+};
 
 const oiLightTheme = {
   name: "oi-light",
@@ -150,7 +165,7 @@ function getHighlighter() {
 
 export function normalizeCodeLanguage(language: string | undefined) {
   if (!language) {
-    return "text";
+    return defaultCodeLanguage;
   }
 
   const normalized = supportedLanguages.get(language.trim().toLowerCase());
@@ -158,14 +173,15 @@ export function normalizeCodeLanguage(language: string | undefined) {
   return normalized === undefined ? null : normalized;
 }
 
-export function highlightCode(code: string, language: string | undefined) {
+export function highlightCode(code: string, language: string | undefined, metaString = "") {
   const normalizedLanguage = normalizeCodeLanguage(language);
 
   if (!normalizedLanguage) {
     return Promise.resolve(null);
   }
 
-  const cacheKey = `${normalizedLanguage}\0${code}`;
+  const highlightLines = parseHighlightedLines(metaString);
+  const cacheKey = `${normalizedLanguage}\0${metaString}\0${code}`;
   const cached = highlightedCodeCache.get(cacheKey);
 
   if (cached) {
@@ -176,7 +192,9 @@ export function highlightCode(code: string, language: string | undefined) {
     .then((highlighter) =>
       highlighter.codeToHtml(code, {
         lang: normalizedLanguage,
+        meta: highlightLines.size > 0 ? { highlightLines } : undefined,
         theme: "oi-light",
+        transformers: [luoguCodeLineTransformer],
       }),
     )
     .catch((error) => {
@@ -186,4 +204,41 @@ export function highlightCode(code: string, language: string | undefined) {
 
   highlightedCodeCache.set(cacheKey, highlighted);
   return highlighted;
+}
+
+function parseHighlightedLines(metaString: string): Set<number> {
+  const lines = new Set<number>();
+  const match = metaString.match(/(?:^|\s)lines=([^\s]+)/);
+
+  if (!match) {
+    return lines;
+  }
+
+  for (const segment of match[1].split(",")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+
+    const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const start = Number(rangeMatch[1]);
+      const end = Number(rangeMatch[2]);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
+        continue;
+      }
+
+      for (let line = start; line <= end; line += 1) {
+        lines.add(line);
+      }
+      continue;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const line = Number(trimmed);
+      if (Number.isSafeInteger(line) && line >= 1) {
+        lines.add(line);
+      }
+    }
+  }
+
+  return lines;
 }

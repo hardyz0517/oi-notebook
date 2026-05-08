@@ -142,7 +142,16 @@ function getNodeText(children: ReactNode): string {
   return "";
 }
 
-function CodeBlock({ children }: { children: ReactNode }) {
+type CodeNode = {
+  data?: {
+    meta?: string | null;
+  };
+  properties?: {
+    metastring?: string | null;
+  };
+};
+
+function CodeBlock({ children, metaString }: { children: ReactNode; metaString?: string }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
   const codeText = getNodeText(children).replace(/\n$/, "");
@@ -158,7 +167,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
     setHighlightedHtml(null);
 
-    highlightCode(codeText, language).then((html) => {
+    highlightCode(codeText, language, metaString).then((html) => {
       if (!cancelled) {
         setHighlightedHtml(html);
       }
@@ -167,7 +176,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [codeText, language]);
+  }, [codeText, language, metaString]);
 
   const copyCode = async () => {
     try {
@@ -241,12 +250,42 @@ const components: Components = {
     return <img {...props} alt={alt ?? ""} loading="lazy" src={safeSrc} />;
   },
   pre({ children }: HTMLAttributes<HTMLPreElement> & { children?: ReactNode }) {
-    return <CodeBlock>{children}</CodeBlock>;
+    const codeChild = Array.isArray(children) ? children[0] : children;
+    const node =
+      codeChild && typeof codeChild === "object" && "props" in codeChild
+        ? ((codeChild.props as { node?: unknown }).node ?? null)
+        : null;
+    const codeProps =
+      codeChild && typeof codeChild === "object" && "props" in codeChild
+        ? (codeChild.props as { "data-meta"?: string })
+        : null;
+    const metaString = getCodeMetaString(node) ?? codeProps?.["data-meta"];
+
+    return <CodeBlock metaString={metaString}>{children}</CodeBlock>;
   },
-  code({ children, className }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) {
-    return <code className={className}>{children}</code>;
+  code({
+    children,
+    className,
+    node,
+  }: HTMLAttributes<HTMLElement> & { children?: ReactNode; node?: unknown }) {
+    const metaString = getCodeMetaString(node);
+
+    return (
+      <code className={className} data-meta={metaString}>
+        {children}
+      </code>
+    );
   },
 };
+
+function getCodeMetaString(node: unknown): string | undefined {
+  if (!node || typeof node !== "object") {
+    return undefined;
+  }
+
+  const codeNode = node as CodeNode;
+  return codeNode.data?.meta ?? codeNode.properties?.metastring ?? undefined;
+}
 
 export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
   const rootRef = useRef<HTMLDivElement>(null);

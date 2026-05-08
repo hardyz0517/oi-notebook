@@ -234,6 +234,8 @@ export default function MarkdownPreview({
           "[&_pre]:my-4 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm",
           // reset 行内 code 样式，防止 pre > code 继承背景和 padding
           "[&_pre_code]:inline-block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
+          "[&_pre_.line]:block [&_pre_.line]:min-h-[1.4em]",
+          "[&_pre_.oi-code-line-highlight]:mx-[-1rem] [&_pre_.oi-code-line-highlight]:border-l-2 [&_pre_.oi-code-line-highlight]:border-amber-300/80 [&_pre_.oi-code-line-highlight]:bg-amber-300/15 [&_pre_.oi-code-line-highlight]:px-4",
 
           // ── 引用块 ────────────────────────────────────────────────────
           "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",

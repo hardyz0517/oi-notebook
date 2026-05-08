@@ -7,7 +7,24 @@ import remarkRehype from "remark-rehype";
 import rehypeKatex from "rehype-katex";
 import rehypeShiki from "@shikijs/rehype";
 import rehypeStringify from "rehype-stringify";
+import type { Element } from "hast";
+import type { ShikiTransformer } from "shiki";
 import { remarkLuoguCallouts } from "./markdownCallouts";
+
+type CodeMeta = {
+  highlightLines?: Set<number>;
+};
+
+const luoguCodeLineTransformer: ShikiTransformer = {
+  name: "oi-luogu-code-lines",
+  line(node, lineNumber) {
+    const meta = this.options.meta as CodeMeta | undefined;
+
+    if (meta?.highlightLines?.has(lineNumber)) {
+      this.addClassToHast(node, "oi-code-line-highlight");
+    }
+  },
+};
 
 const processor = unified()
   .use(remarkParse)
@@ -17,7 +34,12 @@ const processor = unified()
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeKatex)
-  .use(rehypeShiki, { theme: "one-dark-pro" })
+  .use(rehypeShiki, {
+    defaultLanguage: "cpp",
+    parseMetaString: parseCodeMeta,
+    theme: "one-dark-pro",
+    transformers: [luoguCodeLineTransformer],
+  })
   .use(rehypeStringify, { allowDangerousHtml: true })
   .freeze();
 
@@ -55,4 +77,47 @@ function stripFrontmatter(markdown: string): string {
   }
 
   return markdown;
+}
+
+function parseCodeMeta(metaString: string, _node: Element): CodeMeta | undefined {
+  const highlightLines = parseHighlightedLines(metaString);
+
+  return highlightLines.size > 0 ? { highlightLines } : undefined;
+}
+
+function parseHighlightedLines(metaString: string): Set<number> {
+  const lines = new Set<number>();
+  const match = metaString.match(/(?:^|\s)lines=([^\s]+)/);
+
+  if (!match) {
+    return lines;
+  }
+
+  for (const segment of match[1].split(",")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+
+    const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const start = Number(rangeMatch[1]);
+      const end = Number(rangeMatch[2]);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
+        continue;
+      }
+
+      for (let line = start; line <= end; line += 1) {
+        lines.add(line);
+      }
+      continue;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const line = Number(trimmed);
+      if (Number.isSafeInteger(line) && line >= 1) {
+        lines.add(line);
+      }
+    }
+  }
+
+  return lines;
 }

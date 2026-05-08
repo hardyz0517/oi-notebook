@@ -1027,6 +1027,18 @@ a {
   line-height: 1.62;
 }
 
+.code-block .line {
+  display: block;
+  min-height: 1.62em;
+}
+
+.code-block .oi-code-line-highlight {
+  margin: 0 -18px;
+  border-left: 3px solid rgba(183, 121, 31, 0.48);
+  padding: 0 18px;
+  background: rgba(255, 202, 87, 0.2);
+}
+
 .prose-content img {
   display: block;
   max-width: 100%;
