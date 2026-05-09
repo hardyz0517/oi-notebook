@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+﻿import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
@@ -3605,239 +3605,315 @@ export default function App() {
         <Separator orientation="vertical" />
 
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {currentFilePath && (
-          <MarkdownEditorToolbar
-            disabled={!showEditorPane || !markdownToolbarApi?.hasEditor()}
-            zoomLabel={showEditorPane ? contentZoomLabel : undefined}
-            trailingContent={editorViewModeSwitcher}
-            onAction={(actionId) => {
-              markdownToolbarApi?.executeAction(actionId);
-            }}
-          />
-        )}
+          {!currentFilePath ? (
+            <div className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
+              <div className="grid w-full max-w-6xl gap-5">
+                <section className="rounded-lg border border-border bg-background/90 p-6 shadow-sm">
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-2xl font-semibold tracking-wide">OI Notebook</div>
+                        <span className="rounded-sm border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground">
+                          OI 笔记编辑器 + 本地博客 + 洛谷 / AI 辅助
+                        </span>
+                      </div>
+                      <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                        用一个本地工作台把题解、trick、复盘、博客预览，以及洛谷导入和 AI 整理串起来。第一次打开时，可以先从一篇普通笔记开始。
+                      </p>
+                    </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {/* Center: Markdown editor */}
-        <main
-          className={cn(
-            "flex min-w-0 flex-1 flex-col overflow-hidden",
-            !showEditorPane && "hidden",
-          )}
-          style={zoomStyle}
-          onWheelCapture={handleContentWheel}
-        >
-          {currentFilePath && editorViewMode !== "preview" && (
-            <details
-              open={isFrontmatterOpen}
-              onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
-              className="shrink-0 border-b border-border bg-background/95"
-            >
-              <summary className="flex h-8 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
-                <span className="inline-flex items-center gap-1.5">
-                  <ChevronRight
-                    className={cn(
-                      "h-3.5 w-3.5 transition-transform",
-                      isFrontmatterOpen && "rotate-90",
-                    )}
-                    aria-hidden="true"
-                  />
-                  <span>文章信息</span>
-                </span>
-                {frontmatter.warning && (
-                  <span className="normal-case tracking-normal text-amber-400">
-                    {frontmatter.warning}
-                  </span>
-                )}
-              </summary>
-              <div className="grid gap-3 px-4 py-3">
-                <div className="flex items-center justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1.5 px-2 text-xs"
-                    onClick={handlePolishNoteBody}
-                    disabled={!currentFilePath || isPolishingNoteBody}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    AI 全文润色
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1.5 px-2 text-xs"
-                    onClick={handleGenerateNoteMetadata}
-                    disabled={
-                      !currentFilePath ||
-                      !frontmatter.canMerge ||
-                      !frontmatter.canEditTags ||
-                      isGeneratingNoteMetadata
-                    }
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    AI 补全元数据
-                  </Button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="frontmatter-title">title</Label>
-                    <Input
-                      id="frontmatter-title"
-                      value={frontmatter.fields.title}
-                      disabled={!frontmatter.canMerge}
-                      onChange={(e) => updateFrontmatter({ title: e.target.value })}
-                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button className="gap-2" onClick={openCreateDialog}>
+                        <Plus className="h-4 w-4" />
+                        新建笔记
+                      </Button>
+                      <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
+                        <ExternalLink className="h-4 w-4" />
+                        打开博客
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={openAiSettings}
+                        disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                      >
+                        <Bot className="h-4 w-4" />
+                        配置 AI
+                      </Button>
+                      <Button variant="outline" className="gap-2" onClick={openNotesFolder}>
+                        <FolderOpen className="h-4 w-4" />
+                        笔记目录
+                      </Button>
+                    </div>
                   </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="frontmatter-tags">tags</Label>
-                    <Input
-                      id="frontmatter-tags"
-                      value={frontmatter.fields.tags.join(", ")}
-                      disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
-                      placeholder="DP, 线段树, trick"
-                      onChange={(e) => updateTagsFromInput(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="frontmatter-difficulty">difficulty</Label>
-                    <Input
-                      id="frontmatter-difficulty"
-                      value={frontmatter.fields.difficulty}
-                      disabled={!frontmatter.canMerge}
-                      onChange={(e) => updateFrontmatter({ difficulty: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="frontmatter-source">source</Label>
-                    <Input
-                      id="frontmatter-source"
-                      value={frontmatter.fields.source}
-                      disabled={!frontmatter.canMerge}
-                      onChange={(e) => updateFrontmatter({ source: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="frontmatter-summary">summary</Label>
-                  <textarea
-                    id="frontmatter-summary"
-                    value={frontmatter.fields.summary}
-                    disabled={!frontmatter.canMerge}
-                    rows={2}
-                    className="min-h-14 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
-                    onChange={(e) => updateFrontmatter({ summary: e.target.value })}
-                  />
-                </div>
-                <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={frontmatter.fields.draft}
-                    disabled={!frontmatter.canMerge}
-                    className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
-                    onChange={(e) => updateFrontmatter({ draft: e.target.checked })}
-                  />
-                  draft
-                </label>
-              </div>
-            </details>
-          )}
-          {currentFilePath ? (
-            <MarkdownEditor
-              value={markdown}
-              onChange={handleEditorChange}
-              onPasteImage={handlePasteImage}
-              onScroll={(r) => setScrollRatio(r)}
-              hideToolbar
-              onToolbarApiChange={setMarkdownToolbarApi}
-              className="min-h-0 min-w-0 flex-1"
-            />
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6 py-8">
-              <div className="grid w-full max-w-3xl gap-6">
-                <div className="grid gap-2">
-                  <div className="text-2xl font-semibold tracking-wide">OI Notebook</div>
-                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                    为 OIer 准备的本地 Markdown 笔记、博客复习和 AI 整理工具。
-                  </p>
+                </section>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Plus className="h-4 w-4" />
+                      快速开始
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>左侧文件树管理 notes，中间写 Markdown，选中文件后右侧实时预览。</div>
+                      <div>保存后可以直接去 Local Blog v2 看文章效果。</div>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Sparkles className="h-4 w-4" />
+                      Markdown 能力
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>支持 KaTeX 数学公式、代码高亮、行高亮和可选行号。</div>
+                      <div>也支持洛谷风格 callout、align、epigraph、cute-table 和表格合并。</div>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RefreshCw className="h-4 w-4" />
+                      洛谷导入
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>现在是可控流程：先扫描提交，再选择规则。</div>
+                      <div>生成预览后可查看渲染预览、Markdown 源文和提交源码，确认后再写入。</div>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Bot className="h-4 w-4" />
+                      AI 辅助
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>可配置 DeepSeek 或 OpenAI compatible API。</div>
+                      <div>支持编辑 AI Prompt，导入洛谷时也能让 AI 整理 insight 或生成草稿。</div>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <ExternalLink className="h-4 w-4" />
+                      Local Blog
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>一键打开本地博客预览，支持文章列表、搜索、分类和标签。</div>
+                      <div>当前主力体验是 Local Blog v2，适合拿来复习和回看自己的积累。</div>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <FileText className="h-4 w-4" />
+                      注意事项
+                    </div>
+                    <div className="text-xs leading-6 text-muted-foreground">
+                      <div>API Key 只保存在本地配置。</div>
+                      <div>普通同学使用安装版时，不需要自己安装 Node 或 pnpm；Git 也可以后面再学。</div>
+                    </div>
+                  </section>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Button className="gap-2" onClick={openCreateDialog}>
-                    <Plus className="h-4 w-4" />
-                    新建笔记
-                  </Button>
-                  <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
-                    <ExternalLink className="h-4 w-4" />
-                    打开博客
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2"
-                    onClick={openAiSettings}
-                    disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-                  >
-                    <Bot className="h-4 w-4" />
-                    配置 AI
-                  </Button>
-                </div>
-
-                <div className="grid gap-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    笔记目录
+                <section className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      笔记目录
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={openNotesFolder}>
+                      打开目录
+                    </Button>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-md border border-border bg-background/70 p-3">
                       <div className="text-sm font-medium">tricks</div>
-                      <div className="mt-1 text-xs text-muted-foreground">手写技巧 / trick</div>
+                      <div className="mt-1 text-xs text-muted-foreground">算法结论、模板和常见套路。</div>
                     </div>
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                    <div className="rounded-md border border-border bg-background/70 p-3">
                       <div className="text-sm font-medium">problems</div>
-                      <div className="mt-1 text-xs text-muted-foreground">题解</div>
+                      <div className="mt-1 text-xs text-muted-foreground">题解、证明、踩坑和复盘。</div>
                     </div>
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                    <div className="rounded-md border border-border bg-background/70 p-3">
                       <div className="text-sm font-medium">luogu</div>
-                      <div className="mt-1 text-xs text-muted-foreground">洛谷同步沉淀</div>
+                      <div className="mt-1 text-xs text-muted-foreground">洛谷导入后沉淀下来的笔记。</div>
                     </div>
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                    <div className="rounded-md border border-border bg-background/70 p-3">
                       <div className="text-sm font-medium">inbox</div>
-                      <div className="mt-1 text-xs text-muted-foreground">速记收件箱</div>
+                      <div className="mt-1 text-xs text-muted-foreground">速记、草稿和暂存想法。</div>
                     </div>
                   </div>
-                </div>
-
-                <div className="rounded-md border border-border bg-background/80 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  笔记保存在本机 notes 目录，可通过顶部“笔记文件夹”打开。
-                </div>
+                </section>
               </div>
             </div>
-          )}
-        </main>
-
-        {showEditorPane && showPreviewPane && <Separator orientation="vertical" />}
-
-        {/* Right: Live preview */}
-        <aside
-          className={cn(
-            "min-w-0 overflow-hidden",
-            showPreviewPane ? "flex" : "hidden",
-            showEditorPane ? "flex-1" : "flex-[1_1_100%]",
-          )}
-          style={zoomStyle}
-          onWheelCapture={handleContentWheel}
-        >
-          {currentFilePath ? (
-            <MarkdownPreview
-              markdown={markdown}
-              noteRelativePath={currentFilePath}
-              scrollRatio={scrollRatio}
-              className="h-full w-full min-w-0"
-            />
           ) : (
-            <div className="flex h-full w-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground">
-              选择或新建笔记后，这里会显示 Markdown 预览。
-            </div>
+            <>
+              <MarkdownEditorToolbar
+                disabled={!showEditorPane || !markdownToolbarApi?.hasEditor()}
+                zoomLabel={showEditorPane ? contentZoomLabel : undefined}
+                trailingContent={editorViewModeSwitcher}
+                onAction={(actionId) => {
+                  markdownToolbarApi?.executeAction(actionId);
+                }}
+              />
+
+              <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+                {/* Center: Markdown editor */}
+                <main
+                  className={cn(
+                    "flex min-w-0 flex-1 flex-col overflow-hidden",
+                    !showEditorPane && "hidden",
+                  )}
+                  style={zoomStyle}
+                  onWheelCapture={handleContentWheel}
+                >
+                  {editorViewMode !== "preview" && (
+                    <details
+                      open={isFrontmatterOpen}
+                      onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
+                      className="shrink-0 border-b border-border bg-background/95"
+                    >
+                      <summary className="flex h-8 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ChevronRight
+                            className={cn(
+                              "h-3.5 w-3.5 transition-transform",
+                              isFrontmatterOpen && "rotate-90",
+                            )}
+                            aria-hidden="true"
+                          />
+                          <span>文章信息</span>
+                        </span>
+                        {frontmatter.warning && (
+                          <span className="normal-case tracking-normal text-amber-400">
+                            {frontmatter.warning}
+                          </span>
+                        )}
+                      </summary>
+                      <div className="grid gap-3 px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 px-2 text-xs"
+                            onClick={handlePolishNoteBody}
+                            disabled={!currentFilePath || isPolishingNoteBody}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            AI 全文润色
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 px-2 text-xs"
+                            onClick={handleGenerateNoteMetadata}
+                            disabled={
+                              !currentFilePath ||
+                              !frontmatter.canMerge ||
+                              !frontmatter.canEditTags ||
+                              isGeneratingNoteMetadata
+                            }
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            AI 补全元数据
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="frontmatter-title">title</Label>
+                            <Input
+                              id="frontmatter-title"
+                              value={frontmatter.fields.title}
+                              disabled={!frontmatter.canMerge}
+                              onChange={(e) => updateFrontmatter({ title: e.target.value })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="frontmatter-tags">tags</Label>
+                            <Input
+                              id="frontmatter-tags"
+                              value={frontmatter.fields.tags.join(", ")}
+                              disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
+                              placeholder="DP, 线段树, trick"
+                              onChange={(e) => updateTagsFromInput(e.target.value)}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="frontmatter-difficulty">difficulty</Label>
+                            <Input
+                              id="frontmatter-difficulty"
+                              value={frontmatter.fields.difficulty}
+                              disabled={!frontmatter.canMerge}
+                              onChange={(e) => updateFrontmatter({ difficulty: e.target.value })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="frontmatter-source">source</Label>
+                            <Input
+                              id="frontmatter-source"
+                              value={frontmatter.fields.source}
+                              disabled={!frontmatter.canMerge}
+                              onChange={(e) => updateFrontmatter({ source: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="frontmatter-summary">summary</Label>
+                          <textarea
+                            id="frontmatter-summary"
+                            value={frontmatter.fields.summary}
+                            disabled={!frontmatter.canMerge}
+                            rows={2}
+                            className="min-h-14 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                            onChange={(e) => updateFrontmatter({ summary: e.target.value })}
+                          />
+                        </div>
+                        <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={frontmatter.fields.draft}
+                            disabled={!frontmatter.canMerge}
+                            className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                            onChange={(e) => updateFrontmatter({ draft: e.target.checked })}
+                          />
+                          draft
+                        </label>
+                      </div>
+                    </details>
+                  )}
+                  <MarkdownEditor
+                    value={markdown}
+                    onChange={handleEditorChange}
+                    onPasteImage={handlePasteImage}
+                    onScroll={(r) => setScrollRatio(r)}
+                    hideToolbar
+                    onToolbarApiChange={setMarkdownToolbarApi}
+                    className="min-h-0 min-w-0 flex-1"
+                  />
+                </main>
+
+                {showEditorPane && showPreviewPane && <Separator orientation="vertical" />}
+
+                {/* Right: Live preview */}
+                <aside
+                  className={cn(
+                    "min-w-0 overflow-hidden",
+                    showPreviewPane ? "flex" : "hidden",
+                    showEditorPane ? "flex-1" : "flex-[1_1_100%]",
+                  )}
+                  style={zoomStyle}
+                  onWheelCapture={handleContentWheel}
+                >
+                  <MarkdownPreview
+                    markdown={markdown}
+                    noteRelativePath={currentFilePath}
+                    scrollRatio={scrollRatio}
+                    className="h-full w-full min-w-0"
+                  />
+                </aside>
+              </div>
+            </>
           )}
-        </aside>
-        </div>
         </section>
       </div>
     </div>
