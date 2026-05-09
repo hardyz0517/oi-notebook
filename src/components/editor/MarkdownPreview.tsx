@@ -67,25 +67,45 @@ export default function MarkdownPreview({
     if (!root) return;
 
     const timeoutIds = new Set<number>();
+    let animationFrameId: number | null = null;
+    let decorateTimeoutId: number | null = null;
 
-    for (const code of root.querySelectorAll<HTMLElement>("pre > code")) {
-      const pre = code.parentElement;
-      if (!pre || pre.dataset.copyDecorated === "true") continue;
+    const decorateCodeBlocks = () => {
+      for (const code of root.querySelectorAll<HTMLElement>("pre > code")) {
+        const pre = code.parentElement;
+        if (!pre) continue;
 
-      pre.dataset.copyDecorated = "true";
-      pre.classList.add("relative");
+        const existingButton = pre.querySelector<HTMLButtonElement>(
+          ":scope > button[data-code-copy-button='true'], :scope > button.code-copy-button",
+        );
+        if (existingButton) {
+          pre.dataset.copyDecorated = "true";
+          pre.classList.add("relative");
+          continue;
+        }
 
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.codeCopyButton = "true";
+        pre.dataset.copyDecorated = "true";
+        pre.classList.add("relative");
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.codeCopyButton = "true";
       button.setAttribute("aria-label", "复制代码");
       button.title = "复制代码";
-      button.className =
+        button.className =
         "code-copy-button absolute right-3 top-3 z-50 grid h-8 w-8 place-items-center rounded-sm border border-white/80 bg-white text-zinc-950 shadow-xl ring-1 ring-black/30 backdrop-blur transition hover:scale-105 hover:border-white hover:bg-zinc-100 hover:text-black hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-      setCodeCopyButtonIcon(button, "copy");
+        setCodeCopyButtonIcon(button, "copy");
 
-      pre.append(button);
-    }
+        pre.append(button);
+      }
+    };
+
+    decorateCodeBlocks();
+    animationFrameId = window.requestAnimationFrame(decorateCodeBlocks);
+    decorateTimeoutId = window.setTimeout(() => {
+      decorateCodeBlocks();
+      decorateTimeoutId = null;
+    }, 0);
 
     const setButtonStatus = (button: HTMLButtonElement, status: "copied" | "failed") => {
       if (status === "copied") {
@@ -129,6 +149,12 @@ export default function MarkdownPreview({
 
     return () => {
       root.removeEventListener("click", handleCopyClick);
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      if (decorateTimeoutId !== null) {
+        window.clearTimeout(decorateTimeoutId);
+      }
       for (const timeoutId of timeoutIds) {
         window.clearTimeout(timeoutId);
       }

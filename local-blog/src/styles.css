@@ -1032,11 +1032,40 @@ a {
   min-height: 1.62em;
 }
 
+.code-block .oi-code-with-lines {
+  counter-reset: oi-code-line;
+}
+
+.code-block .oi-code-with-lines .line {
+  position: relative;
+  padding-left: 3.8rem;
+  counter-increment: oi-code-line;
+}
+
+.code-block .oi-code-with-lines .line::before {
+  content: counter(oi-code-line);
+  position: absolute;
+  left: 0;
+  width: 2.4rem;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
 .code-block .oi-code-line-highlight {
   margin: 0 -18px;
   border-left: 3px solid rgba(183, 121, 31, 0.48);
   padding: 0 18px;
   background: rgba(255, 202, 87, 0.2);
+}
+
+.code-block .oi-code-with-lines .oi-code-line-highlight {
+  padding: 0 18px 0 calc(18px + 3.8rem);
+}
+
+.code-block .oi-code-with-lines .oi-code-line-highlight::before {
+  left: 18px;
 }
 
 .prose-content img {

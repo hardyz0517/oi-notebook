@@ -155,3 +155,28 @@
     background-clip: content-box;
   }
 }
+
+[data-markdown-preview-content] pre.oi-code-with-lines {
+  counter-reset: oi-code-line;
+}
+
+[data-markdown-preview-content] pre.oi-code-with-lines .line {
+  position: relative;
+  counter-increment: oi-code-line;
+  padding-left: 4rem;
+}
+
+[data-markdown-preview-content] pre.oi-code-with-lines .line::before {
+  content: counter(oi-code-line);
+  position: absolute;
+  left: 0.25rem;
+  width: 2.5rem;
+  color: color-mix(in oklch, var(--muted-foreground) 76%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+[data-markdown-preview-content] pre.oi-code-with-lines .line.oi-code-line-highlight {
+  padding-left: 4rem;
+}

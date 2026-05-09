@@ -13,10 +13,18 @@ import { remarkLuoguCallouts } from "./markdownCallouts";
 
 type CodeMeta = {
   highlightLines?: Set<number>;
+  showLineNumbers?: boolean;
 };
 
 const luoguCodeLineTransformer: ShikiTransformer = {
   name: "oi-luogu-code-lines",
+  pre(node) {
+    const meta = this.options.meta as CodeMeta | undefined;
+
+    if (meta?.showLineNumbers) {
+      this.addClassToHast(node, "oi-code-with-lines");
+    }
+  },
   line(node, lineNumber) {
     const meta = this.options.meta as CodeMeta | undefined;
 
@@ -81,8 +89,20 @@ function stripFrontmatter(markdown: string): string {
 
 function parseCodeMeta(metaString: string, _node: Element): CodeMeta | undefined {
   const highlightLines = parseHighlightedLines(metaString);
+  const showLineNumbers = shouldShowLineNumbers(metaString);
 
-  return highlightLines.size > 0 ? { highlightLines } : undefined;
+  if (highlightLines.size === 0 && !showLineNumbers) {
+    return undefined;
+  }
+
+  return {
+    ...(highlightLines.size > 0 ? { highlightLines } : {}),
+    ...(showLineNumbers ? { showLineNumbers } : {}),
+  };
+}
+
+function shouldShowLineNumbers(metaString: string): boolean {
+  return /(?:^|\s)(?:showLineNumbers|line-numbers|lineNumbers)(?=\s|$)/.test(metaString);
 }
 
 function parseHighlightedLines(metaString: string): Set<number> {

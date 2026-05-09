@@ -3,6 +3,7 @@ import type { HighlighterCore, ShikiTransformer, ThemeRegistration } from "shiki
 type HighlightLanguage = "bash" | "c" | "cpp" | "java" | "javascript" | "python" | "rust" | "typescript";
 type CodeMeta = {
   highlightLines?: Set<number>;
+  showLineNumbers?: boolean;
 };
 
 const supportedLanguages = new Map<string, HighlightLanguage | null>([
@@ -32,6 +33,13 @@ const defaultCodeLanguage: HighlightLanguage = "cpp";
 
 const luoguCodeLineTransformer: ShikiTransformer = {
   name: "oi-luogu-code-lines",
+  pre(node) {
+    const meta = this.options.meta as CodeMeta | undefined;
+
+    if (meta?.showLineNumbers) {
+      this.addClassToHast(node, "oi-code-with-lines");
+    }
+  },
   line(node, lineNumber) {
     const meta = this.options.meta as CodeMeta | undefined;
 
@@ -181,6 +189,7 @@ export function highlightCode(code: string, language: string | undefined, metaSt
   }
 
   const highlightLines = parseHighlightedLines(metaString);
+  const showLineNumbers = shouldShowLineNumbers(metaString);
   const cacheKey = `${normalizedLanguage}\0${metaString}\0${code}`;
   const cached = highlightedCodeCache.get(cacheKey);
 
@@ -192,7 +201,7 @@ export function highlightCode(code: string, language: string | undefined, metaSt
     .then((highlighter) =>
       highlighter.codeToHtml(code, {
         lang: normalizedLanguage,
-        meta: highlightLines.size > 0 ? { highlightLines } : undefined,
+        meta: createCodeMeta(highlightLines, showLineNumbers),
         theme: "oi-light",
         transformers: [luoguCodeLineTransformer],
       }),
@@ -204,6 +213,24 @@ export function highlightCode(code: string, language: string | undefined, metaSt
 
   highlightedCodeCache.set(cacheKey, highlighted);
   return highlighted;
+}
+
+function createCodeMeta(
+  highlightLines: Set<number>,
+  showLineNumbers: boolean,
+): CodeMeta | undefined {
+  if (highlightLines.size === 0 && !showLineNumbers) {
+    return undefined;
+  }
+
+  return {
+    ...(highlightLines.size > 0 ? { highlightLines } : {}),
+    ...(showLineNumbers ? { showLineNumbers } : {}),
+  };
+}
+
+function shouldShowLineNumbers(metaString: string): boolean {
+  return /(?:^|\s)(?:showLineNumbers|line-numbers|lineNumbers)(?=\s|$)/.test(metaString);
 }
 
 function parseHighlightedLines(metaString: string): Set<number> {
