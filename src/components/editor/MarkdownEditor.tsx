@@ -342,6 +342,8 @@ const markdownShortcutBindings: MarkdownShortcutBinding[] = [
   { key: "Mod-i", actionId: "italic" },
   { key: "Mod-m", actionId: "inline-math" },
   { key: "Mod-Shift-h", actionId: "divider" },
+  { key: "Mod-Shift-1", actionId: "code-block" },
+  { key: "Mod-Shift-2", actionId: "table" },
   { key: "Mod-Shift-i", actionId: "image" },
   { key: "Mod-Shift-l", actionId: "link" },
   { key: "Mod-Shift-q", actionId: "quote" },
