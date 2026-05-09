@@ -8,14 +8,18 @@ export function rehypeTableMerge() {
   return (tree: Root) => {
     visitElements(tree, (node) => {
       if (node.tagName === "table") {
-        mergeTableRowspans(node);
+        mergeTableCells(node);
       }
     });
   };
 }
 
-function mergeTableRowspans(table: Element) {
+function mergeTableCells(table: Element) {
   for (const group of getRowGroups(table)) {
+    for (const row of group) {
+      mergeRowColspans(row);
+    }
+
     mergeRowGroup(group);
   }
 }
@@ -49,6 +53,36 @@ function getRowGroups(table: Element): Element[][] {
   return groups;
 }
 
+function mergeRowColspans(row: Element) {
+  const nextChildren: typeof row.children = [];
+  let targetCell: TableCell | undefined;
+
+  for (let index = row.children.length - 1; index >= 0; index -= 1) {
+    const child = row.children[index];
+
+    if (!isTableCell(child)) {
+      nextChildren.unshift(child);
+      continue;
+    }
+
+    if (isHorizontalMergeMarkerCell(child)) {
+      if (targetCell) {
+        incrementColspan(targetCell);
+      } else {
+        nextChildren.unshift(child);
+      }
+      continue;
+    }
+
+    if (!isVerticalMergeMarkerCell(child)) {
+      targetCell = child;
+    }
+    nextChildren.unshift(child);
+  }
+
+  row.children = nextChildren;
+}
+
 function mergeRowGroup(rows: Element[]) {
   const lastRealCells: Array<TableCell | undefined> = [];
 
@@ -62,7 +96,7 @@ function mergeRowGroup(rows: Element[]) {
         continue;
       }
 
-      if (isMergeMarkerCell(child)) {
+      if (isVerticalMergeMarkerCell(child)) {
         const targetCell = lastRealCells[columnIndex];
         if (targetCell) {
           incrementRowspan(targetCell);
@@ -81,8 +115,12 @@ function mergeRowGroup(rows: Element[]) {
   }
 }
 
-function isMergeMarkerCell(cell: TableCell) {
+function isVerticalMergeMarkerCell(cell: TableCell) {
   return getPlainText(cell)?.trim() === "^";
+}
+
+function isHorizontalMergeMarkerCell(cell: TableCell) {
+  return getPlainText(cell)?.trim() === ">";
 }
 
 function getPlainText(element: Element): string | null {
@@ -103,6 +141,12 @@ function incrementRowspan(cell: TableCell) {
   const properties = (cell.properties ??= {});
   const current = Number(properties.rowSpan ?? properties.rowspan ?? 1);
   properties.rowSpan = Number.isSafeInteger(current) && current >= 1 ? current + 1 : 2;
+}
+
+function incrementColspan(cell: TableCell) {
+  const properties = (cell.properties ??= {});
+  const current = Number(properties.colSpan ?? properties.colspan ?? 1);
+  properties.colSpan = Number.isSafeInteger(current) && current >= 1 ? current + 1 : 2;
 }
 
 function getColspan(cell: TableCell) {
