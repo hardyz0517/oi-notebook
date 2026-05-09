@@ -71,6 +71,11 @@ interface InsertDialogState {
   selectionTo: number;
 }
 
+interface MarkdownShortcutBinding {
+  key: string;
+  actionId: string;
+}
+
 const placeholderSnippet = (before: string, placeholder: string, after: string): MarkdownSnippet => ({
   text: `${before}${placeholder}${after}`,
   anchorOffset: before.length,
@@ -98,6 +103,15 @@ const insertMarkdownSnippet = (
   });
   view.focus();
 };
+
+const createWrappedSelectionSnippet = (
+  before: string,
+  placeholder: string,
+  after: string = before,
+) => (
+  (selection: string): MarkdownSnippet =>
+    selection ? { text: `${before}${selection}${after}` } : placeholderSnippet(before, placeholder, after)
+);
 
 const insertMarkdownText = (
   view: EditorView,
@@ -206,6 +220,46 @@ const prefixSelectedLines = (
   view.focus();
 };
 
+const insertBlockquote = (view: EditorView) => {
+  const selection = view.state.selection.main;
+
+  if (selection.empty) {
+    const line = view.state.doc.lineAt(selection.from);
+    const existingText = line.text;
+    const insertText = existingText.length === 0 ? "> " : `> ${existingText}`;
+    const cursorOffset = existingText.length === 0 ? 2 : insertText.length;
+
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: insertText },
+      selection: { anchor: line.from + cursorOffset },
+      scrollIntoView: true,
+    });
+    view.focus();
+    return;
+  }
+
+  prefixSelectedLines(view, () => "> ");
+};
+
+const insertHorizontalRule = (view: EditorView) => {
+  const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.from);
+  const beforeText = view.state.doc.sliceString(0, line.from);
+  const afterText = view.state.doc.sliceString(line.to);
+  const needsLeadingBreaks = beforeText.length === 0 ? "" : beforeText.endsWith("\n\n") ? "" : beforeText.endsWith("\n") ? "\n" : "\n\n";
+  const needsTrailingBreaks = afterText.length === 0 ? "" : afterText.startsWith("\n\n") ? "" : afterText.startsWith("\n") ? "\n" : "\n\n";
+  const insertText = `${needsLeadingBreaks}---${needsTrailingBreaks}`;
+  const insertFrom = line.from;
+  const insertTo = selection.empty ? line.from : selection.to;
+
+  view.dispatch({
+    changes: { from: insertFrom, to: insertTo, insert: insertText },
+    selection: { anchor: insertFrom + insertText.length },
+    scrollIntoView: true,
+  });
+  view.focus();
+};
+
 const changeHeadingLevel = (view: EditorView, direction: "increase" | "decrease") => {
   transformSelectedLines(view, (line) => {
     if (line.trim().length === 0) return line;
@@ -261,6 +315,14 @@ const createMarkdownTable = (cells: string[][]) => {
   return [renderRow(header), renderRow(separator), ...bodyRows.map(renderRow)].join("\n");
 };
 
+const markdownShortcutBindings: MarkdownShortcutBinding[] = [
+  { key: "Mod-b", actionId: "bold" },
+  { key: "Mod-i", actionId: "italic" },
+  { key: "Mod-m", actionId: "inline-math" },
+  { key: "Mod-Shift-h", actionId: "divider" },
+  { key: "Mod-Shift-q", actionId: "quote" },
+];
+
 const markdownToolbarGroups: MarkdownToolbarGroup[] = [
   {
     id: "structure",
@@ -284,7 +346,7 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
         label: "---",
         title: "Horizontal rule",
         icon: Minus,
-        run: (view) => insertMarkdownSnippet(view, () => ({ text: "\n\n---\n\n" })),
+        run: (view) => insertHorizontalRule(view),
       },
     ],
   },
@@ -296,18 +358,14 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
         label: "B",
         title: "Bold",
         icon: Bold,
-        run: (view) => insertMarkdownSnippet(view, (selection) =>
-          selection ? { text: `**${selection}**` } : placeholderSnippet("**", "bold text", "**"),
-        ),
+        run: (view) => insertMarkdownSnippet(view, createWrappedSelectionSnippet("**", "bold text")),
       },
       {
         id: "italic",
         label: "I",
         title: "Italic",
         icon: Italic,
-        run: (view) => insertMarkdownSnippet(view, (selection) =>
-          selection ? { text: `*${selection}*` } : placeholderSnippet("*", "italic text", "*"),
-        ),
+        run: (view) => insertMarkdownSnippet(view, createWrappedSelectionSnippet("*", "italic text")),
       },
       {
         id: "strike",
@@ -332,9 +390,7 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
         label: "√x",
         title: "Inline formula",
         icon: Sigma,
-        run: (view) => insertMarkdownSnippet(view, (selection) =>
-          selection ? { text: `$${selection}$` } : placeholderSnippet("$", "a_i", "$"),
-        ),
+        run: (view) => insertMarkdownSnippet(view, createWrappedSelectionSnippet("$", "a_i")),
       },
     ],
   },
@@ -390,7 +446,7 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
         label: ">",
         title: "Quote",
         icon: Quote,
-        run: (view) => prefixSelectedLines(view, () => "> "),
+        run: (view) => insertBlockquote(view),
       },
       {
         id: "unordered-list",
@@ -416,6 +472,10 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
     ],
   },
 ];
+
+const markdownToolbarActionMap = new Map(
+  markdownToolbarGroups.flatMap((group) => group.actions.map((action) => [action.id, action] as const)),
+);
 
 export default function MarkdownEditor({
   value,
@@ -507,6 +567,14 @@ export default function MarkdownEditor({
     }
   };
 
+  const executeToolbarAction = (actionId: string, view: EditorView) => {
+    const action = markdownToolbarActionMap.get(actionId);
+    if (!action) return false;
+
+    action.run(view, { openInsertDialog });
+    return true;
+  };
+
   const closeInsertDialog = () => {
     setInsertDialog(null);
     requestAnimationFrame(() => viewRef.current?.focus());
@@ -563,7 +631,13 @@ export default function MarkdownEditor({
           EditorView.lineWrapping,
 
           history(),
-          keymap.of(historyKeymap),
+          keymap.of([
+            ...markdownShortcutBindings.map(({ key, actionId }) => ({
+              key,
+              run: (view: EditorView) => executeToolbarAction(actionId, view),
+            })),
+            ...historyKeymap,
+          ]),
 
           EditorView.domEventHandlers({
             paste(event, view) {
