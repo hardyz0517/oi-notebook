@@ -15,6 +15,7 @@ import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRe
 import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
+import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -1765,6 +1766,30 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
   }, [contentZoom]);
+
+  useEffect(() => {
+    let timeoutId: number | undefined;
+    let idleCallbackId: number | undefined;
+
+    const runPrewarm = () => {
+      void prewarmMarkdownRenderer();
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      idleCallbackId = window.requestIdleCallback(runPrewarm, { timeout: 1500 });
+    } else {
+      timeoutId = window.setTimeout(runPrewarm, 1000);
+    }
+
+    return () => {
+      if (idleCallbackId !== undefined && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   // Ctrl/Cmd + Plus/Minus/0 缩放编辑器正文和右侧预览正文，不拦截 Ctrl+S 保存。
   useEffect(() => {

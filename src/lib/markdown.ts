@@ -7,14 +7,30 @@ import remarkRehype from "remark-rehype";
 import rehypeKatex from "rehype-katex";
 import rehypeShiki from "@shikijs/rehype";
 import rehypeStringify from "rehype-stringify";
-import type { Element } from "hast";
-import type { ShikiTransformer } from "shiki";
+import type { Element, Root } from "hast";
+import type { BuiltinLanguage, ShikiTransformer } from "shiki";
 import { remarkLuoguCallouts } from "./markdownCallouts";
 
 type CodeMeta = {
   highlightLines?: Set<number>;
   showLineNumbers?: boolean;
 };
+
+const SHIKI_LANGS: BuiltinLanguage[] = [
+  "cpp",
+  "c",
+  "python",
+  "java",
+  "rust",
+  "javascript",
+  "typescript",
+  "json",
+  "yaml",
+  "markdown",
+  "bash",
+];
+
+const shikiHighlightCache = new Map<string, Root>();
 
 const luoguCodeLineTransformer: ShikiTransformer = {
   name: "oi-luogu-code-lines",
@@ -44,9 +60,12 @@ const processor = unified()
   .use(rehypeKatex)
   .use(rehypeShiki, {
     defaultLanguage: "cpp",
+    fallbackLanguage: "text",
+    langs: SHIKI_LANGS,
     parseMetaString: parseCodeMeta,
     theme: "one-dark-pro",
     transformers: [luoguCodeLineTransformer],
+    cache: shikiHighlightCache,
   })
   .use(rehypeStringify, { allowDangerousHtml: true })
   .freeze();
@@ -54,6 +73,14 @@ const processor = unified()
 export async function renderMarkdown(md: string): Promise<string> {
   const result = await processor.process(stripFrontmatter(md));
   return String(result);
+}
+
+export async function prewarmMarkdownRenderer(): Promise<void> {
+  try {
+    await renderMarkdown("```cpp\nint main() { return 0; }\n```");
+  } catch (error) {
+    console.warn("Prewarm markdown renderer failed:", error);
+  }
 }
 
 function stripFrontmatter(markdown: string): string {
