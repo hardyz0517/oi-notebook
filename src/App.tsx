@@ -68,6 +68,7 @@ type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguMissingInsightStrategy = "skip" | "draft";
 type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
+type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
@@ -414,6 +415,7 @@ export default function App() {
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
+  const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -604,6 +606,20 @@ export default function App() {
   const gitStatusLabel = isPushingGit ? "同步中" : "同步入口";
   const editorViewModeLabel =
     editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
+  const activeActivityItem: ActivityBarItem | null =
+    isAdvancedActionsOpen
+      ? "settings"
+      : isLuoguDialogOpen
+        ? "luogu"
+        : isAiSettingsOpen || isPromptDialogOpen
+          ? "ai"
+          : isRestartingBlog
+            ? "blog"
+            : isSearchOpen
+              ? "search"
+              : isNotesSidebarOpen
+                ? "notes"
+                : null;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
 
@@ -1832,6 +1848,35 @@ export default function App() {
   const openSettingsCenter = () => {
     openSettingsSection("general");
   };
+
+  const handleActivityNotes = () => {
+    setIsNotesSidebarOpen((open) => (open && activeActivityItem === "notes" ? false : true));
+  };
+
+  const handleActivitySearch = () => {
+    setIsSearchOpen(true);
+  };
+
+  const handleActivityLuogu = () => {
+    void openLuoguDialog();
+  };
+
+  const handleActivityAi = () => {
+    void openAiSettings();
+  };
+
+  const handleActivityBlog = () => {
+    void handleOpenBlog();
+  };
+
+  const activityButtonClass = (item: ActivityBarItem) =>
+    cn(
+      "relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+      "disabled:pointer-events-none disabled:opacity-40",
+      activeActivityItem === item && "bg-accent/60 text-foreground",
+      activeActivityItem === item &&
+        "before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary",
+    );
 
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
@@ -3897,49 +3942,122 @@ export default function App() {
         </div>
       </header>
 
-      {/* Three-column body */}
+      {/* Main workspace */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left: File tree (fixed 240px) */}
-        <aside className="flex w-60 shrink-0 flex-col overflow-hidden">
-          <div className="flex h-8 shrink-0 items-center justify-between px-3">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              笔记列表
-            </span>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => setIsSearchOpen(true)}
-                title="搜索笔记 Ctrl+K"
-                aria-label="搜索笔记"
-              >
-                <Search className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={openCreateDialog}
-                title="新建笔记"
-                aria-label="新建笔记"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+        <nav
+          className="flex w-12 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2"
+          aria-label="主活动栏"
+        >
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              className={activityButtonClass("notes")}
+              onClick={handleActivityNotes}
+              title={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
+              aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
+              aria-pressed={activeActivityItem === "notes"}
+            >
+              <FileText className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={activityButtonClass("search")}
+              onClick={handleActivitySearch}
+              title="搜索笔记"
+              aria-label="搜索笔记"
+              aria-pressed={activeActivityItem === "search"}
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={activityButtonClass("luogu")}
+              onClick={handleActivityLuogu}
+              title="洛谷导入中心"
+              aria-label="洛谷导入中心"
+              aria-pressed={activeActivityItem === "luogu"}
+              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={activityButtonClass("ai")}
+              onClick={handleActivityAi}
+              title="AI 设置"
+              aria-label="AI 设置"
+              aria-pressed={activeActivityItem === "ai"}
+              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+            >
+              <Bot className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={activityButtonClass("blog")}
+              onClick={handleActivityBlog}
+              title="打开博客"
+              aria-label="打开博客"
+              aria-pressed={activeActivityItem === "blog"}
+            >
+              <ExternalLink className="h-4 w-4" />
+            </button>
           </div>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <FileTree
-              files={files}
-              activeFilePath={currentFilePath}
-              onSelectFile={handleSelectFile}
-              onDeleteFile={handleDelete}
-              onRenameFile={openRenameDialog}
-            />
-          </div>
-        </aside>
+          <button
+            type="button"
+            className={activityButtonClass("settings")}
+            onClick={openSettingsCenter}
+            title="设置中心"
+            aria-label="设置中心"
+            aria-pressed={activeActivityItem === "settings"}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        </nav>
 
-        <Separator orientation="vertical" />
+        {isNotesSidebarOpen && (
+          <>
+            <aside className="flex w-60 shrink-0 flex-col overflow-hidden bg-background/70">
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  笔记
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setIsSearchOpen(true)}
+                    title="搜索笔记 Ctrl+K"
+                    aria-label="搜索笔记"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={openCreateDialog}
+                    title="新建笔记"
+                    aria-label="新建笔记"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <FileTree
+                  files={files}
+                  activeFilePath={currentFilePath}
+                  onSelectFile={handleSelectFile}
+                  onDeleteFile={handleDelete}
+                  onRenameFile={openRenameDialog}
+                />
+              </div>
+            </aside>
+
+            <Separator orientation="vertical" />
+          </>
+        )}
 
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!currentFilePath ? (
