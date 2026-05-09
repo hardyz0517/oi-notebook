@@ -1,7 +1,7 @@
 ﻿import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
+import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -3399,71 +3399,81 @@ export default function App() {
     <Dialog open={isAdvancedActionsOpen} onOpenChange={setIsAdvancedActionsOpen}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>高级与维护</DialogTitle>
+          <DialogTitle>设置与工具</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-2 py-2">
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={() => {
-              setIsAdvancedActionsOpen(false);
-              void openLuoguDialog();
-            }}
-          >
-            <Download className="h-3.5 w-3.5" />
-            洛谷导入中心
-          </Button>
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={() => {
-              setIsAdvancedActionsOpen(false);
-              openLuoguSettings();
-            }}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
-          >
-            <Settings className="h-3.5 w-3.5" />
-            洛谷设置
-          </Button>
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={handleTestLuoguConnection}
-            disabled={isTestingLuoguConnection}
-          >
-            <PlugZap className="h-3.5 w-3.5" />
-            测试连接
-          </Button>
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={() => {
-              setIsAdvancedActionsOpen(false);
-              openPromptDialog();
-            }}
-            disabled={isLoadingPrompt || isSavingPrompt}
-          >
-            <FileText className="h-3.5 w-3.5" />
-            AI Prompt
-          </Button>
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={handleRestartBlog}
-            disabled={isRestartingBlog}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            重启博客
-          </Button>
-          <Button
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={handlePushGit}
-            disabled={isPushingGit}
-          >
-            <Upload className="h-3.5 w-3.5" />
-            同步 Git
-          </Button>
+        <div className="space-y-4 py-2">
+          <section className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">设置</div>
+            <div className="grid gap-2">
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={() => {
+                  setIsAdvancedActionsOpen(false);
+                  openLuoguSettings();
+                }}
+                disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                洛谷设置
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={() => {
+                  setIsAdvancedActionsOpen(false);
+                  openPromptDialog();
+                }}
+                disabled={isLoadingPrompt || isSavingPrompt}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                AI Prompt
+              </Button>
+            </div>
+          </section>
+          <section className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">工具</div>
+            <div className="grid gap-2">
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={() => {
+                  setIsAdvancedActionsOpen(false);
+                  void openLuoguDialog();
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                洛谷导入中心
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={handleTestLuoguConnection}
+                disabled={isTestingLuoguConnection}
+              >
+                <PlugZap className="h-3.5 w-3.5" />
+                测试连接
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={handleRestartBlog}
+                disabled={isRestartingBlog}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                重启博客
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-2"
+                onClick={handlePushGit}
+                disabled={isPushingGit}
+              >
+                <Upload className="h-3.5 w-3.5" />
+                同步 Git
+              </Button>
+            </div>
+          </section>
         </div>
       </DialogContent>
     </Dialog>
@@ -3482,9 +3492,8 @@ export default function App() {
             </span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">主操作</span>
             <Button
               variant="outline"
               size="sm"
@@ -3525,7 +3534,6 @@ export default function App() {
           </div>
           <Separator orientation="vertical" className="h-6" />
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">核心能力</span>
             <Button
               variant="outline"
               size="sm"
@@ -3553,9 +3561,11 @@ export default function App() {
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
             onClick={() => setIsAdvancedActionsOpen(true)}
+            title="设置与工具"
+            aria-label="设置与工具"
           >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-            更多
+            <Settings className="h-3.5 w-3.5" />
+            设置
           </Button>
         </div>
       </header>
