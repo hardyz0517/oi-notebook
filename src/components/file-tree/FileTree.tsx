@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from "lucide-react";
+import { FileText, FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatRelativeTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -6,47 +6,58 @@ import type { NoteFileInfo } from "@/types/note";
 
 interface FileTreeProps {
   files: NoteFileInfo[];
-  /** 当前打开的文件路径，null 表示无选中 */
   activeFilePath: string | null;
   onSelectFile: (path: string) => void;
   onDeleteFile: (path: string) => void;
   onRenameFile: (path: string) => void;
 }
 
-/** 去掉 .md 扩展名，用于显示更清爽的标题 */
 function stripMdExtension(name: string): string {
   return name.endsWith(".md") ? name.slice(0, -3) : name;
 }
 
-/**
- * 分组规则：
- * - 分组依据 path 的一级目录（第一个 "/" 前的部分）判定
- * - tricks / problems / luogu / inbox 归对应标准分组，始终显示标题（空组显示具体提示）
- * - 其余（含顶层文件 / 未知子目录）归「其他」，仅有文件时才渲染
- * - 文件项显示用 file.name（后端保证为纯文件名，不含路径前缀），不论分组
- * - 组内顺序保持后端传入顺序（已按 modified 降序排好，前端不再排序）
- */
-type GroupKey = "tricks" | "problems" | "luogu" | "inbox" | "其他";
+type GroupKey = "tricks" | "problems" | "luogu" | "inbox" | "other";
 
-const GROUP_ORDER: GroupKey[] = ["tricks", "problems", "luogu", "inbox", "其他"];
+const GROUP_ORDER: GroupKey[] = ["tricks", "problems", "luogu", "inbox", "other"];
 const STANDARD_DIRS = new Set<string>(["tricks", "problems", "luogu", "inbox"]);
-const GROUP_META: Record<GroupKey, { label: string; emptyText: string }> = {
-  tricks: { label: "技巧 / tricks", emptyText: "还没有手写技巧" },
-  problems: { label: "题解 / problems", emptyText: "还没有题解" },
-  luogu: { label: "洛谷 / luogu", emptyText: "还没有洛谷同步笔记" },
-  inbox: { label: "收件箱 / inbox", emptyText: "还没有速记" },
-  其他: { label: "其他", emptyText: "暂无其他笔记" },
+const GROUP_META: Record<GroupKey, { label: string; directory: string; emptyText: string }> = {
+  tricks: {
+    label: "\u6280\u5de7",
+    directory: "tricks",
+    emptyText: "\u8fd8\u6ca1\u6709\u624b\u5199\u6280\u5de7\u7b14\u8bb0",
+  },
+  problems: {
+    label: "\u9898\u89e3",
+    directory: "problems",
+    emptyText: "\u8fd8\u6ca1\u6709\u9898\u89e3\u7b14\u8bb0",
+  },
+  luogu: {
+    label: "\u6d1b\u8c37",
+    directory: "luogu",
+    emptyText: "\u8fd8\u6ca1\u6709\u6d1b\u8c37\u540c\u6b65\u7b14\u8bb0",
+  },
+  inbox: {
+    label: "\u6536\u4ef6\u7bb1",
+    directory: "inbox",
+    emptyText: "\u8fd8\u6ca1\u6709\u901f\u8bb0",
+  },
+  other: {
+    label: "\u5176\u4ed6",
+    directory: "misc",
+    emptyText: "\u6682\u65e0\u5176\u4ed6\u7b14\u8bb0",
+  },
 };
 
 function buildGroupMap(files: NoteFileInfo[]): Map<GroupKey, NoteFileInfo[]> {
-  const map = new Map<GroupKey, NoteFileInfo[]>(GROUP_ORDER.map((k) => [k, []]));
+  const map = new Map<GroupKey, NoteFileInfo[]>(GROUP_ORDER.map((key) => [key, []]));
+
   for (const file of files) {
-    const slashIdx = file.path.indexOf("/");
-    const dir = slashIdx === -1 ? null : file.path.slice(0, slashIdx);
-    const key: GroupKey =
-      dir !== null && STANDARD_DIRS.has(dir) ? (dir as GroupKey) : "其他";
+    const slashIndex = file.path.indexOf("/");
+    const dir = slashIndex === -1 ? null : file.path.slice(0, slashIndex);
+    const key: GroupKey = dir !== null && STANDARD_DIRS.has(dir) ? (dir as GroupKey) : "other";
     map.get(key)!.push(file);
   }
+
   return map;
 }
 
@@ -60,33 +71,38 @@ export default function FileTree({
   const groups = buildGroupMap(files);
 
   return (
-    // ScrollArea 确保文件数量多时可以垂直滚动，不撑破左栏布局
     <ScrollArea className="h-full w-full">
-      <div className="w-full pt-1 pb-4">
-        {GROUP_ORDER.map((groupKey, idx) => {
+      <div className="w-full px-2 py-2">
+        {GROUP_ORDER.map((groupKey, index) => {
           const groupFiles = groups.get(groupKey)!;
           const count = groupFiles.length;
           const groupMeta = GROUP_META[groupKey];
 
-          // 「其他」分组没有文件时整组不渲染（标准目录即使为空也要显示）
-          if (groupKey === "其他" && count === 0) return null;
+          if (groupKey === "other" && count === 0) return null;
 
           return (
-            <div key={groupKey} className={cn(idx > 0 && "mt-3")}>
-              {/* 分组标题，不可点击，样式与「笔记列表」标题一致 */}
-              <div className="px-3 pb-0.5">
-                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground">
-                  {groupMeta.label} ({count})
-                </span>
+            <section key={groupKey} className={cn(index > 0 && "mt-4")}>
+              <div className="mb-1 flex items-center justify-between px-2">
+                <div className="flex min-w-0 items-center gap-2 text-muted-foreground/85">
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90">
+                      {groupMeta.label}
+                    </div>
+                    <div className="truncate text-[10px] text-muted-foreground/65">
+                      {groupMeta.directory}
+                    </div>
+                  </div>
+                </div>
+                <span className="shrink-0 text-[10px] text-muted-foreground/65">{count}</span>
               </div>
 
               {count === 0 ? (
-                // 标准目录空组：显示具体提示，让用户知道这里适合沉淀什么内容
-                <p className="py-1 pl-6 text-[10px] text-muted-foreground">
+                <p className="px-7 py-1.5 text-[10px] leading-4 text-muted-foreground/75">
                   {groupMeta.emptyText}
                 </p>
               ) : (
-                <ul className="w-full">
+                <ul className="w-full space-y-0.5 pl-2">
                   {groupFiles.map((file) => {
                     const isActive = file.path === activeFilePath;
 
@@ -95,52 +111,52 @@ export default function FileTree({
                         <button
                           type="button"
                           onClick={() => onSelectFile(file.path)}
+                          title={file.path}
                           className={cn(
-                            // 基础：撑满宽度，左对齐，左侧留出 border 空间，右侧留出操作按钮的空间
-                            "w-full cursor-pointer py-2 pr-16 text-left",
-                            // 过渡动画
-                            "transition-colors duration-100",
-                            // 选中态：bg-accent 背景 + 2px 主色左竖条（Lyra 锐角风格标记）
-                            // border-l-2 配合 pl-[10px] 保持内容对齐（px-3=12px，减去 border 2px）
+                            "relative flex w-full min-w-0 items-start gap-2 rounded-sm border border-transparent py-2 pl-2.5 pr-14 text-left transition-colors duration-100",
                             isActive
-                              ? "border-l-2 border-primary bg-accent pl-[10px] text-accent-foreground"
-                              : "border-l-2 border-transparent pl-[10px] text-foreground hover:bg-muted",
+                              ? "bg-accent/75 text-accent-foreground before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-px before:bg-primary"
+                              : "text-foreground/92 hover:bg-muted/60",
                           )}
                         >
-                          {/* 文件名（去掉 .md，截断过长名称）；file.name 是纯文件名，不含路径 */}
-                          <p className="truncate text-xs font-medium leading-tight">
-                            {stripMdExtension(file.name)}
-                          </p>
-
-                          {/* 相对时间：小字、静音色 */}
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            {formatRelativeTime(file.modified)}
-                          </p>
+                          <FileText
+                            className={cn(
+                              "mt-0.5 h-3.5 w-3.5 shrink-0",
+                              isActive ? "text-primary" : "text-muted-foreground/70",
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[12px] font-medium leading-4">
+                              {stripMdExtension(file.name)}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground/70">
+                              {formatRelativeTime(file.modified)}
+                            </p>
+                          </div>
                         </button>
 
-                        {/* hover 显示的操作按钮区，绝对定位在行右侧 */}
-                        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <button
                             type="button"
-                            title="重命名"
-                            aria-label="重命名"
+                            title="\u91cd\u547d\u540d"
+                            aria-label="\u91cd\u547d\u540d"
                             onClick={(e) => {
                               e.stopPropagation();
                               onRenameFile(file.path);
                             }}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                            className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted hover:text-foreground"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
                           <button
                             type="button"
-                            title="删除"
-                            aria-label="删除"
+                            title="\u5220\u9664"
+                            aria-label="\u5220\u9664"
                             onClick={(e) => {
                               e.stopPropagation();
                               onDeleteFile(file.path);
                             }}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                            className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
@@ -150,7 +166,7 @@ export default function FileTree({
                   })}
                 </ul>
               )}
-            </div>
+            </section>
           );
         })}
       </div>
