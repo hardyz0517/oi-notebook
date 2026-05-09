@@ -338,9 +338,12 @@ const createMarkdownTable = (cells: string[][]) => {
 
 const markdownShortcutBindings: MarkdownShortcutBinding[] = [
   { key: "Mod-b", actionId: "bold" },
+  { key: "Mod-d", actionId: "strike" },
   { key: "Mod-i", actionId: "italic" },
   { key: "Mod-m", actionId: "inline-math" },
   { key: "Mod-Shift-h", actionId: "divider" },
+  { key: "Mod-Shift-i", actionId: "image" },
+  { key: "Mod-Shift-l", actionId: "link" },
   { key: "Mod-Shift-q", actionId: "quote" },
   { key: "Mod-Shift-7", actionId: "unordered-list" },
   { key: "Mod-Shift-8", actionId: "ordered-list" },
