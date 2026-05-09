@@ -13,6 +13,7 @@ import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorToolbarApi } 
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/datetime";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
@@ -405,6 +406,24 @@ function formatSearchDate(value: string): string {
   });
 }
 
+function getDashboardNoteCategory(path: string): string {
+  const [topLevel] = path.split("/");
+  if (!topLevel || topLevel === path) return "notes";
+
+  switch (topLevel) {
+    case "tricks":
+      return "tricks";
+    case "problems":
+      return "problems";
+    case "luogu":
+      return "luogu";
+    case "inbox":
+      return "inbox";
+    default:
+      return topLevel;
+  }
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -622,6 +641,13 @@ export default function App() {
                 : null;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
+  const dashboardNotes = useMemo(
+    () =>
+      [...files]
+        .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
+        .slice(0, 6),
+    [files],
+  );
 
   const updateContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setContentZoom((currentZoom) => {
@@ -4031,141 +4057,259 @@ export default function App() {
             <div className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
               <div className="grid w-full max-w-6xl gap-5">
                 <section className="rounded-lg border border-border bg-background/90 p-6 shadow-sm">
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.95fr)]">
+                    <div className="grid gap-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-2xl font-semibold tracking-wide">OI Notebook</div>
+                        <div className="text-2xl font-semibold tracking-wide">欢迎回来</div>
                         <span className="rounded-sm border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground">
-                          OI 笔记编辑器 + 本地博客 + 洛谷 / AI 辅助
+                          OI Notebook
                         </span>
                       </div>
                       <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                        用一个本地工作台把题解、trick、复盘、博客预览，以及洛谷导入和 AI 整理串起来。第一次打开时，可以先从一篇普通笔记开始。
+                        本地 OI 笔记、题解复盘、洛谷导入与 AI 辅助整理工作台。第一屏先帮你继续写，而不是重新读一遍说明书。
                       </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button className="gap-2" onClick={openCreateDialog}>
+                          <Plus className="h-4 w-4" />
+                          新建笔记
+                        </Button>
+                        <Button variant="outline" className="gap-2" onClick={() => void openLuoguDialog()}>
+                          <Download className="h-4 w-4" />
+                          从洛谷导入
+                        </Button>
+                        <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
+                          <ExternalLink className="h-4 w-4" />
+                          打开本地博客
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="gap-2"
+                          onClick={openAiSettings}
+                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                        >
+                          <Bot className="h-4 w-4" />
+                          配置 AI
+                        </Button>
+                        <Button variant="ghost" className="gap-2 text-muted-foreground hover:text-foreground" onClick={openSettingsCenter}>
+                          <Settings className="h-4 w-4" />
+                          打开设置
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button className="gap-2" onClick={openCreateDialog}>
-                        <Plus className="h-4 w-4" />
-                        新建笔记
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
-                        <ExternalLink className="h-4 w-4" />
-                        打开博客
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="gap-2"
-                        onClick={openAiSettings}
-                        disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-                      >
-                        <Bot className="h-4 w-4" />
-                        配置 AI
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={openNotesFolder}>
-                        <FolderOpen className="h-4 w-4" />
-                        笔记目录
-                      </Button>
-                    </div>
+                    <section className="grid gap-3 rounded-lg border border-border bg-muted/15 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                            当前状态
+                          </div>
+                          <div className="mt-1 text-sm font-medium text-foreground">桌面工作台已就绪</div>
+                        </div>
+                        <span className="rounded-sm border border-border bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
+                          {dashboardNotes.length} 篇可用笔记
+                        </span>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
+                          onClick={() => openSettingsSection("blog")}
+                        >
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Blog</div>
+                          <div className="mt-1 text-sm font-medium text-foreground">{blogStatusLabel}</div>
+                          <div className="mt-1 text-xs leading-5 text-muted-foreground">本地博客入口和服务管理在这里汇总。</div>
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
+                          onClick={() => openSettingsSection("ai")}
+                        >
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">AI</div>
+                          <div className="mt-1 text-sm font-medium text-foreground">{aiStatusLabel}</div>
+                          <div className="mt-1 text-xs leading-5 text-muted-foreground">API Key 和 Prompt 都走本地配置，不会帮你编造连接状态。</div>
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
+                          onClick={() => openSettingsSection("luogu")}
+                        >
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">洛谷</div>
+                          <div className="mt-1 text-sm font-medium text-foreground">{luoguStatusLabel}</div>
+                          <div className="mt-1 text-xs leading-5 text-muted-foreground">Cookie、扫描规则和导入入口都继续复用现有流程。</div>
+                        </button>
+                        <div className="rounded-md border border-border bg-background/70 px-3 py-3">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">数据与存储</div>
+                          <div className="mt-1 text-sm font-medium text-foreground">notes 本地目录</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
+                            <span>笔记保存在本机目录里，Git 同步仍是进阶能力。</span>
+                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={openNotesFolder}>
+                              打开目录
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void handlePushGit()}>
+                              {gitStatusLabel}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
                   </div>
                 </section>
 
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Plus className="h-4 w-4" />
-                      快速开始
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
+                  <section className="grid gap-3 rounded-lg border border-border bg-background/80 p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                          继续编辑
+                        </div>
+                        <div className="mt-1 text-base font-medium text-foreground">从现有笔记继续推进</div>
+                      </div>
+                      <span className="text-xs text-muted-foreground">按最近修改排序</span>
                     </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>左侧文件树管理 notes，中间写 Markdown，选中文件后右侧实时预览。</div>
-                      <div>保存后可以直接去 Local Blog v2 看文章效果。</div>
-                    </div>
+                    {dashboardNotes.length > 0 ? (
+                      <div className="grid gap-2">
+                        {dashboardNotes.map((file) => (
+                          <button
+                            key={file.path}
+                            type="button"
+                            className="grid min-w-0 gap-2 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                            onClick={() => handleSelectFile(file.path)}
+                          >
+                            <div className="flex min-w-0 items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-foreground">{file.name.replace(/\.md$/i, "")}</div>
+                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  <span className="rounded-sm border border-border bg-background/60 px-1.5 py-0.5">
+                                    {getDashboardNoteCategory(file.path)}
+                                  </span>
+                                  <span className="truncate">{file.path}</span>
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(file.modified)}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border bg-muted/10 px-4 py-6 text-sm text-muted-foreground">
+                        还没有可继续的笔记。可以从左侧 Sidebar 或这里的新建入口先写第一篇。
+                      </div>
+                    )}
                   </section>
 
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Sparkles className="h-4 w-4" />
-                      Markdown 能力
-                    </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>支持 KaTeX 数学公式、代码高亮、行高亮和可选行号。</div>
-                      <div>也支持洛谷风格 callout、align、epigraph、cute-table 和表格合并。</div>
-                    </div>
-                  </section>
+                  <div className="grid gap-5">
+                    <section className="grid gap-3 rounded-lg border border-border bg-background/80 p-5">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                        快速操作
+                      </div>
+                      <div className="grid gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                          onClick={openCreateDialog}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Plus className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="text-sm font-medium text-foreground">新建笔记</div>
+                              <div className="text-xs text-muted-foreground">从 trick 或 problem 模板开始。</div>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                          onClick={() => void openLuoguDialog()}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Download className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="text-sm font-medium text-foreground">从洛谷导入</div>
+                              <div className="text-xs text-muted-foreground">扫描、预览、确认后再写入笔记。</div>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                          onClick={handleOpenBlog}
+                        >
+                          <div className="flex items-center gap-3">
+                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="text-sm font-medium text-foreground">打开本地博客</div>
+                              <div className="text-xs text-muted-foreground">用阅读视图回看文章效果。</div>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                          onClick={openAiSettings}
+                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Bot className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="text-sm font-medium text-foreground">配置 AI</div>
+                              <div className="text-xs text-muted-foreground">管理模型配置和 Prompt 入口。</div>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                          onClick={openSettingsCenter}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Settings className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <div className="text-sm font-medium text-foreground">打开设置</div>
+                              <div className="text-xs text-muted-foreground">外观、Markdown、Blog、Git、数据目录都在这里。</div>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </div>
+                    </section>
 
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RefreshCw className="h-4 w-4" />
-                      洛谷导入
-                    </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>现在是可控流程：先扫描提交，再选择规则。</div>
-                      <div>生成预览后可查看渲染预览、Markdown 源文和提交源码，确认后再写入。</div>
-                    </div>
-                  </section>
-
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Bot className="h-4 w-4" />
-                      AI 辅助
-                    </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>可配置 DeepSeek 或 OpenAI compatible API。</div>
-                      <div>支持编辑 AI Prompt，导入洛谷时也能让 AI 整理 insight 或生成草稿。</div>
-                    </div>
-                  </section>
-
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <ExternalLink className="h-4 w-4" />
-                      Local Blog
-                    </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>一键打开本地博客预览，支持文章列表、搜索、分类和标签。</div>
-                      <div>当前主力体验是 Local Blog v2，适合拿来复习和回看自己的积累。</div>
-                    </div>
-                  </section>
-
-                  <section className="grid gap-2 rounded-lg border border-border bg-muted/15 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <FileText className="h-4 w-4" />
-                      注意事项
-                    </div>
-                    <div className="text-xs leading-6 text-muted-foreground">
-                      <div>API Key 只保存在本地配置。</div>
-                      <div>普通同学使用安装版时，不需要自己安装 Node 或 pnpm；Git 也可以后面再学。</div>
-                    </div>
-                  </section>
+                    <section className="grid gap-3 rounded-lg border border-border bg-muted/15 p-5">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                        能力速览
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
+                          <div className="text-sm font-medium text-foreground">Markdown</div>
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            KaTeX、代码高亮、callout、cute-table、表格合并。
+                          </div>
+                        </div>
+                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
+                          <div className="text-sm font-medium text-foreground">洛谷导入</div>
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            扫描、规则、预览、确认写入，仍是可控工作流。
+                          </div>
+                        </div>
+                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
+                          <div className="text-sm font-medium text-foreground">AI</div>
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            Prompt 可编辑，API Key 只保存在本地配置。
+                          </div>
+                        </div>
+                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
+                          <div className="text-sm font-medium text-foreground">Local Blog</div>
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            用本地博客预览文章列表、搜索、分类和阅读效果。
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
                 </div>
-
-                <section className="grid gap-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      笔记目录
-                    </div>
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={openNotesFolder}>
-                      打开目录
-                    </Button>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-md border border-border bg-background/70 p-3">
-                      <div className="text-sm font-medium">tricks</div>
-                      <div className="mt-1 text-xs text-muted-foreground">算法结论、模板和常见套路。</div>
-                    </div>
-                    <div className="rounded-md border border-border bg-background/70 p-3">
-                      <div className="text-sm font-medium">problems</div>
-                      <div className="mt-1 text-xs text-muted-foreground">题解、证明、踩坑和复盘。</div>
-                    </div>
-                    <div className="rounded-md border border-border bg-background/70 p-3">
-                      <div className="text-sm font-medium">luogu</div>
-                      <div className="mt-1 text-xs text-muted-foreground">洛谷导入后沉淀下来的笔记。</div>
-                    </div>
-                    <div className="rounded-md border border-border bg-background/70 p-3">
-                      <div className="text-sm font-medium">inbox</div>
-                      <div className="mt-1 text-xs text-muted-foreground">速记、草稿和暂存想法。</div>
-                    </div>
-                  </div>
-                </section>
               </div>
             </div>
           ) : (
