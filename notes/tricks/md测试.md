@@ -4,7 +4,7 @@ tags: []
 difficulty: ''
 source: ''
 created: 2026-05-08T15:01:44.529837800+08:00
-updated: 2026-05-09T08:22:52.919793+08:00
+updated: 2026-05-09T08:34:25.740407900+08:00
 summary: ''
 draft: false
 ---
@@ -77,3 +77,74 @@ int main() {
 }
 ```
 
+
+# align / epigraph 测试
+
+## 1. align left
+
+:::align{left}
+这段文字应该居左。
+
+### 这个标题也应该居左
+
+普通段落继续居左。
+:::
+
+## 2. align center
+
+:::align{center}
+这段文字应该居中。
+
+### 这个标题也应该居中
+
+数学公式也应该整体居中显示：$a_i + b_i = c_i$
+:::
+
+## 3. align right
+
+:::align{right}
+这段文字应该居右。
+
+### 这个标题也应该居右
+
+普通段落继续居右。
+:::
+
+## 4. align 嵌套测试
+
+::::align{right}
+外层应该居右。
+
+:::align{center}
+内层应该居中。
+:::
+
+外层结束前，这一段应该继续居右。
+::::
+
+## 5. epigraph 测试
+
+:::epigraph[——otto]
+大家好啊，我是说的道理。
+
+这里是第二段，用来测试 epigraph 里的多段正文。
+:::
+
+## 6. epigraph 内含 Markdown
+
+:::epigraph[——某位 OIer]
+如果一个转移看起来很复杂，先试着把它拆成 **状态设计** 和 **贡献计算**。
+
+也可以写一点公式：$dp_i = \min(dp_j + w(j,i))$。
+:::
+
+## 7. 未知 directive 测试
+
+下面这个未知类型不应该套用 align 或 epigraph 样式，也不应该把页面渲染炸掉。
+
+:::unknown[未知类型]
+这里是未知 directive 的内容。
+
+- 列表项一
+- 列表项二
+:::
