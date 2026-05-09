@@ -1,16 +1,17 @@
 import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Bot, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
+import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import MarkdownEditor from "@/components/editor/MarkdownEditor";
+import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
+import { cn } from "@/lib/utils";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
 import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
@@ -57,6 +58,7 @@ const AI_CONFIG_MISSING_MESSAGE =
 
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
+type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "rules" | "account" | "manual" | "advanced";
 type LuoguImportStep = "scan" | "preview";
 type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
@@ -384,9 +386,12 @@ export default function App() {
   // null 时显示欢迎内容，选中文件后只把正文 body 放进主编辑器。
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   const [frontmatterPrefix, setFrontmatterPrefix] = useState("");
+  const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
   // undefined 表示未发生过滚动（初次挂载跳过预览同步）
   const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
+  const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
@@ -505,6 +510,42 @@ export default function App() {
     [luoguPreviewResult, luoguSubmissionCandidateStates],
   );
   const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
+  const showEditorPane = editorViewMode !== "preview";
+  const showPreviewPane = editorViewMode !== "editor";
+  const editorViewModeSwitcher = (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        variant={editorViewMode === "split" ? "secondary" : "ghost"}
+        size="sm"
+        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
+        onClick={() => setEditorViewMode("split")}
+        aria-pressed={editorViewMode === "split"}
+      >
+        双栏
+      </Button>
+      <Button
+        type="button"
+        variant={editorViewMode === "editor" ? "secondary" : "ghost"}
+        size="sm"
+        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
+        onClick={() => setEditorViewMode("editor")}
+        aria-pressed={editorViewMode === "editor"}
+      >
+        仅编辑
+      </Button>
+      <Button
+        type="button"
+        variant={editorViewMode === "preview" ? "secondary" : "ghost"}
+        size="sm"
+        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
+        onClick={() => setEditorViewMode("preview")}
+        aria-pressed={editorViewMode === "preview"}
+      >
+        仅预览
+      </Button>
+    </div>
+  );
   const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
     (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
   );
@@ -3563,16 +3604,45 @@ export default function App() {
 
         <Separator orientation="vertical" />
 
+        <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {currentFilePath && (
+          <MarkdownEditorToolbar
+            disabled={!showEditorPane || !markdownToolbarApi?.hasEditor()}
+            zoomLabel={showEditorPane ? contentZoomLabel : undefined}
+            trailingContent={editorViewModeSwitcher}
+            onAction={(actionId) => {
+              markdownToolbarApi?.executeAction(actionId);
+            }}
+          />
+        )}
+
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Center: Markdown editor */}
         <main
-          className="flex min-w-0 flex-1 flex-col overflow-hidden"
+          className={cn(
+            "flex min-w-0 flex-1 flex-col overflow-hidden",
+            !showEditorPane && "hidden",
+          )}
           style={zoomStyle}
           onWheelCapture={handleContentWheel}
         >
-          {currentFilePath && (
-            <details className="shrink-0 border-b border-border bg-background/95">
-              <summary className="flex h-8 cursor-pointer select-none items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
-                <span>Frontmatter</span>
+          {currentFilePath && editorViewMode !== "preview" && (
+            <details
+              open={isFrontmatterOpen}
+              onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
+              className="shrink-0 border-b border-border bg-background/95"
+            >
+              <summary className="flex h-8 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
+                <span className="inline-flex items-center gap-1.5">
+                  <ChevronRight
+                    className={cn(
+                      "h-3.5 w-3.5 transition-transform",
+                      isFrontmatterOpen && "rotate-90",
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span>文章信息</span>
+                </span>
                 {frontmatter.warning && (
                   <span className="normal-case tracking-normal text-amber-400">
                     {frontmatter.warning}
@@ -3676,7 +3746,8 @@ export default function App() {
               onChange={handleEditorChange}
               onPasteImage={handlePasteImage}
               onScroll={(r) => setScrollRatio(r)}
-              zoomLabel={contentZoomLabel}
+              hideToolbar
+              onToolbarApiChange={setMarkdownToolbarApi}
               className="min-h-0 min-w-0 flex-1"
             />
           ) : (
@@ -3741,11 +3812,15 @@ export default function App() {
           )}
         </main>
 
-        <Separator orientation="vertical" />
+        {showEditorPane && showPreviewPane && <Separator orientation="vertical" />}
 
         {/* Right: Live preview */}
         <aside
-          className="flex min-w-0 flex-1 overflow-hidden"
+          className={cn(
+            "min-w-0 overflow-hidden",
+            showPreviewPane ? "flex" : "hidden",
+            showEditorPane ? "flex-1" : "flex-[1_1_100%]",
+          )}
           style={zoomStyle}
           onWheelCapture={handleContentWheel}
         >
@@ -3762,6 +3837,8 @@ export default function App() {
             </div>
           )}
         </aside>
+        </div>
+        </section>
       </div>
     </div>
     </>

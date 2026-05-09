@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useRef, useState } from "react";
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
 import { EditorState, Transaction } from "@codemirror/state";
@@ -36,8 +36,9 @@ interface MarkdownEditorProps {
   onChange: (value: string) => void;
   onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
-  zoomLabel?: string;
+  hideToolbar?: boolean;
   className?: string;
+  onToolbarApiChange?: (api: MarkdownEditorToolbarApi | null) => void;
 }
 
 interface MarkdownSnippet {
@@ -57,6 +58,18 @@ interface MarkdownToolbarAction {
 interface MarkdownToolbarGroup {
   id: string;
   actions: MarkdownToolbarAction[];
+}
+
+export interface MarkdownEditorToolbarApi {
+  executeAction: (actionId: string) => boolean;
+  hasEditor: () => boolean;
+}
+
+interface MarkdownEditorToolbarProps {
+  disabled?: boolean;
+  zoomLabel?: string;
+  trailingContent?: ReactNode;
+  onAction?: (actionId: string) => void;
 }
 
 type InsertDialogKind = "link" | "image" | "code-block" | "table";
@@ -506,13 +519,62 @@ const markdownToolbarActionMap = new Map(
   markdownToolbarGroups.flatMap((group) => group.actions.map((action) => [action.id, action] as const)),
 );
 
+export function MarkdownEditorToolbar({
+  disabled = false,
+  zoomLabel,
+  trailingContent,
+  onAction,
+}: MarkdownEditorToolbarProps) {
+  return (
+    <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-border bg-background px-2 py-1">
+      {markdownToolbarGroups.map((group, groupIndex) => (
+        <div
+          key={group.id}
+          className={cn("flex items-center gap-0.5", disabled && "pointer-events-none opacity-45")}
+        >
+          {groupIndex > 0 && <div className="mx-1 h-4 w-px bg-border" aria-hidden="true" />}
+          {group.actions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.id}
+                type="button"
+                title={action.title}
+                aria-label={action.title}
+                disabled={disabled}
+                className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  if (disabled) return;
+                  onAction?.(action.id);
+                }}
+              >
+                {Icon ? <Icon className="h-3.5 w-3.5" /> : action.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {zoomLabel && (
+          <span className="shrink-0 px-1.5 text-[10px] font-semibold text-muted-foreground">
+            {zoomLabel}
+          </span>
+        )}
+        {trailingContent}
+      </div>
+    </div>
+  );
+}
+
 export default function MarkdownEditor({
   value,
   onChange,
   onPasteImage,
   onScroll,
-  zoomLabel,
+  hideToolbar = false,
   className,
+  onToolbarApiChange,
 }: MarkdownEditorProps) {
   // 容器 div 的 DOM 引用，CodeMirror 需要一个真实的 DOM 节点作为挂载点
   const containerRef = useRef<HTMLDivElement>(null);
@@ -800,41 +862,31 @@ export default function MarkdownEditor({
     });
   }, [value]);
 
+  useEffect(() => {
+    onToolbarApiChange?.({
+      executeAction: (actionId: string) => {
+        const view = viewRef.current;
+        if (!view) return false;
+        return executeToolbarAction(actionId, view);
+      },
+      hasEditor: () => viewRef.current !== null,
+    });
+
+    return () => onToolbarApiChange?.(null);
+  }, [onToolbarApiChange]);
+
   return (
     <div className={cn("flex h-full w-full min-w-0 flex-col overflow-hidden", className)}>
-      <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-border bg-background px-2 py-1">
-        {markdownToolbarGroups.map((group, groupIndex) => (
-          <div key={group.id} className="flex items-center gap-0.5">
-            {groupIndex > 0 && <div className="mx-1 h-4 w-px bg-border" aria-hidden="true" />}
-            {group.actions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={action.id}
-                  type="button"
-                  title={action.title}
-                  aria-label={action.title}
-                  className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  onMouseDown={(event) => {
-                    const view = viewRef.current;
-                    if (!view) return;
-
-                    event.preventDefault();
-                    action.run(view, { openInsertDialog });
-                  }}
-                >
-                  {Icon ? <Icon className="h-3.5 w-3.5" /> : action.label}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-        {zoomLabel && (
-          <span className="ml-auto shrink-0 px-1.5 text-[10px] font-semibold text-muted-foreground">
-            {zoomLabel}
-          </span>
-        )}
-      </div>
+      {!hideToolbar && (
+        <MarkdownEditorToolbar
+          zoomLabel={undefined}
+          onAction={(actionId) => {
+            const view = viewRef.current;
+            if (!view) return;
+            executeToolbarAction(actionId, view);
+          }}
+        />
+      )}
       <div
         ref={containerRef}
         className="min-h-0 flex-1 overflow-hidden"
