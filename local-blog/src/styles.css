@@ -941,6 +941,12 @@ a {
   vertical-align: top;
 }
 
+.prose-content td[rowspan],
+.prose-content th[rowspan] {
+  vertical-align: middle;
+  text-align: center;
+}
+
 .prose-content th {
   background: var(--wash);
   color: #202124;
@@ -976,8 +982,8 @@ a {
 .prose-content table.oi-cute-table-three td {
   border-left: 0;
   border-right: 0;
-  border-top-color: #ddd6cd;
-  border-bottom-color: #ddd6cd;
+  border-top: 0;
+  border-bottom: 0;
 }
 
 .prose-content table.oi-cute-table-three thead th {

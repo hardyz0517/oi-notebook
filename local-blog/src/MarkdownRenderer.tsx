@@ -15,6 +15,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { highlightCode } from "./highlight";
 import { remarkLuoguCallouts } from "./markdownCallouts";
+import { rehypeTableMerge } from "./rehypeTableMerge";
 
 type MarkdownRendererProps = {
   markdown: string;
@@ -358,7 +359,7 @@ export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
     <div ref={rootRef} className="prose-content">
       <ReactMarkdown
         components={components}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeKatex, rehypeTableMerge]}
         remarkPlugins={[remarkGfm, remarkDirective, remarkLuoguCallouts, remarkMath]}
       >
         {markdown}

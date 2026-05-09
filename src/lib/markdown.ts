@@ -10,6 +10,7 @@ import rehypeStringify from "rehype-stringify";
 import type { Element, Root } from "hast";
 import type { BuiltinLanguage, ShikiTransformer } from "shiki";
 import { remarkLuoguCallouts } from "./markdownCallouts";
+import { rehypeTableMerge } from "./rehypeTableMerge";
 
 type CodeMeta = {
   highlightLines?: Set<number>;
@@ -58,6 +59,7 @@ const processor = unified()
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeKatex)
+  .use(rehypeTableMerge)
   .use(rehypeShiki, {
     defaultLanguage: "cpp",
     fallbackLanguage: "text",
