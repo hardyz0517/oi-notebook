@@ -180,3 +180,51 @@
 [data-markdown-preview-content] pre.oi-code-with-lines .line.oi-code-line-highlight {
   padding-left: 4rem;
 }
+
+[data-markdown-preview-content] .oi-align {
+  margin: 1rem 0;
+}
+
+[data-markdown-preview-content] .oi-align > :first-child {
+  margin-top: 0;
+}
+
+[data-markdown-preview-content] .oi-align > :last-child {
+  margin-bottom: 0;
+}
+
+[data-markdown-preview-content] .oi-align-left {
+  text-align: left;
+}
+
+[data-markdown-preview-content] .oi-align-center {
+  text-align: center;
+}
+
+[data-markdown-preview-content] .oi-align-right {
+  text-align: right;
+}
+
+[data-markdown-preview-content] .oi-epigraph {
+  margin: 1.25rem 0;
+  border-left: 3px solid color-mix(in oklch, var(--muted-foreground) 42%, transparent);
+  padding: 0.25rem 1rem;
+  color: color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground));
+  font-style: italic;
+}
+
+[data-markdown-preview-content] .oi-epigraph-body > :first-child {
+  margin-top: 0;
+}
+
+[data-markdown-preview-content] .oi-epigraph-body > :last-child {
+  margin-bottom: 0;
+}
+
+[data-markdown-preview-content] .oi-epigraph-caption {
+  margin: 0.75rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.875em;
+  font-style: normal;
+  text-align: right;
+}

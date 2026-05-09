@@ -866,6 +866,56 @@ a {
   vertical-align: middle;
 }
 
+.prose-content .oi-align {
+  margin: 1.05em 0;
+}
+
+.prose-content .oi-align > :first-child {
+  margin-top: 0;
+}
+
+.prose-content .oi-align > :last-child {
+  margin-bottom: 0;
+}
+
+.prose-content .oi-align-left {
+  text-align: left;
+}
+
+.prose-content .oi-align-center {
+  text-align: center;
+}
+
+.prose-content .oi-align-right {
+  text-align: right;
+}
+
+.prose-content .oi-epigraph {
+  margin: 1.5em 0;
+  border-left: 3px solid #d8d0c6;
+  padding: 0.15em 0 0.15em 1.1em;
+  color: #555c56;
+  font-style: italic;
+}
+
+.prose-content .oi-epigraph-body > :first-child {
+  margin-top: 0;
+}
+
+.prose-content .oi-epigraph-body > :last-child {
+  margin-bottom: 0;
+}
+
+.prose-content .oi-epigraph-caption {
+  margin: 0.8em 0 0;
+  color: var(--ink-muted);
+  font-family:
+    Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 0.82em;
+  font-style: normal;
+  text-align: right;
+}
+
 .prose-content hr {
   margin: 2.2em 0;
   border: 0;

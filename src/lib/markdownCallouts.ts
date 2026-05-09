@@ -14,6 +14,9 @@ type MarkdownNode = DirectiveNode & {
 };
 
 const calloutTypes = new Set(["info", "success", "warning", "error"]);
+const alignDirections = ["left", "center", "right"] as const;
+
+type AlignDirection = (typeof alignDirections)[number];
 
 export const remarkLuoguCallouts: Plugin = () => {
   return (tree) => {
@@ -24,6 +27,15 @@ export const remarkLuoguCallouts: Plugin = () => {
 
       const calloutType = node.name;
       if (!calloutType || !calloutTypes.has(calloutType)) {
+        if (node.name === "align") {
+          transformAlignDirective(node);
+          return;
+        }
+
+        if (node.name === "epigraph") {
+          transformEpigraphDirective(node);
+        }
+
         return;
       }
 
@@ -57,6 +69,55 @@ export const remarkLuoguCallouts: Plugin = () => {
   };
 };
 
+function transformAlignDirective(node: MarkdownNode) {
+  const direction = getAlignDirection(node.attributes);
+  if (!direction) {
+    return;
+  }
+
+  node.data = {
+    ...(node.data ?? {}),
+    hName: "div",
+    hProperties: {
+      className: `oi-align oi-align-${direction}`,
+      "data-align": direction,
+    },
+  };
+}
+
+function transformEpigraphDirective(node: MarkdownNode) {
+  const children = node.children ?? [];
+  const labelIndex = children.findIndex(isDirectiveLabel);
+  const bodyChildren =
+    labelIndex === -1
+      ? children
+      : [...children.slice(0, labelIndex), ...children.slice(labelIndex + 1)];
+  const nextChildren = [createEpigraphBodyNode(bodyChildren)];
+
+  if (labelIndex !== -1) {
+    nextChildren.push(createEpigraphCaptionNode(children[labelIndex].children ?? []));
+  }
+
+  node.children = nextChildren;
+  node.data = {
+    ...(node.data ?? {}),
+    hName: "figure",
+    hProperties: {
+      className: "oi-epigraph",
+    },
+  };
+}
+
+function getAlignDirection(attributes: Record<string, unknown> | undefined): AlignDirection | null {
+  for (const direction of alignDirections) {
+    if (Object.prototype.hasOwnProperty.call(attributes ?? {}, direction)) {
+      return direction;
+    }
+  }
+
+  return null;
+}
+
 function isDirectiveNode(node: unknown): node is MarkdownNode {
   return Boolean(node && typeof node === "object" && "type" in node);
 }
@@ -89,6 +150,32 @@ function createBodyNode(children: MarkdownNode[], isOpen: boolean): MarkdownNode
       hProperties: {
         className: "oi-callout-body",
         ...(!isOpen ? { hidden: true } : {}),
+      },
+    },
+  };
+}
+
+function createEpigraphBodyNode(children: MarkdownNode[]): MarkdownNode {
+  return {
+    type: "containerDirectiveBody",
+    children,
+    data: {
+      hName: "div",
+      hProperties: {
+        className: "oi-epigraph-body",
+      },
+    },
+  };
+}
+
+function createEpigraphCaptionNode(children: MarkdownNode[]): MarkdownNode {
+  return {
+    type: "paragraph",
+    children,
+    data: {
+      hName: "figcaption",
+      hProperties: {
+        className: "oi-epigraph-caption",
       },
     },
   };
