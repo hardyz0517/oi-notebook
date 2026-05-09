@@ -28,7 +28,7 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 ## 你可以用它做什么
 
 - 写 Markdown 笔记：左边编辑，右边实时预览，支持标题、列表、代码块、表格、图片和公式。
-- 打开本地博客复习：点击顶部“打开博客”，用更适合阅读的页面回看自己的笔记。
+- 打开本地博客复习：点击左侧 Activity Bar 的“博客”，用更适合阅读的页面回看自己的笔记。
 - 用 AI 整理内容：配置 API 后，可以让 AI 补全标题、标签、摘要，也可以尝试润色正文。
 - 同步洛谷 insight：配置洛谷 Cookie 后，可以把 AC 提交里的沉淀内容同步成笔记。
 
@@ -36,13 +36,13 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 笔记默认保存在本机数据目录的 \`notes/\` 里。开发版会打开项目里的 \`notes/\`，安装版会打开系统 app data 里的 \`notes/\`。
 
-想看真实位置，可以点顶部“打开笔记文件夹”。
+想看真实位置，可以点设置中心的“数据与存储”。
 
 ## 推荐第一步
 
 1. 点左侧笔记列表右上角的“+”，新建一篇 trick 或 problem 笔记。
 2. 写几行 Markdown，然后点顶部“保存”。
-3. 点“打开博客”，看看它在本地博客里的效果。
+3. 点左侧 Activity Bar 的“博客”，看看它在本地博客里的效果。
 
 普通写笔记和本地博客不需要配置 AI 或洛谷；这些能力可以等你熟悉后再打开。
 `;
@@ -3853,88 +3853,55 @@ export default function App() {
       {/* Header */}
       <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 text-sm font-semibold tracking-wide">OI Notebook</span>
-          <div className="flex min-w-0 max-w-80 items-center gap-2 truncate text-xs text-muted-foreground">
-            <span className="truncate">{currentFilePath ?? "未选择文件"}</span>
+          <div className="grid shrink-0 gap-0.5">
+            <span className="text-sm font-semibold tracking-wide text-foreground">OI Notebook</span>
+            <span className="text-[11px] text-muted-foreground">桌面工作区</span>
+          </div>
+          <Separator orientation="vertical" className="hidden h-7 sm:block" />
+          <div className="grid min-w-0 gap-0.5">
+            <span className="truncate text-sm text-foreground">{currentFilePath ?? "未选择文件"}</span>
             <span
-              className={isDirty ? "shrink-0 text-amber-300" : "shrink-0 text-muted-foreground"}
+              className={cn(
+                "truncate text-[11px] text-muted-foreground",
+                isDirty && !isSavingNote && "text-amber-300",
+              )}
               title={saveStatusLabel}
             >
-              {saveStatusLabel}
+              保存状态：{saveStatusLabel}
             </span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={openCreateDialog}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              新建
-            </Button>
-            <Button
-              variant={isDirty ? "default" : "outline"}
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={handleSaveCurrentNote}
-              disabled={!currentFilePath || !isDirty || isSavingNote}
-            >
-              <Save className="h-3.5 w-3.5" />
-              {isDirty ? "保存" : "已保存"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={handleOpenBlog}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              打开博客
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={handleOpenNotesFolder}
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              笔记文件夹
-            </Button>
-          </div>
-          <Separator orientation="vertical" className="h-6" />
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={openAiSettings}
-              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-            >
-              <Bot className="h-3.5 w-3.5" />
-              AI 设置
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={() => void openLuoguDialog()}
-              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              洛谷
-            </Button>
-          </div>
-          <Separator orientation="vertical" className="h-6" />
+        <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={openCreateDialog}
+            title="新建笔记"
+            aria-label="新建笔记"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新建
+          </Button>
+          <Button
+            variant={isDirty ? "default" : "outline"}
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={handleSaveCurrentNote}
+            disabled={!currentFilePath || !isDirty || isSavingNote}
+            title={saveStatusLabel}
+            aria-label={isDirty ? "保存当前笔记" : "当前笔记已保存"}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {isDirty ? "保存" : "已保存"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
             onClick={openSettingsCenter}
-            title="设置与工具"
-            aria-label="设置与工具"
+            title="打开设置中心"
+            aria-label="打开设置中心"
           >
             <Settings className="h-3.5 w-3.5" />
             设置
