@@ -27,7 +27,7 @@ files are not enough to determine intent safely.
 
 For ordinary small tasks, read only:
 - AGENTS.md
-- `git status --short`
+- `git status --short -- . ":(exclude)notes/**"`
 - directly relevant source files
 
 Prefer `rg` or other targeted search over full-file reads. If more context is
@@ -40,6 +40,9 @@ Hard rules (excerpted from HANDOFF.md):
 - Don't "optimize" the ref-based patterns in MarkdownEditor and MarkdownPreview.
 - Frontend -> Rust calls go through src/lib/api.ts, never invoke directly.
 - Do not handle `notes/**` unless the user explicitly asks.
+- Treat `notes/**` as a local test-notes area: do not modify, restore, stage, or commit it.
+- For ordinary work, prefer `git status --short -- . ":(exclude)notes/**"` and keep `notes/**` out of routine status output.
+- If notes state must be mentioned, summarize it briefly instead of printing the full list. Only print full `notes/**` status when the user explicitly asks for it.
 - Do not use `git add .`.
 - Before commit, use exact `git add -- <paths>`.
 - Before commit, check `git diff --cached --name-only`.
