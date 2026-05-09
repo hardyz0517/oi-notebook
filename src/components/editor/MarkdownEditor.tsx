@@ -220,6 +220,27 @@ const prefixSelectedLines = (
   view.focus();
 };
 
+const prefixListSelectedLines = (
+  view: EditorView,
+  createPrefix: (lineIndex: number) => string,
+  existingPrefixPattern: RegExp,
+) => {
+  let lineIndex = 0;
+
+  transformSelectedLines(view, (line) => {
+    if (existingPrefixPattern.test(line)) {
+      lineIndex += 1;
+      return line;
+    }
+
+    const [, indent = "", content = ""] = line.match(/^(\s*)(.*)$/) ?? [];
+    const prefix = createPrefix(lineIndex);
+    lineIndex += 1;
+
+    return `${indent}${prefix}${content}`;
+  });
+};
+
 const insertBlockquote = (view: EditorView) => {
   const selection = view.state.selection.main;
 
@@ -321,6 +342,9 @@ const markdownShortcutBindings: MarkdownShortcutBinding[] = [
   { key: "Mod-m", actionId: "inline-math" },
   { key: "Mod-Shift-h", actionId: "divider" },
   { key: "Mod-Shift-q", actionId: "quote" },
+  { key: "Mod-Shift-7", actionId: "unordered-list" },
+  { key: "Mod-Shift-8", actionId: "ordered-list" },
+  { key: "Mod-Shift-9", actionId: "task-list" },
 ];
 
 const markdownToolbarGroups: MarkdownToolbarGroup[] = [
@@ -453,21 +477,21 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
         label: "-",
         title: "Unordered list",
         icon: List,
-        run: (view) => prefixSelectedLines(view, () => "- "),
+        run: (view) => prefixListSelectedLines(view, () => "- ", /^\s*-\s+/),
       },
       {
         id: "ordered-list",
         label: "1.",
         title: "Ordered list",
         icon: ListOrdered,
-        run: (view) => prefixSelectedLines(view, (index) => `${index + 1}. `),
+        run: (view) => prefixListSelectedLines(view, (index) => `${index + 1}. `, /^\s*\d+\.\s+/),
       },
       {
         id: "task-list",
         label: "[]",
         title: "Task list",
         icon: ListChecks,
-        run: (view) => prefixSelectedLines(view, () => "- [ ] "),
+        run: (view) => prefixListSelectedLines(view, () => "- [ ] ", /^\s*-\s\[\s\]\s+/),
       },
     ],
   },
