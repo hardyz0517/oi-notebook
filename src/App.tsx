@@ -4236,17 +4236,6 @@ export default function App() {
             <Save className="h-3.5 w-3.5" />
             {isDirty ? "保存" : "已保存"}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={openSettingsCenter}
-            title="打开设置中心"
-            aria-label="打开设置中心"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            设置
-          </Button>
         </div>
       </header>
 
