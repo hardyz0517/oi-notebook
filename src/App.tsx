@@ -485,6 +485,8 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
   const [isSearchingNotes, setIsSearchingNotes] = useState(false);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
+  const [hasLoadedAiConfigStatus, setHasLoadedAiConfigStatus] = useState(false);
+  const [hasLoadedLuoguConfigStatus, setHasLoadedLuoguConfigStatus] = useState(false);
   const [luoguProblemId, setLuoguProblemId] = useState("");
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
   const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
@@ -504,7 +506,6 @@ export default function App() {
     () => getPromptUsageInfo(selectedPromptFileName),
     [selectedPromptFileName],
   );
-  const saveStatusLabel = currentFilePath === null ? "未选择文件" : isDirty ? "未保存" : "已保存";
   const luoguRuleSummary = useMemo(
     () => getLuoguImportRuleSummary(luoguImportRules),
     [luoguImportRules],
@@ -586,6 +587,23 @@ export default function App() {
     preparedLuoguNotes[0] ??
     null;
 
+  const aiConfigured =
+    aiConfigBaseUrl.trim() !== "" &&
+    aiConfigApiKey.trim() !== "" &&
+    aiConfigModel.trim() !== "";
+  const luoguConfigured =
+    luoguConfigUid.trim() !== "" &&
+    luoguConfigClientId.trim() !== "";
+  const saveStatusLabel =
+    currentFilePath === null ? "未选择文件" : isSavingNote ? "保存中" : isDirty ? "未保存" : "已保存";
+  const blogStatusLabel = isRestartingBlog ? "重启中" : "打开 / 重启";
+  const aiStatusLabel =
+    !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
+  const luoguStatusLabel =
+    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已配置" : "未配置";
+  const gitStatusLabel = isPushingGit ? "同步中" : "同步入口";
+  const editorViewModeLabel =
+    editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
 
@@ -1806,9 +1824,13 @@ export default function App() {
     }
   };
 
-  const openSettingsCenter = () => {
-    setSettingsSection("general");
+  const openSettingsSection = (section: SettingsSection) => {
+    setSettingsSection(section);
     setIsAdvancedActionsOpen(true);
+  };
+
+  const openSettingsCenter = () => {
+    openSettingsSection("general");
   };
 
   // Ctrl+S / Cmd+S 保存当前笔记
@@ -1837,6 +1859,57 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
   }, [contentZoom]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getAiConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setAiConfigBaseUrl(config.base_url);
+        setAiConfigApiKey(config.api_key);
+        setAiConfigModel(config.model);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) {
+          console.error("读取 AI 配置状态失败：", e.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHasLoadedAiConfigStatus(true);
+        }
+      });
+
+    getLuoguConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setLuoguConfigUid(config.luogu.uid);
+        setLuoguConfigClientId(config.luogu.client_id);
+        setLuoguConfigLastSubmissionId(
+          config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
+        );
+        setLuoguConfigAiConfigured(
+          config.ai.base_url.trim() !== "" &&
+          config.ai.api_key.trim() !== "" &&
+          config.ai.model.trim() !== "",
+        );
+      })
+      .catch((e: Error) => {
+        if (!cancelled) {
+          console.error("读取洛谷配置状态失败：", e.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHasLoadedLuoguConfigStatus(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let timeoutId: number | undefined;
@@ -3825,7 +3898,7 @@ export default function App() {
       </header>
 
       {/* Three-column body */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: File tree (fixed 240px) */}
         <aside className="flex w-60 shrink-0 flex-col overflow-hidden">
           <div className="flex h-8 shrink-0 items-center justify-between px-3">
@@ -4180,6 +4253,55 @@ export default function App() {
           )}
         </section>
       </div>
+      <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className={cn("whitespace-nowrap", isDirty && !isSavingNote && "text-amber-300")}>
+              保存：{saveStatusLabel}
+            </span>
+            <span className="whitespace-nowrap">类型：Markdown</span>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <button
+              type="button"
+              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              onClick={() => openSettingsSection("blog")}
+              title="打开博客相关工具"
+            >
+              Blog：{blogStatusLabel}
+            </button>
+            <button
+              type="button"
+              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              onClick={() => openSettingsSection("ai")}
+              title="打开 AI 分类"
+            >
+              AI：{aiStatusLabel}
+            </button>
+            <button
+              type="button"
+              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              onClick={() => openSettingsSection("luogu")}
+              title="打开洛谷分类"
+            >
+              洛谷：{luoguStatusLabel}
+            </button>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            <button
+              type="button"
+              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              onClick={() => void handlePushGit()}
+              disabled={isPushingGit}
+              title="同步 Git"
+            >
+              Git：{gitStatusLabel}
+            </button>
+            <span className="whitespace-nowrap">视图：{editorViewModeLabel}</span>
+            <span className="whitespace-nowrap">缩放：{contentZoomLabel}</span>
+          </div>
+        </div>
+      </footer>
     </div>
     </>
   );
