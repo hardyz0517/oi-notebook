@@ -13,6 +13,15 @@ type MarkdownNode = DirectiveNode & {
   value?: string;
 };
 
+type ParentNode = {
+  children?: MarkdownNode[];
+};
+
+type CuteTableConfig = {
+  classes: string[];
+  dataAttributes?: Record<string, string>;
+};
+
 const calloutTypes = new Set(["info", "success", "warning", "error"]);
 const alignDirections = ["left", "center", "right"] as const;
 
@@ -20,6 +29,8 @@ type AlignDirection = (typeof alignDirections)[number];
 
 export const remarkLuoguCallouts: Plugin = () => {
   return (tree) => {
+    transformCuteTableDirectives(tree as ParentNode);
+
     visit(tree, (node) => {
       if (!isDirectiveNode(node) || node.type !== "containerDirective") {
         return;
@@ -68,6 +79,38 @@ export const remarkLuoguCallouts: Plugin = () => {
     });
   };
 };
+
+function transformCuteTableDirectives(node: ParentNode) {
+  if (!node.children || node.children.length === 0) {
+    return;
+  }
+
+  const nextChildren: MarkdownNode[] = [];
+  let pendingCuteTable: CuteTableConfig | null = null;
+
+  for (const child of node.children) {
+    if (isCuteTableDirective(child)) {
+      pendingCuteTable = parseCuteTableConfig(child.attributes);
+      continue;
+    }
+
+    if (pendingCuteTable && child.type === "table") {
+      applyCuteTableConfig(child, pendingCuteTable);
+      pendingCuteTable = null;
+      nextChildren.push(child);
+      continue;
+    }
+
+    pendingCuteTable = null;
+    nextChildren.push(child);
+  }
+
+  node.children = nextChildren;
+
+  for (const child of node.children) {
+    transformCuteTableDirectives(child as ParentNode);
+  }
+}
 
 function transformAlignDirective(node: MarkdownNode) {
   const direction = getAlignDirection(node.attributes);
@@ -120,6 +163,75 @@ function getAlignDirection(attributes: Record<string, unknown> | undefined): Ali
 
 function isDirectiveNode(node: unknown): node is MarkdownNode {
   return Boolean(node && typeof node === "object" && "type" in node);
+}
+
+function isCuteTableDirective(node: MarkdownNode) {
+  return node.type === "leafDirective" && node.name === "cute-table";
+}
+
+function parseCuteTableConfig(
+  attributes: Record<string, unknown> | undefined,
+): CuteTableConfig | null {
+  if (Object.prototype.hasOwnProperty.call(attributes ?? {}, "three")) {
+    return {
+      classes: ["oi-cute-table", "oi-cute-table-three"],
+    };
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(attributes ?? {}, "tuack")) {
+    return null;
+  }
+
+  const tuackValue = attributes?.tuack;
+  if (tuackValue === "" || tuackValue === true || tuackValue == null) {
+    return {
+      classes: ["oi-cute-table", "oi-cute-table-tuack"],
+    };
+  }
+
+  if (String(tuackValue).trim() === "3") {
+    return {
+      classes: ["oi-cute-table", "oi-cute-table-tuack", "oi-cute-table-tuack-split-3"],
+      dataAttributes: {
+        "data-tuack-split": "3",
+      },
+    };
+  }
+
+  return null;
+}
+
+function applyCuteTableConfig(node: MarkdownNode, config: CuteTableConfig) {
+  const data = (node.data ??= {});
+  const hProperties = ((data.hProperties as Record<string, unknown> | undefined) ??= {});
+  const classNames = normalizeClassNames(hProperties.className);
+
+  for (const className of config.classes) {
+    if (!classNames.includes(className)) {
+      classNames.push(className);
+    }
+  }
+
+  hProperties.className = classNames;
+
+  for (const [key, value] of Object.entries(config.dataAttributes ?? {})) {
+    hProperties[key] = value;
+  }
+}
+
+function normalizeClassNames(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
 }
 
 function isDirectiveLabel(node: MarkdownNode) {
