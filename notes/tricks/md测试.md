@@ -4,7 +4,7 @@ tags: []
 difficulty: ''
 source: ''
 created: 2026-05-08T15:01:44.529837800+08:00
-updated: 2026-05-09T08:15:56.817936900+08:00
+updated: 2026-05-09T08:22:52.919793+08:00
 summary: ''
 draft: false
 ---
@@ -52,7 +52,7 @@ int main() {
 
 下面这个代码块用波浪线包裹，写了 `cpp lines=2,4-5`，应该高亮第 2、4、5 行。
 
-~~~cpp lines=2,4-5
+~~~cpp lines=2,4-5 showLineNumbers
 long long qpow(long long a, long long b, long long mod) {
     long long res = 1;            // 第 2 行：应该高亮
     while (b) {
