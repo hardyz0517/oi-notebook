@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
@@ -66,11 +67,34 @@ type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguMissingInsightStrategy = "skip" | "draft";
+type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
 
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
+const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string }> = [
+  { id: "general", label: "常规", blurb: "常用设置与工具总览" },
+  { id: "appearance", label: "外观", blurb: "主题、字体、缩放规划" },
+  { id: "editor", label: "编辑器", blurb: "视图模式与编辑体验" },
+  { id: "markdown", label: "Markdown", blurb: "当前渲染能力速览" },
+  { id: "ai", label: "AI", blurb: "模型配置、Prompt 与连接测试" },
+  { id: "luogu", label: "洛谷", blurb: "配置、导入与扫描工作流" },
+  { id: "blog", label: "博客", blurb: "本地博客预览与服务管理" },
+  { id: "git", label: "Git", blurb: "进阶同步操作入口" },
+  { id: "data", label: "数据与存储", blurb: "本地 notes 目录与数据说明" },
+  { id: "about", label: "关于", blurb: "产品定位与当前阶段" },
+];
+const MARKDOWN_CAPABILITIES = [
+  "KaTeX",
+  "代码高亮",
+  "行高亮",
+  "可选行号",
+  "callout",
+  "align / epigraph",
+  "cute-table",
+  "表格 ^ / > 合并",
+];
 
 interface LuoguScanProgress {
   currentPage: number;
@@ -456,6 +480,7 @@ export default function App() {
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
   const [isSearchingNotes, setIsSearchingNotes] = useState(false);
@@ -1779,6 +1804,11 @@ export default function App() {
     } catch (e) {
       toast.error(`打开笔记文件夹失败：${getErrorMessage(e)}`);
     }
+  };
+
+  const openSettingsCenter = () => {
+    setSettingsSection("general");
+    setIsAdvancedActionsOpen(true);
   };
 
   // Ctrl+S / Cmd+S 保存当前笔记
@@ -3397,84 +3427,308 @@ export default function App() {
       </DialogContent>
     </Dialog>
     <Dialog open={isAdvancedActionsOpen} onOpenChange={setIsAdvancedActionsOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>设置与工具</DialogTitle>
+      <DialogContent className="flex h-[min(82vh,760px)] w-[min(1120px,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-6 py-4 text-left">
+          <DialogTitle className="text-base">设置中心</DialogTitle>
+          <div className="text-sm text-muted-foreground">
+            管理 OI Notebook 的常用设置、工具入口和桌面工作流。当前仍是 preview 阶段，这一版先收纳现有能力。
+          </div>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <section className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">设置</div>
-            <div className="grid gap-2">
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={() => {
-                  setIsAdvancedActionsOpen(false);
-                  openLuoguSettings();
-                }}
-                disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
-              >
-                <Settings className="h-3.5 w-3.5" />
-                洛谷设置
-              </Button>
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={() => {
-                  setIsAdvancedActionsOpen(false);
-                  openPromptDialog();
-                }}
-                disabled={isLoadingPrompt || isSavingPrompt}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                AI Prompt
-              </Button>
+        <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
+          <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-border/80 bg-muted/10 md:w-[220px] md:min-w-[220px] md:border-b-0 md:border-r">
+            <div className="px-4 py-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              Sections
             </div>
-          </section>
-          <section className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">工具</div>
-            <div className="grid gap-2">
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={() => {
-                  setIsAdvancedActionsOpen(false);
-                  void openLuoguDialog();
-                }}
-              >
-                <Download className="h-3.5 w-3.5" />
-                洛谷导入中心
-              </Button>
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={handleTestLuoguConnection}
-                disabled={isTestingLuoguConnection}
-              >
-                <PlugZap className="h-3.5 w-3.5" />
-                测试连接
-              </Button>
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={handleRestartBlog}
-                disabled={isRestartingBlog}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                重启博客
-              </Button>
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                onClick={handlePushGit}
-                disabled={isPushingGit}
-              >
-                <Upload className="h-3.5 w-3.5" />
-                同步 Git
-              </Button>
-            </div>
-          </section>
+            <ScrollArea className="min-h-0 flex-1 max-h-[24vh] md:max-h-none">
+              <div className="grid gap-1 p-3">
+                {SETTINGS_SECTIONS.map((section) => {
+                  const isActive = settingsSection === section.id;
+                  return (
+                    <Button
+                      key={section.id}
+                      variant="ghost"
+                      className={cn(
+                        "h-auto w-full justify-start rounded-md px-3 py-2 text-left",
+                        isActive
+                          ? "bg-accent text-accent-foreground hover:bg-accent"
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                      )}
+                      onClick={() => setSettingsSection(section.id)}
+                    >
+                      <div className="grid w-full min-w-0 gap-0.5">
+                        <div className="text-sm font-medium">{section.label}</div>
+                        <div className={cn("text-[11px] leading-4 break-words", isActive ? "text-accent-foreground/80" : "text-muted-foreground")}>
+                          {section.blurb}
+                        </div>
+                      </div>
+                    </Button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </aside>
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
+            <ScrollArea className="h-full min-h-0">
+              <div className="grid min-w-0 gap-4 p-6">
+                {settingsSection === "general" && (
+                  <>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">常规</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          这里集中展示 OI Notebook 当前的常用设置与工具。第一轮先做信息架构和入口收纳，不引入新的持久化设置。
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                        Preview 提示：主题、字体、缩放等真实开关会后续补上，这一刀先把设置入口整理成正式的设置中心骨架。
+                      </div>
+                    </section>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="text-sm font-medium text-foreground">当前可直接前往</div>
+                      <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+                        <div>AI：模型配置、Prompt 编辑、连接测试</div>
+                        <div>洛谷：账号配置、扫描规则、预览与确认写入入口</div>
+                        <div>博客 / Git / 数据：本地博客、同步工具和 notes 目录入口</div>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {settingsSection === "appearance" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="text-base font-semibold text-foreground">外观</div>
+                    <div className="text-sm leading-6 text-muted-foreground">
+                      主题、字体、界面缩放会在后续 UI pass 中加入。这一版先统一暗色基线，不提供浅色主题或即时切换。
+                    </div>
+                    <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
+                      <div>后续计划：主题 presets</div>
+                      <div>后续计划：编辑区字体与字号偏好</div>
+                      <div>后续计划：整体缩放与阅读密度调节</div>
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "editor" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="text-base font-semibold text-foreground">编辑器</div>
+                    <div className="text-sm leading-6 text-muted-foreground">
+                      当前已经支持双栏、仅编辑、仅预览三种工作模式。视图切换和缩放控制仍保留在 Markdown toolbar 右侧，本刀不新增状态。
+                    </div>
+                    <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
+                      <div>双栏：同时查看编辑区和预览区</div>
+                      <div>仅编辑：更专注地处理 Markdown 正文</div>
+                      <div>仅预览：快速检查渲染效果</div>
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "markdown" && (
+                  <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="grid gap-1">
+                      <div className="text-base font-semibold text-foreground">Markdown</div>
+                      <div className="text-sm leading-6 text-muted-foreground">
+                        这里只汇总当前已支持的渲染能力，不改动 Markdown 渲染逻辑本身。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {MARKDOWN_CAPABILITIES.map((feature) => (
+                        <span
+                          key={feature}
+                          className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-xs text-foreground"
+                        >
+                          {feature}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "ai" && (
+                  <>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">AI 设置</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          管理模型配置、连接测试和 Prompt 模板入口。现有表单与保存逻辑保持不变。
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => {
+                            setIsAdvancedActionsOpen(false);
+                            void openAiSettings();
+                          }}
+                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                        >
+                          <Bot className="h-3.5 w-3.5" />
+                          AI 设置
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleTestAiConnection}
+                          disabled={isTestingAiConnection || isLoadingAiConfig || isSavingAiConfig}
+                        >
+                          <PlugZap className="h-3.5 w-3.5" />
+                          {isTestingAiConnection ? "测试中..." : "测试连接"}
+                        </Button>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {aiConnectionResult
+                          ? `最近一次测试成功，模型：${aiConnectionResult.model}`
+                          : "测试连接会使用当前保存的 AI 配置发起一次轻量请求。"}
+                      </div>
+                    </section>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">AI Prompt</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          Prompt 模板保存在本地 `.oinb/prompts/`，可单独编辑，不需要改动现有工作流。
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setIsAdvancedActionsOpen(false);
+                            void openPromptDialog();
+                          }}
+                          disabled={isLoadingPrompt || isSavingPrompt}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          AI Prompt
+                        </Button>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {settingsSection === "luogu" && (
+                  <>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">洛谷配置</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          管理 Cookie 相关配置，并进入洛谷导入中心。扫描、规则、预览、确认写入仍复用现有流程。
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => {
+                            setIsAdvancedActionsOpen(false);
+                            void openLuoguSettings();
+                          }}
+                          disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
+                        >
+                          <Settings className="h-3.5 w-3.5" />
+                          洛谷设置
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setIsAdvancedActionsOpen(false);
+                            void openLuoguDialog();
+                          }}
+                          disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          洛谷导入中心
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleTestLuoguConnection}
+                          disabled={isTestingLuoguConnection || isSyncingLuogu}
+                        >
+                          <PlugZap className="h-3.5 w-3.5" />
+                          {isTestingLuoguConnection ? "测试中..." : "测试连接"}
+                        </Button>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {luoguConnectionResult
+                          ? `最近一次 dry run 拉到 ${luoguConnectionResult.fetchedCount} 条提交。`
+                          : "先配置 `_uid` 和 `__client_id`，再进入扫描、规则、预览和确认写入流程。"}
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {settingsSection === "blog" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="grid gap-1">
+                      <div className="text-base font-semibold text-foreground">博客</div>
+                      <div className="text-sm leading-6 text-muted-foreground">
+                        管理本地博客预览相关入口。这里只收纳现有能力，不改 Local Blog 服务逻辑。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" onClick={handleOpenBlog}>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        打开博客
+                      </Button>
+                      <Button variant="outline" onClick={handleRestartBlog} disabled={isRestartingBlog}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {isRestartingBlog ? "重启中..." : "重启博客"}
+                      </Button>
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "git" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="grid gap-1">
+                      <div className="text-base font-semibold text-foreground">Git</div>
+                      <div className="text-sm leading-6 text-muted-foreground">
+                        这是进阶能力入口，适合在整理完本地改动后再使用，不作为主编辑流里的高频操作。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}>
+                        <Upload className="h-3.5 w-3.5" />
+                        {isPushingGit ? "同步中..." : "同步 Git"}
+                      </Button>
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "data" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="grid gap-1">
+                      <div className="text-base font-semibold text-foreground">数据与存储</div>
+                      <div className="text-sm leading-6 text-muted-foreground">
+                        `notes` 是本地笔记目录。这里保留打开目录入口，不改动任何数据路径或读写逻辑。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" onClick={handleOpenNotesFolder}>
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        打开笔记文件夹
+                      </Button>
+                    </div>
+                  </section>
+                )}
+
+                {settingsSection === "about" && (
+                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                    <div className="text-base font-semibold text-foreground">关于</div>
+                    <div className="text-sm leading-6 text-muted-foreground">
+                      OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                      当前不显示固定版本号，避免把尚未稳定的阶段信息伪装成正式发布版本。
+                    </div>
+                  </section>
+                )}
+              </div>
+            </ScrollArea>
+          </main>
         </div>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/10 px-6 py-3 sm:items-center sm:justify-between">
+          <div className="min-w-0 text-sm leading-6 text-muted-foreground">
+            顶部齿轮现在收纳桌面端设置与工具入口，原有功能仍保留，只调整信息架构与呈现方式。
+          </div>
+          <Button variant="outline" className="shrink-0" onClick={() => setIsAdvancedActionsOpen(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -3560,7 +3814,7 @@ export default function App() {
             variant="outline"
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
-            onClick={() => setIsAdvancedActionsOpen(true)}
+            onClick={openSettingsCenter}
             title="设置与工具"
             aria-label="设置与工具"
           >
