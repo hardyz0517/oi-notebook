@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { toast } from "sonner";
 import { renderMarkdown } from "@/lib/markdown";
 import { resolveNoteAssetUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -198,6 +200,50 @@ export default function MarkdownPreview({
     };
   }, [renderedHtml]);
 
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+
+    const handleClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || !root.contains(anchor)) return;
+
+      const rawHref = anchor.getAttribute("href")?.trim();
+      if (!rawHref || rawHref.startsWith("#")) return;
+
+      if (isHttpUrl(rawHref) || isMailtoUrl(rawHref)) {
+        event.preventDefault();
+        void openExternalPreviewLink(rawHref);
+        return;
+      }
+
+      if (isRelativePreviewHref(rawHref)) {
+        event.preventDefault();
+        toast.info("Relative links are not opened from desktop preview yet.");
+      }
+    };
+
+    root.addEventListener("click", handleClick);
+
+    return () => {
+      root.removeEventListener("click", handleClick);
+    };
+  }, [renderedHtml]);
+
   return (
     <div ref={containerRef} className={cn("h-full w-full min-w-0 overflow-auto", className)}>
       <div
@@ -314,6 +360,27 @@ function normalizeShikiCodeLines(code: HTMLElement) {
     if (child.nodeType === Node.TEXT_NODE && /^[\s\r\n\t]*$/.test(child.textContent ?? "")) {
       child.remove();
     }
+  }
+}
+
+function isHttpUrl(href: string): boolean {
+  return /^https?:\/\//i.test(href);
+}
+
+function isMailtoUrl(href: string): boolean {
+  return /^mailto:/i.test(href);
+}
+
+function isRelativePreviewHref(href: string): boolean {
+  return !/^[a-z][a-z0-9+.-]*:/i.test(href);
+}
+
+async function openExternalPreviewLink(href: string) {
+  try {
+    await openUrl(href);
+  } catch (error) {
+    console.warn("Open preview link failed:", error);
+    toast.error("Failed to open external link.");
   }
 }
 
