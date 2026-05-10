@@ -69,6 +69,7 @@ type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguMissingInsightStrategy = "skip" | "draft";
+type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 
@@ -258,6 +259,7 @@ function getLuoguPreviewWorkflowStatusText(
   prepared: PrepareLuoguSubmissionNoteResult | undefined,
   prepareError: string | undefined,
   writeResult: WriteLuoguPreparedNoteResult | undefined,
+  prepareStatus: LuoguPrepareItemStatus | undefined,
   currentlyPreparingId: string | null,
   currentlyWritingId: string | null,
   selectedIds: Set<string>,
@@ -285,8 +287,11 @@ function getLuoguPreviewWorkflowStatusText(
     return "preview ready";
   }
 
+  if (prepareStatus === "running") return "生成中";
+  if (prepareStatus === "queued") return "等待中";
+  if (prepareStatus === "stopped") return "已停止";
   if (currentlyPreparingId === submission.submissionId) return "preparing preview";
-  if (selectedIds.has(submission.submissionId)) return "waiting for preview";
+  if (selectedIds.has(submission.submissionId)) return "未生成";
   return submission.statusLabel;
 }
 
@@ -660,8 +665,10 @@ export default function App() {
   const [isPreparingSelectedLuogu, setIsPreparingSelectedLuogu] = useState(false);
   const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
   const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
+  const [luoguPrepareStatusesById, setLuoguPrepareStatusesById] = useState<Record<string, LuoguPrepareItemStatus>>({});
   const [currentlyPreparingLuoguId, setCurrentlyPreparingLuoguId] = useState<string | null>(null);
   const [luoguPrepareProgress, setLuoguPrepareProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isStoppingLuoguPrepare, setIsStoppingLuoguPrepare] = useState(false);
   const [isWritingPreparedLuogu, setIsWritingPreparedLuogu] = useState(false);
   const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
   const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
@@ -712,11 +719,20 @@ export default function App() {
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchRequestSeqRef = useRef(0);
+  const luoguPrepareRunSeqRef = useRef(0);
+  const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
+  const isMountedRef = useRef(true);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
     frontmatterPrefix: "",
     markdown: INITIAL_MARKDOWN,
   });
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      luoguPrepareRunRef.current.cancelled = true;
+    };
+  }, []);
   const fullMarkdown = useMemo(
     () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
     [currentFilePath, frontmatterPrefix, markdown],
@@ -844,15 +860,17 @@ export default function App() {
         const isExplicitlySkipped = skippedLuoguSubmissionIds.has(submission.submissionId);
         const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
         const prepared = luoguPreparedNotesById[submission.submissionId];
+        const prepareStatus = luoguPrepareStatusesById[submission.submissionId];
         return (
-          (isSelected || isExplicitlySkipped || Boolean(prepared?.skipped)) &&
-          (isExplicitlySkipped || prepared?.skipped || !candidateState?.canSelect)
+          (isSelected || isExplicitlySkipped || Boolean(prepared?.skipped) || prepareStatus === "stopped") &&
+          (isExplicitlySkipped || prepared?.skipped || prepareStatus === "stopped" || !candidateState?.canSelect)
         );
       }),
     [
       luoguPreviewResult,
       luoguSubmissionCandidateStates,
       luoguPreparedNotesById,
+      luoguPrepareStatusesById,
       selectedLuoguSubmissionIds,
       skippedLuoguSubmissionIds,
     ],
@@ -1199,8 +1217,10 @@ export default function App() {
     setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
+    setLuoguPrepareStatusesById({});
     setCurrentlyPreparingLuoguId(null);
     setLuoguPrepareProgress(null);
+    setIsStoppingLuoguPrepare(false);
     setLuoguWriteResultsById({});
     setCurrentlyWritingLuoguId(null);
     setLuoguWriteProgress(null);
@@ -1327,10 +1347,13 @@ export default function App() {
   };
 
   const resetLuoguPreparedWorkflow = () => {
+    luoguPrepareRunRef.current.cancelled = true;
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
+    setLuoguPrepareStatusesById({});
     setCurrentlyPreparingLuoguId(null);
     setLuoguPrepareProgress(null);
+    setIsStoppingLuoguPrepare(false);
     setLuoguWriteResultsById({});
     setCurrentlyWritingLuoguId(null);
     setLuoguWriteProgress(null);
@@ -1614,8 +1637,10 @@ export default function App() {
     setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
+    setLuoguPrepareStatusesById({});
     setCurrentlyPreparingLuoguId(null);
     setLuoguPrepareProgress(null);
+    setIsStoppingLuoguPrepare(false);
     setLuoguWriteResultsById({});
     setCurrentlyWritingLuoguId(null);
     setLuoguWriteProgress(null);
@@ -1656,8 +1681,10 @@ export default function App() {
     setSkippedLuoguSubmissionIds(new Set<string>());
     setLuoguPreparedNotesById({});
     setLuoguPrepareErrorsById({});
+    setLuoguPrepareStatusesById({});
     setCurrentlyPreparingLuoguId(null);
     setLuoguPrepareProgress(null);
+    setIsStoppingLuoguPrepare(false);
     setLuoguWriteResultsById({});
     setCurrentlyWritingLuoguId(null);
     setLuoguWriteProgress(null);
@@ -1724,6 +1751,11 @@ export default function App() {
       idsToSkip.forEach((id) => delete next[id]);
       return next;
     });
+    setLuoguPrepareStatusesById((current) => {
+      const next = { ...current };
+      idsToSkip.forEach((id) => delete next[id]);
+      return next;
+    });
     setLuoguWriteResultsById((current) => {
       const next = { ...current };
       idsToSkip.forEach((id) => delete next[id]);
@@ -1731,6 +1763,22 @@ export default function App() {
     });
     setActiveLuoguPreparedPreviewId((current) => current && idsToSkipSet.has(current) ? null : current);
     toast.success(`已跳过 ${idsToSkip.length} 条提交；不会写 notes、调用 AI 或提交 Git`);
+  };
+
+  const handleStopPreparingLuoguPreviews = () => {
+    if (!isPreparingSelectedLuogu) return;
+
+    luoguPrepareRunRef.current.cancelled = true;
+    setIsStoppingLuoguPrepare(true);
+    setLuoguPrepareStatusesById((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([submissionId, status]) => [
+          submissionId,
+          status === "queued" ? "stopped" : status,
+        ]),
+      ) as Record<string, LuoguPrepareItemStatus>,
+    );
+    toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
 
   const handlePrepareSelectedLuoguSubmissions = async () => {
@@ -1764,9 +1812,18 @@ export default function App() {
       return;
     }
 
+    const runId = luoguPrepareRunSeqRef.current + 1;
+    luoguPrepareRunSeqRef.current = runId;
+    luoguPrepareRunRef.current = { id: runId, cancelled: false };
     setIsPreparingSelectedLuogu(true);
+    setIsStoppingLuoguPrepare(false);
     setLuoguPrepareProgress({ current: 0, total: submissionsToPrepare.length });
     setLuoguPrepareErrorsById({});
+    setLuoguPrepareStatusesById(
+      Object.fromEntries(
+        submissionsToPrepare.map((submission) => [submission.submissionId, "queued"]),
+      ) as Record<string, LuoguPrepareItemStatus>,
+    );
     setLuoguWriteResultsById({});
     let preparedCount = reusablePreviewSubmissions.length;
     let draftCount = 0;
@@ -1777,20 +1834,45 @@ export default function App() {
     try {
       for (let index = 0; index < submissionsToPrepare.length; index += 1) {
         const submission = submissionsToPrepare[index];
+        const run = luoguPrepareRunRef.current;
+        if (run.id !== runId || run.cancelled || !isMountedRef.current) {
+          setLuoguPrepareStatusesById((current) => {
+            const next = { ...current };
+            submissionsToPrepare.slice(index).forEach((item) => {
+              if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
+                next[item.submissionId] = "stopped";
+              }
+            });
+            return next;
+          });
+          break;
+        }
+
         setCurrentlyPreparingLuoguId(submission.submissionId);
         setLuoguPrepareProgress({ current: index + 1, total: submissionsToPrepare.length });
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        setLuoguPrepareStatusesById((current) => ({
+          ...current,
+          [submission.submissionId]: "running",
+        }));
+        await sleepMs(0);
 
         try {
           const prepared = await prepareLuoguSubmissionNote(submission.submissionId, {
             requireAc: luoguImportRules.requireAc,
             allowRawDraftWithoutInsight: luoguImportRules.missingInsightStrategy === "draft",
           });
+          const latestRun = luoguPrepareRunRef.current;
+          if (latestRun.id !== runId || !isMountedRef.current) return;
           setLuoguPreparedNotesById((current) => ({
             ...current,
             [submission.submissionId]: prepared,
           }));
           setLuoguPrepareErrorsById((current) => {
+            const next = { ...current };
+            delete next[submission.submissionId];
+            return next;
+          });
+          setLuoguPrepareStatusesById((current) => {
             const next = { ...current };
             delete next[submission.submissionId];
             return next;
@@ -1805,11 +1887,31 @@ export default function App() {
             if (!firstPreparedId) firstPreparedId = submission.submissionId;
           }
         } catch (e) {
+          const latestRun = luoguPrepareRunRef.current;
+          if (latestRun.id !== runId || !isMountedRef.current) return;
           failedCount += 1;
           setLuoguPrepareErrorsById((current) => ({
             ...current,
             [submission.submissionId]: getErrorMessage(e),
           }));
+          setLuoguPrepareStatusesById((current) => {
+            const next = { ...current };
+            delete next[submission.submissionId];
+            return next;
+          });
+        }
+
+        if (luoguPrepareRunRef.current.cancelled) {
+          setLuoguPrepareStatusesById((current) => {
+            const next = { ...current };
+            submissionsToPrepare.slice(index + 1).forEach((item) => {
+              if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
+                next[item.submissionId] = "stopped";
+              }
+            });
+            return next;
+          });
+          break;
         }
       }
 
@@ -1818,13 +1920,31 @@ export default function App() {
         setActiveLuoguPreviewDetailTab("rendered");
       }
       setLuoguImportStep("preview");
-      toast.success(
-        `Preview generated: ${preparedCount} ready, ${draftCount} draft, ${skippedCount + ignoredCount} skipped/ignored, ${failedCount} failed`,
-      );
+      if (luoguPrepareRunRef.current.cancelled) {
+        toast.warning(
+          `已停止生成预览：${preparedCount} ready, ${draftCount} draft, ${skippedCount + ignoredCount} skipped/ignored, ${failedCount} failed`,
+        );
+      } else {
+        toast.success(
+          `Preview generated: ${preparedCount} ready, ${draftCount} draft, ${skippedCount + ignoredCount} skipped/ignored, ${failedCount} failed`,
+        );
+      }
     } finally {
-      setCurrentlyPreparingLuoguId(null);
-      setLuoguPrepareProgress(null);
-      setIsPreparingSelectedLuogu(false);
+      if (luoguPrepareRunRef.current.id === runId && isMountedRef.current) {
+        setLuoguPrepareStatusesById((current) => {
+          const next = { ...current };
+          Object.entries(next).forEach(([submissionId, status]) => {
+            if (status === "queued" || status === "running") {
+              next[submissionId] = luoguPrepareRunRef.current.cancelled ? "stopped" : status;
+            }
+          });
+          return next;
+        });
+        setCurrentlyPreparingLuoguId(null);
+        setLuoguPrepareProgress(null);
+        setIsPreparingSelectedLuogu(false);
+        setIsStoppingLuoguPrepare(false);
+      }
     }
   };
 
@@ -3384,12 +3504,29 @@ export default function App() {
                         {luoguPrepareProgress && (
                           <div className="basis-full rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-foreground">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="font-medium">正在生成预览 {luoguPrepareProgress.current} / {luoguPrepareProgress.total}</span>
+                              <span className="font-medium">
+                                {isStoppingLuoguPrepare ? "正在停止生成" : "正在生成预览"} {luoguPrepareProgress.current} / {luoguPrepareProgress.total}
+                              </span>
                               <span className="font-mono text-muted-foreground">
                                 {currentlyPreparingLuoguSubmission
                                   ? `${currentlyPreparingLuoguSubmission.problemId || "未知题号"} · ${currentlyPreparingLuoguSubmission.submissionId}`
                                   : currentlyPreparingLuoguId ?? "等待下一条"}
                               </span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-muted-foreground">
+                                单篇串行生成；停止后会保留已完成预览，未生成项可稍后继续。
+                              </span>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                onClick={handleStopPreparingLuoguPreviews}
+                                disabled={isStoppingLuoguPrepare}
+                              >
+                                {isStoppingLuoguPrepare ? "停止中..." : "停止生成"}
+                              </Button>
                             </div>
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background/80">
                               <div
@@ -3427,11 +3564,13 @@ export default function App() {
                                 const prepared = luoguPreparedNotesById[submission.submissionId];
                                 const prepareError = luoguPrepareErrorsById[submission.submissionId];
                                 const writeResult = luoguWriteResultsById[submission.submissionId];
+                                const prepareStatus = luoguPrepareStatusesById[submission.submissionId];
                                 const statusText = getLuoguPreviewWorkflowStatusText(
                                   submission,
                                   prepared,
                                   prepareError,
                                   writeResult,
+                                  prepareStatus,
                                   currentlyPreparingLuoguId,
                                   currentlyWritingLuoguId,
                                   selectedLuoguSubmissionIds,
@@ -3543,6 +3682,7 @@ export default function App() {
                                       prepared,
                                       undefined,
                                       writeResult,
+                                      luoguPrepareStatusesById[submission.submissionId],
                                       currentlyPreparingLuoguId,
                                       currentlyWritingLuoguId,
                                       selectedLuoguSubmissionIds,
@@ -3611,6 +3751,7 @@ export default function App() {
                                         prepared,
                                         prepareError,
                                         luoguWriteResultsById[submission.submissionId],
+                                        luoguPrepareStatusesById[submission.submissionId],
                                         currentlyPreparingLuoguId,
                                         currentlyWritingLuoguId,
                                         selectedLuoguSubmissionIds,
@@ -3644,6 +3785,7 @@ export default function App() {
                                         prepared,
                                         undefined,
                                         luoguWriteResultsById[submission.submissionId],
+                                        luoguPrepareStatusesById[submission.submissionId],
                                         currentlyPreparingLuoguId,
                                         currentlyWritingLuoguId,
                                         selectedLuoguSubmissionIds,
@@ -4141,10 +4283,21 @@ export default function App() {
                       >
                         {isPreparingSelectedLuogu
                           ? "正在生成预览..."
-                          : luoguPrepareQueueSubmissions.length > 0
+                            : luoguPrepareQueueSubmissions.length > 0
                             ? `生成预览 ${luoguPrepareQueueSubmissions.length}`
                             : `查看已有预览 ${luoguReusablePreviewCount}`}
                       </Button>
+                      {isPreparingSelectedLuogu && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleStopPreparingLuoguPreviews}
+                          disabled={isStoppingLuoguPrepare}
+                          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          {isStoppingLuoguPrepare ? "停止中..." : "停止生成"}
+                        </Button>
+                      )}
                     </>
                   ) : (
                     <>
