@@ -2657,7 +2657,7 @@ export default function App() {
 
   return (
     <>
-    <Toaster />
+    <Toaster position={isLuoguDialogOpen ? "top-right" : "bottom-right"} />
     <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
       <DialogContent className="flex h-[min(72vh,680px)] w-[min(760px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
