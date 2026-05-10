@@ -14,8 +14,10 @@
       {
         "label": "main",
         "title": "oi-notebook",
-        "width": 800,
-        "height": 600
+        "width": 1280,
+        "height": 780,
+        "minWidth": 1120,
+        "minHeight": 700
       },
       {
         "label": "quick-note",
