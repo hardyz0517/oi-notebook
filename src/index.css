@@ -161,17 +161,74 @@
   counter-reset: oi-code-line;
 }
 
+.cm-editor,
+.cm-editor .cm-scroller,
+.cm-editor .cm-content,
+.cm-editor .cm-line,
+.cm-editor .cm-line * {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings:
+    "liga" 0,
+    "clig" 0,
+    "calt" 0 !important;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell {
+  position: relative;
+  margin: 1.1rem 0 1.35rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+  border-radius: calc(var(--radius) * 0.95);
+  background: color-mix(in oklch, var(--card) 90%, black 10%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 4%, transparent),
+    0 8px 24px color-mix(in oklch, black 14%, transparent);
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > pre {
+  margin: 0;
+  padding: 0.95rem 1.1rem 1rem;
+  scrollbar-gutter: stable both-edges;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > pre > code {
+  font-size: calc(0.8rem * var(--content-zoom, 1));
+  line-height: 1.6;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell,
+[data-markdown-preview-content] .oi-code-block-shell pre,
+[data-markdown-preview-content] .oi-code-block-shell code,
+[data-markdown-preview-content] .oi-code-block-shell code *,
+[data-markdown-preview-content] .oi-code-block-shell .line,
+[data-markdown-preview-content] .oi-code-block-shell .line * {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings:
+    "liga" 0,
+    "clig" 0,
+    "calt" 0 !important;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > .code-copy-button {
+  pointer-events: auto;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell .line {
+  display: inline;
+}
+
 [data-markdown-preview-content] pre.oi-code-with-lines .line {
   position: relative;
   counter-increment: oi-code-line;
-  padding-left: 4rem;
 }
 
 [data-markdown-preview-content] pre.oi-code-with-lines .line::before {
   content: counter(oi-code-line);
-  position: absolute;
-  left: 0.25rem;
-  width: 2.5rem;
+  display: inline-block;
+  width: 2.75rem;
+  margin-right: 1rem;
   color: color-mix(in oklch, var(--muted-foreground) 76%, transparent);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -179,7 +236,10 @@
 }
 
 [data-markdown-preview-content] pre.oi-code-with-lines .line.oi-code-line-highlight {
-  padding-left: 4rem;
+  background: color-mix(in oklch, rgb(252 211 77) 13%, transparent);
+  border-left: 2px solid color-mix(in oklch, rgb(252 211 77) 82%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 [data-markdown-preview-content] .oi-align {
