@@ -728,6 +728,7 @@ export default function App() {
     markdown: INITIAL_MARKDOWN,
   });
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       luoguPrepareRunRef.current.cancelled = true;
@@ -1784,7 +1785,7 @@ export default function App() {
   const handlePrepareSelectedLuoguSubmissions = async () => {
     if (!luoguPreviewResult) return;
     const selectedSubmissions = luoguPreviewResult.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId));
-    const submissionsToPrepare = selectedSubmissions.filter((submission) => {
+    const queue = selectedSubmissions.filter((submission) => {
       const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
       return (
         candidateState?.canSelect &&
@@ -1793,21 +1794,30 @@ export default function App() {
       );
     });
     const reusablePreviewSubmissions = selectedSubmissions.filter((submission) => hasReusableLuoguPreparedPreview(submission.submissionId));
-    const ignoredCount = selectedSubmissions.length - submissionsToPrepare.length - reusablePreviewSubmissions.length;
+    const ignoredCount = selectedSubmissions.length - queue.length - reusablePreviewSubmissions.length;
 
     if (selectedSubmissions.length === 0) {
       toast.error("Please select Luogu submissions to preview");
       return;
     }
 
-    if (submissionsToPrepare.length === 0) {
+    if (queue.length === 0) {
+      luoguPrepareRunRef.current.cancelled = true;
+      setIsPreparingSelectedLuogu(false);
+      setIsStoppingLuoguPrepare(false);
+      setCurrentlyPreparingLuoguId(null);
+      setLuoguPrepareProgress(null);
+      setLuoguPrepareStatusesById({});
       if (reusablePreviewSubmissions.length > 0) {
         setActiveLuoguPreparedPreviewId(reusablePreviewSubmissions[0].submissionId);
         setActiveLuoguPreviewDetailTab("rendered");
         setLuoguImportStep("preview");
         toast.success(`无需重新生成：复用 ${reusablePreviewSubmissions.length} 个已有预览，忽略 ${ignoredCount} 个`);
       } else {
-        toast.error("没有需要生成预览的可候选提交");
+        setActiveLuoguPreparedPreviewId(null);
+        setActiveLuoguPreviewDetailTab("rendered");
+        setLuoguImportStep("preview");
+        toast.info(`没有需要生成的预览；跳过 / 忽略 ${ignoredCount} 个`);
       }
       return;
     }
@@ -1817,11 +1827,11 @@ export default function App() {
     luoguPrepareRunRef.current = { id: runId, cancelled: false };
     setIsPreparingSelectedLuogu(true);
     setIsStoppingLuoguPrepare(false);
-    setLuoguPrepareProgress({ current: 0, total: submissionsToPrepare.length });
+    setLuoguPrepareProgress({ current: 0, total: queue.length });
     setLuoguPrepareErrorsById({});
     setLuoguPrepareStatusesById(
       Object.fromEntries(
-        submissionsToPrepare.map((submission) => [submission.submissionId, "queued"]),
+        queue.map((submission) => [submission.submissionId, "queued"]),
       ) as Record<string, LuoguPrepareItemStatus>,
     );
     setLuoguWriteResultsById({});
@@ -1832,13 +1842,13 @@ export default function App() {
     let firstPreparedId: string | null = reusablePreviewSubmissions[0]?.submissionId ?? null;
 
     try {
-      for (let index = 0; index < submissionsToPrepare.length; index += 1) {
-        const submission = submissionsToPrepare[index];
+      for (let index = 0; index < queue.length; index += 1) {
+        const submission = queue[index];
         const run = luoguPrepareRunRef.current;
         if (run.id !== runId || run.cancelled || !isMountedRef.current) {
           setLuoguPrepareStatusesById((current) => {
             const next = { ...current };
-            submissionsToPrepare.slice(index).forEach((item) => {
+            queue.slice(index).forEach((item) => {
               if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
                 next[item.submissionId] = "stopped";
               }
@@ -1849,7 +1859,7 @@ export default function App() {
         }
 
         setCurrentlyPreparingLuoguId(submission.submissionId);
-        setLuoguPrepareProgress({ current: index + 1, total: submissionsToPrepare.length });
+        setLuoguPrepareProgress({ current: index + 1, total: queue.length });
         setLuoguPrepareStatusesById((current) => ({
           ...current,
           [submission.submissionId]: "running",
@@ -1904,7 +1914,7 @@ export default function App() {
         if (luoguPrepareRunRef.current.cancelled) {
           setLuoguPrepareStatusesById((current) => {
             const next = { ...current };
-            submissionsToPrepare.slice(index + 1).forEach((item) => {
+            queue.slice(index + 1).forEach((item) => {
               if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
                 next[item.submissionId] = "stopped";
               }
