@@ -716,7 +716,7 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
         <a className="back-link" href="#/">
           返回文章
         </a>
-        <LoadingState title="正在打开笔记" description="Local Blog 正在读取这篇 Markdown 笔记。" />
+        <LoadingState title="??????" description="Local Blog ?????? Markdown ???" />
       </article>
     );
   }
@@ -835,8 +835,8 @@ function NoteNavigationItem({
 }
 
 function LoadingState({
-  title = "正在整理本地笔记",
-  description = "Local Blog 正在读取 app data notes，稍等一下就会出现最新文章。",
+  title = "????????",
+  description = "Local Blog ?????? notes??????????????",
 }: {
   title?: string;
   description?: string;

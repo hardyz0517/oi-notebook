@@ -4236,7 +4236,8 @@ export default function App() {
                     <div className="grid gap-1">
                       <div className="text-base font-semibold text-foreground">数据与存储</div>
                       <div className="text-sm leading-6 text-muted-foreground">
-                        `notes` 是本地笔记目录。这里保留打开目录入口，不改动任何数据路径或读写逻辑。
+                        `notes` 是本地笔记目录。可以通过“打开笔记文件夹”查看实际位置；备份或迁移时，优先备份
+                        `notes` 目录。AI API Key、洛谷 Cookie / client_id 等敏感配置保存在本地配置文件中，不要随意打包分享整个数据目录。
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
