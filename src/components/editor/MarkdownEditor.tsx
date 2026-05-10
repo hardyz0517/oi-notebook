@@ -37,6 +37,11 @@ interface MarkdownEditorProps {
   hideToolbar?: boolean;
   className?: string;
   onToolbarApiChange?: (api: MarkdownEditorToolbarApi | null) => void;
+  onScrollApiChange?: (api: MarkdownEditorScrollApi | null) => void;
+}
+
+export interface MarkdownEditorScrollApi {
+  scrollToRatio: (ratio: number) => void;
 }
 
 interface MarkdownSnippet {
@@ -573,6 +578,7 @@ export default function MarkdownEditor({
   hideToolbar = false,
   className,
   onToolbarApiChange,
+  onScrollApiChange,
 }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -593,7 +599,6 @@ export default function MarkdownEditor({
 
   const editorOwnValue = useRef(value);
   const isApplyingExternalValueRef = useRef(false);
-  const lastRatioRef = useRef(0);
 
   const [insertDialog, setInsertDialog] = useState<InsertDialogState | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
@@ -791,10 +796,7 @@ export default function MarkdownEditor({
       const el = view.scrollDOM;
       const max = el.scrollHeight - el.clientHeight;
       const ratio = max > 0 ? el.scrollTop / max : 0;
-      if (Math.abs(ratio - lastRatioRef.current) >= 0.005) {
-        lastRatioRef.current = ratio;
-        onScrollFn.current?.(ratio);
-      }
+      onScrollFn.current?.(ratio);
     };
     view.scrollDOM.addEventListener("scroll", handleScroll);
 
@@ -849,6 +851,24 @@ export default function MarkdownEditor({
 
     return () => onToolbarApiChange?.(null);
   }, [onToolbarApiChange]);
+
+  useEffect(() => {
+    onScrollApiChange?.({
+      scrollToRatio: (ratio: number) => {
+        const view = viewRef.current;
+        if (!view) return;
+
+        const el = view.scrollDOM;
+        const max = el.scrollHeight - el.clientHeight;
+        if (max <= 0) return;
+
+        const nextRatio = Math.min(1, Math.max(0, ratio));
+        el.scrollTop = nextRatio * max;
+      },
+    });
+
+    return () => onScrollApiChange?.(null);
+  }, [onScrollApiChange]);
 
   return (
     <div className={cn("flex h-full w-full min-w-0 flex-col overflow-hidden", className)}>

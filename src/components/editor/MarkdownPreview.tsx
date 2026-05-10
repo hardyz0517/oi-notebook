@@ -8,14 +8,20 @@ import { cn } from "@/lib/utils";
 interface MarkdownPreviewProps {
   markdown: string;
   noteRelativePath?: string | null;
-  scrollRatio?: number;
+  onScroll?: (ratio: number) => void;
+  onScrollApiChange?: (api: MarkdownPreviewScrollApi | null) => void;
   className?: string;
+}
+
+export interface MarkdownPreviewScrollApi {
+  scrollToRatio: (ratio: number) => void;
 }
 
 export default function MarkdownPreview({
   markdown,
   noteRelativePath,
-  scrollRatio,
+  onScroll,
+  onScrollApiChange,
   className,
 }: MarkdownPreviewProps) {
   const [renderedHtml, setRenderedHtml] = useState("");
@@ -39,13 +45,35 @@ export default function MarkdownPreview({
   }, [markdown, noteRelativePath]);
 
   useEffect(() => {
-    if (scrollRatio === undefined) return;
+    onScrollApiChange?.({
+      scrollToRatio: (ratio: number) => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        const max = el.scrollHeight - el.clientHeight;
+        if (max <= 0) return;
+
+        const nextRatio = Math.min(1, Math.max(0, ratio));
+        el.scrollTop = nextRatio * max;
+      },
+    });
+
+    return () => onScrollApiChange?.(null);
+  }, [onScrollApiChange]);
+
+  useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const max = el.scrollHeight - el.clientHeight;
-    if (max <= 0) return;
-    el.scrollTop = scrollRatio * max;
-  }, [scrollRatio, renderedHtml]);
+
+    const handleScroll = () => {
+      const max = el.scrollHeight - el.clientHeight;
+      if (max <= 0) return;
+      onScroll?.(el.scrollTop / max);
+    };
+
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [onScroll, renderedHtml]);
 
   useLayoutEffect(() => {
     const root = contentRef.current;

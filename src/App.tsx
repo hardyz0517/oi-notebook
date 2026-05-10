@@ -1,5 +1,5 @@
 ﻿import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, Upload, X } from "lucide-react";
@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
-import MarkdownPreview from "@/components/editor/MarkdownPreview";
+import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
+import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
@@ -585,12 +585,53 @@ export default function App() {
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   const [frontmatterPrefix, setFrontmatterPrefix] = useState("");
   const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
-  // undefined 表示未发生过滚动（初次挂载跳过预览同步）
-  const [scrollRatio, setScrollRatio] = useState<number | undefined>(undefined);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
+  const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
+  const previewScrollApiRef = useRef<MarkdownPreviewScrollApi | null>(null);
+  const scrollSyncRafRef = useRef<number | null>(null);
+  const scrollSyncSuppressRafRef = useRef<number | null>(null);
+  const suppressedScrollPaneRef = useRef<"editor" | "preview" | null>(null);
+  const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
+    if (suppressedScrollPaneRef.current === source) return;
+
+    if (scrollSyncRafRef.current !== null) {
+      window.cancelAnimationFrame(scrollSyncRafRef.current);
+    }
+
+    scrollSyncRafRef.current = window.requestAnimationFrame(() => {
+      scrollSyncRafRef.current = null;
+
+      const targetPane = source === "editor" ? "preview" : "editor";
+      const targetApi = source === "editor" ? previewScrollApiRef.current : editorScrollApiRef.current;
+      if (!targetApi) return;
+
+      suppressedScrollPaneRef.current = targetPane;
+      targetApi.scrollToRatio(ratio);
+
+      if (scrollSyncSuppressRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
+      }
+      scrollSyncSuppressRafRef.current = window.requestAnimationFrame(() => {
+        scrollSyncSuppressRafRef.current = null;
+        if (suppressedScrollPaneRef.current === targetPane) {
+          suppressedScrollPaneRef.current = null;
+        }
+      });
+    });
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (scrollSyncRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollSyncRafRef.current);
+      }
+      if (scrollSyncSuppressRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
+      }
+    };
+  }, []);
   const [isDirty, setIsDirty] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
@@ -5069,9 +5110,12 @@ export default function App() {
                     value={markdown}
                     onChange={handleEditorChange}
                     onPasteImage={handlePasteImage}
-                    onScroll={(r) => setScrollRatio(r)}
+                    onScroll={(r) => syncEditorPreviewScroll("editor", r)}
                     hideToolbar
                     onToolbarApiChange={setMarkdownToolbarApi}
+                    onScrollApiChange={(api) => {
+                      editorScrollApiRef.current = api;
+                    }}
                     className="min-h-0 min-w-0 flex-1"
                   />
                 </main>
@@ -5091,7 +5135,10 @@ export default function App() {
                   <MarkdownPreview
                     markdown={markdown}
                     noteRelativePath={currentFilePath}
-                    scrollRatio={scrollRatio}
+                    onScroll={(r) => syncEditorPreviewScroll("preview", r)}
+                    onScrollApiChange={(api) => {
+                      previewScrollApiRef.current = api;
+                    }}
                     className="h-full w-full min-w-0"
                   />
                 </aside>
