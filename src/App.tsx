@@ -1,7 +1,8 @@
 ﻿import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Upload, X } from "lucide-react";
+import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, Upload, X } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -2028,6 +2029,30 @@ export default function App() {
       await openNotesFolder();
     } catch (e) {
       toast.error(`打开笔记文件夹失败：${getErrorMessage(e)}`);
+    }
+  };
+
+  const handleMinimizeWindow = async () => {
+    try {
+      await getCurrentWindow().minimize();
+    } catch (e) {
+      toast.error(`最小化窗口失败：${getErrorMessage(e)}`);
+    }
+  };
+
+  const handleToggleMaximizeWindow = async () => {
+    try {
+      await getCurrentWindow().toggleMaximize();
+    } catch (e) {
+      toast.error(`最大化窗口失败：${getErrorMessage(e)}`);
+    }
+  };
+
+  const handleCloseWindow = async () => {
+    try {
+      await getCurrentWindow().close();
+    } catch (e) {
+      toast.error(`关闭窗口失败：${getErrorMessage(e)}`);
     }
   };
 
@@ -4276,8 +4301,8 @@ export default function App() {
     </Dialog>
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="flex min-h-12 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-4 py-2">
+        <div className="flex min-w-0 items-center gap-3" data-tauri-drag-region>
           <div className="grid shrink-0 gap-0.5">
             <span className="text-sm font-semibold tracking-wide text-foreground">OI Notebook</span>
             <span className="text-[11px] text-muted-foreground">桌面工作区</span>
@@ -4296,6 +4321,7 @@ export default function App() {
             </span>
           </div>
         </div>
+        <div className="min-w-4 flex-1 self-stretch" data-tauri-drag-region />
         <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <Button
             variant="outline"
@@ -4320,6 +4346,36 @@ export default function App() {
             <Save className="h-3.5 w-3.5" />
             {isDirty ? "保存" : "已保存"}
           </Button>
+          <Separator orientation="vertical" className="mx-1 h-6" />
+          <div className="flex items-center" aria-label="窗口控制">
+            <button
+              type="button"
+              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              onClick={() => void handleMinimizeWindow()}
+              title="最小化"
+              aria-label="最小化窗口"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              onClick={() => void handleToggleMaximizeWindow()}
+              title="最大化 / 还原"
+              aria-label="最大化或还原窗口"
+            >
+              <Square className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
+              onClick={() => void handleCloseWindow()}
+              title="关闭"
+              aria-label="关闭窗口"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </header>
 

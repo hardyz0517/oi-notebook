@@ -17,7 +17,8 @@
         "width": 1280,
         "height": 780,
         "minWidth": 1120,
-        "minHeight": 700
+        "minHeight": 700,
+        "decorations": false
       },
       {
         "label": "quick-note",
