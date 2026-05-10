@@ -4182,7 +4182,7 @@ export default function App() {
         </div>
         <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/10 px-6 py-3 sm:items-center sm:justify-between">
           <div className="min-w-0 text-sm leading-6 text-muted-foreground">
-            顶部齿轮现在收纳桌面端设置与工具入口，原有功能仍保留，只调整信息架构与呈现方式。
+            设置入口位于左侧 Activity Bar 底部，这里收纳桌面端设置与工具入口。
           </div>
           <Button variant="outline" className="shrink-0" onClick={() => setIsAdvancedActionsOpen(false)}>
             关闭
@@ -4688,7 +4688,7 @@ export default function App() {
                             AI 补全元数据
                           </Button>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                           <div className="grid gap-1.5">
                             <Label htmlFor="frontmatter-title">title</Label>
                             <Input

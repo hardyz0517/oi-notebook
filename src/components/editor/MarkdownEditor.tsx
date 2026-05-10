@@ -1,4 +1,4 @@
-import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
+﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
 import { EditorState, Transaction } from "@codemirror/state";
@@ -26,11 +26,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ref 转发说明（为什么不用 forwardRef）：
-// React 19 已经把 ref 改成普通 prop，不再需要 forwardRef 包装。
-// 当前阶段没有调用命令式 API 的需求（插入图片等功能在后续迭代再做），
-// 暂不暴露 EditorView ref，保持组件接口简洁。届时直接加 ref prop 即可。
-
+// ref 杞彂璇存槑锛堜负浠€涔堜笉鐢?forwardRef锛夛細
+// React 19 宸茬粡鎶?ref 鏀规垚鏅€?prop锛屼笉鍐嶉渶瑕?forwardRef 鍖呰銆?// 褰撳墠闃舵娌℃湁璋冪敤鍛戒护寮?API 鐨勯渶姹傦紙插入图片绛夊姛鑳藉湪鍚庣画杩唬鍐嶅仛锛夛紝
+// 鏆備笉鏆撮湶 EditorView ref锛屼繚鎸佺粍浠舵帴鍙ｇ畝娲併€傚眾鏃剁洿鎺ュ姞 ref prop 鍗冲彲銆?
 interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -429,7 +427,7 @@ const markdownToolbarGroups: MarkdownToolbarGroup[] = [
       },
       {
         id: "inline-math",
-        label: "√x",
+        label: "鈭歺",
         title: "Inline formula",
         icon: Sigma,
         run: (view) => insertMarkdownSnippet(view, createWrappedSelectionSnippet("$", "a_i")),
@@ -576,15 +574,8 @@ export default function MarkdownEditor({
   className,
   onToolbarApiChange,
 }: MarkdownEditorProps) {
-  // 容器 div 的 DOM 引用，CodeMirror 需要一个真实的 DOM 节点作为挂载点
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // 保存 EditorView 实例，供外部 value 同步时使用
   const viewRef = useRef<EditorView | null>(null);
-
-  // 把 onChange / onScroll 存进 ref，这样 listener 永远调用最新版本的回调，
-  // 同时又不需要把它们加入 useEffect 的依赖数组（否则每次父组件重渲
-  // 都会重建整个编辑器）。
   const onChangeFn = useRef(onChange);
   useEffect(() => {
     onChangeFn.current = onChange;
@@ -600,13 +591,7 @@ export default function MarkdownEditor({
     onScrollFn.current = onScroll;
   }, [onScroll]);
 
-  // 记录"编辑器自己最后产生的值"，用来打破同步死循环：
-  // 用户输入 → onChange → 父组件更新 value prop → 下面的 useEffect 同步回来
-  // → 如果不判断，会再次触发 onChange → 无限循环。
-  // 通过比较 value 和这个 ref，可以知道变化是"外部文件切换"还是"自己刚才打的字"。
   const editorOwnValue = useRef(value);
-
-  // 上一次上报给父组件的滚动比例，小于 0.005 的变化不上报，避免抖动
   const lastRatioRef = useRef(0);
 
   const [insertDialog, setInsertDialog] = useState<InsertDialogState | null>(null);
@@ -704,21 +689,15 @@ export default function MarkdownEditor({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [insertDialog]);
 
-  // ─── 挂载 EditorView，仅执行一次 ─────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
 
     const view = new EditorView({
       state: EditorState.create({
-        doc: value, // 用初始 value 作为初始文档内容
+        doc: value,
         extensions: [
-          // Markdown 语法高亮与解析。
           markdown(),
-
-          // One Dark 主题，与应用整体深色风格保持一致
           oneDark,
-
-          // 软换行：Markdown 编辑必须打开，否则长行会溢出容器
           EditorView.lineWrapping,
 
           history(),
@@ -753,27 +732,21 @@ export default function MarkdownEditor({
             },
           }),
 
-          // 监听文档变化，把最新内容通过 onChange 同步给 React
+          // Listen for document changes and sync the latest content back to React.
           EditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) {
               const newValue = update.state.doc.toString();
 
-              // 区分用户输入 vs 程序 dispatch：
-              // 如果新内容已经等于 editorOwnValue.current，说明这次变化来自
-              // "外部 value 变化" effect 的 dispatch（同步外部值），
-              // 不应触发 onChange 否则会让 isDirty 被误置为 true。
-              // 用户真实输入时，editorOwnValue.current 还是旧值，两者不等。
+              // Skip programmatic sync writes so they do not bounce back through onChange.
               if (newValue === editorOwnValue.current) return;
               editorOwnValue.current = newValue;
               onChangeFn.current(newValue);
             }
           }),
 
-          // 覆盖 CodeMirror 默认样式，使其融入应用整体设计
+          // Override CodeMirror defaults so the editor fits the app dark theme.
           EditorView.theme({
-            // 显式用 Lyra --background，覆盖 oneDark 自带的蓝灰背景
             "&": { height: "100%", backgroundColor: "var(--background)" },
-            // scroller 和 gutters 也一并覆盖，保持三栏背景一致
             ".cm-scroller": {
               backgroundColor: "var(--background)",
               overflow: "auto",
@@ -792,21 +765,16 @@ export default function MarkdownEditor({
               backgroundColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
             },
             ".cm-gutters": { backgroundColor: "var(--background)", borderRight: "none" },
-            // 内容区留内边距；caretColor 对齐主题 foreground
             ".cm-content": {
               padding: "12px 16px",
               minHeight: "100%",
               caretColor: "var(--foreground)",
               fontSize: "calc(0.875rem * var(--content-zoom, 1))",
             },
-            // 去掉聚焦时 CodeMirror 自带的 outline，由主题的 focus-visible 接管
             ".cm-focused": { outline: "none" },
-            // 选中态：聚焦时用 accent，非聚焦时用 muted，避免 oneDark 默认蓝色过强
             "&.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "var(--accent)" },
             ".cm-selectionBackground": { backgroundColor: "var(--muted)" },
-            // 光标颜色对齐主题 foreground，避免 oneDark 默认蓝色在 Lyra 里突兀
             ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
-            // 当前行高亮在 Markdown 编辑场景下干扰视觉，关掉
             ".cm-activeLine": { backgroundColor: "transparent" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
           }),
@@ -816,10 +784,10 @@ export default function MarkdownEditor({
     });
 
     viewRef.current = view;
-    // 用初始 value 初始化追踪 ref（与 EditorState.create 保持一致）
+    // 鐢ㄥ垵濮?value 鍒濆鍖栬拷韪?ref锛堜笌 EditorState.create 淇濇寔涓€鑷达級
     editorOwnValue.current = value;
 
-    // 监听编辑器滚动，计算 0~1 比例上报给父组件
+    // 鐩戝惉缂栬緫鍣ㄦ粴鍔紝璁＄畻 0~1 姣斾緥涓婃姤缁欑埗缁勪欢
     const handleScroll = () => {
       const el = view.scrollDOM;
       const max = el.scrollHeight - el.clientHeight;
@@ -831,27 +799,22 @@ export default function MarkdownEditor({
     };
     view.scrollDOM.addEventListener("scroll", handleScroll);
 
-    // cleanup：组件卸载时销毁编辑器实例。
-    // React StrictMode 下 useEffect 会执行 mount → unmount → mount 两轮，
-    // 必须在这里 destroy，否则会出现两个编辑器实例叠在同一个 DOM 节点上。
+    // Clean up the EditorView instance on unmount, including StrictMode remounts.
     return () => {
       view.scrollDOM.removeEventListener("scroll", handleScroll);
       view.destroy();
       viewRef.current = null;
     };
-  }, []); // 空依赖：只在挂载时执行一次，外部 value 变化由下面的 effect 处理
+  }, []);
 
-  // ─── 外部 value 变化时同步到编辑器（例如切换笔记文件）──────────────────
+  // 鈹€鈹€鈹€ 澶栭儴 value 鍙樺寲鏃跺悓姝ュ埌缂栬緫鍣紙渚嬪鍒囨崲绗旇鏂囦欢锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
 
-    // 如果新 value 就是编辑器自己刚产生的，说明是用户输入触发的更新，
-    // 不需要再 dispatch 回去（否则光标位置会被重置）。
-    if (value === editorOwnValue.current) return;
+    // 濡傛灉鏂?value 灏辨槸缂栬緫鍣ㄨ嚜宸卞垰浜х敓鐨勶紝璇存槑鏄敤鎴疯緭鍏ヨЕ鍙戠殑鏇存柊锛?    // 涓嶉渶瑕佸啀 dispatch 鍥炲幓锛堝惁鍒欏厜鏍囦綅缃細琚噸缃級銆?    if (value === editorOwnValue.current) return;
 
-    // 外部变化（例如文件切换）：用新内容替换整个文档
-    editorOwnValue.current = value;
+    // 澶栭儴鍙樺寲锛堜緥濡傛枃浠跺垏鎹級锛氱敤鏂板唴瀹规浛鎹㈡暣涓枃妗?    editorOwnValue.current = value;
     view.dispatch({
       changes: {
         from: 0,
@@ -915,7 +878,7 @@ export default function MarkdownEditor({
               <h2 id="markdown-insert-dialog-title" className="text-sm font-semibold">
                 {insertDialog.kind === "link" && "插入链接"}
                 {insertDialog.kind === "image" && "插入图片"}
-                {insertDialog.kind === "code-block" && "插入代码"}
+                {insertDialog.kind === "code-block" && "插入代码块"}
                 {insertDialog.kind === "table" && "插入表格"}
               </h2>
               <button
@@ -1089,3 +1052,6 @@ export default function MarkdownEditor({
     </div>
   );
 }
+
+
+
