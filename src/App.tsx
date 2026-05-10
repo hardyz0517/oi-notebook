@@ -4473,7 +4473,7 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground">
       {/* Header */}
       <header className="flex min-h-12 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-4 py-2">
         <div className="flex min-w-0 items-center gap-3" data-tauri-drag-region>
