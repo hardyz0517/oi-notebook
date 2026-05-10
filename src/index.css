@@ -290,6 +290,12 @@
   text-align: right;
 }
 
+[data-markdown-preview-content] table th,
+[data-markdown-preview-content] table td {
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
 [data-markdown-preview-content] table.oi-cute-table {
   margin: 1rem 0;
   width: 100%;
