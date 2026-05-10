@@ -15,8 +15,8 @@ import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, searchNotes, listAiPrompts, readAiPrompt, saveAiPrompt } from "@/lib/api";
-import type { PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, NoteSearchResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
+import type { NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
@@ -374,6 +374,18 @@ interface SavedNoteSnapshot {
   markdown: string;
 }
 
+interface SearchResultItem {
+  path: string;
+  title: string;
+  category: string;
+  modified: string;
+  tags: string[];
+  summary: string;
+  excerpt: string;
+  score: number;
+  source: "backend" | "local";
+}
+
 function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
   const split = splitFrontmatter(markdown);
 
@@ -425,6 +437,127 @@ function formatSearchDate(value: string): string {
     month: "2-digit",
     day: "2-digit",
   });
+}
+
+function normalizeSearchText(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/g, "");
+}
+
+function splitSearchTokens(query: string): string[] {
+  return query
+    .trim()
+    .split(/\s+/)
+    .map(normalizeSearchText)
+    .filter(Boolean);
+}
+
+function scoreSubsequence(needle: string, haystack: string): number {
+  if (!needle || !haystack) return 0;
+
+  let needleIndex = 0;
+  let firstMatch = -1;
+  let lastMatch = -1;
+
+  for (let haystackIndex = 0; haystackIndex < haystack.length && needleIndex < needle.length; haystackIndex += 1) {
+    if (haystack[haystackIndex] !== needle[needleIndex]) continue;
+
+    if (firstMatch === -1) firstMatch = haystackIndex;
+    lastMatch = haystackIndex;
+    needleIndex += 1;
+  }
+
+  if (needleIndex !== needle.length) return 0;
+
+  const span = Math.max(lastMatch - firstMatch + 1, needle.length);
+  const compactness = needle.length / span;
+  const earlyBonus = firstMatch === 0 ? 0.18 : 0;
+  return 0.45 + compactness * 0.35 + earlyBonus;
+}
+
+function scoreSearchField(token: string, value: string, weight: number): number {
+  const normalizedValue = normalizeSearchText(value);
+  if (!token || !normalizedValue) return 0;
+
+  const index = normalizedValue.indexOf(token);
+  if (index >= 0) {
+    const earlyBonus = index === 0 ? 0.25 : 0;
+    const coverageBonus = Math.min(token.length / normalizedValue.length, 0.35);
+    return weight * (1.15 + earlyBonus + coverageBonus);
+  }
+
+  return weight * scoreSubsequence(token, normalizedValue);
+}
+
+function toSearchResultItem(result: NoteSearchResult): SearchResultItem {
+  return {
+    path: result.path,
+    title: result.title || result.path.split("/").pop()?.replace(/\.md$/i, "") || result.path,
+    category: getDashboardNoteCategory(result.path),
+    modified: result.date,
+    tags: result.tags,
+    summary: result.summary,
+    excerpt: result.excerpt,
+    score: 0,
+    source: "backend",
+  };
+}
+
+function buildLocalSearchResults(files: NoteFileInfo[], query: string): SearchResultItem[] {
+  const tokens = splitSearchTokens(query);
+  const sortedByModified = [...files].sort(
+    (a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime(),
+  );
+
+  if (tokens.length === 0) {
+    return sortedByModified.slice(0, 30).map((file) => ({
+      path: file.path,
+      title: file.name.replace(/\.md$/i, ""),
+      category: getDashboardNoteCategory(file.path),
+      modified: file.modified,
+      tags: [],
+      summary: "",
+      excerpt: "",
+      score: 0,
+      source: "local",
+    }));
+  }
+
+  return sortedByModified
+    .map((file): SearchResultItem | null => {
+      const title = file.name.replace(/\.md$/i, "");
+      const category = getDashboardNoteCategory(file.path);
+      const fields = [
+        { value: title, weight: 120 },
+        { value: file.name, weight: 95 },
+        { value: category, weight: 70 },
+        { value: file.path, weight: 55 },
+      ];
+
+      let score = 0;
+      for (const token of tokens) {
+        const tokenScore = Math.max(...fields.map((field) => scoreSearchField(token, field.value, field.weight)));
+        if (tokenScore <= 0) return null;
+        score += tokenScore;
+      }
+
+      return {
+        path: file.path,
+        title,
+        category,
+        modified: file.modified,
+        tags: [],
+        summary: "",
+        excerpt: "",
+        score,
+        source: "local",
+      } satisfies SearchResultItem;
+    })
+    .filter((result): result is SearchResultItem => result !== null)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+    })
+    .slice(0, 50);
 }
 
 function getDashboardNoteCategory(path: string): string {
@@ -524,8 +657,9 @@ export default function App() {
   const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
-  const [isSearchingNotes, setIsSearchingNotes] = useState(false);
+  const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [pendingFileSelection, setPendingFileSelection] = useState<{ path: string; closeSearchOnSuccess: boolean } | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [hasLoadedAiConfigStatus, setHasLoadedAiConfigStatus] = useState(false);
@@ -536,6 +670,7 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchRequestSeqRef = useRef(0);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
     frontmatterPrefix: "",
@@ -756,6 +891,14 @@ export default function App() {
         .slice(0, 6),
     [files],
   );
+  const trimmedSearchQuery = searchQuery.trim();
+  const searchResults = useMemo(() => {
+    if (trimmedSearchQuery === "") return buildLocalSearchResults(files, "");
+
+    if (searchError) return buildLocalSearchResults(files, searchQuery);
+
+    return backendSearchResults.map(toSearchResultItem);
+  }, [backendSearchResults, files, searchError, searchQuery, trimmedSearchQuery]);
 
   const updateContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setContentZoom((currentZoom) => {
@@ -2230,31 +2373,42 @@ export default function App() {
   }, [isSearchOpen]);
 
   useEffect(() => {
-    if (!isSearchOpen) return;
+    const query = searchQuery.trim();
 
-    let cancelled = false;
-    setIsSearchingNotes(true);
+    if (!isSearchOpen || query === "") {
+      searchRequestSeqRef.current += 1;
+      setBackendSearchResults([]);
+      setSearchError(null);
+      setIsSearchLoading(false);
+      return;
+    }
+
+    const requestId = searchRequestSeqRef.current + 1;
+    searchRequestSeqRef.current = requestId;
+    setSearchError(null);
+    setBackendSearchResults([]);
+    setIsSearchLoading(true);
 
     const timer = window.setTimeout(() => {
-      searchNotes(searchQuery)
+      searchNotes(query)
         .then((results) => {
-          if (!cancelled) setSearchResults(results);
+          if (searchRequestSeqRef.current !== requestId) return;
+          setBackendSearchResults(results);
+          setSearchError(null);
         })
         .catch((e: Error) => {
-          if (!cancelled) {
-            setSearchResults([]);
-            toast.error(`搜索失败：${e.message}`);
-          }
+          if (searchRequestSeqRef.current !== requestId) return;
+          setBackendSearchResults([]);
+          setSearchError(e.message || "搜索失败");
         })
         .finally(() => {
-          if (!cancelled) setIsSearchingNotes(false);
+          if (searchRequestSeqRef.current === requestId) {
+            setIsSearchLoading(false);
+          }
         });
-    }, 120);
+    }, 250);
 
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
+    return () => window.clearTimeout(timer);
   }, [isSearchOpen, searchQuery]);
 
   // 挂载时从后端加载笔记列表
@@ -2334,18 +2488,18 @@ export default function App() {
     <>
     <Toaster />
     <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-      <DialogContent className="max-w-2xl gap-0 p-0">
-        <DialogHeader className="border-b border-border px-4 py-3">
+      <DialogContent className="flex h-[min(72vh,680px)] w-[min(760px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Search className="h-4 w-4" />
             搜索笔记
           </DialogTitle>
         </DialogHeader>
-        <div className="border-b border-border p-3">
+        <div className="shrink-0 border-b border-border p-4">
           <Input
             ref={searchInputRef}
             value={searchQuery}
-            placeholder="搜索标题、正文、tags、source、summary、路径；支持 tag:DP source:luogu @recent"
+            placeholder="搜索标题、路径、标签、摘要或正文"
             className="h-9"
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -2355,54 +2509,71 @@ export default function App() {
               }
             }}
           />
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            {trimmedSearchQuery === "" ? "显示最近修改的笔记" : "支持标题、路径、标签、摘要和正文搜索"}
+          </div>
         </div>
-        <div className="max-h-[28rem] overflow-y-auto p-2">
-          {isSearchingNotes ? (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              搜索中...
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
+          {isSearchLoading && (
+            <div className="mb-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+              正在搜索本地笔记...
             </div>
-          ) : searchResults.length === 0 ? (
+          )}
+          {searchError && trimmedSearchQuery !== "" && (
+            <div className="mb-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+              后端搜索暂时失败，已显示本地标题和路径的兜底结果：{searchError}
+            </div>
+          )}
+          {searchResults.length === 0 && !isSearchLoading ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               没有找到匹配的笔记
             </div>
           ) : (
             <div className="grid gap-1">
               {searchResults.map((result) => {
-                const preview = result.summary || result.excerpt;
-
                 return (
                   <button
                     key={result.path}
                     type="button"
-                    className="grid gap-1 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                    className="grid w-full min-w-0 gap-1 rounded-md border border-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/35 focus-visible:border-ring focus-visible:bg-accent/35 focus-visible:outline-none"
                     onClick={() => handleSearchResultSelect(result.path)}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-medium text-foreground">
+                    <div className="flex min-w-0 items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm font-medium text-foreground">
                         {result.title}
                       </span>
                       <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatSearchDate(result.date)}
+                        {formatSearchDate(result.modified)}
                       </span>
                     </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {result.path}
+                    <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="shrink-0 rounded-sm border border-border/70 px-1.5 py-0.5 font-medium">
+                        {result.category}
+                      </span>
+                      <span className="min-w-0 truncate font-mono">
+                        {result.path}
+                      </span>
                     </div>
                     {result.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex min-w-0 flex-wrap gap-1">
                         {result.tags.slice(0, 5).map((tag) => (
                           <span
                             key={tag}
-                            className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            className="max-w-32 truncate rounded-sm bg-muted/45 px-1.5 py-0.5 text-[10px] text-muted-foreground"
                           >
-                            {tag}
+                            #{tag}
                           </span>
                         ))}
                       </div>
                     )}
-                    {preview && (
-                      <div className="max-h-10 overflow-hidden text-xs leading-5 text-muted-foreground">
-                        {preview}
+                    {(result.summary || result.excerpt) && (
+                      <div className="line-clamp-2 text-[11px] leading-5 text-muted-foreground/85">
+                        {result.summary || result.excerpt}
+                      </div>
+                    )}
+                    {trimmedSearchQuery !== "" && result.source === "local" && (
+                      <div className="text-[11px] text-muted-foreground/80">
+                        本地兜底相关度 {Math.round(result.score)}
                       </div>
                     )}
                   </button>
@@ -2410,6 +2581,9 @@ export default function App() {
               })}
             </div>
           )}
+        </div>
+        <div className="shrink-0 border-t border-border px-5 py-2 text-[11px] text-muted-foreground">
+          Enter 打开第一条结果，点击结果后会关闭搜索。
         </div>
       </DialogContent>
     </Dialog>
