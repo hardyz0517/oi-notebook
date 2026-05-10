@@ -1,24 +1,15 @@
 ---
-title: md全语法测试
-tags: []
-difficulty: ''
-source: ''
-summary: ''
-draft: false
-updated: 2026-05-10T16:50:41.984629300+08:00
----
----
 title: Markdown 全能力渲染测试
 date: 2026-05-10
 tags:
-  - markdown
-  - 渲染测试
-  - OI
-  - DP
+- markdown
+- 渲染测试
+- OI
+- DP
 source: manual
 summary: 用于测试 OI Notebook 的 Markdown、代码高亮、数学公式、表格、callout、cute-table、表格合并和搜索能力。
+updated: 2026-05-10T20:54:41.730694300+08:00
 ---
-
 # Markdown 全能力渲染测试
 
 这篇笔记用于测试 **OI Notebook** 的主要 Markdown 渲染能力。
