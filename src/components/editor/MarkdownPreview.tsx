@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/lib/markdown";
 import { resolveNoteAssetUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ export default function MarkdownPreview({
 }: MarkdownPreviewProps) {
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,73 +45,57 @@ export default function MarkdownPreview({
     el.scrollTop = scrollRatio * max;
   }, [scrollRatio, renderedHtml]);
 
-  useEffect(() => {
-    const root = containerRef.current?.querySelector<HTMLElement>("[data-markdown-preview-content]");
+  useLayoutEffect(() => {
+    const root = contentRef.current;
     if (!root) return;
 
     const timeoutIds = new Set<number>();
     let animationFrameId: number | null = null;
-    let decorateTimeoutId: number | null = null;
 
     const decorateCodeBlocks = () => {
       for (const code of root.querySelectorAll<HTMLElement>("pre > code")) {
         const pre = code.parentElement;
         if (!pre) continue;
 
-        let shell = pre.parentElement;
-        if (!shell || !shell.classList.contains("oi-code-block-shell")) {
-          shell = document.createElement("div");
-          shell.className = "oi-code-block-shell";
-          pre.replaceWith(shell);
-          shell.append(pre);
-        }
-
-        const existingButton = shell.querySelector<HTMLButtonElement>(
-          ":scope > button[data-code-copy-button='true'], :scope > button.code-copy-button",
-        );
-        if (existingButton) {
-          pre.dataset.copyDecorated = "true";
-          shell.dataset.copyDecorated = "true";
-          continue;
-        }
+        normalizeShikiCodeLines(code);
+        const shell = ensureCodeBlockShell(pre);
+        ensureCodeCopyButton(shell);
 
         pre.dataset.copyDecorated = "true";
         shell.dataset.copyDecorated = "true";
-
-        const button = document.createElement("button");
-        button.type = "button";
-        button.dataset.codeCopyButton = "true";
-        button.setAttribute("aria-label", "复制代码");
-        button.title = "复制代码";
-        button.className =
-          "code-copy-button absolute right-3 top-3 z-20 grid h-8 min-w-8 place-items-center rounded-md border border-white/10 bg-black/55 px-2 text-[11px] font-medium text-zinc-200 opacity-85 shadow-sm backdrop-blur-sm transition hover:border-white/15 hover:bg-black/72 hover:text-white hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-        setCodeCopyButtonIcon(button, "copy");
-
-        shell.append(button);
       }
     };
 
+    const scheduleDecoration = () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null;
+        decorateCodeBlocks();
+      });
+    };
+
     decorateCodeBlocks();
-    animationFrameId = window.requestAnimationFrame(decorateCodeBlocks);
-    decorateTimeoutId = window.setTimeout(() => {
-      decorateCodeBlocks();
-      decorateTimeoutId = null;
-    }, 0);
+    scheduleDecoration();
+
+    const observer = new MutationObserver(scheduleDecoration);
+    observer.observe(root, { childList: true, subtree: true });
 
     const setButtonStatus = (button: HTMLButtonElement, status: "copied" | "failed") => {
       if (status === "copied") {
         setCodeCopyButtonIcon(button, "check");
-        button.title = "已复制";
-        button.setAttribute("aria-label", "已复制");
+        button.title = "Copied";
+        button.setAttribute("aria-label", "Copied");
       } else {
-        button.title = "复制失败";
-        button.setAttribute("aria-label", "复制失败");
+        button.title = "Copy failed";
+        button.setAttribute("aria-label", "Copy failed");
       }
 
       const timeoutId = window.setTimeout(() => {
         setCodeCopyButtonIcon(button, "copy");
-        button.title = "复制代码";
-        button.setAttribute("aria-label", "复制代码");
+        button.title = "Copy code";
+        button.setAttribute("aria-label", "Copy code");
         timeoutIds.delete(timeoutId);
       }, 1400);
       timeoutIds.add(timeoutId);
@@ -124,7 +109,7 @@ export default function MarkdownPreview({
       if (!button || !root.contains(button)) return;
 
       const code = button.parentElement?.querySelector<HTMLElement>("pre > code");
-      const text = code?.textContent ?? "";
+      const text = code ? getCodeBlockText(code) : "";
 
       try {
         await navigator.clipboard.writeText(text);
@@ -139,11 +124,9 @@ export default function MarkdownPreview({
 
     return () => {
       root.removeEventListener("click", handleCopyClick);
+      observer.disconnect();
       if (animationFrameId !== null) {
         window.cancelAnimationFrame(animationFrameId);
-      }
-      if (decorateTimeoutId !== null) {
-        window.clearTimeout(decorateTimeoutId);
       }
       for (const timeoutId of timeoutIds) {
         window.clearTimeout(timeoutId);
@@ -218,7 +201,8 @@ export default function MarkdownPreview({
   return (
     <div ref={containerRef} className={cn("h-full w-full min-w-0 overflow-auto", className)}>
       <div
-        data-markdown-preview-content
+        ref={contentRef}
+        data-markdown-preview-content="true"
         className={cn(
           "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-[calc(0.875rem*var(--content-zoom,1))] text-foreground",
           "[&_h1]:mb-4 [&_h1]:mt-6 [&_h1]:text-[calc(1.5rem*var(--content-zoom,1))] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
@@ -275,6 +259,61 @@ function setCalloutExpanded(callout: HTMLElement, expanded: boolean) {
     body.hidden = !expanded;
     body.toggleAttribute("hidden", !expanded);
     body.style.display = expanded ? "" : "none";
+  }
+}
+
+function ensureCodeBlockShell(pre: HTMLElement) {
+  const parent = pre.parentElement;
+  if (parent?.classList.contains("oi-code-block-shell")) {
+    return parent;
+  }
+
+  const shell = document.createElement("div");
+  shell.className = "oi-code-block-shell";
+  pre.replaceWith(shell);
+  shell.append(pre);
+  return shell;
+}
+
+function ensureCodeCopyButton(shell: HTMLElement) {
+  const existingButton = shell.querySelector<HTMLButtonElement>(
+    ":scope > button[data-code-copy-button='true'], :scope > button.code-copy-button",
+  );
+  if (existingButton) return existingButton;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.codeCopyButton = "true";
+  button.setAttribute("aria-label", "Copy code");
+  button.title = "Copy code";
+  button.className =
+    "code-copy-button absolute right-3 top-3 z-20 grid h-8 min-w-8 place-items-center rounded-md border border-white/10 bg-black/55 px-2 text-[11px] font-medium text-zinc-200 opacity-85 shadow-sm backdrop-blur-sm transition hover:border-white/15 hover:bg-black/72 hover:text-white hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  setCodeCopyButtonIcon(button, "copy");
+
+  shell.append(button);
+  return button;
+}
+
+function getCodeBlockText(code: HTMLElement) {
+  const lines = Array.from(code.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains("line"),
+  );
+
+  if (lines.length > 0) {
+    return lines.map((line) => line.textContent ?? "").join("\n");
+  }
+
+  return code.textContent ?? "";
+}
+
+function normalizeShikiCodeLines(code: HTMLElement) {
+  const hasDirectLines = Array.from(code.children).some((child) => child.classList.contains("line"));
+  if (!hasDirectLines) return;
+
+  for (const child of Array.from(code.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE && /^[\s\r\n\t]*$/.test(child.textContent ?? "")) {
+      child.remove();
+    }
   }
 }
 

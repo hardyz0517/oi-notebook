@@ -164,6 +164,7 @@
 .cm-editor,
 .cm-editor .cm-scroller,
 .cm-editor .cm-content,
+.cm-editor .cm-content *,
 .cm-editor .cm-line,
 .cm-editor .cm-line * {
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
@@ -177,7 +178,7 @@
 [data-markdown-preview-content] .oi-code-block-shell {
   position: relative;
   margin: 1.1rem 0 1.35rem;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
   border-radius: calc(var(--radius) * 0.95);
   background: color-mix(in oklch, var(--card) 90%, black 10%);
@@ -188,7 +189,7 @@
 
 [data-markdown-preview-content] .oi-code-block-shell > pre {
   margin: 0;
-  padding: 0.95rem 1.1rem 1rem;
+  padding: 0.95rem 3.75rem 1rem 1.1rem;
   scrollbar-gutter: stable both-edges;
 }
 
@@ -202,7 +203,22 @@
 [data-markdown-preview-content] .oi-code-block-shell code,
 [data-markdown-preview-content] .oi-code-block-shell code *,
 [data-markdown-preview-content] .oi-code-block-shell .line,
-[data-markdown-preview-content] .oi-code-block-shell .line * {
+[data-markdown-preview-content] .oi-code-block-shell .line *,
+[data-markdown-preview-content] pre.shiki,
+[data-markdown-preview-content] pre.shiki code,
+[data-markdown-preview-content] pre.shiki code *,
+[data-markdown-preview-content] pre.shiki .line,
+[data-markdown-preview-content] pre.shiki .line * {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings:
+    "liga" 0,
+    "clig" 0,
+    "calt" 0 !important;
+}
+
+[data-markdown-preview-content] :not(pre) > code,
+.markdown-preview-content :not(pre) > code {
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
   font-variant-ligatures: none !important;
   font-feature-settings:
@@ -212,11 +228,24 @@
 }
 
 [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 30;
+  display: inline-grid !important;
+  visibility: visible !important;
+  opacity: 0.88 !important;
   pointer-events: auto;
 }
 
-[data-markdown-preview-content] .oi-code-block-shell .line {
-  display: inline;
+[data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:hover,
+[data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:focus-visible {
+  opacity: 1 !important;
+}
+
+[data-markdown-preview-content] pre.shiki .line {
+  display: block;
+  min-width: 100%;
 }
 
 [data-markdown-preview-content] pre.oi-code-with-lines .line {
@@ -235,7 +264,10 @@
   user-select: none;
 }
 
-[data-markdown-preview-content] pre.oi-code-with-lines .line.oi-code-line-highlight {
+[data-markdown-preview-content] pre.shiki .line.oi-code-line-highlight,
+.markdown-preview-content pre.shiki .line.oi-code-line-highlight {
+  display: block;
+  min-width: 100%;
   background: color-mix(in oklch, rgb(252 211 77) 13%, transparent);
   border-left: 2px solid color-mix(in oklch, rgb(252 211 77) 82%, transparent);
   box-decoration-break: clone;
