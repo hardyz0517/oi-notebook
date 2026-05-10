@@ -367,6 +367,12 @@ interface LoadedMarkdownParts {
   warning: string | null;
 }
 
+interface SavedNoteSnapshot {
+  path: string | null;
+  frontmatterPrefix: string;
+  markdown: string;
+}
+
 function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
   const split = splitFrontmatter(markdown);
 
@@ -395,6 +401,20 @@ function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
 
 function combineMarkdown(frontmatterPrefix: string, body: string): string {
   return `${frontmatterPrefix}${body}`;
+}
+
+function isSnapshotDirty(
+  snapshot: SavedNoteSnapshot,
+  path: string | null,
+  nextFrontmatterPrefix: string,
+  nextMarkdown: string,
+): boolean {
+  if (path === null) return false;
+  return (
+    snapshot.path !== path ||
+    snapshot.frontmatterPrefix !== nextFrontmatterPrefix ||
+    snapshot.markdown !== nextMarkdown
+  );
 }
 
 function formatSearchDate(value: string): string {
@@ -505,6 +525,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
   const [isSearchingNotes, setIsSearchingNotes] = useState(false);
+  const [pendingFileSelection, setPendingFileSelection] = useState<{ path: string; closeSearchOnSuccess: boolean } | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [hasLoadedAiConfigStatus, setHasLoadedAiConfigStatus] = useState(false);
   const [hasLoadedLuoguConfigStatus, setHasLoadedLuoguConfigStatus] = useState(false);
@@ -514,6 +535,11 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const savedSnapshotRef = useRef<SavedNoteSnapshot>({
+    path: null,
+    frontmatterPrefix: "",
+    markdown: INITIAL_MARKDOWN,
+  });
   const fullMarkdown = useMemo(
     () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
     [currentFilePath, frontmatterPrefix, markdown],
@@ -1749,14 +1775,21 @@ export default function App() {
   };
 
   const handleEditorChange = (value: string) => {
+    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, value);
     setMarkdown(value);
-    setIsDirty(true);
+    setIsDirty(nextDirty);
   };
 
-  const applyLoadedMarkdown = (content: string) => {
+  const applyLoadedMarkdown = (content: string, path: string | null) => {
     const loaded = splitLoadedMarkdown(content);
+    savedSnapshotRef.current = {
+      path,
+      frontmatterPrefix: loaded.frontmatterPrefix,
+      markdown: loaded.body,
+    };
     setFrontmatterPrefix(loaded.frontmatterPrefix);
     setMarkdown(loaded.body);
+    setIsDirty(false);
     if (loaded.warning) {
       toast.warning(loaded.warning);
     }
@@ -1802,9 +1835,10 @@ export default function App() {
     const nextMarkdown = mergeFrontmatterFields(fullMarkdown, nextFields);
     if (nextMarkdown === fullMarkdown) return;
     const loaded = splitLoadedMarkdown(nextMarkdown);
+    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, loaded.frontmatterPrefix, loaded.body);
     setFrontmatterPrefix(loaded.frontmatterPrefix);
     setMarkdown(loaded.body);
-    setIsDirty(true);
+    setIsDirty(nextDirty);
   };
 
   const updateTagsFromInput = (value: string) => {
@@ -1835,9 +1869,10 @@ export default function App() {
       const nextMarkdown = mergeFrontmatterMetadata(fullMarkdown, metadata);
       if (nextMarkdown !== fullMarkdown) {
         const loaded = splitLoadedMarkdown(nextMarkdown);
+        const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, loaded.frontmatterPrefix, loaded.body);
         setFrontmatterPrefix(loaded.frontmatterPrefix);
         setMarkdown(loaded.body);
-        setIsDirty(true);
+        setIsDirty(nextDirty);
       }
       toast.success("AI 元数据已生成，请确认后保存");
     } catch (e) {
@@ -1882,8 +1917,9 @@ export default function App() {
   const handleApplyPolishedBody = () => {
     if (polishedBodyPreview === null) return;
 
+    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, polishedBodyPreview);
     setMarkdown(polishedBodyPreview);
-    setIsDirty(true);
+    setIsDirty(nextDirty);
     setPolishedBodyPreview(null);
     toast.success("润色稿已应用，请确认后保存");
   };
@@ -1892,21 +1928,41 @@ export default function App() {
     setPolishedBodyPreview(null);
   };
 
-  const handleSelectFile = (path: string): boolean => {
-    if (isDirty) {
-      const ok = window.confirm("当前笔记有未保存的改动，切换将会丢失。确定切换吗？");
-      if (!ok) return false;
-    }
+  const finishFileSelection = (path: string, closeSearchOnSuccess: boolean) => {
     setCurrentFilePath(path);
+    if (closeSearchOnSuccess) {
+      setIsSearchOpen(false);
+      setSearchQuery("");
+    }
+  };
+
+  const confirmPendingFileSelection = () => {
+    if (!pendingFileSelection) return;
+    const { path, closeSearchOnSuccess } = pendingFileSelection;
+    setPendingFileSelection(null);
+    finishFileSelection(path, closeSearchOnSuccess);
+  };
+
+  const cancelPendingFileSelection = () => {
+    setPendingFileSelection(null);
+  };
+
+  const handleSelectFile = (path: string, options?: { closeSearchOnSuccess?: boolean }): boolean => {
+    if (path === currentFilePath) return true;
+    if (isSavingNote) {
+      toast.info("当前笔记正在保存，请稍候再切换");
+      return false;
+    }
+    if (isDirty) {
+      setPendingFileSelection({ path, closeSearchOnSuccess: options?.closeSearchOnSuccess ?? false });
+      return false;
+    }
+    finishFileSelection(path, options?.closeSearchOnSuccess ?? false);
     return true;
   };
 
   const handleSearchResultSelect = (path: string) => {
-    const didSelect = handleSelectFile(path);
-    if (didSelect) {
-      setIsSearchOpen(false);
-      setSearchQuery("");
-    }
+    handleSelectFile(path, { closeSearchOnSuccess: true });
   };
 
   const showSavedToast = (message: string, warning: string | null) => {
@@ -1928,9 +1984,14 @@ export default function App() {
       const warning = await writeNote(currentFilePath, fullMarkdown);
       try {
         const savedContent = await readNote(currentFilePath);
-        applyLoadedMarkdown(savedContent);
+        applyLoadedMarkdown(savedContent, currentFilePath);
       } catch (readError) {
         console.warn("Reload saved note failed:", readError);
+        savedSnapshotRef.current = {
+          path: currentFilePath,
+          frontmatterPrefix,
+          markdown,
+        };
       }
       try {
         const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
@@ -2218,6 +2279,11 @@ export default function App() {
       // 无选中文件时恢复欢迎内容
       setFrontmatterPrefix("");
       setMarkdown(INITIAL_MARKDOWN);
+      savedSnapshotRef.current = {
+        path: null,
+        frontmatterPrefix: "",
+        markdown: INITIAL_MARKDOWN,
+      };
       setIsDirty(false);
       return;
     }
@@ -2227,8 +2293,7 @@ export default function App() {
     readNote(currentFilePath)
       .then((content) => {
         if (!cancelled) {
-          applyLoadedMarkdown(content);
-          setIsDirty(false);
+          applyLoadedMarkdown(content, currentFilePath);
         }
       })
       .catch((e: Error) => {
@@ -2481,6 +2546,24 @@ export default function App() {
           <Button variant="outline" onClick={closeDialog}>取消</Button>
           <Button onClick={handleDialogConfirm}>
             {dialogMode === "create" ? "创建" : "重命名"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={pendingFileSelection !== null} onOpenChange={(open) => !open && cancelPendingFileSelection()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>有未保存的更改</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm leading-6 text-muted-foreground">
+          当前笔记还没有保存，切换后未保存内容会丢失。
+        </p>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={cancelPendingFileSelection}>
+            取消
+          </Button>
+          <Button type="button" variant="destructive" onClick={confirmPendingFileSelection}>
+            放弃更改并切换
           </Button>
         </DialogFooter>
       </DialogContent>

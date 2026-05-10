@@ -592,6 +592,7 @@ export default function MarkdownEditor({
   }, [onScroll]);
 
   const editorOwnValue = useRef(value);
+  const isApplyingExternalValueRef = useRef(false);
   const lastRatioRef = useRef(0);
 
   const [insertDialog, setInsertDialog] = useState<InsertDialogState | null>(null);
@@ -737,9 +738,8 @@ export default function MarkdownEditor({
             if (update.docChanged) {
               const newValue = update.state.doc.toString();
 
-              // Skip programmatic sync writes so they do not bounce back through onChange.
-              if (newValue === editorOwnValue.current) return;
               editorOwnValue.current = newValue;
+              if (isApplyingExternalValueRef.current) return;
               onChangeFn.current(newValue);
             }
           }),
@@ -784,7 +784,6 @@ export default function MarkdownEditor({
     });
 
     viewRef.current = view;
-    // 鐢ㄥ垵濮?value 鍒濆鍖栬拷韪?ref锛堜笌 EditorState.create 淇濇寔涓€鑷达級
     editorOwnValue.current = value;
 
     // 鐩戝惉缂栬緫鍣ㄦ粴鍔紝璁＄畻 0~1 姣斾緥涓婃姤缁欑埗缁勪欢
@@ -807,22 +806,35 @@ export default function MarkdownEditor({
     };
   }, []);
 
-  // 鈹€鈹€鈹€ 澶栭儴 value 鍙樺寲鏃跺悓姝ュ埌缂栬緫鍣紙渚嬪鍒囨崲绗旇鏂囦欢锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
 
-    // 濡傛灉鏂?value 灏辨槸缂栬緫鍣ㄨ嚜宸卞垰浜х敓鐨勶紝璇存槑鏄敤鎴疯緭鍏ヨЕ鍙戠殑鏇存柊锛?    // 涓嶉渶瑕佸啀 dispatch 鍥炲幓锛堝惁鍒欏厜鏍囦綅缃細琚噸缃級銆?    if (value === editorOwnValue.current) return;
+    const currentDoc = view.state.doc.toString();
+    if (currentDoc === value) {
+      editorOwnValue.current = value;
+      return;
+    }
 
-    // 澶栭儴鍙樺寲锛堜緥濡傛枃浠跺垏鎹級锛氱敤鏂板唴瀹规浛鎹㈡暣涓枃妗?    editorOwnValue.current = value;
-    view.dispatch({
-      changes: {
-        from: 0,
-        to: view.state.doc.length,
-        insert: value,
-      },
-      annotations: Transaction.addToHistory.of(false),
-    });
+    const currentSelection = view.state.selection.main;
+    const nextAnchor = Math.min(currentSelection.anchor, value.length);
+    const nextHead = Math.min(currentSelection.head, value.length);
+
+    isApplyingExternalValueRef.current = true;
+    try {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: currentDoc.length,
+          insert: value,
+        },
+        selection: { anchor: nextAnchor, head: nextHead },
+        annotations: Transaction.addToHistory.of(false),
+      });
+    } finally {
+      isApplyingExternalValueRef.current = false;
+    }
+    editorOwnValue.current = value;
   }, [value]);
 
   useEffect(() => {
