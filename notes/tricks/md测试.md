@@ -4,7 +4,7 @@ tags: []
 difficulty: 牛逼
 source: ''
 created: 2026-05-08T15:01:44.529837800+08:00
-updated: 2026-05-10T09:50:19.181404200+08:00
+updated: 2026-05-10T09:50:22.604046700+08:00
 summary: ''
 draft: false
 ---
@@ -14,7 +14,7 @@ draft: false
 
 下面这个**代码**块没有写语言*名，但应*该按 C++ 高亮。
 
-```1
+```
 #include <bits/stdc++.h>
 using namespace std;
 
