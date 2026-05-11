@@ -547,10 +547,68 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
   font-size: calc(0.875rem * var(--app-ui-gap-scale));
 }
 
+.app-column-resizer {
+  position: relative;
+  z-index: 12;
+  width: 7px;
+  flex: 0 0 7px;
+  cursor: col-resize;
+  touch-action: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  outline: none;
+}
+
+.app-column-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: color-mix(in oklch, var(--border) 82%, transparent);
+  opacity: 0.75;
+  transition:
+    background-color 120ms ease,
+    inset 120ms ease,
+    opacity 120ms ease;
+}
+
+.app-column-resizer:hover::before,
+.app-column-resizer:focus-visible::before,
+.app-column-resizer-active::before {
+  inset: 0 2px;
+  background: color-mix(in oklch, var(--ring) 72%, var(--border));
+  opacity: 1;
+}
+
+.app-column-resizer:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 62%, transparent);
+}
+
+body.app-column-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.app-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 html[data-theme="light"] .app-notes-sidebar {
   background: var(--surface-sidebar);
   border-color: var(--separator-strong);
   box-shadow: none;
+}
+
+html[data-theme="light"] .app-column-resizer::before {
+  background: color-mix(in oklch, var(--separator-strong) 88%, transparent);
+}
+
+html[data-theme="light"] .app-column-resizer:hover::before,
+html[data-theme="light"] .app-column-resizer:focus-visible::before,
+html[data-theme="light"] .app-column-resizer-active::before {
+  background: color-mix(in oklch, var(--primary) 58%, var(--separator-strong));
 }
 
 html[data-theme="light"] .markdown-toolbar {

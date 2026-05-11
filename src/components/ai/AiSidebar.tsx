@@ -625,7 +625,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
   );
 }
 
-export default function AiSidebar({ context, isAiConfigured, isOpen, onClose }: AiSidebarProps) {
+export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, width }: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
     initialConversationStateRef.current = loadConversationState();
@@ -1068,9 +1068,10 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose }: 
   return (
     <aside
       className={cn(
-        "w-[390px] max-w-[42vw] shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
+        "shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
         isOpen ? "flex" : "hidden",
       )}
+      style={width ? { width, flexBasis: width, maxWidth: width } : undefined}
       aria-hidden={!isOpen}
     >
       <div className="relative flex h-11 shrink-0 items-center justify-between border-b border-border/70 px-3">

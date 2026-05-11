@@ -1,5 +1,5 @@
 ﻿import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, Upload, X } from "lucide-react";
@@ -78,6 +78,20 @@ const SETTINGS_FONT_SIZE_MAX = 18;
 const SETTINGS_FONT_SIZE_DEFAULT = 14;
 const AI_CONFIG_MISSING_MESSAGE =
   "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
+const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
+const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
+const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
+const LEFT_SIDEBAR_WIDTH_DEFAULT = 260;
+const LEFT_SIDEBAR_WIDTH_MIN = 200;
+const LEFT_SIDEBAR_WIDTH_MAX = 420;
+const AI_SIDEBAR_WIDTH_DEFAULT = 390;
+const AI_SIDEBAR_WIDTH_MIN = 320;
+const AI_SIDEBAR_WIDTH_MAX = 640;
+const AI_SIDEBAR_VIEWPORT_MAX_RATIO = 0.5;
+const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
+const EDITOR_PREVIEW_RATIO_MIN = 0.2;
+const EDITOR_PREVIEW_RATIO_MAX = 0.8;
+const EDITOR_PREVIEW_MIN_PANE_WIDTH = 320;
 
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
@@ -94,6 +108,7 @@ type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
 type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
+type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
@@ -416,6 +431,45 @@ function getInitialNumberRange(storageKey: string, fallback: number, min: number
   return clampNumberRange(parsed, min, max);
 }
 
+function getAiSidebarWidthMax(): number {
+  return Math.min(AI_SIDEBAR_WIDTH_MAX, Math.floor(window.innerWidth * AI_SIDEBAR_VIEWPORT_MAX_RATIO));
+}
+
+function clampAiSidebarWidth(value: number): number {
+  const maxWidth = Math.max(AI_SIDEBAR_WIDTH_MIN, getAiSidebarWidthMax());
+  return clampNumberRange(value, AI_SIDEBAR_WIDTH_MIN, maxWidth);
+}
+
+function getInitialAiSidebarWidth(): number {
+  const stored = window.localStorage.getItem(AI_SIDEBAR_WIDTH_STORAGE_KEY);
+  if (stored === null) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
+  return clampAiSidebarWidth(parsed);
+}
+
+function clampEditorPreviewRatio(value: number, containerWidth?: number): number {
+  let minRatio = EDITOR_PREVIEW_RATIO_MIN;
+  let maxRatio = EDITOR_PREVIEW_RATIO_MAX;
+
+  if (containerWidth && containerWidth > EDITOR_PREVIEW_MIN_PANE_WIDTH * 2) {
+    minRatio = Math.max(minRatio, EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
+    maxRatio = Math.min(maxRatio, 1 - EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
+  }
+
+  return Math.min(maxRatio, Math.max(minRatio, value));
+}
+
+function getInitialEditorPreviewRatio(): number {
+  const stored = window.localStorage.getItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY);
+  if (stored === null) return EDITOR_PREVIEW_RATIO_DEFAULT;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return EDITOR_PREVIEW_RATIO_DEFAULT;
+  return clampEditorPreviewRatio(parsed);
+}
+
 function isAppTheme(value: string | null): value is AppTheme {
   return value === "dark" || value === "light";
 }
@@ -718,6 +772,17 @@ export default function App() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(() =>
+    getInitialNumberRange(
+      LEFT_SIDEBAR_WIDTH_STORAGE_KEY,
+      LEFT_SIDEBAR_WIDTH_DEFAULT,
+      LEFT_SIDEBAR_WIDTH_MIN,
+      LEFT_SIDEBAR_WIDTH_MAX,
+    ),
+  );
+  const [aiSidebarWidth, setAiSidebarWidth] = useState(getInitialAiSidebarWidth);
+  const [editorPreviewRatio, setEditorPreviewRatio] = useState(getInitialEditorPreviewRatio);
+  const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandleId | null>(null);
   const [editorSelectedText, setEditorSelectedText] = useState("");
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
@@ -747,6 +812,7 @@ export default function App() {
     ),
   );
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
+  const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
   const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
   const previewScrollApiRef = useRef<MarkdownPreviewScrollApi | null>(null);
   const scrollSyncRafRef = useRef<number | null>(null);
@@ -779,6 +845,67 @@ export default function App() {
         }
       });
     });
+  }, []);
+
+  const beginColumnResize = useCallback((handleId: ResizeHandleId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    const startX = event.clientX;
+    const startLeftSidebarWidth = leftSidebarWidth;
+    const startAiSidebarWidth = aiSidebarWidth;
+    const editorPreviewRect = editorPreviewContainerRef.current?.getBoundingClientRect() ?? null;
+
+    setActiveResizeHandle(handleId);
+    document.body.classList.add("app-column-resizing");
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (handleId === "left-sidebar") {
+        setLeftSidebarWidth(
+          clampNumberRange(
+            startLeftSidebarWidth + moveEvent.clientX - startX,
+            LEFT_SIDEBAR_WIDTH_MIN,
+            LEFT_SIDEBAR_WIDTH_MAX,
+          ),
+        );
+        return;
+      }
+
+      if (handleId === "ai-sidebar") {
+        setAiSidebarWidth(clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX));
+        return;
+      }
+
+      if (!editorPreviewRect) return;
+      const rawRatio = (moveEvent.clientX - editorPreviewRect.left) / editorPreviewRect.width;
+      setEditorPreviewRatio(clampEditorPreviewRatio(rawRatio, editorPreviewRect.width));
+    };
+
+    const stopResize = () => {
+      setActiveResizeHandle(null);
+      document.body.classList.remove("app-column-resizing");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }, [aiSidebarWidth, leftSidebarWidth]);
+
+  const resetColumnSize = useCallback((handleId: ResizeHandleId) => {
+    if (handleId === "left-sidebar") {
+      setLeftSidebarWidth(LEFT_SIDEBAR_WIDTH_DEFAULT);
+      return;
+    }
+
+    if (handleId === "ai-sidebar") {
+      setAiSidebarWidth(clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT));
+      return;
+    }
+
+    setEditorPreviewRatio(EDITOR_PREVIEW_RATIO_DEFAULT);
   }, []);
   useEffect(() => {
     return () => {
@@ -1149,6 +1276,19 @@ export default function App() {
       markdownBody: hasOpenNote ? markdown : "",
     };
   }, [activeNoteFile, currentFilePath, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
+  const isEditorPreviewSplit = showEditorPane && showPreviewPane;
+  const leftSidebarStyle = {
+    width: leftSidebarWidth,
+    flexBasis: leftSidebarWidth,
+  } as CSSProperties;
+  const editorPaneStyle = {
+    ...appearanceStyle,
+    ...(isEditorPreviewSplit ? { flex: `0 0 ${editorPreviewRatio * 100}%` } : {}),
+  } as CSSProperties;
+  const previewPaneStyle = {
+    ...appearanceStyle,
+    ...(isEditorPreviewSplit ? { flex: `0 0 ${(1 - editorPreviewRatio) * 100}%` } : {}),
+  } as CSSProperties;
   const trimmedSearchQuery = searchQuery.trim();
   const searchResults = useMemo(() => {
     if (trimmedSearchQuery === "") return buildLocalSearchResults(files, "");
@@ -2683,6 +2823,33 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_FONT_SIZE_STORAGE_KEY, String(settingsFontSize));
   }, [settingsFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
+  }, [leftSidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(AI_SIDEBAR_WIDTH_STORAGE_KEY, String(aiSidebarWidth));
+  }, [aiSidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY, String(editorPreviewRatio));
+  }, [editorPreviewRatio]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setAiSidebarWidth((currentWidth) => clampAiSidebarWidth(currentWidth));
+      const containerWidth = editorPreviewContainerRef.current?.getBoundingClientRect().width;
+      setEditorPreviewRatio((currentRatio) => clampEditorPreviewRatio(currentRatio, containerWidth));
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    return () => document.body.classList.remove("app-column-resizing");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -5333,7 +5500,10 @@ export default function App() {
 
         {isNotesSidebarOpen && (
           <>
-            <aside className="app-notes-sidebar flex w-60 shrink-0 flex-col overflow-hidden bg-background/70">
+            <aside
+              className="app-notes-sidebar flex shrink-0 flex-col overflow-hidden bg-background/70"
+              style={leftSidebarStyle}
+            >
               <div className="flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-3">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   笔记
@@ -5372,7 +5542,17 @@ export default function App() {
               </div>
             </aside>
 
-            <Separator orientation="vertical" />
+            <button
+              type="button"
+              className={cn(
+                "app-column-resizer app-column-resizer-left",
+                activeResizeHandle === "left-sidebar" && "app-column-resizer-active",
+              )}
+              onPointerDown={(event) => beginColumnResize("left-sidebar", event)}
+              onDoubleClick={() => resetColumnSize("left-sidebar")}
+              aria-label="调整笔记侧栏宽度"
+              title="拖拽调整笔记侧栏宽度，双击重置"
+            />
           </>
         )}
 
@@ -5647,14 +5827,14 @@ export default function App() {
                 }}
               />
 
-              <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              <div ref={editorPreviewContainerRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 {/* Center: Markdown editor */}
                 <main
                   className={cn(
                     "flex min-w-0 flex-1 flex-col overflow-hidden",
                     !showEditorPane && "hidden",
                   )}
-                  style={appearanceStyle}
+                  style={editorPaneStyle}
                   onWheelCapture={handleContentWheel}
                 >
                   {editorViewMode !== "preview" && (
@@ -5789,7 +5969,19 @@ export default function App() {
                   />
                 </main>
 
-                {showEditorPane && showPreviewPane && <Separator orientation="vertical" />}
+                {isEditorPreviewSplit && (
+                  <button
+                    type="button"
+                    className={cn(
+                      "app-column-resizer app-column-resizer-editor",
+                      activeResizeHandle === "editor-preview" && "app-column-resizer-active",
+                    )}
+                    onPointerDown={(event) => beginColumnResize("editor-preview", event)}
+                    onDoubleClick={() => resetColumnSize("editor-preview")}
+                    aria-label="调整编辑区和预览区比例"
+                    title="拖拽调整编辑区和预览区比例，双击重置"
+                  />
+                )}
 
                 {/* Right: Live preview */}
                 <aside
@@ -5798,7 +5990,7 @@ export default function App() {
                     showPreviewPane ? "flex" : "hidden",
                     showEditorPane ? "flex-1" : "flex-[1_1_100%]",
                   )}
-                  style={appearanceStyle}
+                  style={previewPaneStyle}
                   onWheelCapture={handleContentWheel}
                 >
                   <MarkdownPreview
@@ -5815,11 +6007,25 @@ export default function App() {
             </>
           )}
         </section>
+        {isAiSidebarOpen && (
+          <button
+            type="button"
+            className={cn(
+              "app-column-resizer app-column-resizer-ai",
+              activeResizeHandle === "ai-sidebar" && "app-column-resizer-active",
+            )}
+            onPointerDown={(event) => beginColumnResize("ai-sidebar", event)}
+            onDoubleClick={() => resetColumnSize("ai-sidebar")}
+            aria-label="调整 AI 助手宽度"
+            title="拖拽调整 AI 助手宽度，双击重置"
+          />
+        )}
         <AiSidebar
           context={aiSidebarContext}
           isAiConfigured={aiConfigured}
           isOpen={isAiSidebarOpen}
           onClose={() => setIsAiSidebarOpen(false)}
+          width={aiSidebarWidth}
         />
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">

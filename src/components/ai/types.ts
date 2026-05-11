@@ -16,4 +16,5 @@ export interface AiSidebarProps {
   isAiConfigured: boolean;
   isOpen: boolean;
   onClose: () => void;
+  width?: number;
 }
