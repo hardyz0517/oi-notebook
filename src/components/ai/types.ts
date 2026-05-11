@@ -14,5 +14,6 @@ export interface AiSidebarNoteContext {
 export interface AiSidebarProps {
   context: AiSidebarNoteContext;
   isAiConfigured: boolean;
+  isOpen: boolean;
   onClose: () => void;
 }

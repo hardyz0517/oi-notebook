@@ -75,8 +75,54 @@ const processor = unified()
   .use(rehypeStringify, { allowDangerousHtml: true })
   .freeze();
 
+const lightThemeProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkDirective)
+  .use(remarkLuoguCallouts)
+  .use(remarkMath)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeKatex)
+  .use(rehypeTableMerge)
+  .use(rehypeShiki, {
+    defaultLanguage: "cpp",
+    fallbackLanguage: "text",
+    langs: SHIKI_LANGS,
+    parseMetaString: parseCodeMeta,
+    theme: "github-light",
+    transformers: [luoguCodeLineTransformer],
+  })
+  .use(rehypeStringify, { allowDangerousHtml: true })
+  .freeze();
+
+const darkThemeProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkDirective)
+  .use(remarkLuoguCallouts)
+  .use(remarkMath)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeKatex)
+  .use(rehypeTableMerge)
+  .use(rehypeShiki, {
+    defaultLanguage: "cpp",
+    fallbackLanguage: "text",
+    langs: SHIKI_LANGS,
+    parseMetaString: parseCodeMeta,
+    theme: "one-dark-pro",
+    transformers: [luoguCodeLineTransformer],
+  })
+  .use(rehypeStringify, { allowDangerousHtml: true })
+  .freeze();
+
 export async function renderMarkdown(md: string): Promise<string> {
   const result = await processor.process(stripFrontmatter(md));
+  return String(result);
+}
+
+export async function renderMarkdownForTheme(md: string, theme: "dark" | "light"): Promise<string> {
+  const themedProcessor = theme === "dark" ? darkThemeProcessor : lightThemeProcessor;
+  const result = await themedProcessor.process(stripFrontmatter(md));
   return String(result);
 }
 

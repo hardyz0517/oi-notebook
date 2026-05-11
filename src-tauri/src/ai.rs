@@ -7,6 +7,7 @@ use std::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use tauri::Emitter;
 
 use crate::luogu::{read_config, write_config, AiConfigFields};
 use crate::paths;
@@ -63,6 +64,44 @@ pub struct NoteChatContextInput {
 pub struct NoteChatAnswer {
     pub answer: String,
     pub model: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteChatHistoryMessageInput {
+    pub role: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteChatStreamInput {
+    pub stream_id: String,
+    pub question: String,
+    pub context: NoteChatContextInput,
+    #[serde(default)]
+    pub chat_history: Vec<NoteChatHistoryMessageInput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteChatStreamChunkPayload {
+    stream_id: String,
+    delta: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteChatStreamDonePayload {
+    stream_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteChatStreamErrorPayload {
+    stream_id: String,
+    message: String,
+    detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +349,43 @@ fn extract_chat_content(value: &JsonValue) -> Option<String> {
     None
 }
 
+fn extract_stream_delta(value: &JsonValue) -> Option<String> {
+    let delta = value
+        .get("choices")
+        .and_then(JsonValue::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))?;
+    let content = delta.get("content")?;
+
+    if let Some(text) = content.as_str() {
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+
+    if let Some(parts) = content.as_array() {
+        let mut text_parts = Vec::new();
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(JsonValue::as_str) {
+                if !text.is_empty() {
+                    text_parts.push(text.to_string());
+                }
+                continue;
+            }
+            if let Some(text) = part.as_str() {
+                if !text.is_empty() {
+                    text_parts.push(text.to_string());
+                }
+            }
+        }
+        if !text_parts.is_empty() {
+            return Some(text_parts.join(""));
+        }
+    }
+
+    None
+}
+
 impl AiResponseIssue {
     fn retryable(message: impl Into<String>, debug: impl Into<String>) -> Self {
         Self {
@@ -550,6 +626,308 @@ fn parse_chat_completion_response(
             ),
         )
     })
+}
+
+fn split_ai_error_detail(message: String) -> (String, Option<String>) {
+    let detail_start = message.find("; debug=");
+    match detail_start {
+        Some(index) => (
+            message[..index].trim().to_string(),
+            Some(message[index + 2..].trim().to_string()),
+        ),
+        None => (message, None),
+    }
+}
+
+fn emit_stream_chunk(
+    app: &tauri::AppHandle,
+    stream_id: &str,
+    delta: String,
+) -> Result<(), String> {
+    app.emit(
+        "ai-chat-stream-chunk",
+        NoteChatStreamChunkPayload {
+            stream_id: stream_id.to_string(),
+            delta,
+        },
+    )
+    .map_err(|e| format!("AI chat stream failed: cannot emit chunk: {e}"))
+}
+
+fn emit_stream_done(app: &tauri::AppHandle, stream_id: &str) -> Result<(), String> {
+    app.emit(
+        "ai-chat-stream-done",
+        NoteChatStreamDonePayload {
+            stream_id: stream_id.to_string(),
+        },
+    )
+    .map_err(|e| format!("AI chat stream failed: cannot emit done: {e}"))
+}
+
+fn emit_stream_error(app: &tauri::AppHandle, stream_id: &str, error: String) {
+    let (message, detail) = split_ai_error_detail(error);
+    let _ = app.emit(
+        "ai-chat-stream-error",
+        NoteChatStreamErrorPayload {
+            stream_id: stream_id.to_string(),
+            message,
+            detail,
+        },
+    );
+}
+
+fn truncate_chat_history_text(text: &str) -> String {
+    const MAX_HISTORY_MESSAGE_CHARS: usize = 1600;
+
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= MAX_HISTORY_MESSAGE_CHARS {
+        return trimmed.to_string();
+    }
+
+    let mut truncated = trimmed
+        .chars()
+        .take(MAX_HISTORY_MESSAGE_CHARS)
+        .collect::<String>();
+    truncated.push_str("\n[truncated]");
+    truncated
+}
+
+fn build_stream_note_chat_messages(
+    question: &str,
+    context: &NoteChatContextInput,
+    chat_history: &[NoteChatHistoryMessageInput],
+) -> JsonValue {
+    let tags_text = if context.tags.is_empty() {
+        "not provided".to_string()
+    } else {
+        context
+            .tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let summary_text = if context.summary.trim().is_empty() {
+        "not provided".to_string()
+    } else {
+        context.summary.trim().to_string()
+    };
+    let note_title = context.note_title.trim();
+    let note_path = context.note_path.trim();
+    let markdown = context.markdown.trim();
+    let has_note_context = !note_path.is_empty() || !note_title.is_empty() || !markdown.is_empty();
+    let context_prompt = if has_note_context {
+        let selected_text = context.selected_text.trim();
+        let selection_section = if selected_text.is_empty() {
+            "The user has no selected text.".to_string()
+        } else {
+            format!("The user selected this text. Prefer it when relevant:\n{selected_text}")
+        };
+        let truncation_note = if markdown.is_empty() {
+            "The current note body is empty."
+        } else if context.markdown_truncated {
+            "The markdown body was truncated on the client. Say when the available context is insufficient."
+        } else {
+            "The markdown body is the current full note body."
+        };
+
+        format!(
+            "You are helping the user understand and improve the current OI Notebook note.\n\
+Answer based on the current note context when it is relevant. If the note does not contain enough information, say so clearly instead of inventing details.\n\
+Do not claim you changed the file. If the user asks for edits, provide suggestions only in this chat.\n\n\
+Note title:\n{note_title}\n\n\
+Note path:\n{note_path}\n\n\
+Tags:\n{tags_text}\n\n\
+Summary:\n{summary_text}\n\n\
+Selected text:\n{selection_section}\n\n\
+Markdown note:\n{truncation_note}\n\n{markdown}\n\n\
+The following conversation may contain previous user goals. The note above is the latest optional note context for the next user question.",
+        )
+    } else {
+        "There is no current note context attached to this request. Answer as a general helpful OI Notebook assistant, using any relevant recent conversation below. Do not claim you can read or modify a note unless the user provides one.".to_string()
+    };
+
+    let mut messages = vec![
+        json!({
+            "role": "system",
+            "content": "You are an OI Notebook assistant. Answer directly in helpful Markdown. Use the provided current note context when present, otherwise answer as a normal assistant. Also use relevant recent conversation."
+        }),
+        json!({
+            "role": "user",
+            "content": context_prompt
+        }),
+    ];
+
+    for message in chat_history.iter().take(10) {
+        let role = match message.role.trim() {
+            "user" => "user",
+            "assistant" => "assistant",
+            _ => continue,
+        };
+        let content = truncate_chat_history_text(&message.text);
+        if content.is_empty() {
+            continue;
+        }
+
+        messages.push(json!({
+            "role": role,
+            "content": content,
+        }));
+    }
+
+    messages.push(json!({
+        "role": "user",
+        "content": format!("User question:\n{question}"),
+    }));
+
+    JsonValue::Array(messages)
+}
+
+fn parse_stream_line(line: &str, scope: &str) -> Result<Option<String>, String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with(':') {
+        return Ok(None);
+    }
+    let Some(data) = trimmed.strip_prefix("data:") else {
+        return Ok(None);
+    };
+    let data = data.trim();
+    if data.is_empty() {
+        return Ok(None);
+    }
+    if data == "[DONE]" {
+        return Err("__AI_STREAM_DONE__".to_string());
+    }
+    if looks_like_html(data) {
+        return Err(format!(
+            "{scope}: AI service returned a non JSON stream chunk; debug=chunk_preview={}",
+            sanitize_ai_detail(data)
+        ));
+    }
+
+    let value = serde_json::from_str::<JsonValue>(data).map_err(|e| {
+        format!(
+            "{scope}: AI service returned an unreadable stream chunk; debug=json_parse_error={e}; chunk_preview={}",
+            sanitize_ai_detail(data)
+        )
+    })?;
+
+    if let Some(provider_message) = extract_provider_error_message(&value) {
+        return Err(format!("{scope}: {provider_message}; debug=provider_error=true"));
+    }
+
+    Ok(extract_stream_delta(&value))
+}
+
+async fn request_chat_completion_stream(
+    config: &AiConfigFields,
+    messages: JsonValue,
+    temperature: f32,
+    scope: &str,
+    app: tauri::AppHandle,
+    stream_id: String,
+) -> Result<(), String> {
+    let (base_url, api_key, model) = require_ai_config(config)?;
+    let url = format!("{base_url}/chat/completions");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("AI connection failed: cannot create HTTP client: {e}"))?;
+    let request_body = json!({
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": true
+    });
+
+    let mut response = client
+        .post(&url)
+        .bearer_auth(api_key)
+        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("{scope}: request timed out")
+            } else {
+                format!("{scope}: network error")
+            }
+        })?;
+
+    let status = response.status();
+    let status_code = status.as_u16();
+    if !status.is_success() {
+        let body = response
+            .bytes()
+            .await
+            .map(|bytes| decode_response_body(&bytes))
+            .unwrap_or_else(|e| format!("<failed to read error body: {e}>"));
+        let body_trimmed = body.trim();
+        if let Ok(value) = serde_json::from_str::<JsonValue>(body_trimmed) {
+            if let Some(provider_message) = extract_provider_error_message(&value) {
+                return Err(format!(
+                    "{scope}: {provider_message}; debug=http_status={status_code}; provider_error=true"
+                ));
+            }
+        }
+        return Err(format!(
+            "{scope}: AI service returned HTTP {status_code}; debug=error_body_preview={}",
+            sanitize_ai_detail(body_trimmed)
+        ));
+    }
+
+    let mut buffer = String::new();
+    let mut emitted_any_delta = false;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("{scope}: stream interrupted; debug={e}"))?
+    {
+        buffer.push_str(&decode_response_body(&chunk));
+        while let Some(newline_index) = buffer.find('\n') {
+            let line = buffer[..newline_index].trim_end_matches('\r').to_string();
+            buffer.drain(..=newline_index);
+            match parse_stream_line(&line, scope) {
+                Ok(Some(delta)) => {
+                    emitted_any_delta = true;
+                    emit_stream_chunk(&app, &stream_id, delta)?;
+                }
+                Ok(None) => {}
+                Err(done) if done == "__AI_STREAM_DONE__" => {
+                    emit_stream_done(&app, &stream_id)?;
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    let trailing = buffer.trim();
+    if !trailing.is_empty() {
+        match parse_stream_line(trailing, scope) {
+            Ok(Some(delta)) => {
+                emitted_any_delta = true;
+                emit_stream_chunk(&app, &stream_id, delta)?;
+            }
+            Ok(None) => {}
+            Err(done) if done == "__AI_STREAM_DONE__" => {
+                emit_stream_done(&app, &stream_id)?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    if !emitted_any_delta {
+        return Err(format!(
+            "{scope}: AI service returned an empty stream; debug=http_status={status_code}"
+        ));
+    }
+
+    emit_stream_done(&app, &stream_id)
 }
 
 fn test_ai_connection_with_config(
@@ -982,6 +1360,43 @@ pub fn chat_with_current_note(
         answer,
         model: model.to_string(),
     })
+}
+
+#[tauri::command]
+pub async fn chat_with_current_note_stream(
+    app: tauri::AppHandle,
+    input: NoteChatStreamInput,
+) -> Result<(), String> {
+    let stream_id = input.stream_id.trim().to_string();
+    if stream_id.is_empty() {
+        return Err("AI chat stream failed: stream id is missing".to_string());
+    }
+
+    let question = input.question.trim().to_string();
+    if question.is_empty() {
+        let error = "AI chat stream failed: question is empty".to_string();
+        emit_stream_error(&app, &stream_id, error.clone());
+        return Err(error);
+    }
+
+    let config = match read_config().map(|config| config.ai) {
+        Ok(config) => config,
+        Err(error) => {
+            emit_stream_error(&app, &stream_id, error.clone());
+            return Err(error);
+        }
+    };
+    let messages = build_stream_note_chat_messages(&question, &input.context, &input.chat_history);
+    let result =
+        request_chat_completion_stream(&config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
+            .await;
+
+    if let Err(error) = result {
+        emit_stream_error(&app, &stream_id, error.clone());
+        return Err(error);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

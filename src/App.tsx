@@ -5815,13 +5815,12 @@ export default function App() {
             </>
           )}
         </section>
-        {isAiSidebarOpen && (
-          <AiSidebar
-            context={aiSidebarContext}
-            isAiConfigured={aiConfigured}
-            onClose={() => setIsAiSidebarOpen(false)}
-          />
-        )}
+        <AiSidebar
+          context={aiSidebarContext}
+          isAiConfigured={aiConfigured}
+          isOpen={isAiSidebarOpen}
+          onClose={() => setIsAiSidebarOpen(false)}
+        />
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">

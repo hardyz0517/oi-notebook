@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
@@ -6,6 +7,10 @@ export type CommitNoteStatus = "committed" | "noChanges";
 export interface SaveNoteAssetResult {
   markdownPath: string;
   assetRelativePath: string;
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  await openUrl(url);
 }
 
 export interface NoteSearchResult {
@@ -153,6 +158,33 @@ export interface NoteChatContextPayload {
 export interface NoteChatAnswer {
   answer: string;
   model: string;
+}
+
+export interface NoteChatHistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface NoteChatStreamInput {
+  streamId: string;
+  question: string;
+  context: NoteChatContextPayload;
+  chatHistory?: NoteChatHistoryMessage[];
+}
+
+export interface NoteChatStreamChunkEvent {
+  streamId: string;
+  delta: string;
+}
+
+export interface NoteChatStreamDoneEvent {
+  streamId: string;
+}
+
+export interface NoteChatStreamErrorEvent {
+  streamId: string;
+  message: string;
+  detail?: string | null;
 }
 
 export interface PromptTemplateSummary {
@@ -518,6 +550,14 @@ export async function chatWithCurrentNote(
       question,
       context,
     });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function startCurrentNoteChatStream(input: NoteChatStreamInput): Promise<void> {
+  try {
+    await invoke<void>("chat_with_current_note_stream", { input });
   } catch (e) {
     throw toError(e);
   }

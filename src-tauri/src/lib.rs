@@ -228,6 +228,7 @@ pub fn run() {
             ai::generate_note_metadata,
             ai::polish_note_body,
             ai::chat_with_current_note,
+            ai::chat_with_current_note_stream,
             prompts::list_ai_prompts,
             prompts::read_ai_prompt,
             prompts::save_ai_prompt,
