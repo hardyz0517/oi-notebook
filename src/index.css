@@ -183,7 +183,7 @@
 
 [data-markdown-preview-content] .oi-code-block-shell {
   position: relative;
-  margin: 1.1rem 0 1.35rem;
+  margin: var(--content-callout-spacing, 1rem) 0 calc(var(--content-callout-spacing, 1rem) * 1.15);
   overflow: visible;
   border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
   border-radius: calc(var(--radius) * 0.95);
@@ -200,8 +200,74 @@
 }
 
 [data-markdown-preview-content] .oi-code-block-shell > pre > code {
-  font-size: calc(0.8rem * var(--content-zoom, 1));
+  font-size: calc(var(--preview-font-size, 14px) * var(--md-content-zoom, 1) * 0.92);
   line-height: 1.6;
+}
+
+.app-shell {
+  --app-ui-gap-scale: var(--app-ui-scale, 1);
+}
+
+.app-top-toolbar {
+  min-height: calc(3rem * var(--app-ui-gap-scale));
+  gap: calc(0.75rem * var(--app-ui-gap-scale));
+  padding: calc(0.5rem * var(--app-ui-gap-scale)) calc(1rem * var(--app-ui-gap-scale));
+  font-size: var(--toolbar-font-size, 12px);
+}
+
+.app-top-toolbar button {
+  font-size: var(--toolbar-font-size, 12px);
+}
+
+.app-top-toolbar .toolbar-primary-text {
+  font-size: var(--toolbar-font-size, 12px);
+}
+
+.app-top-toolbar .toolbar-secondary-text {
+  font-size: calc(var(--toolbar-font-size, 12px) * 0.86);
+}
+
+.app-activity-bar {
+  width: calc(3rem * var(--app-ui-gap-scale));
+  padding-block: calc(0.5rem * var(--app-ui-gap-scale));
+}
+
+.app-activity-bar button {
+  height: calc(2rem * var(--app-ui-gap-scale));
+  width: calc(2rem * var(--app-ui-gap-scale));
+}
+
+.app-notes-sidebar {
+  width: calc(15rem * var(--app-ui-gap-scale));
+  font-size: calc(0.875rem * var(--app-ui-gap-scale));
+}
+
+.markdown-toolbar,
+.markdown-toolbar button,
+.markdown-toolbar span {
+  font-size: calc(var(--toolbar-font-size, 12px) * 0.86);
+}
+
+.settings-center {
+  font-size: var(--settings-font-size, 14px);
+}
+
+.settings-center .text-base {
+  font-size: calc(var(--settings-font-size, 14px) * 1.14);
+}
+
+.settings-center .text-sm,
+.settings-center .text-xs,
+.settings-center .text-\[11px\],
+.settings-center .text-\[10px\],
+.settings-center button,
+.settings-center input,
+.settings-center textarea {
+  font-size: var(--settings-font-size, 14px);
+}
+
+.settings-center :where(section) {
+  padding: calc(1.25rem * var(--app-ui-scale, 1));
 }
 
 [data-markdown-preview-content] .oi-code-block-shell,

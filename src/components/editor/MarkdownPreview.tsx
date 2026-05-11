@@ -277,18 +277,22 @@ export default function MarkdownPreview({
       <div
         ref={contentRef}
         data-markdown-preview-content="true"
+        style={{
+          fontSize: "calc(var(--preview-font-size, 14px) * var(--md-content-zoom, 1))",
+          lineHeight: "var(--content-line-height, 1.7)",
+        }}
         className={cn(
-          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-[calc(0.875rem*var(--content-zoom,1))] text-foreground",
-          "[&_h1]:mb-4 [&_h1]:mt-6 [&_h1]:text-[calc(1.5rem*var(--content-zoom,1))] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
-          "[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-[calc(1.25rem*var(--content-zoom,1))] [&_h2]:font-semibold [&_h2]:leading-tight",
-          "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-[calc(1.125rem*var(--content-zoom,1))] [&_h3]:font-semibold [&_h3]:leading-snug",
-          "[&_h4]:mb-2 [&_h4]:mt-3 [&_h4]:text-[calc(1rem*var(--content-zoom,1))] [&_h4]:font-semibold",
-          "[&_p]:mb-3 [&_p]:leading-relaxed",
-          "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[calc(0.75rem*var(--content-zoom,1))]",
+          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-foreground",
+          "[&_h1]:mb-[calc(var(--content-block-spacing,0.75rem)*1.35)] [&_h1]:mt-[calc(var(--content-block-spacing,0.75rem)*2)] [&_h1]:text-[1.714em] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
+          "[&_h2]:mb-[calc(var(--content-block-spacing,0.75rem)*1.15)] [&_h2]:mt-[calc(var(--content-block-spacing,0.75rem)*1.7)] [&_h2]:text-[1.43em] [&_h2]:font-semibold [&_h2]:leading-tight",
+          "[&_h3]:mb-[var(--content-block-spacing,0.75rem)] [&_h3]:mt-[calc(var(--content-block-spacing,0.75rem)*1.35)] [&_h3]:text-[1.286em] [&_h3]:font-semibold [&_h3]:leading-snug",
+          "[&_h4]:mb-[var(--content-block-spacing,0.75rem)] [&_h4]:mt-[var(--content-block-spacing,0.75rem)] [&_h4]:text-[1.14em] [&_h4]:font-semibold",
+          "[&_p]:mb-[var(--content-block-spacing,0.75rem)] [&_p]:leading-[var(--content-line-height,1.7)]",
+          "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.92em]",
           "[&_pre]:my-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-[inherit]",
           "[&_pre_code]:inline-block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
-          "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
-          "[&_.oi-callout]:my-4 [&_.oi-callout]:overflow-hidden [&_.oi-callout]:rounded-sm [&_.oi-callout]:border [&_.oi-callout]:bg-muted/35",
+          "[&_blockquote]:my-[var(--content-block-spacing,0.75rem)] [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
+          "[&_.oi-callout]:my-[var(--content-callout-spacing,1rem)] [&_.oi-callout]:overflow-hidden [&_.oi-callout]:rounded-sm [&_.oi-callout]:border [&_.oi-callout]:bg-muted/35",
           "[&_.oi-callout-title]:flex [&_.oi-callout-title]:cursor-pointer [&_.oi-callout-title]:select-none [&_.oi-callout-title]:items-center [&_.oi-callout-title]:gap-2 [&_.oi-callout-title]:border-b [&_.oi-callout-title]:px-4 [&_.oi-callout-title]:py-2.5 [&_.oi-callout-title]:text-sm [&_.oi-callout-title]:font-semibold [&_.oi-callout-title]:not-italic [&_.oi-callout-title]:outline-none [&_.oi-callout-title]:transition-colors [&_.oi-callout-title]:focus-visible:ring-2 [&_.oi-callout-title]:focus-visible:ring-ring",
           "[&_.oi-callout-chevron]:inline-flex [&_.oi-callout-chevron]:h-4 [&_.oi-callout-chevron]:w-4 [&_.oi-callout-chevron]:shrink-0 [&_.oi-callout-chevron]:items-center [&_.oi-callout-chevron]:justify-center [&_.oi-callout-chevron]:text-base [&_.oi-callout-chevron]:leading-none [&_.oi-callout-chevron]:opacity-75 [&_.oi-callout-chevron]:transition-transform",
           "[&_.oi-callout[data-state='open']>.oi-callout-title>.oi-callout-chevron]:rotate-90",
@@ -300,18 +304,18 @@ export default function MarkdownPreview({
           "[&_.oi-callout-warning]:border-amber-500/45 [&_.oi-callout-warning_.oi-callout-title]:border-amber-500/30 [&_.oi-callout-warning_.oi-callout-title]:bg-amber-500/10 [&_.oi-callout-warning_.oi-callout-title]:text-amber-200",
           "[&_.oi-callout-error]:border-rose-500/45 [&_.oi-callout-error_.oi-callout-title]:border-rose-500/30 [&_.oi-callout-error_.oi-callout-title]:bg-rose-500/10 [&_.oi-callout-error_.oi-callout-title]:text-rose-200",
           "[&_.oi-callout[data-open='true']>.oi-callout-title]:after:ml-1 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:rounded [&_.oi-callout[data-open='true']>.oi-callout-title]:after:border [&_.oi-callout[data-open='true']>.oi-callout-title]:after:border-current/30 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:px-1.5 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:py-0.5 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:text-[10px] [&_.oi-callout[data-open='true']>.oi-callout-title]:after:font-medium [&_.oi-callout[data-open='true']>.oi-callout-title]:after:text-current/75 [&_.oi-callout[data-open='true']>.oi-callout-title]:after:content-['open']",
-          "[&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
-          "[&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6",
-          "[&_li]:mb-1",
+          "[&_ul]:mb-[var(--content-block-spacing,0.75rem)] [&_ul]:list-disc [&_ul]:pl-6",
+          "[&_ol]:mb-[var(--content-block-spacing,0.75rem)] [&_ol]:list-decimal [&_ol]:pl-6",
+          "[&_li]:mb-[var(--content-list-item-spacing,0.25rem)]",
           "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2",
           "[&_a:hover]:opacity-75",
-          "[&_hr]:my-6 [&_hr]:border-border",
-          "[&_table]:my-4 [&_table]:w-full [&_table]:border-collapse",
+          "[&_hr]:my-[calc(var(--content-block-spacing,0.75rem)*2)] [&_hr]:border-border",
+          "[&_table]:my-[var(--content-callout-spacing,1rem)] [&_table]:w-full [&_table]:border-collapse",
           "[&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold",
           "[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2",
           "[&_strong]:font-semibold",
           "[&_em]:italic",
-          "[&_.katex-display]:my-4",
+          "[&_.katex-display]:my-[var(--content-callout-spacing,1rem)]",
         )}
         dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />

@@ -529,7 +529,7 @@ export function MarkdownEditorToolbar({
   onAction,
 }: MarkdownEditorToolbarProps) {
   return (
-    <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-border bg-background px-2 py-1">
+    <div className="markdown-toolbar flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-border bg-background px-2 py-1">
       {markdownToolbarGroups.map((group, groupIndex) => (
         <div
           key={group.id}
@@ -545,7 +545,7 @@ export function MarkdownEditorToolbar({
                 title={action.title}
                 aria-label={action.title}
                 disabled={disabled}
-                className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+                className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm px-1.5 font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
                 onMouseDown={(event) => {
                   event.preventDefault();
                   if (disabled) return;
@@ -560,7 +560,7 @@ export function MarkdownEditorToolbar({
       ))}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {zoomLabel && (
-          <span className="shrink-0 px-1.5 text-[10px] font-semibold text-muted-foreground">
+          <span className="shrink-0 px-1.5 font-semibold text-muted-foreground">
             {zoomLabel}
           </span>
         )}
@@ -774,7 +774,8 @@ export default function MarkdownEditor({
               padding: "12px 16px",
               minHeight: "100%",
               caretColor: "var(--foreground)",
-              fontSize: "calc(0.875rem * var(--content-zoom, 1))",
+              fontSize: "calc(var(--editor-font-size, 14px) * var(--md-content-zoom, 1))",
+              lineHeight: "var(--content-line-height, 1.7)",
             },
             ".cm-focused": { outline: "none" },
             "&.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "var(--accent)" },

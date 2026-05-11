@@ -56,6 +56,23 @@ const CONTENT_ZOOM_MIN = 0.8;
 const CONTENT_ZOOM_MAX = 1.6;
 const CONTENT_ZOOM_STEP = 0.1;
 const CONTENT_ZOOM_DEFAULT = 1;
+const UI_SCALE_STORAGE_KEY = "oi-notebook.uiScale";
+const UI_SCALE_DEFAULT = 1;
+const EDITOR_FONT_SIZE_STORAGE_KEY = "oi-notebook.editorFontSize";
+const PREVIEW_FONT_SIZE_STORAGE_KEY = "oi-notebook.previewFontSize";
+const READING_DENSITY_STORAGE_KEY = "oi-notebook.readingDensity";
+const TOOLBAR_FONT_SIZE_STORAGE_KEY = "oi-notebook.toolbarFontSize";
+const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
+const FONT_SIZE_MIN = 13;
+const FONT_SIZE_MAX = 20;
+const EDITOR_FONT_SIZE_DEFAULT = 14;
+const PREVIEW_FONT_SIZE_DEFAULT = 14;
+const TOOLBAR_FONT_SIZE_MIN = 12;
+const TOOLBAR_FONT_SIZE_MAX = 18;
+const TOOLBAR_FONT_SIZE_DEFAULT = 12;
+const SETTINGS_FONT_SIZE_MIN = 13;
+const SETTINGS_FONT_SIZE_MAX = 18;
+const SETTINGS_FONT_SIZE_DEFAULT = 14;
 const AI_CONFIG_MISSING_MESSAGE =
   "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
 
@@ -70,6 +87,7 @@ type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguMissingInsightStrategy = "skip" | "draft";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
+type ReadingDensity = "compact" | "standard" | "comfortable";
 type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 
@@ -77,9 +95,48 @@ const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
+const CONTENT_ZOOM_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
+const UI_SCALE_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
+const READING_DENSITY_OPTIONS: Array<{
+  id: ReadingDensity;
+  label: string;
+  description: string;
+  lineHeight: number;
+  blockSpacing: string;
+  listItemSpacing: string;
+  calloutSpacing: string;
+}> = [
+  {
+    id: "compact",
+    label: "紧凑",
+    description: "减少段落和列表间距，适合高信息密度浏览。",
+    lineHeight: 1.55,
+    blockSpacing: "0.55rem",
+    listItemSpacing: "0.15rem",
+    calloutSpacing: "0.75rem",
+  },
+  {
+    id: "standard",
+    label: "标准",
+    description: "保持当前阅读节奏，适合日常编辑和预览。",
+    lineHeight: 1.7,
+    blockSpacing: "0.75rem",
+    listItemSpacing: "0.25rem",
+    calloutSpacing: "1rem",
+  },
+  {
+    id: "comfortable",
+    label: "宽松",
+    description: "增加正文呼吸感，适合长文审阅。",
+    lineHeight: 1.85,
+    blockSpacing: "1rem",
+    listItemSpacing: "0.4rem",
+    calloutSpacing: "1.25rem",
+  },
+];
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string }> = [
   { id: "general", label: "常规", blurb: "常用设置与工具总览" },
-  { id: "appearance", label: "外观", blurb: "主题、字体、缩放规划" },
+  { id: "appearance", label: "外观", blurb: "缩放、字号与阅读密度" },
   { id: "editor", label: "编辑器", blurb: "视图模式与编辑体验" },
   { id: "markdown", label: "Markdown", blurb: "当前渲染能力速览" },
   { id: "ai", label: "AI", blurb: "模型配置、Prompt 与连接测试" },
@@ -300,6 +357,21 @@ function clampContentZoom(value: number): number {
   return Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, stepped));
 }
 
+function clampScale(value: number): number {
+  const stepped = Math.round(value * 10) / 10;
+  return Math.min(1.3, Math.max(0.9, stepped));
+}
+
+function clampFontSize(value: number): number {
+  const rounded = Math.round(value);
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, rounded));
+}
+
+function clampNumberRange(value: number, min: number, max: number): number {
+  const rounded = Math.round(value);
+  return Math.min(max, Math.max(min, rounded));
+}
+
 function getInitialContentZoom(): number {
   const stored = window.localStorage.getItem(CONTENT_ZOOM_STORAGE_KEY);
   if (stored === null) return CONTENT_ZOOM_DEFAULT;
@@ -307,6 +379,42 @@ function getInitialContentZoom(): number {
   const parsed = Number(stored);
   if (!Number.isFinite(parsed)) return CONTENT_ZOOM_DEFAULT;
   return clampContentZoom(parsed);
+}
+
+function getInitialScale(storageKey: string, fallback: number): number {
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored === null) return fallback;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clampScale(parsed);
+}
+
+function getInitialFontSize(storageKey: string, fallback: number): number {
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored === null) return fallback;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clampFontSize(parsed);
+}
+
+function getInitialNumberRange(storageKey: string, fallback: number, min: number, max: number): number {
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored === null) return fallback;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clampNumberRange(parsed, min, max);
+}
+
+function isReadingDensity(value: string | null): value is ReadingDensity {
+  return value === "compact" || value === "standard" || value === "comfortable";
+}
+
+function getInitialReadingDensity(): ReadingDensity {
+  const stored = window.localStorage.getItem(READING_DENSITY_STORAGE_KEY);
+  return isReadingDensity(stored) ? stored : "standard";
 }
 
 function isAiConfigMissingError(message: string): boolean {
@@ -593,6 +701,30 @@ export default function App() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
+  const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
+  const [editorFontSize, setEditorFontSize] = useState(() =>
+    getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
+  );
+  const [previewFontSize, setPreviewFontSize] = useState(() =>
+    getInitialFontSize(PREVIEW_FONT_SIZE_STORAGE_KEY, PREVIEW_FONT_SIZE_DEFAULT),
+  );
+  const [readingDensity, setReadingDensity] = useState<ReadingDensity>(getInitialReadingDensity);
+  const [toolbarFontSize, setToolbarFontSize] = useState(() =>
+    getInitialNumberRange(
+      TOOLBAR_FONT_SIZE_STORAGE_KEY,
+      TOOLBAR_FONT_SIZE_DEFAULT,
+      TOOLBAR_FONT_SIZE_MIN,
+      TOOLBAR_FONT_SIZE_MAX,
+    ),
+  );
+  const [settingsFontSize, setSettingsFontSize] = useState(() =>
+    getInitialNumberRange(
+      SETTINGS_FONT_SIZE_STORAGE_KEY,
+      SETTINGS_FONT_SIZE_DEFAULT,
+      SETTINGS_FONT_SIZE_MIN,
+      SETTINGS_FONT_SIZE_MAX,
+    ),
+  );
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
   const previewScrollApiRef = useRef<MarkdownPreviewScrollApi | null>(null);
@@ -943,7 +1075,25 @@ export default function App() {
                 ? "notes"
                 : null;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
-  const zoomStyle = { "--content-zoom": contentZoom } as CSSProperties;
+  const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
+  const activeReadingDensity =
+    READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
+  const appearanceStyle = {
+    "--md-content-zoom": contentZoom,
+    "--app-ui-scale": uiScale,
+    "--editor-font-size": `${editorFontSize}px`,
+    "--preview-font-size": `${previewFontSize}px`,
+    "--toolbar-font-size": `${toolbarFontSize}px`,
+    "--settings-font-size": `${settingsFontSize}px`,
+    "--content-line-height": activeReadingDensity.lineHeight,
+    "--content-block-spacing": activeReadingDensity.blockSpacing,
+    "--content-list-item-spacing": activeReadingDensity.listItemSpacing,
+    "--content-callout-spacing": activeReadingDensity.calloutSpacing,
+  } as CSSProperties;
+  const settingsAppearanceStyle = {
+    ...appearanceStyle,
+    fontSize: "var(--settings-font-size)",
+  } as CSSProperties;
   const dashboardNotes = useMemo(
     () =>
       [...files]
@@ -965,6 +1115,26 @@ export default function App() {
       const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
       return clampContentZoom(rawZoom);
     });
+  };
+
+  const updateUiScale = (nextScale: number) => {
+    setUiScale(clampScale(nextScale));
+  };
+
+  const updateEditorFontSize = (nextSize: number) => {
+    setEditorFontSize(clampFontSize(nextSize));
+  };
+
+  const updatePreviewFontSize = (nextSize: number) => {
+    setPreviewFontSize(clampFontSize(nextSize));
+  };
+
+  const updateToolbarFontSize = (nextSize: number) => {
+    setToolbarFontSize(clampNumberRange(nextSize, TOOLBAR_FONT_SIZE_MIN, TOOLBAR_FONT_SIZE_MAX));
+  };
+
+  const updateSettingsFontSize = (nextSize: number) => {
+    setSettingsFontSize(clampNumberRange(nextSize, SETTINGS_FONT_SIZE_MIN, SETTINGS_FONT_SIZE_MAX));
   };
 
   const handleContentWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -2434,6 +2604,30 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
   }, [contentZoom]);
+
+  useEffect(() => {
+    window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
+  }, [uiScale]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EDITOR_FONT_SIZE_STORAGE_KEY, String(editorFontSize));
+  }, [editorFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(PREVIEW_FONT_SIZE_STORAGE_KEY, String(previewFontSize));
+  }, [previewFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(READING_DENSITY_STORAGE_KEY, readingDensity);
+  }, [readingDensity]);
+
+  useEffect(() => {
+    window.localStorage.setItem(TOOLBAR_FONT_SIZE_STORAGE_KEY, String(toolbarFontSize));
+  }, [toolbarFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_FONT_SIZE_STORAGE_KEY, String(settingsFontSize));
+  }, [settingsFontSize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4372,7 +4566,10 @@ export default function App() {
       </DialogContent>
     </Dialog>
     <Dialog open={isAdvancedActionsOpen} onOpenChange={setIsAdvancedActionsOpen}>
-      <DialogContent className="flex h-[min(82vh,760px)] w-[min(1120px,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent
+        className="settings-center flex h-[min(82vh,760px)] w-[min(1120px,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        style={settingsAppearanceStyle}
+      >
         <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-6 py-4 text-left">
           <DialogTitle className="text-base">设置中心</DialogTitle>
           <div className="text-sm text-muted-foreground">
@@ -4440,17 +4637,236 @@ export default function App() {
                 )}
 
                 {settingsSection === "appearance" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="text-base font-semibold text-foreground">外观</div>
-                    <div className="text-sm leading-6 text-muted-foreground">
-                      主题、字体、界面缩放会在后续 UI pass 中加入。这一版先统一暗色基线，不提供浅色主题或即时切换。
-                    </div>
-                    <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                      <div>后续计划：主题 presets</div>
-                      <div>后续计划：编辑区字体与字号偏好</div>
-                      <div>后续计划：整体缩放与阅读密度调节</div>
-                    </div>
-                  </section>
+                  <>
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">外观</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          分开调整软件界面、工具栏文字、设置中心文字，以及 Markdown 编辑和预览内容。设置会立即生效并保存在本机。
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="grid min-w-0 gap-1">
+                          <div className="text-sm font-medium text-foreground">界面缩放</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            调整软件界面控件、间距和面板文字，不改变状态栏里的 Markdown 内容缩放。当前界面缩放为 {uiScaleLabel}。
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {UI_SCALE_PRESETS.map((scale) => {
+                            const isActive = Math.round(uiScale * 100) === Math.round(scale * 100);
+                            return (
+                              <Button
+                                key={scale}
+                                type="button"
+                                variant={isActive ? "default" : "outline"}
+                                size="sm"
+                                className="h-8 min-w-14 px-3"
+                                onClick={() => updateUiScale(scale)}
+                              >
+                                {Math.round(scale * 100)}%
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="grid min-w-0 gap-1">
+                          <div className="text-sm font-medium text-foreground">Markdown 内容缩放</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            影响编辑区和预览区的 Markdown 内容，和状态栏“缩放：{contentZoomLabel}”保持一致；也会响应 Ctrl + 鼠标滚轮。
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {CONTENT_ZOOM_PRESETS.map((zoom) => {
+                            const isActive = Math.round(contentZoom * 100) === Math.round(zoom * 100);
+                            return (
+                              <Button
+                                key={zoom}
+                                type="button"
+                                variant={isActive ? "default" : "outline"}
+                                size="sm"
+                                className="h-8 min-w-14 px-3"
+                                onClick={() => updateContentZoom(zoom)}
+                              >
+                                {Math.round(zoom * 100)}%
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">工具栏 / 顶部操作区文字大小</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          影响顶部文件状态、主要操作按钮和 Markdown 工具栏文字，不改变 Markdown 正文内容字号。
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          type="range"
+                          min={TOOLBAR_FONT_SIZE_MIN}
+                          max={TOOLBAR_FONT_SIZE_MAX}
+                          step={1}
+                          value={toolbarFontSize}
+                          onChange={(event) => updateToolbarFontSize(Number(event.target.value))}
+                          className="h-2 min-w-0 flex-1 accent-primary"
+                          aria-label="工具栏文字大小"
+                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Input
+                            type="number"
+                            min={TOOLBAR_FONT_SIZE_MIN}
+                            max={TOOLBAR_FONT_SIZE_MAX}
+                            value={toolbarFontSize}
+                            onChange={(event) => updateToolbarFontSize(Number(event.target.value))}
+                            className="h-9 w-20"
+                            aria-label="工具栏文字大小数值"
+                          />
+                          <span className="text-sm text-muted-foreground">px</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">设置中心文字大小</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          影响设置中心标题、说明、设置项和表单文字，帮助长中文说明保持可读。
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          type="range"
+                          min={SETTINGS_FONT_SIZE_MIN}
+                          max={SETTINGS_FONT_SIZE_MAX}
+                          step={1}
+                          value={settingsFontSize}
+                          onChange={(event) => updateSettingsFontSize(Number(event.target.value))}
+                          className="h-2 min-w-0 flex-1 accent-primary"
+                          aria-label="设置中心文字大小"
+                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Input
+                            type="number"
+                            min={SETTINGS_FONT_SIZE_MIN}
+                            max={SETTINGS_FONT_SIZE_MAX}
+                            value={settingsFontSize}
+                            onChange={(event) => updateSettingsFontSize(Number(event.target.value))}
+                            className="h-9 w-20"
+                            aria-label="设置中心文字大小数值"
+                          />
+                          <span className="text-sm text-muted-foreground">px</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">编辑区字体大小</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          影响 Markdown 编辑区正文，不改变工具栏和设置中心文字。
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          type="range"
+                          min={FONT_SIZE_MIN}
+                          max={FONT_SIZE_MAX}
+                          step={1}
+                          value={editorFontSize}
+                          onChange={(event) => updateEditorFontSize(Number(event.target.value))}
+                          className="h-2 min-w-0 flex-1 accent-primary"
+                          aria-label="编辑区字体大小"
+                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Input
+                            type="number"
+                            min={FONT_SIZE_MIN}
+                            max={FONT_SIZE_MAX}
+                            value={editorFontSize}
+                            onChange={(event) => updateEditorFontSize(Number(event.target.value))}
+                            className="h-9 w-20"
+                            aria-label="编辑区字体大小数值"
+                          />
+                          <span className="text-sm text-muted-foreground">px</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">预览区字体大小</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          影响 Markdown 预览正文和标题比例，代码块、公式、表格和 callout 保持原有渲染结构。
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          type="range"
+                          min={FONT_SIZE_MIN}
+                          max={FONT_SIZE_MAX}
+                          step={1}
+                          value={previewFontSize}
+                          onChange={(event) => updatePreviewFontSize(Number(event.target.value))}
+                          className="h-2 min-w-0 flex-1 accent-primary"
+                          aria-label="预览区字体大小"
+                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Input
+                            type="number"
+                            min={FONT_SIZE_MIN}
+                            max={FONT_SIZE_MAX}
+                            value={previewFontSize}
+                            onChange={(event) => updatePreviewFontSize(Number(event.target.value))}
+                            className="h-9 w-20"
+                            aria-label="预览区字体大小数值"
+                          />
+                          <span className="text-sm text-muted-foreground">px</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">阅读密度</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          调整预览正文的行高、段落间距、列表间距和 callout 外间距。默认使用标准。
+                        </div>
+                      </div>
+                      <div className="grid gap-2 lg:grid-cols-3">
+                        {READING_DENSITY_OPTIONS.map((option) => {
+                          const isActive = readingDensity === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => setReadingDensity(option.id)}
+                              className={cn(
+                                "grid min-w-0 gap-1 rounded-md border px-4 py-3 text-left transition-colors",
+                                isActive
+                                  ? "border-primary/50 bg-primary/10 text-foreground"
+                                  : "border-border/80 bg-muted/15 text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+                              )}
+                            >
+                              <span className="text-sm font-medium">{option.label}</span>
+                              <span className={cn("text-xs leading-5", isActive ? "text-foreground/75" : "text-muted-foreground")}>
+                                {option.description}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  </>
                 )}
 
                 {settingsSection === "editor" && (
@@ -4677,20 +5093,20 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
-      <header className="flex min-h-12 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-4 py-2">
+      <header className="app-top-toolbar flex min-h-12 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-4 py-2">
         <div className="flex min-w-0 items-center gap-3" data-tauri-drag-region>
           <div className="grid shrink-0 gap-0.5">
-            <span className="text-sm font-semibold tracking-wide text-foreground">OI Notebook</span>
-            <span className="text-[11px] text-muted-foreground">桌面工作区</span>
+            <span className="toolbar-primary-text font-semibold tracking-wide text-foreground">OI Notebook</span>
+            <span className="toolbar-secondary-text text-muted-foreground">桌面工作区</span>
           </div>
           <Separator orientation="vertical" className="hidden h-7 sm:block" />
           <div className="grid min-w-0 gap-0.5">
-            <span className="truncate text-sm text-foreground">{currentFilePath ?? "未选择文件"}</span>
+            <span className="toolbar-primary-text truncate text-foreground">{currentFilePath ?? "未选择文件"}</span>
             <span
               className={cn(
-                "truncate text-[11px] text-muted-foreground",
+                "toolbar-secondary-text truncate text-muted-foreground",
                 isDirty && !isSavingNote && "text-amber-300",
               )}
               title={saveStatusLabel}
@@ -4700,11 +5116,11 @@ export default function App() {
           </div>
         </div>
         <div className="min-w-4 flex-1 self-stretch" data-tauri-drag-region />
-        <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
           <Button
             variant="outline"
             size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="h-7 gap-1.5 px-2"
             onClick={openCreateDialog}
             title="新建笔记"
             aria-label="新建笔记"
@@ -4715,7 +5131,7 @@ export default function App() {
           <Button
             variant={isDirty ? "default" : "outline"}
             size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="h-7 gap-1.5 px-2"
             onClick={handleSaveCurrentNote}
             disabled={!currentFilePath || !isDirty || isSavingNote}
             title={saveStatusLabel}
@@ -4760,7 +5176,7 @@ export default function App() {
       {/* Main workspace */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
-          className="flex w-12 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2"
+          className="app-activity-bar flex w-12 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2"
           aria-label="主活动栏"
         >
           <div className="flex flex-col items-center gap-1">
@@ -4831,7 +5247,7 @@ export default function App() {
 
         {isNotesSidebarOpen && (
           <>
-            <aside className="flex w-60 shrink-0 flex-col overflow-hidden bg-background/70">
+            <aside className="app-notes-sidebar flex w-60 shrink-0 flex-col overflow-hidden bg-background/70">
               <div className="flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-3">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   笔记
@@ -5152,7 +5568,7 @@ export default function App() {
                     "flex min-w-0 flex-1 flex-col overflow-hidden",
                     !showEditorPane && "hidden",
                   )}
-                  style={zoomStyle}
+                  style={appearanceStyle}
                   onWheelCapture={handleContentWheel}
                 >
                   {editorViewMode !== "preview" && (
@@ -5292,7 +5708,7 @@ export default function App() {
                     showPreviewPane ? "flex" : "hidden",
                     showEditorPane ? "flex-1" : "flex-[1_1_100%]",
                   )}
-                  style={zoomStyle}
+                  style={appearanceStyle}
                   onWheelCapture={handleContentWheel}
                 >
                   <MarkdownPreview
