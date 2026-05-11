@@ -718,6 +718,7 @@ export default function App() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [editorSelectedText, setEditorSelectedText] = useState("");
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
@@ -1138,14 +1139,16 @@ export default function App() {
       hasBody: hasOpenNote && markdown.trim().length > 0,
       tags: hasOpenNote ? frontmatter.fields.tags : [],
       summary: hasOpenNote ? frontmatter.fields.summary : "",
+      selectedText: hasOpenNote ? editorSelectedText : "",
       selectedTextLength: hasOpenNote ? editorSelectedTextLength : null,
       selectionStatus: hasOpenNote
         ? editorSelectedTextLength && editorSelectedTextLength > 0
           ? "available"
           : "empty"
         : "unavailable",
+      markdownBody: hasOpenNote ? markdown : "",
     };
-  }, [activeNoteFile, currentFilePath, editorSelectedTextLength, frontmatter.fields, markdown]);
+  }, [activeNoteFile, currentFilePath, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
   const trimmedSearchQuery = searchQuery.trim();
   const searchResults = useMemo(() => {
     if (trimmedSearchQuery === "") return buildLocalSearchResults(files, "");
@@ -5771,7 +5774,10 @@ export default function App() {
                   <MarkdownEditor
                     value={markdown}
                     onChange={handleEditorChange}
-                    onSelectionChange={(selectedText) => setEditorSelectedTextLength(selectedText.length)}
+                    onSelectionChange={(selectedText) => {
+                      setEditorSelectedText(selectedText);
+                      setEditorSelectedTextLength(selectedText.length);
+                    }}
                     onPasteImage={handlePasteImage}
                     onScroll={(r) => syncEditorPreviewScroll("editor", r)}
                     hideToolbar
@@ -5812,6 +5818,7 @@ export default function App() {
         {isAiSidebarOpen && (
           <AiSidebar
             context={aiSidebarContext}
+            isAiConfigured={aiConfigured}
             onClose={() => setIsAiSidebarOpen(false)}
           />
         )}

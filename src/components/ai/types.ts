@@ -5,11 +5,14 @@ export interface AiSidebarNoteContext {
   hasBody: boolean;
   tags: string[];
   summary: string;
+  selectedText: string;
   selectedTextLength: number | null;
   selectionStatus: "available" | "empty" | "unavailable";
+  markdownBody: string;
 }
 
 export interface AiSidebarProps {
   context: AiSidebarNoteContext;
+  isAiConfigured: boolean;
   onClose: () => void;
 }

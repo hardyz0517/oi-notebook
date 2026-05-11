@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+﻿import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
   ArrowUp,
@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardList,
   FileText,
+  Loader2,
   MessageCircle,
   PenLine,
   Sparkles,
@@ -15,11 +16,16 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
+import { chatWithCurrentNote, type NoteChatContextPayload } from "@/lib/api";
 
 type AiMessage = {
   id: number;
   role: "user" | "assistant" | "system";
   text: string;
+  state?: "done" | "loading" | "error";
+  retryText?: string;
+  requestId?: number;
+  retryContext?: NoteChatContextPayload;
 };
 
 type SlashCommand = {
@@ -92,6 +98,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const COMMAND_GROUPS: SlashCommand["group"][] = ["文档操作", "上下文"];
+const NOTE_CHAT_MAX_MARKDOWN_CHARS = 16000;
+const NOTE_CHAT_MAX_SELECTION_CHARS = 4000;
 
 const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteContext): string | null => {
   if (command.requiresNote && !context.filePath) return "请先打开一篇笔记";
@@ -108,13 +116,46 @@ const getSelectionLabel = (context: AiSidebarNoteContext): string => {
 
 const getCompactPath = (path: string): string => path.replace(/\\/g, "/");
 
-export default function AiSidebar({ context, onClose }: AiSidebarProps) {
+const truncateText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
+  if (text.length <= maxChars) return { text, truncated: false };
+  return { text: text.slice(0, maxChars), truncated: true };
+};
+
+const getChatErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detailStart = message.indexOf("; debug=");
+  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
+  const normalized = scopedMessage.replace(/^AI chat failed:\s*/i, "").trim();
+
+  if (
+    message.includes("base_url is missing") ||
+    message.includes("api_key is missing") ||
+    message.includes("model is missing")
+  ) {
+    return "AI 尚未配置，请先到设置中心配置。";
+  }
+  if (message.includes("request timed out")) {
+    return "这次思考超时了，请重试。";
+  }
+  if (message.includes("network error")) {
+    return "连接 AI 服务失败，请检查网络或 base_url。";
+  }
+  if (normalized.startsWith("AI ")) {
+    return normalized;
+  }
+  return "AI 聊天暂时失败了，请重试。";
+};
+
+export default function AiSidebar({ context, isAiConfigured, onClose }: AiSidebarProps) {
   const [inputValue, setInputValue] = useState("");
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [isResponding, setIsResponding] = useState(false);
   const messageSeqRef = useRef(0);
+  const requestSeqRef = useRef(0);
+  const activeRequestIdRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const commandQuery = inputValue.startsWith("/") ? inputValue.slice(1).trim() : "";
@@ -152,6 +193,124 @@ export default function AiSidebar({ context, onClose }: AiSidebarProps) {
     ]);
   };
 
+  const appendMessage = (message: Omit<AiMessage, "id">): number => {
+    messageSeqRef.current += 1;
+    const nextMessage = { ...message, id: messageSeqRef.current };
+    setMessages((current) => [...current, nextMessage]);
+    return nextMessage.id;
+  };
+
+  const replaceRequestMessage = (
+    id: number,
+    requestId: number,
+    updater: (message: AiMessage) => AiMessage,
+  ) => {
+    setMessages((current) =>
+      current.map((message) => {
+        if (message.id !== id || message.requestId !== requestId) return message;
+        return updater(message);
+      }),
+    );
+  };
+
+  const buildChatContext = (): NoteChatContextPayload | null => {
+    if (!context.filePath) return null;
+
+    const truncatedSelection = truncateText(context.selectedText.trim(), NOTE_CHAT_MAX_SELECTION_CHARS);
+    const truncatedMarkdown = truncateText(context.markdownBody, NOTE_CHAT_MAX_MARKDOWN_CHARS);
+
+    return {
+      noteTitle: context.title,
+      notePath: context.filePath,
+      tags: context.tags,
+      summary: context.summary.trim(),
+      selectedText: truncatedSelection.text,
+      markdown: truncatedMarkdown.text,
+      markdownTruncated: truncatedMarkdown.truncated,
+    };
+  };
+
+  const submitQuestion = async (questionText: string, snapshot?: NoteChatContextPayload) => {
+    if (isResponding) return;
+
+    const question = questionText.trim();
+    if (!question) return;
+
+    if (!context.filePath) {
+      appendMessages(
+        { role: "user", text: question },
+        { role: "system", text: "请先打开一篇笔记，我再基于当前内容回答。" },
+      );
+      setInputValue("");
+      return;
+    }
+
+    if (!context.hasBody) {
+      appendMessages(
+        { role: "user", text: question },
+        { role: "system", text: "当前笔记暂无正文，先写一点内容再来问我。" },
+      );
+      setInputValue("");
+      return;
+    }
+
+    if (!isAiConfigured) {
+      appendMessages(
+        { role: "user", text: question },
+        { role: "system", text: "AI 尚未配置，请先到设置中心配置。" },
+      );
+      setInputValue("");
+      return;
+    }
+
+    const chatContext = snapshot ?? buildChatContext();
+    if (!chatContext) return;
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+
+    appendMessage({ role: "user", text: question, state: "done" });
+    const loadingMessageId = appendMessage({
+      role: "assistant",
+      text: "正在思考...",
+      state: "loading",
+      retryText: question,
+      requestId,
+      retryContext: chatContext,
+    });
+
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+    setIsResponding(true);
+    activeRequestIdRef.current = requestId;
+
+    try {
+      const result = await chatWithCurrentNote(question, chatContext);
+      replaceRequestMessage(loadingMessageId, requestId, (message) => ({
+        ...message,
+        text: result.answer,
+        state: "done",
+      }));
+    } catch (error) {
+      console.warn("AI sidebar chat request failed", {
+        requestId,
+        notePath: chatContext.notePath,
+        error,
+      });
+      replaceRequestMessage(loadingMessageId, requestId, (message) => ({
+        ...message,
+        text: getChatErrorMessage(error),
+        state: "error",
+      }));
+    } finally {
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = null;
+        setIsResponding(false);
+      }
+    }
+  };
+
   const selectCommand = (command: SlashCommand) => {
     const commandText = `/${command.label}`;
     const disabledReason = getCommandDisabledReason(command, context);
@@ -168,20 +327,23 @@ export default function AiSidebar({ context, onClose }: AiSidebarProps) {
 
   const submitInput = () => {
     const value = inputValue.trim();
-    if (!value) return;
+    if (!value || isResponding) return;
 
-    appendMessages(
-      { role: "user", text: value },
-      {
-        role: "assistant",
-        text: value.startsWith("/")
-          ? "我已经记录这个操作，下一步会接入真正执行。"
-          : "聊天问答将在下一步接入。",
-      },
-    );
-    setInputValue("");
-    setActiveCommandIndex(0);
-    setIsCommandPanelDismissed(false);
+    if (value.startsWith("/")) {
+      appendMessages(
+        { role: "user", text: value },
+        {
+          role: "assistant",
+          text: "我已经记录这个操作，下一步会接入真正执行。",
+        },
+      );
+      setInputValue("");
+      setActiveCommandIndex(0);
+      setIsCommandPanelDismissed(false);
+      return;
+    }
+
+    void submitQuestion(value);
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -290,7 +452,7 @@ export default function AiSidebar({ context, onClose }: AiSidebarProps) {
               </div>
               <div className="text-sm font-medium text-foreground">我会读取当前笔记</div>
               <div className="text-sm leading-6 text-muted-foreground">
-                输入 / 选择操作，或直接提问。当前版本只打通交互，不会调用 AI。
+                输入 / 选择操作，或直接提问。普通聊天会基于当前笔记回答，命令仍然只是占位。
               </div>
             </div>
           </div>
@@ -303,13 +465,32 @@ export default function AiSidebar({ context, onClose }: AiSidebarProps) {
                   "max-w-[92%] rounded-lg px-3 py-2 text-sm leading-6 shadow-sm",
                   message.role === "user"
                     ? "ml-auto bg-primary text-primary-foreground"
-                    : message.role === "assistant"
-                      ? "mr-auto border border-border/70 bg-muted/20 text-foreground"
-                      : "mx-auto flex items-start gap-2 border border-border/60 bg-background/80 text-muted-foreground",
+                    : message.role === "assistant" && message.state === "error"
+                      ? "mr-auto border border-amber-500/30 bg-amber-500/10 text-foreground"
+                      : message.role === "assistant"
+                        ? "mr-auto border border-border/70 bg-muted/20 text-foreground"
+                        : "mx-auto flex items-start gap-2 border border-border/60 bg-background/80 text-muted-foreground",
                 )}
               >
                 {message.role === "system" && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
-                <span>{message.text}</span>
+                {message.role === "assistant" && message.state === "loading" && (
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                )}
+                <div className="min-w-0">
+                  <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                  {message.role === "assistant" && message.state === "error" && message.retryText && (
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => {
+                        if (isResponding) return;
+                        void submitQuestion(message.retryText ?? "", message.retryContext);
+                      }}
+                    >
+                      重新发送
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -402,11 +583,11 @@ export default function AiSidebar({ context, onClose }: AiSidebarProps) {
               type="button"
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#202124] text-white shadow-sm transition-[background-color,color,opacity,transform,box-shadow] hover:bg-[#111827] hover:shadow disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-55 dark:bg-[#f3f4f6] dark:text-[#202124] dark:hover:bg-white dark:disabled:bg-white/12 dark:disabled:text-muted-foreground"
               onClick={submitInput}
-              disabled={inputValue.trim().length === 0}
-              title="发送"
-              aria-label="发送"
+              disabled={inputValue.trim().length === 0 || isResponding}
+              title={isResponding ? "正在思考" : "发送"}
+              aria-label={isResponding ? "正在思考" : "发送"}
             >
-              <ArrowUp className="h-4 w-4" />
+              {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
             </button>
           </div>
         </div>

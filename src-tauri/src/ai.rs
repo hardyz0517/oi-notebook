@@ -16,6 +16,7 @@ const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
 const NOTE_METADATA_TASK: &str = "note-metadata";
 const NOTE_POLISH_TASK: &str = "note-polish";
 const AI_DIAGNOSTIC_PREVIEW_CHARS: usize = 500;
+const AI_RESPONSE_RETRY_ATTEMPTS: usize = 2;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +44,38 @@ pub struct GeneratedNoteMetadata {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PolishedNoteBody {
     pub polished_body: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteChatContextInput {
+    pub note_title: String,
+    pub note_path: String,
+    pub tags: Vec<String>,
+    pub summary: String,
+    pub selected_text: String,
+    pub markdown: String,
+    pub markdown_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteChatAnswer {
+    pub answer: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiResponseIssueKind {
+    RetryableMalformedResponse,
+    NonRetryable,
+}
+
+#[derive(Debug, Clone)]
+struct AiResponseIssue {
+    kind: AiResponseIssueKind,
+    message: String,
+    debug: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -205,6 +238,108 @@ fn diagnostic_json_preview(value: &JsonValue) -> String {
     }
 }
 
+fn sanitize_ai_detail(text: &str) -> String {
+    let detail = diagnostic_preview(text).replace('\n', "\\n").replace('\r', "\\r");
+    if detail.is_empty() {
+        "<empty>".to_string()
+    } else {
+        detail
+    }
+}
+
+fn decode_response_body(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    text.trim_start_matches('\u{feff}').to_string()
+}
+
+fn looks_like_html(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    let lowered = trimmed.chars().take(32).collect::<String>().to_ascii_lowercase();
+    lowered.starts_with("<!doctype html")
+        || lowered.starts_with("<html")
+        || lowered.starts_with("<body")
+        || lowered.starts_with("<head")
+}
+
+fn extract_provider_error_message(value: &JsonValue) -> Option<String> {
+    value.get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn extract_chat_content(value: &JsonValue) -> Option<String> {
+    let content = value
+        .get("choices")
+        .and_then(JsonValue::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))?;
+
+    if let Some(text) = content.as_str() {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    if let Some(parts) = content.as_array() {
+        let mut text_parts = Vec::new();
+        for part in parts {
+            let Some(part_type) = part.get("type").and_then(JsonValue::as_str) else {
+                continue;
+            };
+            if part_type != "text" {
+                continue;
+            }
+            let Some(text) = part.get("text").and_then(JsonValue::as_str) else {
+                continue;
+            };
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                text_parts.push(trimmed.to_string());
+            }
+        }
+        if !text_parts.is_empty() {
+            return Some(text_parts.join("\n"));
+        }
+    }
+
+    None
+}
+
+impl AiResponseIssue {
+    fn retryable(message: impl Into<String>, debug: impl Into<String>) -> Self {
+        Self {
+            kind: AiResponseIssueKind::RetryableMalformedResponse,
+            message: message.into(),
+            debug: debug.into(),
+        }
+    }
+
+    fn non_retryable(message: impl Into<String>, debug: impl Into<String>) -> Self {
+        Self {
+            kind: AiResponseIssueKind::NonRetryable,
+            message: message.into(),
+            debug: debug.into(),
+        }
+    }
+
+    fn is_retryable(&self) -> bool {
+        self.kind == AiResponseIssueKind::RetryableMalformedResponse
+    }
+
+    fn into_error(self, scope: &str) -> String {
+        if self.debug.is_empty() {
+            format!("{scope}: {}", self.message)
+        } else {
+            format!("{scope}: {}; {}", self.message, self.debug)
+        }
+    }
+}
+
 fn chat_response_shape(value: &JsonValue) -> String {
     let choices = value.get("choices");
     let has_choices = choices.and_then(JsonValue::as_array).is_some();
@@ -258,61 +393,163 @@ fn request_chat_completion(
         .build()
         .map_err(|e| format!("AI connection failed: cannot create HTTP client: {e}"))?;
 
-    let response = client
-        .post(url)
-        .bearer_auth(api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .json(&json!({
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "response_format": { "type": "json_object" }
-        }))
-        .send()
-        .map_err(|e| {
-            if e.is_timeout() {
-                format!("{scope}: request timed out")
-            } else {
-                format!("{scope}: network error")
-            }
-        })?;
+    let request_body = json!({
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "response_format": { "type": "json_object" }
+    });
 
+    let mut last_issue: Option<AiResponseIssue> = None;
+
+    for attempt in 1..=AI_RESPONSE_RETRY_ATTEMPTS {
+        let response = client
+            .post(&url)
+            .bearer_auth(api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .json(&request_body)
+            .send()
+            .map_err(|e| {
+                if e.is_timeout() {
+                    format!("{scope}: request timed out")
+                } else {
+                    format!("{scope}: network error")
+                }
+            })?;
+
+        match parse_chat_completion_response(response) {
+            Ok(content) => return Ok(content),
+            Err(issue) => {
+                let should_retry = issue.is_retryable() && attempt < AI_RESPONSE_RETRY_ATTEMPTS;
+                eprintln!(
+                    "{scope}: attempt {attempt}/{} failed: {}",
+                    AI_RESPONSE_RETRY_ATTEMPTS,
+                    issue.clone().into_error(scope)
+                );
+                if should_retry {
+                    last_issue = Some(issue);
+                    continue;
+                }
+                return Err(issue.into_error(scope));
+            }
+        }
+    }
+
+    Err(last_issue
+        .unwrap_or_else(|| {
+            AiResponseIssue::retryable("AI 服务返回了无法解析的响应，请重试。", "debug=retry-exhausted")
+        })
+        .into_error(scope))
+}
+
+fn parse_chat_completion_response(
+    response: reqwest::blocking::Response,
+) -> Result<String, AiResponseIssue> {
     let status = response.status();
     let status_code = status.as_u16();
+    let bytes = response.bytes().map_err(|e| {
+        if status.is_success() {
+            AiResponseIssue::retryable(
+                "AI 服务响应体读取失败，请重试。",
+                format!("debug=http_status={status_code}; read_error={e}"),
+            )
+        } else {
+            AiResponseIssue::non_retryable(
+                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!("debug=http_status={status_code}; error_body_read_failed={e}"),
+            )
+        }
+    })?;
+    let body = decode_response_body(&bytes);
+    let body_trimmed = body.trim();
+
     if !status.is_success() {
-        let error_text = response
-            .text()
-            .unwrap_or_else(|_| "<failed to read error body>".to_string());
-        return Err(format!(
-            "{scope}: server returned HTTP {status_code}; response_format=json_object may be unsupported by this provider/model; body_preview={}",
-            diagnostic_preview(&error_text)
+        if body_trimmed.is_empty() {
+            return Err(AiResponseIssue::non_retryable(
+                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!("debug=http_status={status_code}; error_body=empty"),
+            ));
+        }
+
+        if looks_like_html(body_trimmed) {
+            return Err(AiResponseIssue::non_retryable(
+                format!("AI 服务返回了 HTTP {status_code}，且错误响应不是 JSON。"),
+                format!(
+                    "debug=http_status={status_code}; error_body_preview={}",
+                    sanitize_ai_detail(body_trimmed)
+                ),
+            ));
+        }
+
+        if let Ok(value) = serde_json::from_str::<JsonValue>(body_trimmed) {
+            if let Some(provider_message) = extract_provider_error_message(&value) {
+                return Err(AiResponseIssue::non_retryable(
+                    provider_message,
+                    format!("debug=http_status={status_code}; provider_error=true"),
+                ));
+            }
+            return Err(AiResponseIssue::non_retryable(
+                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!(
+                    "debug=http_status={status_code}; error_json_preview={}",
+                    diagnostic_json_preview(&value)
+                ),
+            ));
+        }
+
+        return Err(AiResponseIssue::non_retryable(
+            format!("AI 服务返回了 HTTP {status_code}。"),
+            format!(
+                "debug=http_status={status_code}; error_body_preview={}",
+                sanitize_ai_detail(body_trimmed)
+            ),
         ));
     }
 
-    let body = response.text().map_err(|e| {
-        format!("{scope}: failed to read HTTP {status_code} response body: {e}")
-    })?;
-    let value = serde_json::from_str::<JsonValue>(&body).map_err(|e| {
-        format!(
-            "{scope}: HTTP {status_code} response was not valid JSON: {e}; body_preview={}",
-            diagnostic_preview(&body)
+    if body_trimmed.is_empty() {
+        return Err(AiResponseIssue::retryable(
+            "AI 服务返回空响应，请重试。",
+            format!("debug=http_status={status_code}; body=empty"),
+        ));
+    }
+
+    if looks_like_html(body_trimmed) {
+        return Err(AiResponseIssue::retryable(
+            "AI 服务返回了非 JSON 响应，请重试。",
+            format!(
+                "debug=http_status={status_code}; html_body_preview={}",
+                sanitize_ai_detail(body_trimmed)
+            ),
+        ));
+    }
+
+    let value = serde_json::from_str::<JsonValue>(body_trimmed).map_err(|e| {
+        AiResponseIssue::retryable(
+            "AI 服务返回了无法解析的响应，请重试。",
+            format!(
+                "debug=http_status={status_code}; json_parse_error={e}; body_preview={}",
+                sanitize_ai_detail(body_trimmed)
+            ),
         )
     })?;
+
+    if let Some(provider_message) = extract_provider_error_message(&value) {
+        return Err(AiResponseIssue::non_retryable(
+            provider_message,
+            format!("debug=http_status={status_code}; provider_error=true"),
+        ));
+    }
+
     let shape = chat_response_shape(&value);
-    value
-        .get("choices")
-        .and_then(JsonValue::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| {
+    extract_chat_content(&value).ok_or_else(|| {
+        AiResponseIssue::retryable(
+            "AI 服务响应格式不符合预期，请重试。",
             format!(
-                "{scope}: HTTP {status_code} response did not include choices[0].message.content; {shape}; body_preview={}",
+                "debug=http_status={status_code}; {shape}; body_preview={}",
                 diagnostic_json_preview(&value)
-            )
-        })
-        .map(ToOwned::to_owned)
+            ),
+        )
+    })
 }
 
 fn test_ai_connection_with_config(
@@ -469,6 +706,21 @@ fn validate_polished_note_body(value: JsonValue, scope: &str) -> Result<Polished
         .to_string();
 
     Ok(PolishedNoteBody { polished_body })
+}
+
+fn validate_note_chat_answer(value: JsonValue, scope: &str) -> Result<String, String> {
+    value
+        .get("answer")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|answer| !answer.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            format!(
+                "{scope}: response JSON schema failed: answer was missing or empty; json_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })
 }
 
 pub(crate) fn organize_luogu_insight(
@@ -640,6 +892,96 @@ pub fn polish_note_body(
     let _ = write_ai_cache(&cache_path, NOTE_POLISH_TASK, &config, &value);
 
     Ok(polished)
+}
+
+#[tauri::command]
+pub fn chat_with_current_note(
+    question: String,
+    context: NoteChatContextInput,
+) -> Result<NoteChatAnswer, String> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("AI chat failed: question is empty".to_string());
+    }
+
+    let note_path = context.note_path.trim();
+    if note_path.is_empty() {
+        return Err("AI chat failed: note path is missing".to_string());
+    }
+
+    let note_title = context.note_title.trim();
+    if note_title.is_empty() {
+        return Err("AI chat failed: note title is missing".to_string());
+    }
+
+    let markdown = context.markdown.trim();
+    if markdown.is_empty() {
+        return Err("AI chat failed: note content is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let selected_text = context.selected_text.trim();
+    let tags_text = if context.tags.is_empty() {
+        "未填写".to_string()
+    } else {
+        context
+            .tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let summary_text = if context.summary.trim().is_empty() {
+        "未填写".to_string()
+    } else {
+        context.summary.trim().to_string()
+    };
+    let selection_section = if selected_text.is_empty() {
+        "用户当前没有选中文段。".to_string()
+    } else {
+        format!("这是用户当前选中的内容，请优先参考：\n{selected_text}")
+    };
+    let truncation_note = if context.markdown_truncated {
+        "正文是截断后的节选，不是整篇全文。若信息不足，请明确说明。"
+    } else {
+        "正文是当前笔记的完整内容。"
+    };
+
+    let user_prompt = format!(
+        "你正在帮助用户理解当前 OI Notebook 笔记。\n\
+请基于下面的笔记上下文回答最后的问题；如果笔记里没有足够信息，请明确说不知道或信息不足，不要编造。\n\
+除非用户明确要求，而且当前阶段也只能给建议，不要自动改写原文或声称已经修改文件。\n\
+你可以回答算法、题解、Markdown 表达、写作建议，但都要尽量贴合当前笔记。\n\
+请只返回 JSON，格式为 {{\"answer\":\"...\"}}。\n\n\
+【笔记标题】\n{note_title}\n\n\
+【笔记路径】\n{note_path}\n\n\
+【tags】\n{tags_text}\n\n\
+【summary】\n{summary_text}\n\n\
+【选中文段】\n{selection_section}\n\n\
+【正文说明】\n{truncation_note}\n\n\
+【当前正文 Markdown】\n{markdown}\n\n\
+【用户问题】\n{question}"
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": "You are an OI Notebook assistant. Return only strict JSON with an answer field. Do not use markdown fences."
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(&config, messages, 0.2, "AI chat failed")?;
+    let value = parse_json_object_from_ai_content(&content, "AI chat failed")?;
+    let answer = validate_note_chat_answer(value, "AI chat failed")?;
+    let (_, _, model) = require_ai_config(&config)?;
+
+    Ok(NoteChatAnswer {
+        answer,
+        model: model.to_string(),
+    })
 }
 
 #[tauri::command]

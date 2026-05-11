@@ -227,6 +227,7 @@ pub fn run() {
             ai::test_ai_connection,
             ai::generate_note_metadata,
             ai::polish_note_body,
+            ai::chat_with_current_note,
             prompts::list_ai_prompts,
             prompts::read_ai_prompt,
             prompts::save_ai_prompt,

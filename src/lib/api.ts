@@ -140,6 +140,21 @@ export interface PolishedNoteBody {
   polished_body: string;
 }
 
+export interface NoteChatContextPayload {
+  noteTitle: string;
+  notePath: string;
+  tags: string[];
+  summary: string;
+  selectedText: string;
+  markdown: string;
+  markdownTruncated: boolean;
+}
+
+export interface NoteChatAnswer {
+  answer: string;
+  model: string;
+}
+
 export interface PromptTemplateSummary {
   fileName: string;
   displayName: string;
@@ -488,6 +503,20 @@ export async function polishNoteBody(
     return await invoke<PolishedNoteBody>("polish_note_body", {
       relativePath,
       markdownContent,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function chatWithCurrentNote(
+  question: string,
+  context: NoteChatContextPayload,
+): Promise<NoteChatAnswer> {
+  try {
+    return await invoke<NoteChatAnswer>("chat_with_current_note", {
+      question,
+      context,
     });
   } catch (e) {
     throw toError(e);
