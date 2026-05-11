@@ -8,7 +8,9 @@ tags:
 - DP
 source: manual
 summary: 用于测试 OI Notebook 的 Markdown、代码高亮、数学公式、表格、callout、cute-table、表格合并和搜索能力。
-updated: 2026-05-10T20:54:41.730694300+08:00
+updated: 2026-05-11T12:26:52.904168100+08:00
+difficulty: ''
+draft: false
 ---
 # Markdown 全能力渲染测试
 
