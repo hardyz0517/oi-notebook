@@ -51,6 +51,7 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
+const THEME_STORAGE_KEY = "oi-notebook.theme";
 const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
 const CONTENT_ZOOM_MIN = 0.8;
 const CONTENT_ZOOM_MAX = 1.6;
@@ -87,6 +88,7 @@ type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguMissingInsightStrategy = "skip" | "draft";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
+type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
 type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
@@ -95,6 +97,10 @@ const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
+const THEME_OPTIONS: Array<{ id: AppTheme; label: string; description: string }> = [
+  { id: "dark", label: "黑色主题", description: "保持当前深色工作台视觉，适合长时间编辑。" },
+  { id: "light", label: "白色主题", description: "切换到浅色界面，适合明亮环境和投屏演示。" },
+];
 const CONTENT_ZOOM_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
 const UI_SCALE_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
 const READING_DENSITY_OPTIONS: Array<{
@@ -408,6 +414,15 @@ function getInitialNumberRange(storageKey: string, fallback: number, min: number
   return clampNumberRange(parsed, min, max);
 }
 
+function isAppTheme(value: string | null): value is AppTheme {
+  return value === "dark" || value === "light";
+}
+
+function getInitialAppTheme(): AppTheme {
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return isAppTheme(stored) ? stored : "dark";
+}
+
 function isReadingDensity(value: string | null): value is ReadingDensity {
   return value === "compact" || value === "standard" || value === "comfortable";
 }
@@ -700,6 +715,7 @@ export default function App() {
   const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
+  const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
@@ -1076,6 +1092,7 @@ export default function App() {
                 : null;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
+  const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
   const activeReadingDensity =
     READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
   const appearanceStyle = {
@@ -2571,11 +2588,11 @@ export default function App() {
 
   const activityButtonClass = (item: ActivityBarItem) =>
     cn(
-      "relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+      "relative flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
       "disabled:pointer-events-none disabled:opacity-40",
       activeActivityItem === item && "bg-accent/60 text-foreground",
       activeActivityItem === item &&
-        "before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary",
+        "before:absolute before:left-1 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary",
     );
 
   // Ctrl+S / Cmd+S 保存当前笔记
@@ -2604,6 +2621,13 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
   }, [contentZoom]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = appTheme;
+    root.classList.toggle("dark", appTheme === "dark");
+    window.localStorage.setItem(THEME_STORAGE_KEY, appTheme);
+  }, [appTheme]);
 
   useEffect(() => {
     window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
@@ -2851,7 +2875,7 @@ export default function App() {
 
   return (
     <>
-    <Toaster position={isLuoguDialogOpen ? "top-right" : "bottom-right"} />
+    <Toaster theme={appTheme} position={isLuoguDialogOpen ? "top-right" : "bottom-right"} />
     <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
       <DialogContent className="flex h-[min(72vh,680px)] w-[min(760px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
@@ -4642,8 +4666,40 @@ export default function App() {
                       <div className="grid gap-1">
                         <div className="text-base font-semibold text-foreground">外观</div>
                         <div className="text-sm leading-6 text-muted-foreground">
-                          分开调整软件界面、工具栏文字、设置中心文字，以及 Markdown 编辑和预览内容。设置会立即生效并保存在本机。
+                          分开调整主题、软件界面、工具栏文字、设置中心文字，以及 Markdown 编辑和预览内容。设置会立即生效并保存在本机。
                         </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
+                        <div className="text-sm font-medium text-foreground">主题</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          当前使用 {appThemeLabel}。切换后会立即影响主界面、编辑区、预览区、设置中心和弹窗。
+                        </div>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {THEME_OPTIONS.map((option) => {
+                          const isActive = appTheme === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => setAppTheme(option.id)}
+                              className={cn(
+                                "grid min-w-0 gap-1 rounded-md border px-4 py-3 text-left transition-colors",
+                                isActive
+                                  ? "border-primary/50 bg-primary/10 text-foreground"
+                                  : "border-border/80 bg-muted/15 text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+                              )}
+                            >
+                              <span className="text-sm font-medium">{option.label}</span>
+                              <span className={cn("text-xs leading-5", isActive ? "text-foreground/75" : "text-muted-foreground")}>
+                                {option.description}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </section>
 
@@ -5176,7 +5232,7 @@ export default function App() {
       {/* Main workspace */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
-          className="app-activity-bar flex w-12 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2"
+          className="app-activity-bar flex w-13 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2.5"
           aria-label="主活动栏"
         >
           <div className="flex flex-col items-center gap-1">
@@ -5188,7 +5244,7 @@ export default function App() {
               aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
               aria-pressed={activeActivityItem === "notes"}
             >
-              <FileText className="h-4 w-4" />
+              <FileText className="h-5 w-5" />
             </button>
             <button
               type="button"
@@ -5198,7 +5254,7 @@ export default function App() {
               aria-label="搜索笔记"
               aria-pressed={activeActivityItem === "search"}
             >
-              <Search className="h-4 w-4" />
+              <Search className="h-5 w-5" />
             </button>
             <button
               type="button"
@@ -5209,7 +5265,7 @@ export default function App() {
               aria-pressed={activeActivityItem === "luogu"}
               disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-5 w-5" />
             </button>
             <button
               type="button"
@@ -5220,7 +5276,7 @@ export default function App() {
               aria-pressed={activeActivityItem === "ai"}
               disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
             >
-              <Bot className="h-4 w-4" />
+              <Bot className="h-5 w-5" />
             </button>
             <button
               type="button"
@@ -5230,7 +5286,7 @@ export default function App() {
               aria-label="打开博客"
               aria-pressed={activeActivityItem === "blog"}
             >
-              <ExternalLink className="h-4 w-4" />
+              <ExternalLink className="h-5 w-5" />
             </button>
           </div>
           <button
@@ -5241,7 +5297,7 @@ export default function App() {
             aria-label="设置中心"
             aria-pressed={activeActivityItem === "settings"}
           >
-            <Settings className="h-4 w-4" />
+            <Settings className="h-5 w-5" />
           </button>
         </nav>
 

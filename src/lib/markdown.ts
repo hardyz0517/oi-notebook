@@ -65,7 +65,10 @@ const processor = unified()
     fallbackLanguage: "text",
     langs: SHIKI_LANGS,
     parseMetaString: parseCodeMeta,
-    theme: "one-dark-pro",
+    themes: {
+      light: "github-light",
+      dark: "one-dark-pro",
+    },
     transformers: [luoguCodeLineTransformer],
     cache: shikiHighlightCache,
   })

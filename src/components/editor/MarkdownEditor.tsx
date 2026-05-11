@@ -1,8 +1,9 @@
 ﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
-import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
 import { EditorState, Transaction } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
+import { foldGutter } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
   AArrowDown,
@@ -703,6 +704,11 @@ export default function MarkdownEditor({
         doc: value,
         extensions: [
           markdown(),
+          lineNumbers(),
+          foldGutter({
+            openText: "⌄",
+            closedText: "›",
+          }),
           oneDark,
           EditorView.lineWrapping,
 
@@ -769,9 +775,38 @@ export default function MarkdownEditor({
             ".cm-scroller::-webkit-scrollbar-thumb:hover": {
               backgroundColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
             },
-            ".cm-gutters": { backgroundColor: "var(--background)", borderRight: "none" },
+            ".cm-gutters": {
+              backgroundColor: "var(--background)",
+              borderRight: "1px solid color-mix(in oklch, var(--border) 18%, transparent)",
+              color: "var(--muted-foreground)",
+              paddingLeft: "1px",
+              paddingRight: "1px",
+              fontFamily: "var(--font-mono)",
+              fontSize: "calc(var(--editor-font-size, 14px) * var(--md-content-zoom, 1) * 0.92)",
+              lineHeight: "var(--content-line-height, 1.7)",
+              userSelect: "none",
+            },
+            ".cm-lineNumbers .cm-gutterElement": {
+              minWidth: "2.55rem",
+              padding: "0 0.45rem 0 0.3rem",
+              fontVariantNumeric: "tabular-nums",
+              textAlign: "right",
+            },
+            ".cm-foldGutter": {
+              minWidth: "0.95rem",
+            },
+            ".cm-foldGutter .cm-gutterElement": {
+              width: "0.95rem",
+              padding: "0 0.12rem 0 0",
+              textAlign: "center",
+              color: "color-mix(in oklch, var(--muted-foreground) 86%, transparent)",
+              cursor: "pointer",
+            },
+            ".cm-foldGutter .cm-gutterElement:hover": {
+              color: "color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground))",
+            },
             ".cm-content": {
-              padding: "12px 16px",
+              padding: "12px 14px 12px 12px",
               minHeight: "100%",
               caretColor: "var(--foreground)",
               fontSize: "calc(var(--editor-font-size, 14px) * var(--md-content-zoom, 1))",
@@ -782,7 +817,10 @@ export default function MarkdownEditor({
             ".cm-selectionBackground": { backgroundColor: "var(--muted)" },
             ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
             ".cm-activeLine": { backgroundColor: "transparent" },
-            ".cm-activeLineGutter": { backgroundColor: "transparent" },
+            ".cm-activeLineGutter": {
+              backgroundColor: "transparent",
+              color: "color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground))",
+            },
           }),
         ],
       }),
