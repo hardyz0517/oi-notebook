@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
+  onSelectionChange?: (selectedText: string) => void;
   onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
   hideToolbar?: boolean;
@@ -574,6 +575,7 @@ export function MarkdownEditorToolbar({
 export default function MarkdownEditor({
   value,
   onChange,
+  onSelectionChange,
   onPasteImage,
   onScroll,
   hideToolbar = false,
@@ -587,6 +589,11 @@ export default function MarkdownEditor({
   useEffect(() => {
     onChangeFn.current = onChange;
   }, [onChange]);
+
+  const onSelectionChangeFn = useRef(onSelectionChange);
+  useEffect(() => {
+    onSelectionChangeFn.current = onSelectionChange;
+  }, [onSelectionChange]);
 
   const onPasteImageFn = useRef(onPasteImage);
   useEffect(() => {
@@ -753,6 +760,11 @@ export default function MarkdownEditor({
               if (isApplyingExternalValueRef.current) return;
               onChangeFn.current(newValue);
             }
+            if (update.selectionSet || update.docChanged) {
+              const selection = update.state.selection.main;
+              const selectedText = selection.empty ? "" : update.state.sliceDoc(selection.from, selection.to);
+              onSelectionChangeFn.current?.(selectedText);
+            }
           }),
 
           // Override CodeMirror defaults so the editor fits the app dark theme.
@@ -844,6 +856,7 @@ export default function MarkdownEditor({
       view.scrollDOM.removeEventListener("scroll", handleScroll);
       view.destroy();
       viewRef.current = null;
+      onSelectionChangeFn.current?.("");
     };
   }, []);
 

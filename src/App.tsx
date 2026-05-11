@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import AiSidebar from "@/components/ai/AiSidebar";
+import type { AiSidebarNoteContext } from "@/components/ai/types";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
@@ -715,6 +717,8 @@ export default function App() {
   const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
@@ -882,6 +886,9 @@ export default function App() {
       luoguPrepareRunRef.current.cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    setEditorSelectedTextLength(null);
+  }, [currentFilePath, editorViewMode]);
   const fullMarkdown = useMemo(
     () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
     [currentFilePath, frontmatterPrefix, markdown],
@@ -1081,15 +1088,14 @@ export default function App() {
       ? "settings"
       : isLuoguDialogOpen
         ? "luogu"
-        : isAiSettingsOpen || isPromptDialogOpen
-          ? "ai"
-          : isRestartingBlog
-            ? "blog"
-            : isSearchOpen
-              ? "search"
-              : isNotesSidebarOpen
-                ? "notes"
-                : null;
+        : isRestartingBlog
+          ? "blog"
+          : isSearchOpen
+            ? "search"
+            : isNotesSidebarOpen
+              ? "notes"
+              : null;
+  const isAiActivityActive = isAiSidebarOpen || isAiSettingsOpen || isPromptDialogOpen;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
   const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
@@ -1118,6 +1124,28 @@ export default function App() {
         .slice(0, 6),
     [files],
   );
+  const activeNoteFile = useMemo(
+    () => files.find((file) => file.path === currentFilePath) ?? null,
+    [files, currentFilePath],
+  );
+  const aiSidebarContext = useMemo<AiSidebarNoteContext>(() => {
+    const fallbackTitle = activeNoteFile?.name.replace(/\.md$/i, "") ?? currentFilePath?.split("/").pop()?.replace(/\.md$/i, "") ?? "";
+    const hasOpenNote = currentFilePath !== null;
+    return {
+      filePath: currentFilePath,
+      title: hasOpenNote ? frontmatter.fields.title.trim() || fallbackTitle || "未命名笔记" : "未选择笔记",
+      bodyLength: hasOpenNote ? markdown.length : 0,
+      hasBody: hasOpenNote && markdown.trim().length > 0,
+      tags: hasOpenNote ? frontmatter.fields.tags : [],
+      summary: hasOpenNote ? frontmatter.fields.summary : "",
+      selectedTextLength: hasOpenNote ? editorSelectedTextLength : null,
+      selectionStatus: hasOpenNote
+        ? editorSelectedTextLength && editorSelectedTextLength > 0
+          ? "available"
+          : "empty"
+        : "unavailable",
+    };
+  }, [activeNoteFile, currentFilePath, editorSelectedTextLength, frontmatter.fields, markdown]);
   const trimmedSearchQuery = searchQuery.trim();
   const searchResults = useMemo(() => {
     if (trimmedSearchQuery === "") return buildLocalSearchResults(files, "");
@@ -2579,7 +2607,7 @@ export default function App() {
   };
 
   const handleActivityAi = () => {
-    void openAiSettings();
+    setIsAiSidebarOpen((open) => !open);
   };
 
   const handleActivityBlog = () => {
@@ -2590,8 +2618,8 @@ export default function App() {
     cn(
       "relative flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
       "disabled:pointer-events-none disabled:opacity-40",
-      activeActivityItem === item && "bg-accent/60 text-foreground",
-      activeActivityItem === item &&
+      (item === "ai" ? isAiActivityActive : activeActivityItem === item) && "bg-accent/60 text-foreground",
+      (item === "ai" ? isAiActivityActive : activeActivityItem === item) &&
         "before:absolute before:left-1 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary",
     );
 
@@ -5271,10 +5299,9 @@ export default function App() {
               type="button"
               className={activityButtonClass("ai")}
               onClick={handleActivityAi}
-              title="AI 设置"
-              aria-label="AI 设置"
-              aria-pressed={activeActivityItem === "ai"}
-              disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+              title={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
+              aria-label={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
+              aria-pressed={isAiActivityActive}
             >
               <Bot className="h-5 w-5" />
             </button>
@@ -5744,6 +5771,7 @@ export default function App() {
                   <MarkdownEditor
                     value={markdown}
                     onChange={handleEditorChange}
+                    onSelectionChange={(selectedText) => setEditorSelectedTextLength(selectedText.length)}
                     onPasteImage={handlePasteImage}
                     onScroll={(r) => syncEditorPreviewScroll("editor", r)}
                     hideToolbar
@@ -5781,6 +5809,12 @@ export default function App() {
             </>
           )}
         </section>
+        {isAiSidebarOpen && (
+          <AiSidebar
+            context={aiSidebarContext}
+            onClose={() => setIsAiSidebarOpen(false)}
+          />
+        )}
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
