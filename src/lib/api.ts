@@ -207,6 +207,11 @@ export interface NoteChatAnswer {
   model: string;
 }
 
+export interface NoteTagSuggestion {
+  suggestedTags: string[];
+  reason: string;
+}
+
 export interface NoteChatHistoryMessage {
   role: "user" | "assistant";
   text: string;
@@ -671,6 +676,22 @@ export async function chatWithCurrentNote(
   try {
     return await invoke<NoteChatAnswer>("chat_with_current_note", {
       question,
+      context,
+      providerId,
+      modelId,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function suggestNoteTags(
+  context: NoteChatContextPayload,
+  providerId?: string,
+  modelId?: string,
+): Promise<NoteTagSuggestion> {
+  try {
+    return await invoke<NoteTagSuggestion>("suggest_note_tags", {
       context,
       providerId,
       modelId,

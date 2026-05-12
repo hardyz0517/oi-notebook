@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
   openExternalUrl,
+  suggestNoteTags,
   startCurrentNoteChatStream,
   type AiConfig,
   type AiModel,
@@ -41,15 +42,29 @@ type AiChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  kind?: "text" | "tag-suggestion";
+  commandId?: string;
+  tagSuggestion?: TagSuggestionResult;
   state?: "done" | "loading" | "streaming" | "error";
   retryText?: string;
   retryDisplayText?: string;
+  retryCommandId?: string;
   requestId?: number;
   streamId?: string;
   retryContext?: NoteChatContextPayload;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
+};
+
+type TagSuggestionResult = {
+  notePath: string;
+  existingTags: string[];
+  suggestedTags: string[];
+  reason?: string;
+  applied?: boolean;
+  ignored?: boolean;
+  error?: string;
 };
 
 type AiConversation = {
@@ -80,6 +95,7 @@ type SlashCommand = {
   category: "文档" | "上下文";
   icon: ComponentType<{ className?: string }>;
   requiresNote?: boolean;
+  requiresBody?: boolean;
   requiresSelectionOrCursor?: boolean;
   mode: "readonly" | "preview" | "diff";
   implemented?: boolean;
@@ -113,6 +129,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     icon: Tag,
     requiresNote: true,
     mode: "preview",
+    implemented: true,
   },
   {
     id: "summarize",
@@ -121,6 +138,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "文档",
     icon: FileText,
     requiresNote: true,
+    requiresBody: true,
     mode: "readonly",
     implemented: true,
   },
@@ -159,6 +177,7 @@ const NOTE_CHAT_MAX_MARKDOWN_CHARS = 16000;
 const NOTE_CHAT_MAX_SELECTION_CHARS = 4000;
 const NOTE_CHAT_MAX_PARAGRAPH_CHARS = 4000;
 const AI_CONVERSATIONS_STORAGE_KEY = "oi-notebook.aiConversations";
+const AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY = "oi-notebook.ai.includeCurrentNoteContext";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const AI_REQUEST_HISTORY_LIMIT = 8;
@@ -166,9 +185,17 @@ const AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS = 1200;
 const AI_SCROLL_BOTTOM_THRESHOLD = 64;
 const UNTITLED_CONVERSATION_TITLE = "New chat";
 
+const readIncludeCurrentNoteContextPreference = (): boolean => {
+  try {
+    return window.localStorage.getItem(AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+};
+
 const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteContext): string | null => {
   if (command.requiresNote && !context.filePath) return "需要先打开笔记";
-  if (command.requiresNote && !context.hasBody) return "当前笔记还没有正文";
+  if (command.requiresBody && !context.hasBody) return "当前笔记还没有正文";
   if (
     command.requiresSelectionOrCursor &&
     context.selectionStatus !== "available" &&
@@ -203,6 +230,38 @@ const truncateText = (text: string, maxChars: number): { text: string; truncated
   return { text: text.slice(0, maxChars), truncated: true };
 };
 
+const normalizeTagValue = (tag: string): string => tag.trim().replace(/\s+/g, " ");
+
+const normalizeTags = (tags: string[]): string[] => {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of tags) {
+    const value = normalizeTagValue(tag);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(value);
+  }
+
+  return normalized;
+};
+
+const filterNewTags = (existingTags: string[], suggestedTags: string[]): string[] => {
+  const existing = new Set(normalizeTags(existingTags));
+  return normalizeTags(suggestedTags).filter((tag) => !existing.has(tag));
+};
+
+const toTagSuggestionResult = (
+  suggestion: { suggestedTags: string[]; reason?: string },
+  notePath: string,
+  existingTags: string[],
+): TagSuggestionResult => ({
+  notePath,
+  existingTags: normalizeTags(existingTags),
+  suggestedTags: filterNewTags(existingTags, suggestion.suggestedTags),
+  reason: suggestion.reason?.trim() || undefined,
+});
+
 const getChatErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const detailStart = message.indexOf("; debug=");
@@ -226,6 +285,34 @@ const getChatErrorMessage = (error: unknown): string => {
   if (normalized.includes("HTTP ")) return "The AI service returned an error response. Check settings and retry.";
   if (normalized.startsWith("AI ")) return normalized;
   return "AI chat failed. Please retry.";
+};
+
+const getTagSuggestionErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detailStart = message.indexOf("; debug=");
+  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
+  const normalized = scopedMessage.replace(/^AI tag suggestion failed:\s*/i, "").trim();
+
+  if (
+    message.includes("base_url is missing") ||
+    message.includes("api_key is missing") ||
+    message.includes("model is missing")
+  ) {
+    return "AI 还没有配置完整，请先在设置里填写 base_url / api_key / model。";
+  }
+  if (message.includes("selected provider does not exist") || message.includes("selected provider is disabled")) {
+    return "当前配置组不可用，请重新选择模型。";
+  }
+  if (message.includes("selected model does not exist")) {
+    return "当前模型不可用，请重新选择模型。";
+  }
+  if (message.includes("request timed out")) return "标签建议请求超时，请重试。";
+  if (message.includes("network error")) return "无法连接 AI 服务，请检查配置和网络。";
+  if (normalized.includes("response JSON parse failed")) return "标签建议解析失败，请重试。";
+  if (normalized.includes("suggestedTags")) return "标签建议格式不正确，请重试。";
+  if (normalized.includes("HTTP ")) return "AI 服务返回错误响应，请检查配置后重试。";
+  if (normalized) return normalized;
+  return "标签建议生成失败，请重试。";
 };
 
 const createConversationId = (): string =>
@@ -273,14 +360,35 @@ const isAiChatMessage = (value: unknown): value is AiChatMessage => {
   );
 };
 
+const sanitizeTagSuggestionForStorage = (value: unknown): TagSuggestionResult | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Partial<TagSuggestionResult>;
+  if (typeof item.notePath !== "string") return undefined;
+  if (!Array.isArray(item.existingTags) || !Array.isArray(item.suggestedTags)) return undefined;
+
+  return {
+    notePath: item.notePath,
+    existingTags: normalizeTags(item.existingTags.filter((tag): tag is string => typeof tag === "string")),
+    suggestedTags: normalizeTags(item.suggestedTags.filter((tag): tag is string => typeof tag === "string")),
+    reason: typeof item.reason === "string" ? item.reason : undefined,
+    applied: item.applied === true,
+    ignored: item.ignored === true,
+    error: typeof item.error === "string" ? item.error : undefined,
+  };
+};
+
 const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] =>
   messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => ({
     id: message.id,
     role: message.role,
     text: message.text,
+    kind: message.kind,
+    commandId: message.commandId,
+    tagSuggestion: sanitizeTagSuggestionForStorage(message.tagSuggestion),
     state: message.state === "error" ? "error" : "done",
     retryText: message.retryText,
     retryDisplayText: message.retryDisplayText,
+    retryCommandId: message.retryCommandId,
     requestId: message.requestId,
     startedAt: message.startedAt,
     finishedAt: message.finishedAt,
@@ -724,7 +832,114 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
   );
 }
 
-export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, width, aiConfig, onOpenAiSettings }: AiSidebarProps) {
+function TagSuggestionCard({
+  suggestion,
+  isApplying,
+  onApply,
+  onIgnore,
+}: {
+  suggestion: TagSuggestionResult;
+  isApplying: boolean;
+  onApply: () => void;
+  onIgnore: () => void;
+}) {
+  const hasSuggestions = suggestion.suggestedTags.length > 0;
+  const statusText = suggestion.applied
+    ? "已应用"
+    : suggestion.ignored
+      ? "已忽略"
+      : suggestion.error;
+
+  const renderTags = (tags: string[], emptyText: string) => (
+    tags.length > 0 ? (
+      <div className="flex flex-wrap gap-1.5">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[11px] leading-5 text-foreground dark:bg-white/[0.04]"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+    ) : (
+      <div className="text-xs leading-5 text-muted-foreground">{emptyText}</div>
+    )
+  );
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-5 text-foreground">建议标签预览</div>
+          <div className="truncate text-[11px] leading-4 text-muted-foreground" title={suggestion.notePath}>
+            {getCompactPath(suggestion.notePath)}
+          </div>
+        </div>
+        {statusText && (
+          <span className={cn(
+            "shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-5",
+            suggestion.error
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "bg-muted text-muted-foreground dark:bg-white/[0.08]",
+          )}>
+            {statusText}
+          </span>
+        )}
+      </div>
+
+      <div className="grid gap-1.5">
+        <div className="text-[11px] font-medium leading-4 text-muted-foreground">当前已有 tags</div>
+        {renderTags(suggestion.existingTags, "当前没有已有标签")}
+      </div>
+
+      <div className="grid gap-1.5">
+        <div className="text-[11px] font-medium leading-4 text-muted-foreground">建议新增 tags</div>
+        {hasSuggestions ? renderTags(suggestion.suggestedTags, "") : (
+          <div className="text-xs leading-5 text-muted-foreground">没有发现需要新增的标签</div>
+        )}
+      </div>
+
+      {suggestion.reason && (
+        <div className="rounded-md bg-background/65 px-2.5 py-2 text-xs leading-5 text-muted-foreground dark:bg-black/10">
+          {suggestion.reason}
+        </div>
+      )}
+
+      {!suggestion.applied && !suggestion.ignored && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-55"
+            onClick={onIgnore}
+            disabled={isApplying}
+          >
+            取消 / 忽略
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
+            onClick={onApply}
+            disabled={!hasSuggestions || isApplying}
+          >
+            {isApplying ? "应用中..." : "应用标签"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function AiSidebar({
+  context,
+  isAiConfigured,
+  isOpen,
+  onClose,
+  width,
+  aiConfig,
+  onOpenAiSettings,
+  onApplySuggestedTags,
+}: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
     initialConversationStateRef.current = loadConversationState();
@@ -744,8 +959,12 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+  const [includeCurrentNoteContext, setIncludeCurrentNoteContext] = useState(
+    readIncludeCurrentNoteContextPreference,
+  );
   const [isResponding, setIsResponding] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
+  const [applyingTagMessageId, setApplyingTagMessageId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -754,6 +973,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -821,6 +1041,17 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       setActiveConversationId(nextConversation.id);
     }
   }, [activeConversation, aiConfig]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY,
+        includeCurrentNoteContext ? "true" : "false",
+      );
+    } catch {
+      // Ignore localStorage failures; the toggle still works for this session.
+    }
+  }, [includeCurrentNoteContext]);
 
   useEffect(() => {
     const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
@@ -1134,8 +1365,23 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     setShowScrollToBottom(true);
   }, [isOpen, messages]);
 
-  const buildChatContext = (): NoteChatContextPayload => {
+  const buildChatContext = (
+    options: { includeNoteContext?: boolean } = {},
+  ): NoteChatContextPayload => {
+    const includeNoteContext = options.includeNoteContext ?? includeCurrentNoteContext;
     const truncatedSelection = truncateText(context.selectedText.trim(), NOTE_CHAT_MAX_SELECTION_CHARS);
+    if (!includeNoteContext) {
+      return {
+        noteTitle: "",
+        notePath: "",
+        tags: [],
+        summary: "",
+        selectedText: truncatedSelection.text,
+        markdown: "",
+        markdownTruncated: false,
+      };
+    }
+
     const truncatedMarkdown = truncateText(context.markdownBody, NOTE_CHAT_MAX_MARKDOWN_CHARS);
 
     return {
@@ -1179,6 +1425,20 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     setIsCommandPanelDismissed(false);
   };
 
+  const updateTagSuggestionMessage = (
+    conversationId: string,
+    messageId: string,
+    updater: (suggestion: TagSuggestionResult) => TagSuggestionResult,
+  ) => {
+    replaceMessage(conversationId, messageId, (message) => {
+      if (!message.tagSuggestion) return message;
+      return {
+        ...message,
+        tagSuggestion: updater(message.tagSuggestion),
+      };
+    });
+  };
+
   const buildSummarizePrompt = (): string => [
     "请执行只读 slash command：/总结本文。",
     "",
@@ -1214,12 +1474,131 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     targetText,
   ].join("\n");
 
+  const submitTagSuggestionCommand = async (
+    snapshot?: NoteChatContextPayload,
+    displayText = "/补全标签",
+  ) => {
+    if (isResponding) return;
+
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
+    const chatContext = snapshot ?? buildChatContext();
+    if (!chatContext.notePath) {
+      appendCommandNotice(conversationId, displayText, "请先打开一篇笔记。");
+      return;
+    }
+
+    if (!isAiConfigured) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
+      );
+      setInputValue("");
+      return;
+    }
+    if (!selectedProviderId || !selectedModelId) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({
+          role: "system",
+          text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
+          state: "done",
+        }),
+      );
+      setInputValue("");
+      return;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const startedAt = Date.now();
+    const userMessage = createMessage({ role: "user", text: displayText, state: "done" });
+    const assistantMessage = createMessage({
+      role: "assistant",
+      text: "正在生成标签建议...",
+      kind: "tag-suggestion",
+      commandId: "complete-tags",
+      state: "loading",
+      retryText: "suggest-note-tags",
+      retryDisplayText: displayText,
+      retryCommandId: "complete-tags",
+      retryContext: chatContext,
+      requestId,
+      startedAt,
+    });
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(conversationId, userMessage, assistantMessage);
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+    setIsResponding(true);
+
+    try {
+      const suggestion = await suggestNoteTags(
+        chatContext,
+        selectedProviderId,
+        selectedModelId,
+      );
+      const parsed = toTagSuggestionResult(suggestion, chatContext.notePath, chatContext.tags);
+
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: "标签建议已生成。",
+        kind: "tag-suggestion",
+        tagSuggestion: parsed,
+        state: "done",
+        retryText: undefined,
+        retryDisplayText: undefined,
+        retryCommandId: undefined,
+        retryContext: undefined,
+        ...finishAssistantTiming(message),
+      }));
+    } catch (error) {
+      console.warn("AI tag suggestion request failed", {
+        requestId,
+        notePath: chatContext.notePath,
+        error,
+      });
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: getTagSuggestionErrorMessage(error),
+        kind: "text",
+        state: "error",
+        ...finishAssistantTiming(message),
+      }));
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
   const executeSlashCommand = (command: SlashCommand) => {
     const conversationId = activeConversation?.id;
     if (!conversationId) return;
 
     const commandText = `/${command.label}`;
-    const chatContext = buildChatContext();
+
+    if (command.id === "complete-tags") {
+      if (!context.filePath) {
+        appendCommandNotice(conversationId, commandText, "请先打开一篇笔记。");
+        return;
+      }
+      if (!includeCurrentNoteContext) {
+        appendCommandNotice(conversationId, commandText, "此命令需要读取当前笔记，请先开启“包含当前笔记信息”。");
+        return;
+      }
+      const chatContext = buildChatContext({ includeNoteContext: true });
+      void submitTagSuggestionCommand(chatContext, commandText);
+      return;
+    }
 
     if (!command.implemented || command.mode !== "readonly") {
       appendCommandNotice(conversationId, commandText, "这个命令稍后接入。");
@@ -1235,6 +1614,11 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         appendCommandNotice(conversationId, commandText, "当前笔记没有可总结的正文。");
         return;
       }
+      if (!includeCurrentNoteContext) {
+        appendCommandNotice(conversationId, commandText, "此命令需要读取当前笔记，请先开启“包含当前笔记信息”。");
+        return;
+      }
+      const chatContext = buildChatContext({ includeNoteContext: true });
       void submitQuestion(buildSummarizePrompt(), chatContext, commandText);
       return;
     }
@@ -1260,6 +1644,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         !selectedText && context.currentParagraphIsCode,
         sourceLabel,
       );
+      const chatContext = buildChatContext();
       const commandContext = {
         ...chatContext,
         selectedText: truncatedTarget.text,
@@ -1370,6 +1755,41 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     });
   };
 
+  const applyTagSuggestion = async (message: AiChatMessage) => {
+    const conversationId = activeConversation?.id;
+    const suggestion = message.tagSuggestion;
+    if (!conversationId || !suggestion || applyingTagMessageId) return;
+
+    setApplyingTagMessageId(message.id);
+    updateTagSuggestionMessage(conversationId, message.id, (current) => ({ ...current, error: undefined }));
+    try {
+      await onApplySuggestedTags(suggestion.notePath, suggestion.suggestedTags);
+      updateTagSuggestionMessage(conversationId, message.id, (current) => ({
+        ...current,
+        applied: true,
+        ignored: false,
+        error: undefined,
+      }));
+    } catch (error) {
+      updateTagSuggestionMessage(conversationId, message.id, (current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setApplyingTagMessageId(null);
+    }
+  };
+
+  const ignoreTagSuggestion = (message: AiChatMessage) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !message.tagSuggestion) return;
+    updateTagSuggestionMessage(conversationId, message.id, (current) => ({
+      ...current,
+      ignored: true,
+      error: undefined,
+    }));
+  };
+
   const selectCommand = (command: SlashCommand) => {
     setInputValue("");
     setIsCommandPanelDismissed(true);
@@ -1427,7 +1847,11 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   const contextMeta = context.filePath
     ? `${getSelectionLabel(context)} - ${context.tags.length} tags`
     : "no note selected";
-  const composerHint = context.filePath ? "current note context" : "no note selected";
+  const composerHint = inputValue.startsWith("/")
+    ? "选择命令"
+    : includeCurrentNoteContext && context.filePath
+      ? "已包含当前笔记信息"
+      : "未包含当前笔记信息";
   const sortedConversations = useMemo(
     () => limitConversations(pruneBlankConversations(conversations, activeConversationId)),
     [activeConversationId, conversations],
@@ -1437,7 +1861,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   return (
     <aside
       className={cn(
-        "shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
+        "relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
         isOpen ? "flex" : "hidden",
       )}
       style={width ? { width, flexBasis: width, maxWidth: width } : undefined}
@@ -1722,10 +2146,10 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
           </span>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{messages.length} msg</span>
         </div>
-        {context.filePath ? (
+        {context.filePath && includeCurrentNoteContext ? (
           <div className="grid gap-0.5">
             <div className="flex min-w-0 items-center justify-between gap-3 leading-4">
-              <span className="text-[11px] font-medium text-muted-foreground">Current context</span>
+              <span className="text-[11px] font-medium text-muted-foreground">当前笔记上下文</span>
               <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{context.bodyLength} chars</span>
             </div>
             <div className="truncate text-[13px] font-medium leading-5 text-foreground" title={context.title}>
@@ -1754,6 +2178,15 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                 </div>
               </div>
             )}
+          </div>
+        ) : context.filePath ? (
+          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium leading-5 text-foreground">当前笔记信息未包含</div>
+              <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                {context.selectedTextLength ? `已选中文段 ${context.selectedTextLength} 字，解释命令仍可使用。` : "普通聊天不会读取当前笔记全文、标题或标签。"}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5">
@@ -1803,13 +2236,26 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                       "min-w-0",
                       message.state === "error" && "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2",
                     )}>
-                      <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
+                      {message.kind === "tag-suggestion" && message.tagSuggestion ? (
+                        <TagSuggestionCard
+                          suggestion={message.tagSuggestion}
+                          isApplying={applyingTagMessageId === message.id}
+                          onApply={() => void applyTagSuggestion(message)}
+                          onIgnore={() => ignoreTagSuggestion(message)}
+                        />
+                      ) : (
+                        <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
+                      )}
                       {message.state === "error" && message.retryText && (
                         <button
                           type="button"
                           className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                           onClick={() => {
                             if (isResponding) return;
+                            if (message.retryCommandId === "complete-tags") {
+                              void submitTagSuggestionCommand(message.retryContext, message.retryDisplayText);
+                              return;
+                            }
                             void submitQuestion(message.retryText ?? "", message.retryContext, message.retryDisplayText);
                           }}
                         >
@@ -1859,7 +2305,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         )}
       </div>
 
-      <div className="relative shrink-0 px-3 pb-3 pt-2">
+      <div className="relative z-30 shrink-0 px-3 pb-3 pt-2">
         {isCommandPanelOpen && (
           <div className="absolute bottom-[calc(100%-0.45rem)] left-3 right-3 z-20 overflow-hidden rounded-2xl border border-[#dcdfe6] bg-white text-popover-foreground shadow-[0_18px_48px_rgb(15_23_42/0.16)] dark:border-white/10 dark:bg-[#2f3134] dark:shadow-[0_18px_52px_rgb(0_0_0/0.42)]">
             <div className="flex items-center justify-between px-3 py-2 text-[11px] text-muted-foreground">
@@ -1933,11 +2379,20 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
 
         <div className="rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
           <textarea
+            ref={inputRef}
             value={inputValue}
             onChange={(event) => {
               setInputValue(event.target.value);
               setActiveCommandIndex(0);
               setIsCommandPanelDismissed(false);
+            }}
+            onPointerDownCapture={(event) => {
+              event.stopPropagation();
+              event.currentTarget.focus();
+            }}
+            onMouseDownCapture={(event) => {
+              event.stopPropagation();
+              event.currentTarget.focus();
             }}
             onKeyDown={handleInputKeyDown}
             rows={3}
@@ -1949,7 +2404,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
               <button
                 type="button"
                 className={cn(
-                  "inline-flex h-7 max-w-[70%] items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
+                  "inline-flex h-7 max-w-[55%] items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
                   isModelPickerOpen && "bg-accent text-accent-foreground",
                 )}
                 onClick={() => {
@@ -1963,6 +2418,32 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
               >
                 <span className="truncate">模型：{selectedModelLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={includeCurrentNoteContext}
+                className={cn(
+                  "inline-flex h-7 min-w-0 shrink items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-2 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
+                  includeCurrentNoteContext && "border-primary/40 bg-primary/10 text-foreground",
+                )}
+                onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
+                title={includeCurrentNoteContext ? "普通聊天会包含当前笔记信息" : "普通聊天不会包含当前笔记信息"}
+              >
+                <span
+                  className={cn(
+                    "relative h-3.5 w-6 shrink-0 rounded-full bg-muted-foreground/30 transition-colors",
+                    includeCurrentNoteContext && "bg-primary/70",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-background shadow-sm transition-transform",
+                      includeCurrentNoteContext && "translate-x-2.5",
+                    )}
+                  />
+                </span>
+                <span className="truncate">包含当前笔记信息</span>
               </button>
 
               {isModelPickerOpen && (

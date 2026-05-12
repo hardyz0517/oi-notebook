@@ -25,4 +25,5 @@ export interface AiSidebarProps {
   width?: number;
   aiConfig: AiConfig | null;
   onOpenAiSettings: () => void;
+  onApplySuggestedTags: (notePath: string, suggestedTags: string[]) => Promise<void>;
 }

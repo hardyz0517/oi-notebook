@@ -79,6 +79,13 @@ pub struct PolishedNoteBody {
     pub polished_body: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteTagSuggestion {
+    pub suggested_tags: Vec<String>,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteChatContextInput {
@@ -1081,9 +1088,9 @@ fn build_stream_note_chat_messages(
     let note_title = context.note_title.trim();
     let note_path = context.note_path.trim();
     let markdown = context.markdown.trim();
-    let has_note_context = !note_path.is_empty() || !note_title.is_empty() || !markdown.is_empty();
-    let context_prompt = if has_note_context {
-        let selected_text = context.selected_text.trim();
+    let selected_text = context.selected_text.trim();
+    let has_full_note_context = !note_path.is_empty() || !note_title.is_empty() || !markdown.is_empty();
+    let context_prompt = if has_full_note_context {
         let selection_section = if selected_text.is_empty() {
             "The user has no selected text.".to_string()
         } else {
@@ -1108,6 +1115,12 @@ Summary:\n{summary_text}\n\n\
 Selected text:\n{selection_section}\n\n\
 Markdown note:\n{truncation_note}\n\n{markdown}\n\n\
 The following conversation may contain previous user goals. The note above is the latest optional note context for the next user question.",
+        )
+    } else if !selected_text.is_empty() {
+        format!(
+            "The full current note context is not attached to this request. The user explicitly provided this local text from the editor, such as a selection or cursor paragraph. Use only this local text when it is relevant, and do not claim you can read the rest of the note.\n\n\
+Local editor text:\n{selected_text}\n\n\
+The following conversation may contain previous user goals."
         )
     } else {
         "There is no current note context attached to this request. Answer as a general helpful assistant inside OI Notebook, using any relevant recent conversation below. Do not claim you can read or modify a note unless the user provides one.".to_string()
@@ -1471,6 +1484,82 @@ fn validate_note_chat_answer(value: JsonValue, scope: &str) -> Result<String, St
         })
 }
 
+fn normalize_suggested_tags(
+    existing_tags: &[String],
+    suggested_tags: Vec<String>,
+    scope: &str,
+) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    let existing = existing_tags
+        .iter()
+        .map(|tag| tag.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|tag| !tag.is_empty())
+        .collect::<Vec<_>>();
+
+    for tag in suggested_tags {
+        let trimmed = tag.split_whitespace().collect::<Vec<_>>().join(" ");
+        if trimmed.is_empty() {
+            continue;
+        }
+        if existing.iter().any(|existing_tag| existing_tag == &trimmed) {
+            continue;
+        }
+        if normalized.iter().any(|existing_tag| existing_tag == &trimmed) {
+            continue;
+        }
+        normalized.push(trimmed);
+        if normalized.len() == 8 {
+            break;
+        }
+    }
+
+    if normalized.is_empty() {
+        return Ok(normalized);
+    }
+
+    if normalized.len() > 8 {
+        return Err(format!("{scope}: response suggestedTags must contain at most 8 items"));
+    }
+
+    Ok(normalized)
+}
+
+fn validate_note_tag_suggestion(
+    value: JsonValue,
+    existing_tags: &[String],
+    scope: &str,
+) -> Result<NoteTagSuggestion, String> {
+    let tags_value = value
+        .get("suggestedTags")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| {
+            format!(
+                "{scope}: response JSON schema failed: suggestedTags must be an array; json_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })?;
+    let mut raw_tags = Vec::new();
+    for tag in tags_value {
+        let Some(tag_text) = tag.as_str() else {
+            return Err(format!("{scope}: response suggestedTags must only contain strings"));
+        };
+        raw_tags.push(tag_text.to_string());
+    }
+    let suggested_tags = normalize_suggested_tags(existing_tags, raw_tags, scope)?;
+    let reason = value
+        .get("reason")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("这些标签来自当前笔记的标题、摘要、已有标签和正文内容。")
+        .to_string();
+
+    Ok(NoteTagSuggestion {
+        suggested_tags,
+        reason,
+    })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -1640,6 +1729,104 @@ pub fn polish_note_body(
     let _ = write_ai_cache(&cache_path, NOTE_POLISH_TASK, &config, &value);
 
     Ok(polished)
+}
+
+fn suggest_note_tags_blocking(
+    context: NoteChatContextInput,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<NoteTagSuggestion, String> {
+    let note_path = context.note_path.trim();
+    if note_path.is_empty() {
+        return Err("AI tag suggestion failed: note path is missing".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let resolved = resolve_ai_config(
+        &config,
+        provider_id.as_deref(),
+        model_id.as_deref(),
+    )?;
+    require_resolved_ai_config(&resolved)?;
+    let selected_config = config_from_resolved(resolved.clone());
+
+    let tags_text = if context.tags.is_empty() {
+        "未填写".to_string()
+    } else {
+        context
+            .tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let summary_text = if context.summary.trim().is_empty() {
+        "未填写".to_string()
+    } else {
+        context.summary.trim().to_string()
+    };
+    let selected_text = context.selected_text.trim();
+    let selection_section = if selected_text.is_empty() {
+        "用户当前没有选中文段。".to_string()
+    } else {
+        format!("用户当前选中的内容如下，可参考但不要只围绕选区生成标签：\n{selected_text}")
+    };
+    let markdown = context.markdown.trim();
+    let body_note = if markdown.is_empty() {
+        "当前正文为空或上下文很少，请主要基于标题、路径和 summary 谨慎建议。"
+    } else if context.markdown_truncated {
+        "正文是截断后的节选，不是整篇全文。"
+    } else {
+        "正文是当前笔记的完整内容。"
+    };
+
+    let user_prompt = format!(
+        "你要为一篇 OI / 算法 / Markdown 学习笔记建议 frontmatter tags。\n\
+请结合标题、路径、已有 tags、summary、正文 Markdown 和选中文段。\n\
+不要重复已有 tags。不要生成太泛的标签，例如“学习”“笔记”“算法”，除非确实必要。\n\
+优先生成具体标签，例如：动态规划、单调队列、最短路、树形 DP、数学、洛谷、题解、模板、调试、复杂度分析。\n\
+tags 应简短，建议 2 到 8 个。保留中文标签风格，除非正文里明显使用英文术语。\n\
+只输出严格 JSON，不要使用 markdown code fence，不要输出额外文本。\n\
+JSON 格式必须是：{{\"suggestedTags\":[\"动态规划\",\"单调队列\"],\"reason\":\"这些标签对应笔记中的状态转移和队列优化内容。\"}}\n\n\
+【标题】\n{note_title}\n\n\
+【路径】\n{note_path}\n\n\
+【已有 tags】\n{tags_text}\n\n\
+【summary】\n{summary_text}\n\n\
+【选中文段】\n{selection_section}\n\n\
+【正文说明】\n{body_note}\n\n\
+【正文 Markdown】\n{markdown}",
+        note_title = context.note_title.trim(),
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": format!(
+                "Return only strict JSON with suggestedTags and reason fields. Do not use markdown fences. Do not claim that files were modified.\n\n{}",
+                build_model_identity_context(&resolved)
+            )
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(&selected_config, messages, 0.2, "AI tag suggestion failed")?;
+    let value = parse_json_object_from_ai_content(&content, "AI tag suggestion failed")?;
+    validate_note_tag_suggestion(value, &context.tags, "AI tag suggestion failed")
+}
+
+#[tauri::command]
+pub async fn suggest_note_tags(
+    context: NoteChatContextInput,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<NoteTagSuggestion, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        suggest_note_tags_blocking(context, provider_id, model_id)
+    })
+    .await
+    .map_err(|e| format!("AI tag suggestion failed: task join failed: {e}"))?
 }
 
 #[tauri::command]

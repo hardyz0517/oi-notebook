@@ -400,6 +400,24 @@ function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function normalizeTagValue(tag: string): string {
+  return tag.trim().replace(/\s+/g, " ");
+}
+
+function mergeTagsStable(existingTags: string[], suggestedTags: string[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of [...existingTags, ...suggestedTags]) {
+    const normalized = normalizeTagValue(tag);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push(normalized);
+  }
+
+  return merged;
+}
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -2943,9 +2961,25 @@ export default function App() {
   const updateTagsFromInput = (value: string) => {
     const tags = value
       .split(",")
-      .map((tag) => tag.trim())
+      .map(normalizeTagValue)
       .filter(Boolean);
     updateFrontmatter({ tags });
+  };
+
+  const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
+    if (!currentFilePath || currentFilePath !== notePath) {
+      throw new Error("当前打开的笔记已变化，请切回原笔记后再应用");
+    }
+    if (!frontmatter.canMerge) {
+      throw new Error(frontmatter.warning ?? "当前 frontmatter 暂不能通过表单改写");
+    }
+    if (!frontmatter.canEditTags) {
+      throw new Error(frontmatter.warning ?? "当前 tags 暂不能通过表单改写");
+    }
+
+    const nextTags = mergeTagsStable(frontmatter.fields.tags, suggestedTags);
+    if (nextTags.length === frontmatter.fields.tags.length) return;
+    updateFrontmatter({ tags: nextTags });
   };
 
   const handleGenerateNoteMetadata = async () => {
@@ -6536,6 +6570,7 @@ export default function App() {
           width={aiSidebarWidth}
           aiConfig={aiConfig}
           onOpenAiSettings={() => void openAiSettings()}
+          onApplySuggestedTags={handleApplyAiSuggestedTags}
         />
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
