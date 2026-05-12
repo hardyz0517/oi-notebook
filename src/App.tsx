@@ -17,8 +17,8 @@ import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/edi
 import FileTree from "@/components/file-tree/FileTree";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, testAiConnection, saveAiProvider, deleteAiProvider, setDefaultAiModel, syncAiProviderModels, testAiProvider, addAiProviderModel, deleteAiProviderModel, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
-import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestAiConnectionResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
+import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
@@ -106,7 +106,8 @@ type LuoguMissingInsightStrategy = "skip" | "draft";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
-type SettingsSection = "general" | "appearance" | "editor" | "markdown" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
+type SettingsSection = "general" | "appearance" | "editor" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
+type AiSettingsTab = "api" | "prompts";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 
@@ -158,16 +159,19 @@ const READING_DENSITY_OPTIONS: Array<{
   },
 ];
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string }> = [
-  { id: "general", label: "常规", blurb: "常用设置与工具总览" },
-  { id: "appearance", label: "外观", blurb: "缩放、字号与阅读密度" },
-  { id: "editor", label: "编辑器", blurb: "视图模式与编辑体验" },
-  { id: "markdown", label: "Markdown", blurb: "当前渲染能力速览" },
-  { id: "ai", label: "AI", blurb: "模型配置、Prompt 与连接测试" },
-  { id: "luogu", label: "洛谷", blurb: "配置、导入与扫描工作流" },
-  { id: "blog", label: "博客", blurb: "本地博客预览与服务管理" },
-  { id: "git", label: "Git", blurb: "进阶同步操作入口" },
-  { id: "data", label: "数据与存储", blurb: "本地 notes 目录与数据说明" },
-  { id: "about", label: "关于", blurb: "产品定位与当前阶段" },
+  { id: "general", label: "常规", blurb: "基础设置" },
+  { id: "appearance", label: "外观", blurb: "主题与字号" },
+  { id: "editor", label: "编辑器", blurb: "编辑体验" },
+  { id: "ai", label: "AI", blurb: "模型、API 与 Prompt" },
+  { id: "luogu", label: "洛谷", blurb: "导入与扫描" },
+  { id: "blog", label: "博客", blurb: "本地预览" },
+  { id: "git", label: "Git", blurb: "同步入口" },
+  { id: "data", label: "数据与存储", blurb: "目录与说明" },
+  { id: "about", label: "关于", blurb: "版本与能力" },
+];
+const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string; description: string }> = [
+  { id: "api", label: "模型与 API", description: "配置 OpenAI-compatible API、模型和默认项" },
+  { id: "prompts", label: "Prompt 模板", description: "编辑本地 AI Prompt 模板" },
 ];
 const MARKDOWN_CAPABILITIES = [
   "KaTeX",
@@ -214,6 +218,97 @@ const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
 
 function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTemplateId {
   return directory === "tricks" ? "trick" : "solution";
+}
+
+function cloneAiConfig(config: AiConfig): AiConfig {
+  return {
+    ...config,
+    providers: config.providers.map((provider) => ({
+      ...provider,
+      models: provider.models.map((model) => ({ ...model })),
+    })),
+  };
+}
+
+function normalizeAiConfigDraft(config: AiConfig): AiConfig {
+  const providers = config.providers.map((provider) => {
+    const models = provider.models
+      .map((model) => ({
+        ...model,
+        id: model.id.trim(),
+        name: model.name?.trim() || null,
+        source: model.source.trim() || "manual",
+        updated_at: model.updated_at ?? null,
+      }))
+      .filter((model, index, items) => model.id && items.findIndex((item) => item.id === model.id) === index);
+    const defaultModel = provider.default_model?.trim() || models.find((model) => model.enabled)?.id || models[0]?.id || null;
+
+    return {
+      ...provider,
+      id: provider.id.trim(),
+      name: provider.name.trim() || "OpenAI Compatible",
+      kind: "openai-compatible",
+      base_url: provider.base_url.trim(),
+      api_key: provider.api_key.trim(),
+      default_model: defaultModel,
+      models,
+      created_at: provider.created_at ?? Date.now(),
+      updated_at: provider.updated_at ?? Date.now(),
+    };
+  }).filter((provider, index, items) => provider.id && items.findIndex((item) => item.id === provider.id) === index);
+
+  const defaultProvider =
+    providers.find((provider) => provider.id === config.default_provider_id) ??
+    providers.find((provider) => provider.enabled) ??
+    providers[0] ??
+    null;
+  const defaultModel =
+    defaultProvider?.models.find((model) => model.id === config.default_model_id && model.enabled)?.id ??
+    defaultProvider?.default_model ??
+    defaultProvider?.models.find((model) => model.enabled)?.id ??
+    defaultProvider?.models[0]?.id ??
+    null;
+
+  return {
+    base_url: defaultProvider?.base_url ?? config.base_url.trim(),
+    api_key: defaultProvider?.api_key ?? config.api_key.trim(),
+    model: defaultModel ?? config.model.trim(),
+    providers,
+    default_provider_id: defaultProvider?.id ?? null,
+    default_model_id: defaultModel,
+  };
+}
+
+function createAiProviderDraft(): AiProvider {
+  const now = Date.now();
+  return {
+    id: `provider-${now.toString(36)}`,
+    name: "新配置组",
+    kind: "openai-compatible",
+    base_url: "",
+    api_key: "",
+    enabled: true,
+    default_model: null,
+    models: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function createAiModelDraft(modelId: string, source: "manual" | "synced" = "manual"): AiProvider["models"][number] {
+  return {
+    id: modelId.trim(),
+    name: null,
+    enabled: true,
+    supports_stream: true,
+    source,
+    updated_at: Date.now(),
+  };
+}
+
+function getAiConfigComparable(config: AiConfig | null): string {
+  if (!config) return "";
+  return JSON.stringify(normalizeAiConfigDraft(config));
 }
 
 function quoteYamlString(value: string): string {
@@ -971,24 +1066,15 @@ export default function App() {
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
   const [isUpdatingLuoguLastSubmissionId, setIsUpdatingLuoguLastSubmissionId] = useState(false);
-  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
-  const [isTestingAiConnection, setIsTestingAiConnection] = useState(false);
-  const [aiConnectionResult, setAiConnectionResult] = useState<TestAiConnectionResult | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
-  const [aiConfigBaseUrl, setAiConfigBaseUrl] = useState("");
-  const [aiConfigApiKey, setAiConfigApiKey] = useState("");
-  const [aiConfigModel, setAiConfigModel] = useState("");
+  const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
-  const [aiProviderName, setAiProviderName] = useState("");
-  const [aiProviderBaseUrl, setAiProviderBaseUrl] = useState("");
-  const [aiProviderApiKey, setAiProviderApiKey] = useState("");
-  const [aiProviderDefaultModel, setAiProviderDefaultModel] = useState("");
   const [aiManualModelId, setAiManualModelId] = useState("");
+  const [aiModelSearchQuery, setAiModelSearchQuery] = useState("");
+  const [aiSettingsTab, setAiSettingsTab] = useState<AiSettingsTab>("api");
   const [aiProviderBusyId, setAiProviderBusyId] = useState<string | null>(null);
-  const [isSavingAiProvider, setIsSavingAiProvider] = useState(false);
-  const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateSummary[]>([]);
   const [selectedPromptFileName, setSelectedPromptFileName] = useState("");
   const [promptContent, setPromptContent] = useState("");
@@ -1038,14 +1124,6 @@ export default function App() {
     [currentFilePath, frontmatterPrefix, markdown],
   );
   const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
-  const selectedPrompt = useMemo(
-    () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
-    [promptTemplates, selectedPromptFileName],
-  );
-  const selectedPromptUsage = useMemo(
-    () => getPromptUsageInfo(selectedPromptFileName),
-    [selectedPromptFileName],
-  );
   const luoguRuleSummary = useMemo(
     () => getLuoguImportRuleSummary(luoguImportRules),
     [luoguImportRules],
@@ -1217,11 +1295,35 @@ export default function App() {
       provider.api_key.trim() !== "" &&
       (provider.default_model?.trim() || provider.models.some((model) => model.enabled && model.id.trim() !== ""))
     )) ??
-    (aiConfigBaseUrl.trim() !== "" &&
-      aiConfigApiKey.trim() !== "" &&
-      aiConfigModel.trim() !== "");
+    Boolean(aiConfig?.base_url.trim() && aiConfig?.api_key.trim() && aiConfig?.model.trim());
   const selectedAiProvider =
-    aiConfig?.providers.find((provider) => provider.id === selectedAiProviderId) ?? null;
+    aiConfigDraft?.providers.find((provider) => provider.id === selectedAiProviderId) ?? null;
+  const savedAiProviderById = useMemo(
+    () => new Map((aiConfig?.providers ?? []).map((provider) => [provider.id, getAiConfigComparable({
+      base_url: "",
+      api_key: "",
+      model: "",
+      providers: [provider],
+      default_provider_id: provider.id,
+      default_model_id: provider.default_model,
+    })])),
+    [aiConfig],
+  );
+  const hasAiConfigDraftChanges =
+    aiConfigDraft !== null &&
+    aiConfig !== null &&
+    getAiConfigComparable(aiConfigDraft) !== getAiConfigComparable(aiConfig);
+  const filteredAiProviderModels = useMemo(() => {
+    if (!selectedAiProvider) return [];
+    const query = aiModelSearchQuery.trim().toLowerCase();
+    if (!query) return selectedAiProvider.models;
+    return selectedAiProvider.models.filter((model) =>
+      model.id.toLowerCase().includes(query) ||
+      (model.name?.toLowerCase().includes(query) ?? false) ||
+      model.source.toLowerCase().includes(query),
+    );
+  }, [aiModelSearchQuery, selectedAiProvider]);
+  const aiProviderBusy = aiProviderBusyId !== null;
   const luoguConfigured =
     luoguConfigUid.trim() !== "" &&
     luoguConfigClientId.trim() !== "";
@@ -1247,7 +1349,7 @@ export default function App() {
             : isNotesSidebarOpen
               ? "notes"
               : null;
-  const isAiActivityActive = isAiSidebarOpen || isAiSettingsOpen || isPromptDialogOpen;
+  const isAiActivityActive = isAiSidebarOpen || (isAdvancedActionsOpen && settingsSection === "ai");
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
   const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
@@ -1830,48 +1932,46 @@ export default function App() {
   };
 
   const applyAiConfigState = (config: AiConfig) => {
-    setAiConfig(config);
-    setAiConfigBaseUrl(config.base_url);
-    setAiConfigApiKey(config.api_key);
-    setAiConfigModel(config.model);
+    const nextConfig = cloneAiConfig(config);
+    setAiConfig(nextConfig);
+    setAiConfigDraft(cloneAiConfig(nextConfig));
     const defaultProvider =
       config.providers.find((provider) => provider.id === config.default_provider_id) ??
       config.providers[0] ??
       null;
     if (defaultProvider) {
       setSelectedAiProviderId(defaultProvider.id);
-      setAiProviderName(defaultProvider.name);
-      setAiProviderBaseUrl(defaultProvider.base_url);
-      setAiProviderApiKey(defaultProvider.api_key);
-      setAiProviderDefaultModel(defaultProvider.default_model ?? config.default_model_id ?? config.model);
     } else {
       setSelectedAiProviderId("");
-      setAiProviderName("");
-      setAiProviderBaseUrl(config.base_url);
-      setAiProviderApiKey(config.api_key);
-      setAiProviderDefaultModel(config.model);
     }
   };
 
   const selectAiProviderForEdit = (provider: AiProvider) => {
     setSelectedAiProviderId(provider.id);
-    setAiProviderName(provider.name);
-    setAiProviderBaseUrl(provider.base_url);
-    setAiProviderApiKey(provider.api_key);
-    setAiProviderDefaultModel(provider.default_model ?? provider.models[0]?.id ?? "");
     setAiManualModelId("");
-    setAiConnectionResult(null);
+    setAiModelSearchQuery("");
   };
 
-  const createAiProviderDraft = () => {
-    const now = Date.now();
-    setSelectedAiProviderId(`provider-${now.toString(36)}`);
-    setAiProviderName("新 API");
-    setAiProviderBaseUrl("");
-    setAiProviderApiKey("");
-    setAiProviderDefaultModel("");
+  const handleCreateAiProviderDraft = () => {
+    const provider = createAiProviderDraft();
+    setAiConfigDraft((current) => {
+      const base = current ?? aiConfig ?? {
+        base_url: "",
+        api_key: "",
+        model: "",
+        providers: [],
+        default_provider_id: null,
+        default_model_id: null,
+      };
+      return {
+        ...cloneAiConfig(base),
+        providers: [...base.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model })) })), provider],
+        default_provider_id: base.default_provider_id ?? provider.id,
+      };
+    });
+    setSelectedAiProviderId(provider.id);
     setAiManualModelId("");
-    setAiConnectionResult(null);
+    setAiModelSearchQuery("");
   };
 
   const refreshAiConfig = async () => {
@@ -1881,9 +1981,10 @@ export default function App() {
   };
 
   const openAiSettings = async () => {
-    setIsAiSettingsOpen(true);
+    setSettingsSection("ai");
+    setAiSettingsTab("api");
+    setIsAdvancedActionsOpen(true);
     setIsLoadingAiConfig(true);
-    setAiConnectionResult(null);
     try {
       await refreshAiConfig();
     } catch (e) {
@@ -1893,34 +1994,85 @@ export default function App() {
     }
   };
 
-  const closeAiSettings = () => {
-    if (isSavingAiConfig || isTestingAiConnection) return;
-    setIsAiSettingsOpen(false);
+  const handleFillDeepSeekDefaults = () => {
+    if (!selectedAiProvider) {
+      const provider = {
+        ...createAiProviderDraft(),
+        name: "DeepSeek",
+        base_url: DEEPSEEK_DEFAULT_BASE_URL,
+        default_model: DEEPSEEK_DEFAULT_MODEL,
+        models: [createAiModelDraft(DEEPSEEK_DEFAULT_MODEL)],
+      };
+      setAiConfigDraft((current) => {
+        const base = current ?? aiConfig ?? {
+          base_url: "",
+          api_key: "",
+          model: "",
+          providers: [],
+          default_provider_id: null,
+          default_model_id: null,
+        };
+        return {
+          ...cloneAiConfig(base),
+          providers: [...base.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model })) })), provider],
+          default_provider_id: base.default_provider_id ?? provider.id,
+          default_model_id: base.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
+        };
+      });
+      setSelectedAiProviderId(provider.id);
+      setAiModelSearchQuery("");
+      return;
+    }
+    updateAiProviderDraft(selectedAiProvider.id, (provider) => ({
+      ...provider,
+      base_url: DEEPSEEK_DEFAULT_BASE_URL,
+      default_model: provider.default_model || DEEPSEEK_DEFAULT_MODEL,
+      models: provider.models.some((model) => model.id === DEEPSEEK_DEFAULT_MODEL)
+        ? provider.models
+        : [...provider.models, createAiModelDraft(DEEPSEEK_DEFAULT_MODEL)],
+      updated_at: Date.now(),
+    }));
+    setAiConfigDraft((current) => current ? {
+      ...current,
+      default_provider_id: current.default_provider_id ?? selectedAiProvider.id,
+      default_model_id: current.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
+    } : current);
+    toast.info("已填入 DeepSeek 默认 base_url 和模型，检查 API key 后保存更改");
   };
 
-  const handleFillDeepSeekDefaults = () => {
-    setAiConfigBaseUrl(DEEPSEEK_DEFAULT_BASE_URL);
-    setAiConfigModel(DEEPSEEK_DEFAULT_MODEL);
-    setAiProviderBaseUrl(DEEPSEEK_DEFAULT_BASE_URL);
-    setAiProviderDefaultModel(DEEPSEEK_DEFAULT_MODEL);
-    setAiConnectionResult(null);
-    toast.info("已填入 DeepSeek 默认 base_url 和 model，请继续填写 API key 后保存");
+  const updateAiConfigDraft = (update: (config: AiConfig) => AiConfig) => {
+    setAiConfigDraft((current) => {
+      const base = current ?? aiConfig;
+      if (!base) return current;
+      return update(cloneAiConfig(base));
+    });
+  };
+
+  const updateAiProviderDraft = (providerId: string, update: (provider: AiProvider) => AiProvider) => {
+    updateAiConfigDraft((config) => ({
+      ...config,
+      providers: config.providers.map((provider) =>
+        provider.id === providerId
+          ? update({
+              ...provider,
+              models: provider.models.map((model) => ({ ...model })),
+            })
+          : provider,
+      ),
+    }));
   };
 
   const handleSaveAiConfig = async () => {
+    if (!aiConfigDraft) {
+      toast.error("AI 配置还没有读取完成");
+      return;
+    }
     setIsSavingAiConfig(true);
     try {
-      await saveAiConfig({
-        base_url: aiConfigBaseUrl.trim(),
-        api_key: aiConfigApiKey.trim(),
-        model: aiConfigModel.trim(),
-        providers: aiConfig?.providers ?? [],
-        default_provider_id: aiConfig?.default_provider_id ?? null,
-        default_model_id: aiConfig?.default_model_id ?? null,
-      });
-      await refreshAiConfig();
+      await saveAiConfig(normalizeAiConfigDraft(aiConfigDraft));
+      const config = await refreshAiConfig();
+      setAiConfigDraft(cloneAiConfig(config));
       toast.success("AI 配置已保存");
-      setIsAiSettingsOpen(false);
     } catch (e) {
       toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
     } finally {
@@ -1928,18 +2080,18 @@ export default function App() {
     }
   };
 
-  const handleTestAiConnection = async () => {
-    setIsTestingAiConnection(true);
-    setAiConnectionResult(null);
-    try {
-      const result = await testAiConnection();
-      setAiConnectionResult(result);
-      toast.success(`AI 连接正常：${result.model}`);
-    } catch (e) {
-      toast.error(`AI 连接测试失败：${getErrorMessage(e)}`);
-    } finally {
-      setIsTestingAiConnection(false);
-    }
+  const handleCancelAiConfigDraft = () => {
+    if (!aiConfig) return;
+    const resetConfig = cloneAiConfig(aiConfig);
+    setAiConfigDraft(resetConfig);
+    setSelectedAiProviderId(
+      resetConfig.providers.find((provider) => provider.id === resetConfig.default_provider_id)?.id ??
+      resetConfig.providers[0]?.id ??
+      "",
+    );
+    setAiManualModelId("");
+    setAiModelSearchQuery("");
+    toast.info("已放弃未保存的 API 管理改动");
   };
 
   const loadPromptContent = async (fileName: string) => {
@@ -1955,28 +2107,28 @@ export default function App() {
     }
   };
 
-  const openPromptDialog = async () => {
-    setIsPromptDialogOpen(true);
+  const loadPromptTemplates = async () => {
     setIsLoadingPrompt(true);
     try {
       const prompts = await listAiPrompts();
       setPromptTemplates(prompts);
-      const firstPrompt = prompts[0];
-      if (firstPrompt) {
-        const prompt = await readAiPrompt(firstPrompt.fileName);
+      const currentPrompt =
+        prompts.find((prompt) => prompt.fileName === selectedPromptFileName) ??
+        prompts[0] ??
+        null;
+      if (currentPrompt) {
+        const prompt = await readAiPrompt(currentPrompt.fileName);
         setSelectedPromptFileName(prompt.fileName);
         setPromptContent(prompt.content);
+      } else {
+        setSelectedPromptFileName("");
+        setPromptContent("");
       }
     } catch (e) {
       toast.error(`Prompt 读取失败：${getErrorMessage(e)}`);
     } finally {
       setIsLoadingPrompt(false);
     }
-  };
-
-  const closePromptDialog = () => {
-    if (isLoadingPrompt || isSavingPrompt) return;
-    setIsPromptDialogOpen(false);
   };
 
   const handleSelectPrompt = (fileName: string) => {
@@ -2218,56 +2370,40 @@ export default function App() {
     toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
 
-  const handleSaveAiProvider = async () => {
-    if (!selectedAiProviderId.trim()) {
-      toast.error("请先添加或选择一个 Provider");
-      return;
-    }
-    setIsSavingAiProvider(true);
-    try {
-      const existing = aiConfig?.providers.find((provider) => provider.id === selectedAiProviderId);
-      const result = await saveAiProvider({
-        id: selectedAiProviderId.trim(),
-        name: aiProviderName.trim() || "OpenAI Compatible",
-        kind: "openai-compatible",
-        base_url: aiProviderBaseUrl.trim(),
-        api_key: aiProviderApiKey.trim(),
-        enabled: true,
-        default_model: aiProviderDefaultModel.trim() || null,
-        models: existing?.models ?? [],
-        created_at: existing?.created_at ?? Date.now(),
-        updated_at: Date.now(),
-      });
-      applyAiConfigState(result.config);
-      selectAiProviderForEdit(result.provider);
-      toast.success("API Provider 已保存");
-    } catch (e) {
-      toast.error(`API Provider 保存失败：${getErrorMessage(e)}`);
-    } finally {
-      setIsSavingAiProvider(false);
-    }
-  };
-
   const handleDeleteAiProvider = async (providerId: string) => {
-    const provider = aiConfig?.providers.find((item) => item.id === providerId);
+    const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
     if (!provider) return;
-    if (!window.confirm(`删除 API Provider「${provider.name}」？`)) return;
-    setAiProviderBusyId(providerId);
-    try {
-      const config = await deleteAiProvider(providerId);
-      applyAiConfigState(config);
-      toast.success("API Provider 已删除");
-    } catch (e) {
-      toast.error(`API Provider 删除失败：${getErrorMessage(e)}`);
-    } finally {
-      setAiProviderBusyId(null);
-    }
+    if (!window.confirm(`删除配置组「${provider.name || provider.id}」？删除后需要点击“保存更改”才会持久化。`)) return;
+    updateAiConfigDraft((config) => {
+      const providers = config.providers.filter((item) => item.id !== providerId);
+      const nextSelected = providers.find((item) => item.id === config.default_provider_id) ?? providers[0] ?? null;
+      if (selectedAiProviderId === providerId) {
+        setSelectedAiProviderId(nextSelected?.id ?? "");
+      }
+      return {
+        ...config,
+        providers,
+        default_provider_id: config.default_provider_id === providerId ? nextSelected?.id ?? null : config.default_provider_id,
+        default_model_id: config.default_provider_id === providerId ? nextSelected?.default_model ?? nextSelected?.models[0]?.id ?? null : config.default_model_id,
+      };
+    });
+    setAiManualModelId("");
   };
 
   const handleTestAiProvider = async (providerId: string) => {
+    const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
+    if (!provider) return;
+    if (!provider.base_url.trim()) {
+      toast.error("请先填写 Base URL");
+      return;
+    }
+    if (!provider.api_key.trim()) {
+      toast.error("请先填写 API Key");
+      return;
+    }
     setAiProviderBusyId(providerId);
     try {
-      const result = await testAiProvider(providerId);
+      const result = await testAiProviderDraft(provider);
       toast.success(`连接正常，发现 ${result.modelCount} 个模型`);
     } catch (e) {
       toast.error(`连接测试失败：${getErrorMessage(e)}`);
@@ -2277,11 +2413,20 @@ export default function App() {
   };
 
   const handleSyncAiProviderModels = async (providerId: string) => {
+    const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
+    if (!provider) return;
+    if (!provider.base_url.trim()) {
+      toast.error("请先填写 Base URL");
+      return;
+    }
+    if (!provider.api_key.trim()) {
+      toast.error("请先填写 API Key");
+      return;
+    }
     setAiProviderBusyId(providerId);
     try {
-      const result = await syncAiProviderModels(providerId);
-      applyAiConfigState(result.config);
-      selectAiProviderForEdit(result.provider);
+      const result = await syncAiProviderModelsDraft(provider);
+      updateAiProviderDraft(providerId, () => result.provider);
       toast.success(`已同步 ${result.syncedCount} 个模型`);
     } catch (e) {
       toast.error(`模型同步失败：${getErrorMessage(e)}；可以手动添加模型`);
@@ -2296,45 +2441,50 @@ export default function App() {
       toast.error("请先选择 Provider 并填写模型 ID");
       return;
     }
-    setAiProviderBusyId(selectedAiProviderId);
-    try {
-      const result = await addAiProviderModel(selectedAiProviderId, modelId);
-      applyAiConfigState(result.config);
-      selectAiProviderForEdit(result.provider);
-      setAiManualModelId("");
-      toast.success("模型已添加");
-    } catch (e) {
-      toast.error(`模型添加失败：${getErrorMessage(e)}`);
-    } finally {
-      setAiProviderBusyId(null);
-    }
+    updateAiProviderDraft(selectedAiProviderId, (provider) => {
+      if (provider.models.some((model) => model.id === modelId)) return provider;
+      return {
+        ...provider,
+        default_model: provider.default_model ?? modelId,
+        models: [...provider.models, createAiModelDraft(modelId)],
+        updated_at: Date.now(),
+      };
+    });
+    setAiManualModelId("");
+    toast.success("模型已加入草稿，保存更改后生效");
   };
 
   const handleDeleteAiProviderModel = async (providerId: string, modelId: string) => {
-    setAiProviderBusyId(providerId);
-    try {
-      const result = await deleteAiProviderModel(providerId, modelId);
-      applyAiConfigState(result.config);
-      selectAiProviderForEdit(result.provider);
-      toast.success("模型已删除");
-    } catch (e) {
-      toast.error(`模型删除失败：${getErrorMessage(e)}`);
-    } finally {
-      setAiProviderBusyId(null);
-    }
+    updateAiProviderDraft(providerId, (provider) => {
+      const models = provider.models.filter((model) => model.id !== modelId);
+      const nextDefault = provider.default_model === modelId ? models.find((model) => model.enabled)?.id ?? models[0]?.id ?? null : provider.default_model;
+      return {
+        ...provider,
+        default_model: nextDefault,
+        models,
+        updated_at: Date.now(),
+      };
+    });
+    updateAiConfigDraft((config) => ({
+      ...config,
+      default_model_id:
+        config.default_provider_id === providerId && config.default_model_id === modelId
+          ? config.providers.find((provider) => provider.id === providerId)?.models.find((model) => model.id !== modelId && model.enabled)?.id ?? null
+          : config.default_model_id,
+    }));
   };
 
   const handleSetDefaultAiModel = async (providerId: string, modelId: string) => {
-    setAiProviderBusyId(providerId);
-    try {
-      const config = await setDefaultAiModel(providerId, modelId);
-      applyAiConfigState(config);
-      toast.success("默认模型已更新");
-    } catch (e) {
-      toast.error(`默认模型更新失败：${getErrorMessage(e)}`);
-    } finally {
-      setAiProviderBusyId(null);
-    }
+    updateAiProviderDraft(providerId, (provider) => ({
+      ...provider,
+      default_model: modelId,
+      updated_at: Date.now(),
+    }));
+    updateAiConfigDraft((config) => ({
+      ...config,
+      default_provider_id: providerId,
+      default_model_id: modelId,
+    }));
   };
 
   const handlePrepareSelectedLuoguSubmissions = async () => {
@@ -2928,10 +3078,23 @@ export default function App() {
   const openSettingsSection = (section: SettingsSection) => {
     setSettingsSection(section);
     setIsAdvancedActionsOpen(true);
+    if (section === "ai" && !aiConfigDraft && !isLoadingAiConfig) {
+      void openAiSettings();
+    }
   };
 
   const openSettingsCenter = () => {
     openSettingsSection("general");
+  };
+
+  const closeSettingsCenter = () => {
+    if (hasAiConfigDraftChanges && !window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
+      return;
+    }
+    if (hasAiConfigDraftChanges && aiConfig) {
+      setAiConfigDraft(cloneAiConfig(aiConfig));
+    }
+    setIsAdvancedActionsOpen(false);
   };
 
   const handleActivityNotes = () => {
@@ -3668,335 +3831,6 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={isAiSettingsOpen} onOpenChange={(open) => !open && closeAiSettings()}>
-      <DialogContent className="flex h-[min(82vh,760px)] w-[min(980px,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
-        <DialogHeader>
-          <DialogTitle className="px-5 pt-5">AI API 管理</DialogTitle>
-        </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-hidden px-5 py-4">
-          <div className="grid h-full min-h-0 gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
-            <aside className="min-h-0 overflow-y-auto rounded-lg border border-border/80 bg-muted/10 p-2 [scrollbar-width:thin]">
-              <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                <div className="text-xs font-medium text-muted-foreground">Providers</div>
-                <Button size="xs" variant="outline" onClick={createAiProviderDraft} disabled={isLoadingAiConfig || isSavingAiProvider}>
-                  <Plus className="h-3 w-3" />
-                  添加
-                </Button>
-              </div>
-              <div className="grid gap-1">
-                {(aiConfig?.providers ?? []).map((provider) => {
-                  const isActive = provider.id === selectedAiProviderId;
-                  const isDefault = provider.id === aiConfig?.default_provider_id;
-                  return (
-                    <button
-                      key={provider.id}
-                      type="button"
-                      className={cn(
-                        "grid min-w-0 gap-1 rounded-md px-2.5 py-2 text-left transition-colors",
-                        isActive ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
-                      )}
-                      onClick={() => selectAiProviderForEdit(provider)}
-                    >
-                      <span className="flex min-w-0 items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">{provider.name || provider.id}</span>
-                        {isDefault && <span className="shrink-0 text-[10px] text-muted-foreground">默认</span>}
-                      </span>
-                      <span className="truncate text-[11px] text-muted-foreground">{provider.base_url || "未填写 base_url"}</span>
-                      <span className="text-[11px] text-muted-foreground">{provider.models.length} models</span>
-                    </button>
-                  );
-                })}
-                {(aiConfig?.providers.length ?? 0) === 0 && (
-                  <div className="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
-                    还没有 Provider。可以添加一个 OpenAI-compatible API。
-                  </div>
-                )}
-              </div>
-            </aside>
-
-            <main className="min-h-0 overflow-y-auto rounded-lg border border-border/80 bg-card/70 p-4 [scrollbar-width:thin]">
-              <div className="grid gap-4">
-                <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
-                  <div>当前仅支持 OpenAI-compatible Chat Completions。API Key 只保存在本地 .oinb/config.json。</div>
-                  <div>/models 不可用时，可以手动添加模型 ID。</div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/10 p-3">
-                  <div className="text-xs leading-5 text-muted-foreground">
-                    <div className="font-medium text-foreground">DeepSeek 默认配置捷径</div>
-                    <div>只填入 base_url 和默认 model，不会填写 API key，也不会自动保存。</div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={handleFillDeepSeekDefaults}
-                    disabled={isLoadingAiConfig || isSavingAiProvider || isTestingAiConnection}
-                  >
-                    填入 DeepSeek 默认配置
-                  </Button>
-                </div>
-
-                <section className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-foreground">Provider 配置</div>
-                    {selectedAiProvider && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => void handleDeleteAiProvider(selectedAiProvider.id)}
-                        disabled={aiProviderBusyId === selectedAiProvider.id || isSavingAiProvider}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        删除
-                      </Button>
-                    )}
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="ai-provider-name">名称</Label>
-                      <Input id="ai-provider-name" value={aiProviderName} placeholder="DeepSeek / OpenAI / 中转站" onChange={(e) => setAiProviderName(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="ai-provider-default-model">默认模型</Label>
-                      <Input id="ai-provider-default-model" value={aiProviderDefaultModel} placeholder="deepseek-chat" onChange={(e) => setAiProviderDefaultModel(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2 md:col-span-2">
-                      <Label htmlFor="ai-provider-base-url">Base URL</Label>
-                      <Input id="ai-provider-base-url" value={aiProviderBaseUrl} placeholder="https://api.example.com/v1" onChange={(e) => setAiProviderBaseUrl(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2 md:col-span-2">
-                      <Label htmlFor="ai-provider-api-key">API Key</Label>
-                      <Input id="ai-provider-api-key" value={aiProviderApiKey} placeholder="sk-..." type="password" onChange={(e) => setAiProviderApiKey(e.target.value)} />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => void handleSaveAiProvider()} disabled={isSavingAiProvider || !selectedAiProviderId}>
-                      {isSavingAiProvider ? "保存中..." : "保存 Provider"}
-                    </Button>
-                    {selectedAiProvider && (
-                      <>
-                        <Button variant="outline" onClick={() => void handleTestAiProvider(selectedAiProvider.id)} disabled={aiProviderBusyId === selectedAiProvider.id}>
-                          {aiProviderBusyId === selectedAiProvider.id ? "处理中..." : "测试连接"}
-                        </Button>
-                        <Button variant="outline" onClick={() => void handleSyncAiProviderModels(selectedAiProvider.id)} disabled={aiProviderBusyId === selectedAiProvider.id}>
-                          同步模型
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </section>
-
-                {selectedAiProvider && (
-                  <section className="grid gap-3">
-                    <div className="text-sm font-semibold text-foreground">模型列表</div>
-                    <div className="flex gap-2">
-                      <Input value={aiManualModelId} placeholder="手动添加模型 ID，例如 deepseek-chat" onChange={(e) => setAiManualModelId(e.target.value)} />
-                      <Button variant="outline" onClick={() => void handleAddAiProviderModel()} disabled={aiProviderBusyId === selectedAiProvider.id || !aiManualModelId.trim()}>
-                        添加模型
-                      </Button>
-                    </div>
-                    <div className="grid gap-1">
-                      {selectedAiProvider.models.length > 0 ? selectedAiProvider.models.map((model) => {
-                        const isDefault = selectedAiProvider.id === aiConfig?.default_provider_id && model.id === aiConfig.default_model_id;
-                        return (
-                          <div key={model.id} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/10 px-3 py-2">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-foreground">{model.name || model.id}</div>
-                              <div className="truncate text-[11px] text-muted-foreground">{model.source === "manual" ? "手动" : "同步"} · stream {model.supports_stream ? "yes" : "unknown"}</div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                              <Button size="xs" variant={isDefault ? "default" : "outline"} onClick={() => void handleSetDefaultAiModel(selectedAiProvider.id, model.id)} disabled={aiProviderBusyId === selectedAiProvider.id}>
-                                {isDefault ? "默认" : "设为默认"}
-                              </Button>
-                              <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteAiProviderModel(selectedAiProvider.id, model.id)} disabled={aiProviderBusyId === selectedAiProvider.id}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      }) : (
-                        <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                          暂无模型。可以同步 /models，或手动添加模型 ID。
-                        </div>
-                      )}
-                    </div>
-                  </section>
-                )}
-
-                {aiConnectionResult && (
-                  <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    <div className="font-medium text-foreground">旧连接测试正常</div>
-                    <div>model: {aiConnectionResult.model}</div>
-                    <div>ok: {String(aiConnectionResult.ok)}</div>
-                  </div>
-                )}
-              </div>
-            </main>
-          </div>
-        </div>
-        <DialogFooter className="border-t border-border/80 px-5 py-4">
-          <Button variant="outline" onClick={closeAiSettings} disabled={isSavingAiConfig || isTestingAiConnection}>
-            关闭
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleTestAiConnection}
-            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-          >
-            测试连接
-          </Button>
-          <Button
-            onClick={handleSaveAiConfig}
-            disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-          >
-            保存旧配置
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    {isPromptDialogOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-8">
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="ai-prompt-editor-title"
-          className="grid overflow-hidden border border-border bg-popover text-popover-foreground shadow-2xl"
-          style={{
-            width: "min(1280px, calc(100vw - 64px))",
-            maxWidth: "1280px",
-            height: "min(86vh, 860px)",
-            maxHeight: "860px",
-            gridTemplateColumns: "clamp(220px, 22vw, 280px) minmax(0, 1fr)",
-          }}
-        >
-          <aside className="flex min-h-0 min-w-0 flex-col border-r border-border bg-muted/10">
-            <div className="shrink-0 border-b border-border px-4 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Prompt 模板
-              </div>
-              <div className="mt-1 text-[11px] text-muted-foreground">
-                选择要编辑的本地模板
-              </div>
-            </div>
-            <div className="grid min-h-0 content-start gap-2 overflow-y-auto p-3">
-              {promptTemplates.map((prompt) => {
-                const isSelected = prompt.fileName === selectedPromptFileName;
-                const promptUsage = getPromptUsageInfo(prompt.fileName);
-                return (
-                  <Button
-                    key={prompt.fileName}
-                    variant="ghost"
-                    className={`h-auto min-w-0 justify-start rounded-none border px-3 py-2.5 text-left text-xs ${
-                      isSelected
-                        ? "border-primary/70 bg-primary/15 text-foreground shadow-[inset_3px_0_0_hsl(var(--primary))]"
-                        : "border-border bg-background/40 hover:bg-accent/50"
-                    }`}
-                    disabled={isLoadingPrompt || isSavingPrompt}
-                    onClick={() => handleSelectPrompt(prompt.fileName)}
-                  >
-                    <span className="grid min-w-0 gap-1">
-                      <span className="truncate font-medium">{prompt.displayName}</span>
-                      <span className="truncate font-mono text-[10px] text-muted-foreground">{prompt.fileName}</span>
-                      <span className="truncate text-[10px] font-normal text-muted-foreground">
-                        {promptUsage.purpose}
-                      </span>
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          </aside>
-
-          <section className="grid min-h-0 min-w-0 grid-rows-[64px_auto_minmax(0,1fr)_56px]">
-            <header className="flex min-h-0 items-center justify-between gap-4 border-b border-border px-5">
-              <div className="grid min-w-0 gap-0.5">
-                <h2 id="ai-prompt-editor-title" className="text-base font-semibold">
-                  编辑 AI Prompt
-                </h2>
-                <div className="truncate font-mono text-[11px] text-muted-foreground">
-                  {selectedPrompt ? selectedPrompt.fileName : "请选择一个 Prompt 模板"}
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                disabled={isLoadingPrompt || isSavingPrompt}
-                aria-label="关闭 AI Prompt 编辑器"
-                onClick={closePromptDialog}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </header>
-
-            <div className="max-h-[108px] min-w-0 overflow-hidden border-b border-border bg-muted/10 px-5 py-3">
-              <div className="grid gap-2 text-xs leading-5">
-                <div className="min-w-0 truncate text-foreground">{selectedPromptUsage.purpose}</div>
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    变量
-                  </span>
-                  <div className="flex min-w-0 flex-wrap gap-1.5 overflow-hidden">
-                    {selectedPromptUsage.variables.length > 0 ? (
-                      selectedPromptUsage.variables.map((variable) => (
-                        <code
-                          key={variable}
-                          className="shrink-0 border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
-                        >
-                          {variable}
-                        </code>
-                      ))
-                    ) : (
-                      <span className="text-muted-foreground">暂无可展示变量</span>
-                    )}
-                  </div>
-                </div>
-                <div className="truncate text-muted-foreground">
-                  {selectedPromptUsage.notes[0]}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 p-5">
-              <Label htmlFor="ai-prompt-content" className="flex items-center justify-between gap-3">
-                <span>Prompt 内容</span>
-                {selectedPrompt && (
-                  <span className="truncate font-mono text-[10px] font-normal text-muted-foreground">
-                    {selectedPrompt.fileName}
-                  </span>
-                )}
-              </Label>
-              <textarea
-                id="ai-prompt-content"
-                value={promptContent}
-                disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}
-                rows={30}
-                className="h-full min-h-[460px] w-full min-w-0 resize-none overflow-auto rounded-none border border-input bg-background px-4 py-3 font-mono text-sm leading-6 outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
-                style={{
-                  width: "100%",
-                  minWidth: 0,
-                }}
-                onChange={(e) => setPromptContent(e.target.value)}
-              />
-            </div>
-
-            <footer className="flex min-w-0 items-center justify-between gap-3 border-t border-border px-5">
-              <div className="min-w-0 truncate text-[11px] text-muted-foreground">
-                本地路径：.oinb/prompts/{selectedPromptFileName || "*.md"}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button variant="outline" onClick={closePromptDialog} disabled={isLoadingPrompt || isSavingPrompt}>
-                  取消
-                </Button>
-                <Button onClick={handleSavePrompt} disabled={isLoadingPrompt || isSavingPrompt || !selectedPromptFileName}>
-                  保存
-                </Button>
-              </div>
-            </footer>
-          </section>
-        </div>
-      </div>
-    )}
     {isLuoguDialogOpen && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-8 backdrop-blur-sm">
         <section
@@ -5084,9 +4918,9 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={isAdvancedActionsOpen} onOpenChange={setIsAdvancedActionsOpen}>
+    <Dialog open={isAdvancedActionsOpen} onOpenChange={(open) => open ? setIsAdvancedActionsOpen(true) : closeSettingsCenter()}>
       <DialogContent
-        className="settings-center flex h-[min(82vh,760px)] w-[min(1120px,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="settings-center flex h-[min(960px,calc(100vh-48px))] w-[min(1480px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
         style={settingsAppearanceStyle}
       >
         <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-6 py-4 text-left">
@@ -5096,7 +4930,7 @@ export default function App() {
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
-          <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-border/80 bg-muted/10 md:w-[220px] md:min-w-[220px] md:border-b-0 md:border-r">
+          <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-border/80 bg-muted/10 md:w-[240px] md:min-w-[240px] md:border-b-0 md:border-r">
             <div className="px-4 py-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Sections
             </div>
@@ -5114,11 +4948,11 @@ export default function App() {
                           ? "bg-accent text-accent-foreground hover:bg-accent"
                           : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       )}
-                      onClick={() => setSettingsSection(section.id)}
+                      onClick={() => openSettingsSection(section.id)}
                     >
                       <div className="grid w-full min-w-0 gap-0.5">
                         <div className="text-sm font-medium">{section.label}</div>
-                        <div className={cn("text-[11px] leading-4 break-words", isActive ? "text-accent-foreground/80" : "text-muted-foreground")}>
+                        <div className={cn("text-xs leading-5", isActive ? "text-accent-foreground/80" : "text-muted-foreground")}>
                           {section.blurb}
                         </div>
                       </div>
@@ -5434,84 +5268,342 @@ export default function App() {
                   </section>
                 )}
 
-                {settingsSection === "markdown" && (
-                  <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="grid gap-1">
-                      <div className="text-base font-semibold text-foreground">Markdown</div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        这里只汇总当前已支持的渲染能力，不改动 Markdown 渲染逻辑本身。
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {MARKDOWN_CAPABILITIES.map((feature) => (
-                        <span
-                          key={feature}
-                          className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-xs text-foreground"
-                        >
-                          {feature}
-                        </span>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
                 {settingsSection === "ai" && (
-                  <>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
+                  <section className="flex min-h-[620px] min-w-0 flex-col gap-4">
+                    <div className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid min-w-0 gap-1">
                         <div className="text-base font-semibold text-foreground">AI 设置</div>
                         <div className="text-sm leading-6 text-muted-foreground">
-                          管理多个 OpenAI-compatible API、中转站模型同步、默认模型和 Prompt 模板入口。
+                          管理模型配置与本地 Prompt 模板。API Key 只通过后端配置保存，不写入 localStorage。
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          onClick={() => {
-                            setIsAdvancedActionsOpen(false);
-                            void openAiSettings();
-                          }}
-                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
-                        >
-                          <Bot className="h-3.5 w-3.5" />
-                          AI 设置
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={handleTestAiConnection}
-                          disabled={isTestingAiConnection || isLoadingAiConfig || isSavingAiConfig}
-                        >
-                          <PlugZap className="h-3.5 w-3.5" />
-                          {isTestingAiConnection ? "测试中..." : "测试连接"}
-                        </Button>
+                      <div className="flex min-w-0 gap-1 border-b border-border/80">
+                        {AI_SETTINGS_TABS.map((tab) => {
+                          const isActive = aiSettingsTab === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              className={cn(
+                                "-mb-px min-w-0 border-b-2 px-3 py-2 text-left text-sm transition-colors",
+                                isActive
+                                  ? "border-primary text-foreground"
+                                  : "border-transparent text-muted-foreground hover:text-foreground",
+                              )}
+                              onClick={() => setAiSettingsTab(tab.id)}
+                              title={tab.description}
+                            >
+                              {tab.label}
+                            </button>
+                          );
+                        })}
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        {aiConnectionResult
-                          ? `最近一次测试成功，模型：${aiConnectionResult.model}`
-                          : "测试连接会使用当前保存的 AI 配置发起一次轻量请求。"}
+                    </div>
+
+                    {aiSettingsTab === "api" && (
+                      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-border/80 bg-card/70 lg:grid-cols-[280px_minmax(0,1fr)]">
+                        <aside className="flex min-h-0 flex-col border-b border-border/80 bg-muted/10 p-3 lg:border-b-0 lg:border-r">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">配置组</div>
+                            <Button size="xs" variant="outline" onClick={handleCreateAiProviderDraft} disabled={isLoadingAiConfig || isSavingAiConfig}>
+                              <Plus className="h-3 w-3" />
+                              添加配置组
+                            </Button>
+                          </div>
+                          <div className="grid min-h-0 flex-1 content-start gap-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
+                            {(aiConfigDraft?.providers ?? []).map((provider) => {
+                              const isActive = provider.id === selectedAiProviderId;
+                              const isDefault = provider.id === aiConfigDraft?.default_provider_id;
+                              const providerComparable = getAiConfigComparable({
+                                base_url: "",
+                                api_key: "",
+                                model: "",
+                                providers: [provider],
+                                default_provider_id: provider.id,
+                                default_model_id: provider.default_model,
+                              });
+                              const isProviderDirty = savedAiProviderById.get(provider.id) !== providerComparable;
+                              return (
+                                <button
+                                  key={provider.id}
+                                  type="button"
+                                  className={cn(
+                                    "grid min-w-0 gap-1 rounded-md border px-3 py-2.5 text-left transition-colors",
+                                    isActive
+                                      ? "border-primary/50 bg-primary/10 text-foreground"
+                                      : "border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/50 hover:text-foreground",
+                                  )}
+                                  onClick={() => selectAiProviderForEdit(provider)}
+                                >
+                                  <span className="flex min-w-0 items-center justify-between gap-2">
+                                    <span className="truncate text-sm font-medium">{provider.name || provider.id}</span>
+                                    <span className="flex shrink-0 items-center gap-1">
+                                      {isDefault && <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">默认</span>}
+                                      {isProviderDirty && <span className="rounded-sm border border-border bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">未保存</span>}
+                                    </span>
+                                  </span>
+                                  <span className="truncate text-[11px] text-muted-foreground">{provider.base_url || "未填写 Base URL"}</span>
+                                  <span className="text-[11px] text-muted-foreground">{provider.models.length} models</span>
+                                </button>
+                              );
+                            })}
+                            {(aiConfigDraft?.providers.length ?? 0) === 0 && (
+                              <div className="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
+                                还没有配置组。点击上方添加一个 OpenAI-compatible API。
+                              </div>
+                            )}
+                          </div>
+                        </aside>
+
+                        <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden p-4">
+                          {isLoadingAiConfig ? (
+                            <div className="rounded-md border border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+                              正在读取 AI 配置...
+                            </div>
+                          ) : selectedAiProvider ? (
+                            <>
+                              <section className="grid min-w-0 gap-3 rounded-md border border-border/70 bg-background/50 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="grid gap-1">
+                                    <div className="text-sm font-semibold text-foreground">连接配置</div>
+                                    <div className="text-xs leading-5 text-muted-foreground">
+                                      测试连接和同步模型会使用当前草稿内容；同步结果也先进入草稿，保存后才持久化。
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => updateAiConfigDraft((config) => ({
+                                        ...config,
+                                        default_provider_id: selectedAiProvider.id,
+                                        default_model_id: selectedAiProvider.default_model ?? selectedAiProvider.models.find((model) => model.enabled)?.id ?? selectedAiProvider.models[0]?.id ?? null,
+                                      }))}
+                                      disabled={isSavingAiConfig}
+                                    >
+                                      设为默认配置组
+                                    </Button>
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={() => void handleDeleteAiProvider(selectedAiProvider.id)}
+                                      disabled={aiProviderBusy || isSavingAiConfig}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      删除配置组
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                <div className="grid gap-3 md:grid-cols-2">
+                                  <div className="grid gap-2">
+                                    <Label htmlFor="ai-provider-name">名称</Label>
+                                    <Input
+                                      id="ai-provider-name"
+                                      value={selectedAiProvider.name}
+                                      placeholder="DeepSeek / OpenAI / 中转站"
+                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, name: event.target.value, updated_at: Date.now() }))}
+                                    />
+                                  </div>
+                                  <div className="grid gap-2">
+                                    <Label htmlFor="ai-provider-default-model">默认模型</Label>
+                                    <Input
+                                      id="ai-provider-default-model"
+                                      value={selectedAiProvider.default_model ?? ""}
+                                      placeholder="deepseek-chat"
+                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, default_model: event.target.value.trim() || null, updated_at: Date.now() }))}
+                                    />
+                                  </div>
+                                  <div className="grid gap-2 md:col-span-2">
+                                    <Label htmlFor="ai-provider-base-url">Base URL</Label>
+                                    <Input
+                                      id="ai-provider-base-url"
+                                      value={selectedAiProvider.base_url}
+                                      placeholder="https://api.example.com/v1"
+                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, base_url: event.target.value, updated_at: Date.now() }))}
+                                    />
+                                  </div>
+                                  <div className="grid gap-2 md:col-span-2">
+                                    <Label htmlFor="ai-provider-api-key">API Key</Label>
+                                    <Input
+                                      id="ai-provider-api-key"
+                                      value={selectedAiProvider.api_key}
+                                      placeholder="sk-..."
+                                      type="password"
+                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, api_key: event.target.value, updated_at: Date.now() }))}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Button variant="outline" onClick={() => void handleTestAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}>
+                                    <PlugZap className="h-3.5 w-3.5" />
+                                    {aiProviderBusyId === selectedAiProvider.id ? "处理中..." : "测试连接"}
+                                  </Button>
+                                  <Button variant="outline" onClick={() => void handleSyncAiProviderModels(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}>
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                    同步模型
+                                  </Button>
+                                  <Button variant="ghost" onClick={handleFillDeepSeekDefaults} disabled={isSavingAiConfig}>
+                                    填入 DeepSeek 默认配置
+                                  </Button>
+                                </div>
+                              </section>
+
+                              <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-md border border-border/70 bg-background/50 p-4">
+                                <div className="grid gap-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                      <div className="text-sm font-semibold text-foreground">模型列表</div>
+                                      <div className="text-xs text-muted-foreground">手动添加、同步、删除和设为默认都先进入草稿。</div>
+                                    </div>
+                                    <div className="flex min-w-0 flex-wrap gap-2">
+                                      <div className="relative min-w-[180px] flex-1">
+                                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                                        <Input
+                                          value={aiModelSearchQuery}
+                                          placeholder="搜索模型"
+                                          onChange={(event) => setAiModelSearchQuery(event.target.value)}
+                                          className="pl-8"
+                                        />
+                                      </div>
+                                      <Input
+                                        value={aiManualModelId}
+                                        placeholder="手动添加模型 ID"
+                                        onChange={(event) => setAiManualModelId(event.target.value)}
+                                        className="min-w-[220px] flex-1"
+                                      />
+                                      <Button variant="outline" onClick={() => void handleAddAiProviderModel()} disabled={!aiManualModelId.trim()}>
+                                        添加模型
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="min-h-0 overflow-hidden rounded-md border border-border/70">
+                                  {selectedAiProvider.models.length > 0 ? (
+                                    <div className="h-full min-h-[260px] max-h-[360px] overflow-auto [scrollbar-width:thin]">
+                                      <div className="grid min-w-[720px] grid-cols-[minmax(260px,1fr)_96px_92px_92px_120px] items-center gap-3 border-b border-border/70 bg-muted/20 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                        <div>模型 ID</div>
+                                        <div>来源</div>
+                                        <div>Stream</div>
+                                        <div>默认</div>
+                                        <div className="text-right">操作</div>
+                                      </div>
+                                      <div className="divide-y divide-border/60">
+                                        {filteredAiProviderModels.length > 0 ? filteredAiProviderModels.map((model) => {
+                                          const isDefault = selectedAiProvider.id === aiConfigDraft?.default_provider_id && model.id === aiConfigDraft.default_model_id;
+                                          return (
+                                            <div key={model.id} className="grid min-w-[720px] grid-cols-[minmax(260px,1fr)_96px_92px_92px_120px] items-center gap-3 px-3 py-2 text-sm">
+                                              <div className="min-w-0">
+                                                <div className="truncate font-medium text-foreground">{model.name || model.id}</div>
+                                                {model.name && <div className="truncate text-[11px] text-muted-foreground">{model.id}</div>}
+                                              </div>
+                                              <div className="text-xs text-muted-foreground">{model.source === "manual" ? "手动" : "同步"}</div>
+                                              <div className="text-xs text-muted-foreground">{model.supports_stream ? "yes" : "unknown"}</div>
+                                              <div>{isDefault ? <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">默认</span> : <span className="text-xs text-muted-foreground">-</span>}</div>
+                                              <div className="flex justify-end gap-1">
+                                                <Button size="xs" variant={isDefault ? "secondary" : "outline"} onClick={() => void handleSetDefaultAiModel(selectedAiProvider.id, model.id)}>
+                                                  {isDefault ? "已默认" : "设默认"}
+                                                </Button>
+                                                <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteAiProviderModel(selectedAiProvider.id, model.id)}>
+                                                  <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          );
+                                        }) : (
+                                          <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+                                            没有匹配的模型。
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+                                      暂无模型，可以同步 /models，或手动添加模型 ID。
+                                    </div>
+                                  )}
+                                </div>
+                              </section>
+                            </>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
+                              选择左侧配置组，或添加一个新的 OpenAI-compatible API。
+                            </div>
+                          )}
+                        </main>
                       </div>
-                    </section>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">AI Prompt</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          Prompt 模板保存在本地 `.oinb/prompts/`，可单独编辑，不需要改动现有工作流。
+                    )}
+
+                    {aiSettingsTab === "prompts" && (
+                      <section className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                        <div className="grid gap-1">
+                          <div className="text-base font-semibold text-foreground">Prompt 模板</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            Prompt 模板保存在本地 `.oinb/prompts/`，可单独编辑，不和 API 配置的保存草稿混在一起。
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setIsAdvancedActionsOpen(false);
-                            void openPromptDialog();
-                          }}
-                          disabled={isLoadingPrompt || isSavingPrompt}
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                          AI Prompt
-                        </Button>
-                      </div>
-                    </section>
-                  </>
+                        {promptTemplates.length === 0 && !selectedPromptFileName ? (
+                          <div className="flex flex-wrap items-start gap-2 rounded-md border border-dashed border-border px-4 py-8">
+                            <Button
+                              variant="outline"
+                              onClick={() => void loadPromptTemplates()}
+                              disabled={isLoadingPrompt || isSavingPrompt}
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              读取 Prompt 模板
+                            </Button>
+                            <span className="pt-2 text-xs text-muted-foreground">在设置中心内直接编辑，不再打开二级大窗口。</span>
+                          </div>
+                        ) : (
+                          <div className="grid min-h-0 min-w-0 overflow-hidden rounded-md border border-border/70 md:grid-cols-[240px_minmax(0,1fr)]">
+                            <aside className="min-h-0 border-b border-border/70 bg-muted/10 p-2 md:border-b-0 md:border-r">
+                              <div className="grid max-h-[420px] gap-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
+                                {promptTemplates.map((prompt) => {
+                                  const isActive = prompt.fileName === selectedPromptFileName;
+                                  const promptUsage = getPromptUsageInfo(prompt.fileName);
+                                  return (
+                                    <button
+                                      key={prompt.fileName}
+                                      type="button"
+                                      className={cn(
+                                        "grid min-w-0 gap-1 rounded-md px-2.5 py-2 text-left transition-colors",
+                                        isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                                      )}
+                                      onClick={() => handleSelectPrompt(prompt.fileName)}
+                                      disabled={isLoadingPrompt || isSavingPrompt}
+                                    >
+                                      <span className="truncate text-sm font-medium">{prompt.displayName}</span>
+                                      <span className={cn("truncate text-[11px]", isActive ? "text-accent-foreground/75" : "text-muted-foreground")}>{prompt.fileName}</span>
+                                      <span className={cn("truncate text-[11px]", isActive ? "text-accent-foreground/70" : "text-muted-foreground")}>{promptUsage.purpose}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </aside>
+                            <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-3">
+                              <div className="flex min-w-0 items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-foreground">{selectedPromptFileName || "未选择 Prompt"}</div>
+                                  <div className="text-xs text-muted-foreground">保存 Prompt 会立即写入本地模板文件。</div>
+                                </div>
+                                <Button size="sm" onClick={() => void handleSavePrompt()} disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}>
+                                  {isSavingPrompt ? "保存中..." : "保存 Prompt"}
+                                </Button>
+                              </div>
+                              <textarea
+                                value={promptContent}
+                                onChange={(event) => setPromptContent(event.target.value)}
+                                disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
+                                className="min-h-[320px] resize-none rounded-md border border-border bg-background px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary"
+                              />
+                            </main>
+                          </div>
+                        )}
+                      </section>
+                    )}
+                  </section>
                 )}
 
                 {settingsSection === "luogu" && (
@@ -5620,27 +5712,64 @@ export default function App() {
                 )}
 
                 {settingsSection === "about" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="text-base font-semibold text-foreground">关于</div>
-                    <div className="text-sm leading-6 text-muted-foreground">
-                      OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
-                    </div>
-                    <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                      当前不显示固定版本号，避免把尚未稳定的阶段信息伪装成正式发布版本。
-                    </div>
-                  </section>
+                  <div className="grid min-w-0 gap-4">
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="text-base font-semibold text-foreground">关于</div>
+                      <div className="text-sm leading-6 text-muted-foreground">
+                        OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
+                      </div>
+                      <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                        当前不显示固定版本号，避免把尚未稳定的阶段信息伪装成正式发布版本。
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">Markdown 渲染能力</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          当前编辑预览支持以下渲染能力；这里仅作能力说明，不改变 Markdown 渲染管线。
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {MARKDOWN_CAPABILITIES.map((feature) => (
+                          <span
+                            key={feature}
+                            className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-xs text-foreground"
+                          >
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
                 )}
               </div>
             </ScrollArea>
           </main>
         </div>
-        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/10 px-6 py-3 sm:items-center sm:justify-between">
-          <div className="min-w-0 text-sm leading-6 text-muted-foreground">
-            设置入口位于左侧 Activity Bar 底部，这里收纳桌面端设置与工具入口。
-          </div>
-          <Button variant="outline" className="shrink-0" onClick={() => setIsAdvancedActionsOpen(false)}>
-            关闭
-          </Button>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-background/95 px-6 py-3 sm:items-center sm:justify-between">
+          {hasAiConfigDraftChanges ? (
+            <>
+              <div className="min-w-0 text-sm font-medium text-muted-foreground">有未保存的更改</div>
+              <div className="flex shrink-0 gap-2">
+                <Button variant="outline" onClick={handleCancelAiConfigDraft} disabled={isSavingAiConfig || aiProviderBusy}>
+                  取消
+                </Button>
+                <Button onClick={() => void handleSaveAiConfig()} disabled={isSavingAiConfig || aiProviderBusy}>
+                  {isSavingAiConfig ? "保存中..." : "保存更改"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="min-w-0 text-sm leading-6 text-muted-foreground">
+                设置保存在本地，仅影响当前设备。
+              </div>
+              <Button variant="outline" className="shrink-0" onClick={closeSettingsCenter}>
+                关闭
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -5886,7 +6015,7 @@ export default function App() {
                           variant="outline"
                           className="gap-2"
                           onClick={openAiSettings}
-                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                          disabled={isLoadingAiConfig || isSavingAiConfig}
                         >
                           <Bot className="h-4 w-4" />
                           配置 AI
@@ -6050,7 +6179,7 @@ export default function App() {
                           type="button"
                           className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
                           onClick={openAiSettings}
-                          disabled={isLoadingAiConfig || isSavingAiConfig || isTestingAiConnection}
+                          disabled={isLoadingAiConfig || isSavingAiConfig}
                         >
                           <div className="flex items-center gap-3">
                             <Bot className="h-4 w-4 text-muted-foreground" />
@@ -6070,7 +6199,7 @@ export default function App() {
                             <Settings className="h-4 w-4 text-muted-foreground" />
                             <div>
                               <div className="text-sm font-medium text-foreground">打开设置</div>
-                              <div className="text-xs text-muted-foreground">外观、Markdown、Blog、Git、数据目录都在这里。</div>
+                              <div className="text-xs text-muted-foreground">外观、AI、Blog、Git、数据目录都在这里。</div>
                             </div>
                           </div>
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />

@@ -45,6 +45,13 @@ pub struct SyncAiProviderModelsResult {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncAiProviderDraftModelsResult {
+    pub provider: AiProvider,
+    pub synced_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TestAiProviderResult {
     pub provider_id: String,
     pub ok: bool,
@@ -208,9 +215,12 @@ fn ai_cache_dir() -> Result<PathBuf, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedAiConfig {
     provider_id: Option<String>,
+    provider_name: Option<String>,
+    provider_kind: Option<String>,
     base_url: String,
     api_key: String,
     model: String,
+    model_name: Option<String>,
 }
 
 fn now_timestamp_millis() -> i64 {
@@ -426,19 +436,26 @@ fn resolve_ai_config(
         {
             return Err("AI connection failed: selected model does not exist".to_string());
         }
+        let selected_model = provider.models.iter().find(|item| item.id == model);
         return Ok(ResolvedAiConfig {
             provider_id: Some(provider.id.clone()),
+            provider_name: Some(provider.name.clone()),
+            provider_kind: Some(provider.kind.clone()),
             base_url: provider.base_url.clone(),
             api_key: provider.api_key.clone(),
             model,
+            model_name: selected_model.and_then(|item| item.name.clone()),
         });
     }
 
     Ok(ResolvedAiConfig {
         provider_id: None,
+        provider_name: None,
+        provider_kind: None,
         base_url: normalized.base_url,
         api_key: normalized.api_key,
         model: selected_model_id.unwrap_or(normalized.model),
+        model_name: None,
     })
 }
 
@@ -483,6 +500,39 @@ fn config_from_resolved(resolved: ResolvedAiConfig) -> AiConfigFields {
         default_provider_id: resolved.provider_id,
         default_model_id: None,
     }
+}
+
+fn build_model_identity_context(resolved: &ResolvedAiConfig) -> String {
+    let provider_text = resolved
+        .provider_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or(resolved.provider_id.as_deref())
+        .unwrap_or("not provided");
+    let provider_kind = resolved
+        .provider_kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or("not provided");
+    let model_id = resolved.model.trim();
+    let model_id = if model_id.is_empty() { "not provided" } else { model_id };
+    let model_name = resolved
+        .model_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("not provided");
+
+    format!(
+        "Visible model configuration:\n\
+- provider: {provider_text}\n\
+- provider kind: {provider_kind}\n\
+- model id: {model_id}\n\
+- model display name: {model_name}\n\
+If the user asks what model you are, answer from this visible provider/model configuration. Do not claim to be a fixed model, company, or OI Notebook-branded identity. If the provider is OpenAI-compatible, custom, or a relay, explain that the actual underlying model routing depends on the service provider and cannot be independently verified from this chat. Never reveal or invent API keys, Authorization headers, cookies, or base URLs."
+    )
 }
 
 fn stable_hash_hex(content: &str) -> String {
@@ -1010,6 +1060,7 @@ fn build_stream_note_chat_messages(
     question: &str,
     context: &NoteChatContextInput,
     chat_history: &[NoteChatHistoryMessageInput],
+    resolved: &ResolvedAiConfig,
 ) -> JsonValue {
     let tags_text = if context.tags.is_empty() {
         "not provided".to_string()
@@ -1059,13 +1110,16 @@ Markdown note:\n{truncation_note}\n\n{markdown}\n\n\
 The following conversation may contain previous user goals. The note above is the latest optional note context for the next user question.",
         )
     } else {
-        "There is no current note context attached to this request. Answer as a general helpful OI Notebook assistant, using any relevant recent conversation below. Do not claim you can read or modify a note unless the user provides one.".to_string()
+        "There is no current note context attached to this request. Answer as a general helpful assistant inside OI Notebook, using any relevant recent conversation below. Do not claim you can read or modify a note unless the user provides one.".to_string()
     };
+    let model_identity_context = build_model_identity_context(resolved);
 
     let mut messages = vec![
         json!({
             "role": "system",
-            "content": "You are an OI Notebook assistant. Answer directly in helpful Markdown. Use the provided current note context when present, otherwise answer as a normal assistant. Also use relevant recent conversation."
+            "content": format!(
+                "You are running inside OI Notebook and helping the user with OI study, Markdown notes, algorithms, writing, and general questions. Answer honestly, directly, and clearly in helpful Markdown. Use the current note context when present, otherwise answer as a normal assistant. Do not force a fixed assistant identity.\n\n{model_identity_context}"
+            )
         }),
         json!({
             "role": "user",
@@ -1616,11 +1670,12 @@ pub fn chat_with_current_note(
     }
 
     let config = read_config()?.ai;
-    let selected_config = config_from_resolved(resolve_ai_config(
+    let resolved = resolve_ai_config(
         &config,
         provider_id.as_deref(),
         model_id.as_deref(),
-    )?);
+    )?;
+    let selected_config = config_from_resolved(resolved.clone());
     let selected_text = context.selected_text.trim();
     let tags_text = if context.tags.is_empty() {
         "未填写".to_string()
@@ -1667,7 +1722,10 @@ pub fn chat_with_current_note(
     let messages = json!([
         {
             "role": "system",
-            "content": "You are an OI Notebook assistant. Return only strict JSON with an answer field. Do not use markdown fences."
+            "content": format!(
+                "You are running inside OI Notebook and helping the user with the current note. Return only strict JSON with an answer field. Do not use markdown fences. Do not force a fixed assistant identity.\n\n{}",
+                build_model_identity_context(&resolved)
+            )
         },
         {
             "role": "user",
@@ -1710,22 +1768,23 @@ pub async fn chat_with_current_note_stream(
             return Err(error);
         }
     };
-    let selected_config = match resolve_ai_config(
+    let resolved = match resolve_ai_config(
         &config,
         input.provider_id.as_deref(),
         input.model_id.as_deref(),
     )
     .and_then(|resolved| {
         require_resolved_ai_config(&resolved)?;
-        Ok(config_from_resolved(resolved))
+        Ok(resolved)
     }) {
-        Ok(config) => config,
+        Ok(resolved) => resolved,
         Err(error) => {
             emit_stream_error(&app, &stream_id, error.clone());
             return Err(error);
         }
     };
-    let messages = build_stream_note_chat_messages(&question, &input.context, &input.chat_history);
+    let messages = build_stream_note_chat_messages(&question, &input.context, &input.chat_history, &resolved);
+    let selected_config = config_from_resolved(resolved);
     let result =
         request_chat_completion_stream(&selected_config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
             .await;
@@ -1991,6 +2050,38 @@ pub fn sync_ai_provider_models(provider_id: String) -> Result<SyncAiProviderMode
 }
 
 #[tauri::command]
+pub fn sync_ai_provider_models_draft(provider: AiProvider) -> Result<SyncAiProviderDraftModelsResult, String> {
+    let mut provider = sanitize_ai_provider(&provider)
+        .ok_or_else(|| "AI models sync failed: provider id is missing".to_string())?;
+    let synced_models = request_provider_models(&provider)?;
+    let synced_count = synced_models.len();
+    let now = now_timestamp_millis();
+    for model_id in &synced_models {
+        if let Some(existing) = provider.models.iter_mut().find(|model| model.id == *model_id) {
+            existing.enabled = true;
+            existing.source = "synced".to_string();
+            existing.updated_at = Some(now);
+        } else {
+            provider.models.push(AiModel {
+                id: model_id.clone(),
+                name: None,
+                enabled: true,
+                supports_stream: true,
+                source: "synced".to_string(),
+                updated_at: Some(now),
+            });
+        }
+    }
+    if provider.default_model.is_none() {
+        provider.default_model = provider.models.first().map(|model| model.id.clone());
+    }
+    Ok(SyncAiProviderDraftModelsResult {
+        provider,
+        synced_count,
+    })
+}
+
+#[tauri::command]
 pub fn test_ai_provider(provider_id: String) -> Result<TestAiProviderResult, String> {
     let provider_id = provider_id.trim().to_string();
     if provider_id.is_empty() {
@@ -2005,6 +2096,18 @@ pub fn test_ai_provider(provider_id: String) -> Result<TestAiProviderResult, Str
     let models = request_provider_models(provider)?;
     Ok(TestAiProviderResult {
         provider_id,
+        ok: true,
+        model_count: models.len(),
+    })
+}
+
+#[tauri::command]
+pub fn test_ai_provider_draft(provider: AiProvider) -> Result<TestAiProviderResult, String> {
+    let provider = sanitize_ai_provider(&provider)
+        .ok_or_else(|| "AI provider test failed: provider id is missing".to_string())?;
+    let models = request_provider_models(&provider)?;
+    Ok(TestAiProviderResult {
+        provider_id: provider.id,
         ok: true,
         model_count: models.len(),
     })

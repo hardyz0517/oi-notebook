@@ -78,6 +78,11 @@ export interface SyncAiProviderModelsResult {
   config: AiConfig;
 }
 
+export interface SyncAiProviderDraftModelsResult {
+  provider: AiProvider;
+  syncedCount: number;
+}
+
 export interface TestAiProviderResult {
   providerId: string;
   ok: boolean;
@@ -589,9 +594,25 @@ export async function syncAiProviderModels(providerId: string): Promise<SyncAiPr
   }
 }
 
+export async function syncAiProviderModelsDraft(provider: AiProvider): Promise<SyncAiProviderDraftModelsResult> {
+  try {
+    return await invoke<SyncAiProviderDraftModelsResult>("sync_ai_provider_models_draft", { provider });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function testAiProvider(providerId: string): Promise<TestAiProviderResult> {
   try {
     return await invoke<TestAiProviderResult>("test_ai_provider", { providerId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function testAiProviderDraft(provider: AiProvider): Promise<TestAiProviderResult> {
+  try {
+    return await invoke<TestAiProviderResult>("test_ai_provider_draft", { provider });
   } catch (e) {
     throw toError(e);
   }

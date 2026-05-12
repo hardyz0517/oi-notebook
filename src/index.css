@@ -641,13 +641,22 @@ html[data-theme="light"] .markdown-toolbar button:hover {
 }
 
 .settings-center .text-sm,
-.settings-center .text-xs,
-.settings-center .text-\[11px\],
-.settings-center .text-\[10px\],
 .settings-center button,
 .settings-center input,
 .settings-center textarea {
   font-size: var(--settings-font-size, 14px);
+}
+
+.settings-center .text-xs {
+  font-size: calc(var(--settings-font-size, 14px) * 0.86);
+}
+
+.settings-center .text-\[11px\] {
+  font-size: calc(var(--settings-font-size, 14px) * 0.79);
+}
+
+.settings-center .text-\[10px\] {
+  font-size: calc(var(--settings-font-size, 14px) * 0.72);
 }
 
 .settings-center :where(section) {
