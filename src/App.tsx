@@ -111,6 +111,11 @@ type AiSettingsTab = "api" | "prompts";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 
+interface CursorParagraphContext {
+  text: string;
+  isCode: boolean;
+}
+
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
 const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
@@ -313,6 +318,69 @@ function getAiConfigComparable(config: AiConfig | null): string {
 
 function quoteYamlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function extractCursorParagraph(markdownContent: string, cursorOffset: number | null): CursorParagraphContext | null {
+  if (cursorOffset === null || markdownContent.trim().length === 0) return null;
+
+  const safeOffset = Math.max(0, Math.min(markdownContent.length, cursorOffset));
+  let lineStart = 0;
+  let inFence = false;
+  let fenceStart = 0;
+  let fenceMarker = "";
+
+  while (lineStart <= markdownContent.length) {
+    const lineEnd = markdownContent.indexOf("\n", lineStart);
+    const nextLineStart = lineEnd === -1 ? markdownContent.length + 1 : lineEnd + 1;
+    const lineText = markdownContent.slice(lineStart, lineEnd === -1 ? markdownContent.length : lineEnd);
+    const fenceMatch = lineText.match(/^\s*(`{3,}|~{3,})/);
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceStart = lineStart;
+        fenceMarker = marker;
+      } else if (marker === fenceMarker) {
+        if (safeOffset >= fenceStart && safeOffset <= nextLineStart) {
+          return {
+            text: markdownContent.slice(fenceStart, nextLineStart).trim(),
+            isCode: true,
+          };
+        }
+        inFence = false;
+        fenceMarker = "";
+      }
+    }
+
+    if (safeOffset < nextLineStart) break;
+    lineStart = nextLineStart;
+  }
+
+  if (inFence && safeOffset >= fenceStart) {
+    const closingPattern = new RegExp(`(^|\\n)\\s*${fenceMarker}{3,}[^\\n]*(\\n|$)`);
+    const rest = markdownContent.slice(safeOffset);
+    const closingMatch = rest.match(closingPattern);
+    const fenceEnd = closingMatch?.index === undefined
+      ? markdownContent.length
+      : safeOffset + closingMatch.index + closingMatch[0].length;
+    return {
+      text: markdownContent.slice(fenceStart, fenceEnd).trim(),
+      isCode: true,
+    };
+  }
+
+  const beforeCursor = markdownContent.slice(0, safeOffset);
+  const paragraphStartMatch = beforeCursor.match(/\n\s*\n[ \t]*[^\n]*$/);
+  const paragraphStart = paragraphStartMatch?.index === undefined
+    ? 0
+    : paragraphStartMatch.index + paragraphStartMatch[0].match(/^\n\s*\n/)![0].length;
+  const afterCursor = markdownContent.slice(safeOffset);
+  const paragraphEndMatch = afterCursor.match(/\n\s*\n/);
+  const paragraphEnd = paragraphEndMatch?.index === undefined ? markdownContent.length : safeOffset + paragraphEndMatch.index;
+  const paragraphText = markdownContent.slice(paragraphStart, paragraphEnd).trim();
+
+  return paragraphText ? { text: paragraphText, isCode: false } : null;
 }
 
 function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
@@ -880,6 +948,7 @@ export default function App() {
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandleId | null>(null);
   const [editorSelectedText, setEditorSelectedText] = useState("");
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
+  const [editorCursorOffset, setEditorCursorOffset] = useState<number | null>(null);
   const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
@@ -946,6 +1015,7 @@ export default function App() {
   useEffect(() => {
     setEditorSelectedText("");
     setEditorSelectedTextLength(null);
+    setEditorCursorOffset(null);
     setAiContextSelectionRange(null);
   }, [currentFilePath]);
 
@@ -1382,9 +1452,14 @@ export default function App() {
     () => files.find((file) => file.path === currentFilePath) ?? null,
     [files, currentFilePath],
   );
+  const currentParagraphContext = useMemo(
+    () => currentFilePath === null ? null : extractCursorParagraph(markdown, editorCursorOffset),
+    [currentFilePath, editorCursorOffset, markdown],
+  );
   const aiSidebarContext = useMemo<AiSidebarNoteContext>(() => {
     const fallbackTitle = activeNoteFile?.name.replace(/\.md$/i, "") ?? currentFilePath?.split("/").pop()?.replace(/\.md$/i, "") ?? "";
     const hasOpenNote = currentFilePath !== null;
+    const currentParagraphText = hasOpenNote ? currentParagraphContext?.text ?? "" : "";
     return {
       filePath: currentFilePath,
       title: hasOpenNote ? frontmatter.fields.title.trim() || fallbackTitle || "未命名笔记" : "未选择笔记",
@@ -1399,9 +1474,13 @@ export default function App() {
           ? "available"
           : "empty"
         : "unavailable",
+      currentParagraphText,
+      currentParagraphLength: currentParagraphText ? currentParagraphText.length : null,
+      currentParagraphStatus: hasOpenNote ? currentParagraphText ? "available" : "empty" : "unavailable",
+      currentParagraphIsCode: currentParagraphContext?.isCode ?? false,
       markdownBody: hasOpenNote ? markdown : "",
     };
-  }, [activeNoteFile, currentFilePath, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
+  }, [activeNoteFile, currentFilePath, currentParagraphContext, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
   const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
@@ -6381,9 +6460,10 @@ export default function App() {
                     value={markdown}
                     onChange={handleEditorChange}
                     aiContextSelectionRange={aiContextSelectionRange}
-                    onSelectionChange={(selectedText, range) => {
+                    onSelectionChange={(selectedText, range, cursorOffset) => {
                       setEditorSelectedText(selectedText);
                       setEditorSelectedTextLength(selectedText.length > 0 ? selectedText.length : null);
+                      setEditorCursorOffset(cursorOffset);
                       setAiContextSelectionRange(range);
                     }}
                     onPasteImage={handlePasteImage}

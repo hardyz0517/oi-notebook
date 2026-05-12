@@ -43,6 +43,7 @@ type AiChatMessage = {
   text: string;
   state?: "done" | "loading" | "streaming" | "error";
   retryText?: string;
+  retryDisplayText?: string;
   requestId?: number;
   streamId?: string;
   retryContext?: NoteChatContextPayload;
@@ -76,10 +77,12 @@ type SlashCommand = {
   id: string;
   label: string;
   description: string;
-  group: "文档" | "上下文";
+  category: "文档" | "上下文";
   icon: ComponentType<{ className?: string }>;
   requiresNote?: boolean;
-  requiresSelection?: boolean;
+  requiresSelectionOrCursor?: boolean;
+  mode: "readonly" | "preview" | "diff";
+  implemented?: boolean;
 };
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -87,63 +90,74 @@ const SLASH_COMMANDS: SlashCommand[] = [
     id: "polish-all",
     label: "全文润色",
     description: "为当前笔记准备润色建议。",
-    group: "文档",
+    category: "文档",
     icon: Sparkles,
     requiresNote: true,
+    mode: "preview",
   },
   {
     id: "polish-selection",
     label: "润色选中",
     description: "只处理当前选中的文本。",
-    group: "文档",
+    category: "文档",
     icon: PenLine,
     requiresNote: true,
-    requiresSelection: true,
+    requiresSelectionOrCursor: true,
+    mode: "preview",
   },
   {
     id: "complete-tags",
     label: "补全标签",
     description: "根据笔记正文建议标签。",
-    group: "文档",
+    category: "文档",
     icon: Tag,
     requiresNote: true,
+    mode: "preview",
   },
   {
     id: "summarize",
     label: "总结本文",
     description: "为当前笔记生成摘要。",
-    group: "文档",
+    category: "文档",
     icon: FileText,
     requiresNote: true,
+    mode: "readonly",
+    implemented: true,
   },
   {
     id: "explain-paragraph",
     label: "解释当前段落",
     description: "解释光标附近的上下文。",
-    group: "上下文",
+    category: "上下文",
     icon: BookOpen,
     requiresNote: true,
+    requiresSelectionOrCursor: true,
+    mode: "readonly",
+    implemented: true,
   },
   {
     id: "compress-context",
     label: "压缩上下文",
     description: "准备更紧凑的对话上下文。",
-    group: "上下文",
+    category: "上下文",
     icon: Archive,
+    mode: "readonly",
   },
   {
     id: "retrospective",
     label: "生成复盘",
     description: "准备 OI 题解复盘建议。",
-    group: "上下文",
+    category: "上下文",
     icon: ClipboardList,
     requiresNote: true,
+    mode: "readonly",
   },
 ];
 
-const COMMAND_GROUPS: SlashCommand["group"][] = ["文档", "上下文"];
+const COMMAND_CATEGORIES: SlashCommand["category"][] = ["文档", "上下文"];
 const NOTE_CHAT_MAX_MARKDOWN_CHARS = 16000;
 const NOTE_CHAT_MAX_SELECTION_CHARS = 4000;
+const NOTE_CHAT_MAX_PARAGRAPH_CHARS = 4000;
 const AI_CONVERSATIONS_STORAGE_KEY = "oi-notebook.aiConversations";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
@@ -155,8 +169,25 @@ const UNTITLED_CONVERSATION_TITLE = "New chat";
 const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteContext): string | null => {
   if (command.requiresNote && !context.filePath) return "需要先打开笔记";
   if (command.requiresNote && !context.hasBody) return "当前笔记还没有正文";
-  if (command.requiresSelection && context.selectionStatus !== "available") return "需要先选中文本";
+  if (
+    command.requiresSelectionOrCursor &&
+    context.selectionStatus !== "available" &&
+    context.currentParagraphStatus !== "available"
+  ) {
+    return "需要先选中文本，或把光标放在段落中";
+  }
   return null;
+};
+
+const getCommandByInput = (value: string): SlashCommand | undefined => {
+  const commandText = value.trim().replace(/^\/+/, "").trim();
+  if (!commandText) return undefined;
+
+  return SLASH_COMMANDS.find((command) => (
+    commandText === command.label ||
+    commandText === command.id ||
+    commandText.startsWith(`${command.label} `)
+  ));
 };
 
 const getSelectionLabel = (context: AiSidebarNoteContext): string => {
@@ -249,6 +280,7 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     text: message.text,
     state: message.state === "error" ? "error" : "done",
     retryText: message.retryText,
+    retryDisplayText: message.retryDisplayText,
     requestId: message.requestId,
     startedAt: message.startedAt,
     finishedAt: message.finishedAt,
@@ -770,13 +802,13 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     if (!inputValue.startsWith("/")) return [];
     if (!commandQuery) return SLASH_COMMANDS;
     return SLASH_COMMANDS.filter((command) =>
-      `${command.label} ${command.description} ${command.group}`.toLocaleLowerCase().includes(commandQuery.toLocaleLowerCase()),
+      `${command.label} ${command.description} ${command.category}`.toLocaleLowerCase().includes(commandQuery.toLocaleLowerCase()),
     );
   }, [commandQuery, inputValue]);
   const isCommandPanelOpen = inputValue.startsWith("/") && !isCommandPanelDismissed;
-  const groupedVisibleCommands = COMMAND_GROUPS.map((group) => ({
-    group,
-    commands: visibleCommands.filter((command) => command.group === group),
+  const groupedVisibleCommands = COMMAND_CATEGORIES.map((category) => ({
+    category,
+    commands: visibleCommands.filter((command) => command.category === category),
   })).filter((group) => group.commands.length > 0);
 
   useEffect(() => {
@@ -1134,19 +1166,126 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       }));
   };
 
-  const submitQuestion = async (questionText: string, snapshot?: NoteChatContextPayload) => {
+  const appendCommandNotice = (conversationId: string, commandText: string, notice: string) => {
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(
+      conversationId,
+      createMessage({ role: "user", text: commandText, state: "done" }),
+      createMessage({ role: "assistant", text: notice, state: "done" }),
+    );
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+  };
+
+  const buildSummarizePrompt = (): string => [
+    "请执行只读 slash command：/总结本文。",
+    "",
+    "任务：只总结当前打开的这一篇笔记，回答只显示在 AI Sidebar 聊天区。",
+    "硬性要求：",
+    "- 不要修改原文。",
+    "- 不要输出 frontmatter。",
+    "- 不要声称已经写入文件。",
+    "- 使用清晰 Markdown。",
+    "- 面向 OI / 算法学习笔记场景，优先提炼算法思想、复杂度、代码细节和易错点。",
+    "",
+    "建议结构：",
+    "## 核心内容",
+    "## 关键知识点",
+    "## 代码/公式/注意事项",
+    "## 可以改进的地方",
+  ].join("\n");
+
+  const buildExplainParagraphPrompt = (targetText: string, isCode: boolean, sourceLabel: string): string => [
+    "请执行只读 slash command：/解释当前段落。",
+    "",
+    `解释对象来源：${sourceLabel}${isCode ? "，当前光标位于代码块中" : ""}。`,
+    "只解释下面这段内容，不要展开成与当前段落无关的大段泛泛内容。",
+    "不要修改原文，不要声称已经写入文件。",
+    "",
+    "回答要求：",
+    "1. 先用一句话概括这段在讲什么。",
+    "2. 再分点解释关键概念。",
+    "3. 如果涉及算法、代码或公式，说明含义、复杂度相关信息和可能坑点。",
+    "4. 如果这段表达不清楚，可以给改进建议，但不要直接改写原文。",
+    "",
+    "当前段落：",
+    targetText,
+  ].join("\n");
+
+  const executeSlashCommand = (command: SlashCommand) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
+    const commandText = `/${command.label}`;
+    const chatContext = buildChatContext();
+
+    if (!command.implemented || command.mode !== "readonly") {
+      appendCommandNotice(conversationId, commandText, "这个命令稍后接入。");
+      return;
+    }
+
+    if (command.id === "summarize") {
+      if (!context.filePath) {
+        appendCommandNotice(conversationId, commandText, "请先打开一篇笔记。");
+        return;
+      }
+      if (!context.hasBody) {
+        appendCommandNotice(conversationId, commandText, "当前笔记没有可总结的正文。");
+        return;
+      }
+      void submitQuestion(buildSummarizePrompt(), chatContext, commandText);
+      return;
+    }
+
+    if (command.id === "explain-paragraph") {
+      if (!context.filePath) {
+        appendCommandNotice(conversationId, commandText, "请先打开一篇笔记。");
+        return;
+      }
+
+      const selectedText = context.selectedText.trim();
+      const paragraphText = context.currentParagraphText.trim();
+      const target = selectedText || paragraphText;
+      if (!target) {
+        appendCommandNotice(conversationId, commandText, "请先选中一段文字，或把光标放在要解释的段落中。");
+        return;
+      }
+
+      const truncatedTarget = truncateText(target, NOTE_CHAT_MAX_PARAGRAPH_CHARS);
+      const sourceLabel = selectedText ? "当前选中文本" : "当前光标所在段落";
+      const prompt = buildExplainParagraphPrompt(
+        truncatedTarget.truncated ? `${truncatedTarget.text}\n\n（以上内容已截断）` : truncatedTarget.text,
+        !selectedText && context.currentParagraphIsCode,
+        sourceLabel,
+      );
+      const commandContext = {
+        ...chatContext,
+        selectedText: truncatedTarget.text,
+      };
+      void submitQuestion(prompt, commandContext, commandText);
+    }
+  };
+
+  const submitQuestion = async (
+    questionText: string,
+    snapshot?: NoteChatContextPayload,
+    displayText = questionText,
+  ) => {
     if (isResponding) return;
 
     const conversationId = activeConversation?.id;
     const question = questionText.trim();
     if (!conversationId || !question) return;
+    const userFacingText = displayText.trim() || question;
 
     if (!isAiConfigured) {
       shouldAutoScrollRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
-        createMessage({ role: "user", text: question, state: "done" }),
+        createMessage({ role: "user", text: userFacingText, state: "done" }),
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
       );
       setInputValue("");
@@ -1157,7 +1296,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
-        createMessage({ role: "user", text: question, state: "done" }),
+        createMessage({ role: "user", text: userFacingText, state: "done" }),
         createMessage({
           role: "system",
           text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
@@ -1175,12 +1314,13 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     const startedAt = Date.now();
     const streamId = `${Date.now()}-${requestId}`;
     const chatHistory = buildRequestHistory(conversationId);
-    const userMessage = createMessage({ role: "user", text: question, state: "done" });
+    const userMessage = createMessage({ role: "user", text: userFacingText, state: "done" });
     const assistantMessage = createMessage({
       role: "assistant",
       text: "",
       state: "streaming",
       retryText: question,
+      retryDisplayText: userFacingText,
       requestId,
       streamId,
       retryContext: chatContext,
@@ -1231,26 +1371,10 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   };
 
   const selectCommand = (command: SlashCommand) => {
-    const conversationId = activeConversation?.id;
-    if (!conversationId) return;
-
-    const commandText = `/${command.label}`;
-    const disabledReason = getCommandDisabledReason(command, context);
-    setInputValue(`${commandText} `);
+    setInputValue("");
     setIsCommandPanelDismissed(true);
     setActiveCommandIndex(0);
-    shouldAutoScrollRef.current = true;
-    setShowScrollToBottom(false);
-    appendMessages(
-      conversationId,
-      createMessage({
-        role: "system",
-        state: "done",
-        text: disabledReason
-          ? `${commandText} 需要更多上下文：${disabledReason}。`
-          : `${commandText} 已记录。真实执行逻辑仍是占位。`,
-      }),
-    );
+    executeSlashCommand(command);
   };
 
   const submitInput = () => {
@@ -1259,20 +1383,12 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     if (!conversationId || !value || isResponding) return;
 
     if (value.startsWith("/")) {
-      shouldAutoScrollRef.current = true;
-      setShowScrollToBottom(false);
-      appendMessages(
-        conversationId,
-        createMessage({ role: "user", text: value, state: "done" }),
-        createMessage({
-          role: "assistant",
-          text: "我已记录这个操作。真实执行逻辑仍是占位。",
-          state: "done",
-        }),
-      );
-      setInputValue("");
-      setActiveCommandIndex(0);
-      setIsCommandPanelDismissed(false);
+      const command = getCommandByInput(value);
+      if (command) {
+        executeSlashCommand(command);
+      } else {
+        appendCommandNotice(conversationId, value, "这个命令稍后接入。");
+      }
       return;
     }
 
@@ -1694,7 +1810,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                           className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                           onClick={() => {
                             if (isResponding) return;
-                            void submitQuestion(message.retryText ?? "", message.retryContext);
+                            void submitQuestion(message.retryText ?? "", message.retryContext, message.retryDisplayText);
                           }}
                         >
                           Retry
@@ -1752,10 +1868,10 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
             </div>
             {visibleCommands.length > 0 ? (
               <div className="max-h-72 overflow-y-auto px-1.5 pb-1.5 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--muted-foreground)_30%,transparent)_transparent]">
-                {groupedVisibleCommands.map(({ group, commands }) => (
-                  <div key={group} className="py-0.5">
+                {groupedVisibleCommands.map(({ category, commands }) => (
+                  <div key={category} className="py-0.5">
                     <div className="px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/75">
-                      {group}
+                      {category}
                     </div>
                     <div className="grid gap-0.5">
                       {commands.map((command) => {
@@ -1795,6 +1911,11 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                             {disabledReason && (
                               <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground dark:bg-white/[0.08]">
                                 占位
+                              </span>
+                            )}
+                            {!disabledReason && !command.implemented && (
+                              <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground dark:bg-white/[0.08]">
+                                即将支持
                               </span>
                             )}
                           </button>

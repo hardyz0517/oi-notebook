@@ -10,6 +10,10 @@ export interface AiSidebarNoteContext {
   selectedText: string;
   selectedTextLength: number | null;
   selectionStatus: "available" | "empty" | "unavailable";
+  currentParagraphText: string;
+  currentParagraphLength: number | null;
+  currentParagraphStatus: "available" | "empty" | "unavailable";
+  currentParagraphIsCode: boolean;
   markdownBody: string;
 }
 

@@ -34,7 +34,7 @@ interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
   aiContextSelectionRange?: MarkdownEditorSelectionRange | null;
-  onSelectionChange?: (selectedText: string, range: MarkdownEditorSelectionRange | null) => void;
+  onSelectionChange?: (selectedText: string, range: MarkdownEditorSelectionRange | null, cursorOffset: number | null) => void;
   onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
   hideToolbar?: boolean;
@@ -809,7 +809,7 @@ export default function MarkdownEditor({
                 from: Math.min(selection.from, selection.to),
                 to: Math.max(selection.from, selection.to),
               };
-              onSelectionChangeFn.current?.(selectedText, range);
+              onSelectionChangeFn.current?.(selectedText, range, selection.head);
             }
           }),
 
@@ -911,7 +911,7 @@ export default function MarkdownEditor({
       view.scrollDOM.removeEventListener("scroll", handleScroll);
       view.destroy();
       viewRef.current = null;
-      onSelectionChangeFn.current?.("", null);
+      onSelectionChangeFn.current?.("", null, null);
     };
   }, []);
 
