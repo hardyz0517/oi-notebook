@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tauri::Emitter;
 
-use crate::luogu::{read_config, write_config, AiConfigFields};
+use crate::luogu::{read_config, write_config, AiConfigFields, AiModel, AiProvider};
 use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
 
@@ -18,12 +18,37 @@ const NOTE_METADATA_TASK: &str = "note-metadata";
 const NOTE_POLISH_TASK: &str = "note-polish";
 const AI_DIAGNOSTIC_PREVIEW_CHARS: usize = 500;
 const AI_RESPONSE_RETRY_ATTEMPTS: usize = 2;
+const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
+const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TestAiConnectionResult {
     pub model: String,
     pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderActionResult {
+    pub provider: AiProvider,
+    pub config: AiConfigFields,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncAiProviderModelsResult {
+    pub provider: AiProvider,
+    pub synced_count: usize,
+    pub config: AiConfigFields,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TestAiProviderResult {
+    pub provider_id: String,
+    pub ok: bool,
+    pub model_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +106,10 @@ pub struct NoteChatStreamInput {
     pub context: NoteChatContextInput,
     #[serde(default)]
     pub chat_history: Vec<NoteChatHistoryMessageInput>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +165,7 @@ struct AiCacheFile {
     response_json: JsonValue,
 }
 
+#[allow(dead_code)]
 fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), String> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -175,6 +205,286 @@ fn ai_cache_dir() -> Result<PathBuf, String> {
     Ok(paths::oinb_dir()?.join("ai-cache"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedAiConfig {
+    provider_id: Option<String>,
+    base_url: String,
+    api_key: String,
+    model: String,
+}
+
+fn now_timestamp_millis() -> i64 {
+    Utc::now().timestamp_millis()
+}
+
+fn normalize_ai_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/').to_string();
+    if trimmed.is_empty() || trimmed.ends_with("/v1") {
+        return trimmed;
+    }
+    format!("{trimmed}/v1")
+}
+
+fn model_from_id(model_id: &str, source: &str) -> Option<AiModel> {
+    let id = model_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    Some(AiModel {
+        id: id.to_string(),
+        name: None,
+        enabled: true,
+        supports_stream: true,
+        source: source.to_string(),
+        updated_at: Some(now_timestamp_millis()),
+    })
+}
+
+fn sanitize_ai_model(model: &AiModel) -> Option<AiModel> {
+    let id = model.id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    Some(AiModel {
+        id: id.to_string(),
+        name: model
+            .name
+            .as_ref()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty()),
+        enabled: model.enabled,
+        supports_stream: model.supports_stream,
+        source: if model.source.trim().is_empty() {
+            "manual".to_string()
+        } else {
+            model.source.trim().to_string()
+        },
+        updated_at: model.updated_at,
+    })
+}
+
+fn sanitize_ai_provider(provider: &AiProvider) -> Option<AiProvider> {
+    let id = provider.id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let mut models = Vec::new();
+    for model in provider.models.iter().filter_map(sanitize_ai_model) {
+        if !models.iter().any(|existing: &AiModel| existing.id == model.id) {
+            models.push(model);
+        }
+    }
+    if let Some(default_model) = provider.default_model.as_deref().and_then(|model| model_from_id(model, "manual")) {
+        if !models.iter().any(|model| model.id == default_model.id) {
+            models.push(default_model);
+        }
+    }
+    Some(AiProvider {
+        id: id.to_string(),
+        name: if provider.name.trim().is_empty() {
+            "OpenAI Compatible".to_string()
+        } else {
+            provider.name.trim().to_string()
+        },
+        kind: OPENAI_COMPATIBLE_PROVIDER_KIND.to_string(),
+        base_url: normalize_ai_base_url(&provider.base_url),
+        api_key: provider.api_key.trim().to_string(),
+        enabled: provider.enabled,
+        default_model: provider
+            .default_model
+            .as_ref()
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty()),
+        models,
+        created_at: provider.created_at,
+        updated_at: provider.updated_at,
+    })
+}
+
+fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
+    let now = now_timestamp_millis();
+    let legacy_base_url = normalize_ai_base_url(&config.base_url);
+    let legacy_api_key = config.api_key.trim().to_string();
+    let legacy_model = config.model.trim().to_string();
+    let mut providers = config
+        .providers
+        .iter()
+        .filter_map(sanitize_ai_provider)
+        .collect::<Vec<_>>();
+
+    if providers.is_empty()
+        && (!legacy_base_url.is_empty() || !legacy_api_key.is_empty() || !legacy_model.is_empty())
+    {
+        providers.push(AiProvider {
+            id: config
+                .default_provider_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .unwrap_or(DEFAULT_LEGACY_PROVIDER_ID)
+                .to_string(),
+            name: "默认 OpenAI Compatible".to_string(),
+            kind: OPENAI_COMPATIBLE_PROVIDER_KIND.to_string(),
+            base_url: legacy_base_url.clone(),
+            api_key: legacy_api_key.clone(),
+            enabled: true,
+            default_model: if legacy_model.is_empty() {
+                None
+            } else {
+                Some(legacy_model.clone())
+            },
+            models: model_from_id(&legacy_model, "manual").into_iter().collect(),
+            created_at: Some(now),
+            updated_at: Some(now),
+        });
+    }
+
+    let default_provider_id = config
+        .default_provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| providers.iter().any(|provider| provider.id == *id))
+        .map(ToOwned::to_owned)
+        .or_else(|| providers.iter().find(|provider| provider.enabled).map(|provider| provider.id.clone()))
+        .or_else(|| providers.first().map(|provider| provider.id.clone()));
+    let default_provider = default_provider_id
+        .as_deref()
+        .and_then(|id| providers.iter().find(|provider| provider.id == id));
+    let default_model_id = config
+        .default_model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|model_id| {
+            default_provider
+                .map(|provider| provider.models.iter().any(|model| model.id == *model_id && model.enabled))
+                .unwrap_or(false)
+        })
+        .map(ToOwned::to_owned)
+        .or_else(|| default_provider.and_then(|provider| provider.default_model.clone()))
+        .or_else(|| {
+            default_provider.and_then(|provider| {
+                provider
+                    .models
+                    .iter()
+                    .find(|model| model.enabled)
+                    .map(|model| model.id.clone())
+            })
+        })
+        .or_else(|| if legacy_model.is_empty() { None } else { Some(legacy_model.clone()) });
+    let (base_url, api_key, model) = match default_provider {
+        Some(provider) => (
+            provider.base_url.clone(),
+            provider.api_key.clone(),
+            default_model_id.clone().unwrap_or_default(),
+        ),
+        None => (legacy_base_url, legacy_api_key, legacy_model),
+    };
+
+    AiConfigFields {
+        base_url,
+        api_key,
+        model,
+        providers,
+        default_provider_id,
+        default_model_id,
+    }
+}
+
+fn resolve_ai_config(
+    config: &AiConfigFields,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Result<ResolvedAiConfig, String> {
+    let normalized = normalize_ai_config(config);
+    let selected_provider_id = provider_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+        .or(normalized.default_provider_id.clone());
+    let selected_model_id = model_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+        .or(normalized.default_model_id.clone());
+
+    if let Some(provider_id) = selected_provider_id.as_deref() {
+        let provider = normalized
+            .providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| "AI connection failed: selected provider does not exist".to_string())?;
+        if !provider.enabled {
+            return Err("AI connection failed: selected provider is disabled".to_string());
+        }
+        let model = selected_model_id
+            .or_else(|| provider.default_model.clone())
+            .or_else(|| provider.models.iter().find(|model| model.enabled).map(|model| model.id.clone()))
+            .unwrap_or_default();
+        if !model.trim().is_empty()
+            && !provider.models.is_empty()
+            && !provider.models.iter().any(|item| item.id == model && item.enabled)
+        {
+            return Err("AI connection failed: selected model does not exist".to_string());
+        }
+        return Ok(ResolvedAiConfig {
+            provider_id: Some(provider.id.clone()),
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+            model,
+        });
+    }
+
+    Ok(ResolvedAiConfig {
+        provider_id: None,
+        base_url: normalized.base_url,
+        api_key: normalized.api_key,
+        model: selected_model_id.unwrap_or(normalized.model),
+    })
+}
+
+fn require_resolved_ai_config(resolved: &ResolvedAiConfig) -> Result<(&str, &str, &str), String> {
+    let base_url = resolved.base_url.trim().trim_end_matches('/');
+    let api_key = resolved.api_key.trim();
+    let model = resolved.model.trim();
+
+    if base_url.is_empty() {
+        return Err("AI connection failed: base_url is missing in .oinb/config.json".to_string());
+    }
+    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+        return Err(
+            "AI connection failed: base_url must start with http:// or https://".to_string(),
+        );
+    }
+    if api_key.is_empty() {
+        return Err("AI connection failed: api_key is missing in .oinb/config.json".to_string());
+    }
+    if api_key.contains(['\r', '\n']) {
+        return Err("AI connection failed: api_key contains invalid characters".to_string());
+    }
+    if model.is_empty() {
+        return Err("AI connection failed: model is missing in .oinb/config.json".to_string());
+    }
+
+    Ok((base_url, api_key, model))
+}
+
+fn require_ai_config_resolved(config: &AiConfigFields) -> Result<ResolvedAiConfig, String> {
+    let resolved = resolve_ai_config(config, None, None)?;
+    require_resolved_ai_config(&resolved)?;
+    Ok(resolved)
+}
+
+fn config_from_resolved(resolved: ResolvedAiConfig) -> AiConfigFields {
+    AiConfigFields {
+        base_url: resolved.base_url,
+        api_key: resolved.api_key,
+        model: resolved.model,
+        providers: Vec::new(),
+        default_provider_id: resolved.provider_id,
+        default_model_id: None,
+    }
+}
+
 fn stable_hash_hex(content: &str) -> String {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x00000100000001b3;
@@ -200,7 +510,9 @@ fn build_ai_cache_key(
     prompt: &str,
     context: JsonValue,
 ) -> Result<String, String> {
-    let (base_url, _, model) = require_ai_config(config)?;
+    let resolved = require_ai_config_resolved(config)?;
+    let base_url = resolved.base_url.trim().trim_end_matches('/');
+    let model = resolved.model.trim();
     let key_json = json!({
         "task": task,
         "model": model,
@@ -236,7 +548,8 @@ fn write_ai_cache(
     config: &AiConfigFields,
     response_json: &JsonValue,
 ) -> Result<(), String> {
-    let (_, _, model) = require_ai_config(config)?;
+    let resolved = require_ai_config_resolved(config)?;
+    let model = resolved.model.trim();
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("AI cache failed: cannot create .oinb/ai-cache directory: {e}"))?;
@@ -461,7 +774,8 @@ fn request_chat_completion(
     temperature: f32,
     scope: &str,
 ) -> Result<String, String> {
-    let (base_url, api_key, model) = require_ai_config(config)?;
+    let resolved = require_ai_config_resolved(config)?;
+    let (base_url, api_key, model) = require_resolved_ai_config(&resolved)?;
     let url = format!("{base_url}/chat/completions");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -828,7 +1142,8 @@ async fn request_chat_completion_stream(
     app: tauri::AppHandle,
     stream_id: String,
 ) -> Result<(), String> {
-    let (base_url, api_key, model) = require_ai_config(config)?;
+    let resolved = require_ai_config_resolved(config)?;
+    let (base_url, api_key, model) = require_resolved_ai_config(&resolved)?;
     let url = format!("{base_url}/chat/completions");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -945,7 +1260,8 @@ fn test_ai_connection_with_config(
     ]);
     let content = request_chat_completion(config, messages, 0.0, "AI connection failed")?;
     let ok = parse_ai_ok_response(&content)?;
-    let (_, _, model) = require_ai_config(config)?;
+    let resolved = require_ai_config_resolved(config)?;
+    let model = resolved.model.trim();
 
     if !ok {
         return Err("AI connection failed: model returned ok=false".to_string());
@@ -1276,6 +1592,8 @@ pub fn polish_note_body(
 pub fn chat_with_current_note(
     question: String,
     context: NoteChatContextInput,
+    provider_id: Option<String>,
+    model_id: Option<String>,
 ) -> Result<NoteChatAnswer, String> {
     let question = question.trim();
     if question.is_empty() {
@@ -1298,6 +1616,11 @@ pub fn chat_with_current_note(
     }
 
     let config = read_config()?.ai;
+    let selected_config = config_from_resolved(resolve_ai_config(
+        &config,
+        provider_id.as_deref(),
+        model_id.as_deref(),
+    )?);
     let selected_text = context.selected_text.trim();
     let tags_text = if context.tags.is_empty() {
         "未填写".to_string()
@@ -1351,10 +1674,11 @@ pub fn chat_with_current_note(
             "content": user_prompt
         }
     ]);
-    let content = request_chat_completion(&config, messages, 0.2, "AI chat failed")?;
+    let content = request_chat_completion(&selected_config, messages, 0.2, "AI chat failed")?;
     let value = parse_json_object_from_ai_content(&content, "AI chat failed")?;
     let answer = validate_note_chat_answer(value, "AI chat failed")?;
-    let (_, _, model) = require_ai_config(&config)?;
+    let resolved = require_ai_config_resolved(&selected_config)?;
+    let model = resolved.model.trim();
 
     Ok(NoteChatAnswer {
         answer,
@@ -1386,9 +1710,24 @@ pub async fn chat_with_current_note_stream(
             return Err(error);
         }
     };
+    let selected_config = match resolve_ai_config(
+        &config,
+        input.provider_id.as_deref(),
+        input.model_id.as_deref(),
+    )
+    .and_then(|resolved| {
+        require_resolved_ai_config(&resolved)?;
+        Ok(config_from_resolved(resolved))
+    }) {
+        Ok(config) => config,
+        Err(error) => {
+            emit_stream_error(&app, &stream_id, error.clone());
+            return Err(error);
+        }
+    };
     let messages = build_stream_note_chat_messages(&question, &input.context, &input.chat_history);
     let result =
-        request_chat_completion_stream(&config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
+        request_chat_completion_stream(&selected_config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
             .await;
 
     if let Err(error) = result {
@@ -1399,19 +1738,103 @@ pub async fn chat_with_current_note_stream(
     Ok(())
 }
 
+fn request_provider_models(provider: &AiProvider) -> Result<Vec<String>, String> {
+    let base_url = provider.base_url.trim().trim_end_matches('/');
+    let api_key = provider.api_key.trim();
+    if base_url.is_empty() {
+        return Err("AI models sync failed: base_url is missing".to_string());
+    }
+    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+        return Err("AI models sync failed: base_url must start with http:// or https://".to_string());
+    }
+    if api_key.is_empty() {
+        return Err("AI models sync failed: api_key is missing".to_string());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("AI models sync failed: cannot create HTTP client: {e}"))?;
+    let response = client
+        .get(format!("{base_url}/models"))
+        .bearer_auth(api_key)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                "AI models sync failed: request timed out".to_string()
+            } else {
+                "AI models sync failed: network error".to_string()
+            }
+        })?;
+    let status = response.status();
+    let status_code = status.as_u16();
+    let body = response
+        .bytes()
+        .map(|bytes| decode_response_body(&bytes))
+        .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
+    let body_trimmed = body.trim();
+    if !status.is_success() {
+        if status_code == 401 || status_code == 403 {
+            return Err("AI models sync failed: API key is invalid or has no permission".to_string());
+        }
+        return Err(format!(
+            "AI models sync failed: service returned HTTP {status_code}; debug=body_preview={}",
+            sanitize_ai_detail(body_trimmed)
+        ));
+    }
+
+    let value = serde_json::from_str::<JsonValue>(body_trimmed)
+        .map_err(|_| "AI models sync failed: service did not return OpenAI-compatible JSON. Please add models manually.".to_string())?;
+    let data = value
+        .get("data")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| "AI models sync failed: /models response had no data array. Please add models manually.".to_string())?;
+    let mut model_ids = Vec::new();
+    for item in data {
+        let Some(id) = item.get("id").and_then(JsonValue::as_str).map(str::trim) else {
+            continue;
+        };
+        if !id.is_empty() && !model_ids.iter().any(|existing| existing == id) {
+            model_ids.push(id.to_string());
+        }
+    }
+    if model_ids.is_empty() {
+        return Err("AI models sync failed: /models returned no usable model id. Please add models manually.".to_string());
+    }
+
+    Ok(model_ids)
+}
+
+fn update_config_provider<F>(provider_id: &str, mut update: F) -> Result<AiConfigFields, String>
+where
+    F: FnMut(&mut AiProvider) -> Result<(), String>,
+{
+    let mut app_config = read_config()?;
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    let provider = app_config
+        .ai
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| "AI provider failed: provider does not exist".to_string())?;
+    update(provider)?;
+    provider.updated_at = Some(now_timestamp_millis());
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    write_config(&app_config)?;
+    Ok(app_config.ai)
+}
+
 #[tauri::command]
 pub fn get_ai_config() -> Result<AiConfigFields, String> {
-    Ok(read_config()?.ai)
+    Ok(normalize_ai_config(&read_config()?.ai))
 }
 
 #[tauri::command]
 pub fn save_ai_config(config: AiConfigFields) -> Result<(), String> {
     let mut app_config = read_config()?;
-    app_config.ai = AiConfigFields {
-        base_url: config.base_url.trim().trim_end_matches('/').to_string(),
-        api_key: config.api_key.trim().to_string(),
-        model: config.model.trim().to_string(),
-    };
+    app_config.ai = normalize_ai_config(&config);
     write_config(&app_config)
 }
 
@@ -1419,6 +1842,220 @@ pub fn save_ai_config(config: AiConfigFields) -> Result<(), String> {
 pub fn test_ai_connection() -> Result<TestAiConnectionResult, String> {
     let config = read_config()?;
     test_ai_connection_with_config(&config.ai)
+}
+
+#[tauri::command]
+pub fn save_ai_provider(provider: AiProvider) -> Result<AiProviderActionResult, String> {
+    let provider = sanitize_ai_provider(&provider)
+        .ok_or_else(|| "AI provider save failed: provider id is missing".to_string())?;
+    let mut app_config = read_config()?;
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    let mut saved_provider = provider.clone();
+    let now = now_timestamp_millis();
+    saved_provider.created_at = saved_provider.created_at.or(Some(now));
+    saved_provider.updated_at = Some(now);
+
+    if let Some(existing) = app_config
+        .ai
+        .providers
+        .iter_mut()
+        .find(|existing| existing.id == saved_provider.id)
+    {
+        *existing = saved_provider.clone();
+    } else {
+        app_config.ai.providers.push(saved_provider.clone());
+    }
+    if app_config.ai.default_provider_id.is_none() {
+        app_config.ai.default_provider_id = Some(saved_provider.id.clone());
+    }
+    if app_config.ai.default_model_id.is_none() {
+        app_config.ai.default_model_id = saved_provider.default_model.clone();
+    }
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    write_config(&app_config)?;
+    let provider = app_config
+        .ai
+        .providers
+        .iter()
+        .find(|provider| provider.id == saved_provider.id)
+        .cloned()
+        .unwrap_or(saved_provider);
+    Ok(AiProviderActionResult {
+        provider,
+        config: app_config.ai,
+    })
+}
+
+#[tauri::command]
+pub fn delete_ai_provider(provider_id: String) -> Result<AiConfigFields, String> {
+    let provider_id = provider_id.trim();
+    if provider_id.is_empty() {
+        return Err("AI provider delete failed: provider id is missing".to_string());
+    }
+    let mut app_config = read_config()?;
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    app_config.ai.providers.retain(|provider| provider.id != provider_id);
+    if app_config.ai.default_provider_id.as_deref() == Some(provider_id) {
+        app_config.ai.default_provider_id = app_config.ai.providers.first().map(|provider| provider.id.clone());
+        app_config.ai.default_model_id = app_config
+            .ai
+            .providers
+            .first()
+            .and_then(|provider| provider.default_model.clone())
+            .or_else(|| {
+                app_config
+                    .ai
+                    .providers
+                    .first()
+                    .and_then(|provider| provider.models.first().map(|model| model.id.clone()))
+            });
+    }
+    app_config.ai = normalize_ai_config(&app_config.ai);
+    write_config(&app_config)?;
+    Ok(app_config.ai)
+}
+
+#[tauri::command]
+pub fn set_default_ai_model(provider_id: String, model_id: String) -> Result<AiConfigFields, String> {
+    let provider_id = provider_id.trim().to_string();
+    let model_id = model_id.trim().to_string();
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Err("AI default model failed: provider id and model id are required".to_string());
+    }
+    let mut config = update_config_provider(&provider_id, |provider| {
+        if !provider.models.iter().any(|model| model.id == model_id && model.enabled) {
+            return Err("AI default model failed: model does not exist".to_string());
+        }
+        provider.default_model = Some(model_id.clone());
+        Ok(())
+    })?;
+    config.default_provider_id = Some(provider_id);
+    config.default_model_id = Some(model_id);
+    let mut app_config = read_config()?;
+    app_config.ai = normalize_ai_config(&config);
+    write_config(&app_config)?;
+    Ok(app_config.ai)
+}
+
+#[tauri::command]
+pub fn sync_ai_provider_models(provider_id: String) -> Result<SyncAiProviderModelsResult, String> {
+    let provider_id = provider_id.trim().to_string();
+    if provider_id.is_empty() {
+        return Err("AI models sync failed: provider id is missing".to_string());
+    }
+    let config = read_config()?.ai;
+    let normalized = normalize_ai_config(&config);
+    let provider = normalized
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .cloned()
+        .ok_or_else(|| "AI models sync failed: provider does not exist".to_string())?;
+    let synced_models = request_provider_models(&provider)?;
+    let synced_count = synced_models.len();
+    let mut updated_config = update_config_provider(&provider_id, |provider| {
+        let now = now_timestamp_millis();
+        for model_id in &synced_models {
+            if let Some(existing) = provider.models.iter_mut().find(|model| model.id == *model_id) {
+                existing.enabled = true;
+                existing.source = "synced".to_string();
+                existing.updated_at = Some(now);
+            } else {
+                provider.models.push(AiModel {
+                    id: model_id.clone(),
+                    name: None,
+                    enabled: true,
+                    supports_stream: true,
+                    source: "synced".to_string(),
+                    updated_at: Some(now),
+                });
+            }
+        }
+        if provider.default_model.is_none() {
+            provider.default_model = provider.models.first().map(|model| model.id.clone());
+        }
+        Ok(())
+    })?;
+    updated_config = normalize_ai_config(&updated_config);
+    let provider = updated_config
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .cloned()
+        .ok_or_else(|| "AI models sync failed: provider was removed".to_string())?;
+    Ok(SyncAiProviderModelsResult {
+        provider,
+        synced_count,
+        config: updated_config,
+    })
+}
+
+#[tauri::command]
+pub fn test_ai_provider(provider_id: String) -> Result<TestAiProviderResult, String> {
+    let provider_id = provider_id.trim().to_string();
+    if provider_id.is_empty() {
+        return Err("AI provider test failed: provider id is missing".to_string());
+    }
+    let config = normalize_ai_config(&read_config()?.ai);
+    let provider = config
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| "AI provider test failed: provider does not exist".to_string())?;
+    let models = request_provider_models(provider)?;
+    Ok(TestAiProviderResult {
+        provider_id,
+        ok: true,
+        model_count: models.len(),
+    })
+}
+
+#[tauri::command]
+pub fn add_ai_provider_model(provider_id: String, model_id: String) -> Result<AiProviderActionResult, String> {
+    let provider_id = provider_id.trim().to_string();
+    let model_id = model_id.trim().to_string();
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Err("AI model add failed: provider id and model id are required".to_string());
+    }
+    let config = update_config_provider(&provider_id, |provider| {
+        if !provider.models.iter().any(|model| model.id == model_id) {
+            provider.models.push(model_from_id(&model_id, "manual").expect("model id was checked"));
+        }
+        if provider.default_model.is_none() {
+            provider.default_model = Some(model_id.clone());
+        }
+        Ok(())
+    })?;
+    let provider = config
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .cloned()
+        .ok_or_else(|| "AI model add failed: provider was removed".to_string())?;
+    Ok(AiProviderActionResult { provider, config })
+}
+
+#[tauri::command]
+pub fn delete_ai_provider_model(provider_id: String, model_id: String) -> Result<AiProviderActionResult, String> {
+    let provider_id = provider_id.trim().to_string();
+    let model_id = model_id.trim().to_string();
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Err("AI model delete failed: provider id and model id are required".to_string());
+    }
+    let config = update_config_provider(&provider_id, |provider| {
+        provider.models.retain(|model| model.id != model_id);
+        if provider.default_model.as_deref() == Some(model_id.as_str()) {
+            provider.default_model = provider.models.first().map(|model| model.id.clone());
+        }
+        Ok(())
+    })?;
+    let provider = config
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .cloned()
+        .ok_or_else(|| "AI model delete failed: provider was removed".to_string())?;
+    Ok(AiProviderActionResult { provider, config })
 }
 
 #[cfg(test)]
@@ -1604,6 +2241,7 @@ mod tests {
             base_url: "https://api.example.com/v1/".to_string(),
             api_key: "secret".to_string(),
             model: "model".to_string(),
+            ..AiConfigFields::default()
         };
 
         let (base_url, _, model) = require_ai_config(&config).unwrap();
@@ -1618,6 +2256,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-one".to_string(),
             model: "model-a".to_string(),
+            ..AiConfigFields::default()
         };
         let context = json!({
             "note_path": "tricks/a.md",
@@ -1637,6 +2276,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-one".to_string(),
             model: "model-a".to_string(),
+            ..AiConfigFields::default()
         };
         let context = json!({
             "note_path": "tricks/a.md",
@@ -1657,6 +2297,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-one".to_string(),
             model: "model-a".to_string(),
+            ..AiConfigFields::default()
         };
         let context = json!({
             "note_path": "tricks/a.md",
@@ -1677,6 +2318,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-one".to_string(),
             model: "model-a".to_string(),
+            ..AiConfigFields::default()
         };
         let cache = AiCacheFile {
             created_at: "2026-05-05T00:00:00Z".to_string(),

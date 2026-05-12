@@ -42,9 +42,43 @@ pub struct LuoguConfigFields {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AiConfigFields {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub providers: Vec<AiProvider>,
+    #[serde(default)]
+    pub default_provider_id: Option<String>,
+    #[serde(default)]
+    pub default_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AiProvider {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
     pub base_url: String,
     pub api_key: String,
-    pub model: String,
+    pub enabled: bool,
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub models: Vec<AiModel>,
+    pub created_at: Option<i64>,
+    pub updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AiModel {
+    pub id: String,
+    pub name: Option<String>,
+    pub enabled: bool,
+    pub supports_stream: bool,
+    pub source: String,
+    pub updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -2534,6 +2568,7 @@ Keep one sentinel item to avoid special casing.
                 base_url: "https://api.example.com/v1".to_string(),
                 api_key: "ai-secret".to_string(),
                 model: "example-model".to_string(),
+                ..AiConfigFields::default()
             },
         };
 

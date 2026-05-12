@@ -1,3 +1,5 @@
+import type { AiConfig } from "@/lib/api";
+
 export interface AiSidebarNoteContext {
   filePath: string | null;
   title: string;
@@ -17,4 +19,6 @@ export interface AiSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   width?: number;
+  aiConfig: AiConfig | null;
+  onOpenAiSettings: () => void;
 }

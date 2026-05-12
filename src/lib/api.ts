@@ -40,6 +40,48 @@ export interface AiConfig {
   base_url: string;
   api_key: string;
   model: string;
+  providers: AiProvider[];
+  default_provider_id: string | null;
+  default_model_id: string | null;
+}
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  kind: "openai-compatible" | string;
+  base_url: string;
+  api_key: string;
+  enabled: boolean;
+  default_model: string | null;
+  models: AiModel[];
+  created_at: number | null;
+  updated_at: number | null;
+}
+
+export interface AiModel {
+  id: string;
+  name: string | null;
+  enabled: boolean;
+  supports_stream: boolean;
+  source: "synced" | "manual" | string;
+  updated_at: number | null;
+}
+
+export interface AiProviderActionResult {
+  provider: AiProvider;
+  config: AiConfig;
+}
+
+export interface SyncAiProviderModelsResult {
+  provider: AiProvider;
+  syncedCount: number;
+  config: AiConfig;
+}
+
+export interface TestAiProviderResult {
+  providerId: string;
+  ok: boolean;
+  modelCount: number;
 }
 
 export interface LuoguSubmissionPreview {
@@ -170,6 +212,8 @@ export interface NoteChatStreamInput {
   question: string;
   context: NoteChatContextPayload;
   chatHistory?: NoteChatHistoryMessage[];
+  providerId?: string;
+  modelId?: string;
 }
 
 export interface NoteChatStreamChunkEvent {
@@ -513,6 +557,62 @@ export async function testAiConnection(): Promise<TestAiConnectionResult> {
   }
 }
 
+export async function saveAiProvider(provider: AiProvider): Promise<AiProviderActionResult> {
+  try {
+    return await invoke<AiProviderActionResult>("save_ai_provider", { provider });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function deleteAiProvider(providerId: string): Promise<AiConfig> {
+  try {
+    return await invoke<AiConfig>("delete_ai_provider", { providerId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function setDefaultAiModel(providerId: string, modelId: string): Promise<AiConfig> {
+  try {
+    return await invoke<AiConfig>("set_default_ai_model", { providerId, modelId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function syncAiProviderModels(providerId: string): Promise<SyncAiProviderModelsResult> {
+  try {
+    return await invoke<SyncAiProviderModelsResult>("sync_ai_provider_models", { providerId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function testAiProvider(providerId: string): Promise<TestAiProviderResult> {
+  try {
+    return await invoke<TestAiProviderResult>("test_ai_provider", { providerId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function addAiProviderModel(providerId: string, modelId: string): Promise<AiProviderActionResult> {
+  try {
+    return await invoke<AiProviderActionResult>("add_ai_provider_model", { providerId, modelId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function deleteAiProviderModel(providerId: string, modelId: string): Promise<AiProviderActionResult> {
+  try {
+    return await invoke<AiProviderActionResult>("delete_ai_provider_model", { providerId, modelId });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function generateNoteMetadata(
   relativePath: string,
   markdownContent: string,
@@ -544,11 +644,15 @@ export async function polishNoteBody(
 export async function chatWithCurrentNote(
   question: string,
   context: NoteChatContextPayload,
+  providerId?: string,
+  modelId?: string,
 ): Promise<NoteChatAnswer> {
   try {
     return await invoke<NoteChatAnswer>("chat_with_current_note", {
       question,
       context,
+      providerId,
+      modelId,
     });
   } catch (e) {
     throw toError(e);

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
+  ArrowDown,
   ArrowUp,
   Bot,
   BookOpen,
+  ChevronDown,
   CheckCircle2,
   ClipboardList,
   FileText,
@@ -12,6 +14,7 @@ import {
   MessageCircle,
   PenLine,
   Plus,
+  Settings,
   Sparkles,
   Tag,
   Trash2,
@@ -24,6 +27,9 @@ import type { AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types
 import {
   openExternalUrl,
   startCurrentNoteChatStream,
+  type AiConfig,
+  type AiModel,
+  type AiProvider,
   type NoteChatContextPayload,
   type NoteChatHistoryMessage,
   type NoteChatStreamChunkEvent,
@@ -40,12 +46,17 @@ type AiChatMessage = {
   requestId?: number;
   streamId?: string;
   retryContext?: NoteChatContextPayload;
+  startedAt?: number;
+  finishedAt?: number;
+  elapsedMs?: number;
 };
 
 type AiConversation = {
   id: string;
   title: string;
   messages: AiChatMessage[];
+  providerId?: string;
+  modelId?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -138,6 +149,7 @@ const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const AI_REQUEST_HISTORY_LIMIT = 8;
 const AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS = 1200;
+const AI_SCROLL_BOTTOM_THRESHOLD = 64;
 const UNTITLED_CONVERSATION_TITLE = "New chat";
 
 const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteContext): string | null => {
@@ -198,6 +210,24 @@ const createEmptyConversation = (now = Date.now()): AiConversation => ({
   updatedAt: now,
 });
 
+const getEnabledProviderModels = (provider: AiProvider | undefined): AiModel[] =>
+  provider?.models.filter((model) => model.enabled) ?? [];
+
+const getPreferredModelForProvider = (provider: AiProvider | undefined, config: AiConfig | null): AiModel | undefined => {
+  if (!provider) return undefined;
+  const enabledModels = getEnabledProviderModels(provider);
+  return (
+    enabledModels.find((model) => model.id === provider.default_model) ??
+    enabledModels.find((model) => model.id === config?.default_model_id) ??
+    enabledModels[0]
+  );
+};
+
+const getDefaultConversationModel = (config: AiConfig | null): Pick<AiConversation, "providerId" | "modelId"> => ({
+  providerId: config?.default_provider_id ?? config?.providers.find((provider) => provider.enabled)?.id,
+  modelId: (config?.default_model_id ?? config?.model) || undefined,
+});
+
 const getConversationTitleFromQuestion = (question: string): string => {
   const compact = question.replace(/\s+/g, " ").trim();
   if (!compact) return UNTITLED_CONVERSATION_TITLE;
@@ -220,6 +250,9 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     state: message.state === "error" ? "error" : "done",
     retryText: message.retryText,
     requestId: message.requestId,
+    startedAt: message.startedAt,
+    finishedAt: message.finishedAt,
+    elapsedMs: message.elapsedMs,
   }));
 
 const hasConversationContent = (conversation: AiConversation): boolean =>
@@ -239,6 +272,8 @@ const sanitizeConversation = (value: unknown): AiConversation | null => {
     id: item.id,
     title: item.title.trim() || UNTITLED_CONVERSATION_TITLE,
     messages: sanitizeMessagesForStorage(item.messages.filter(isAiChatMessage)),
+    providerId: typeof item.providerId === "string" ? item.providerId : undefined,
+    modelId: typeof item.modelId === "string" ? item.modelId : undefined,
     createdAt,
     updatedAt,
   };
@@ -409,6 +444,38 @@ const normalizeAiMathDelimiters = (markdown: string): string =>
   splitMarkdownByFencedCode(markdown)
     .map((chunk) => (chunk.isCode ? chunk.text : normalizeMathInSegment(chunk.text)))
     .join("");
+
+const finishAssistantTiming = (message: AiChatMessage, now = Date.now()): Pick<AiChatMessage, "finishedAt" | "elapsedMs"> => {
+  const startedAt = message.startedAt ?? now;
+  return {
+    finishedAt: now,
+    elapsedMs: Math.max(0, now - startedAt),
+  };
+};
+
+const getAssistantElapsedMs = (message: AiChatMessage, now: number): number | null => {
+  if (typeof message.elapsedMs === "number") return message.elapsedMs;
+  if (typeof message.startedAt !== "number") return null;
+  const end = typeof message.finishedAt === "number" ? message.finishedAt : now;
+  return Math.max(0, end - message.startedAt);
+};
+
+const formatElapsed = (elapsedMs: number): string => {
+  if (elapsedMs < 1000) return `${Math.max(0.1, elapsedMs / 1000).toFixed(1)}s`;
+  if (elapsedMs < 10000) return `${(elapsedMs / 1000).toFixed(1)}s`;
+  return `${Math.round(elapsedMs / 1000)}s`;
+};
+
+const getAssistantTimingLabel = (message: AiChatMessage, elapsedMs: number | null): string | null => {
+  if (elapsedMs === null) {
+    return message.state === "streaming" || message.state === "loading" ? "正在思考" : null;
+  }
+
+  const elapsed = formatElapsed(elapsedMs);
+  if (message.state === "streaming" || message.state === "loading") return `正在思考 ${elapsed}`;
+  if (message.state === "error") return `思考 ${elapsed} 后失败`;
+  return `思考 ${elapsed}`;
+};
 
 const createAiCodeCopyIcon = (icon: "copy" | "check"): SVGSVGElement => {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -625,7 +692,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
   );
 }
 
-export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, width }: AiSidebarProps) {
+export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, width, aiConfig, onOpenAiSettings }: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
     initialConversationStateRef.current = loadConversationState();
@@ -642,17 +709,61 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
   const [isResponding, setIsResponding] = useState(false);
+  const [elapsedNow, setElapsedNow] = useState(Date.now());
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingConversationTitle, setEditingConversationTitle] = useState("");
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const messageSeqRef = useRef(0);
   const requestSeqRef = useRef(0);
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const activeConversation =
     conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0];
   const messages = activeConversation?.messages ?? [];
+  const enabledProviders = aiConfig?.providers.filter((provider) => provider.enabled) ?? [];
+  const fallbackProvider = enabledProviders.find((provider) => provider.id === aiConfig?.default_provider_id) ?? enabledProviders[0];
+  const activeProvider =
+    enabledProviders.find((provider) => provider.id === activeConversation?.providerId) ?? fallbackProvider;
+  const activeProviderModels = getEnabledProviderModels(activeProvider);
+  const activeModel =
+    activeProvider?.models.find((model) => model.enabled && model.id === activeConversation?.modelId) ??
+    getPreferredModelForProvider(activeProvider, aiConfig);
+  const selectedProviderId = activeProvider?.id;
+  const selectedModelId = activeModel?.id;
+  const selectedProviderLabel = activeProvider
+    ? activeProvider.name || activeProvider.id
+    : aiConfig && enabledProviders.length > 0
+      ? "配置组不可用"
+      : "未配置 API";
+  const selectedModelLabel = activeModel
+    ? activeModel.name || activeModel.id
+    : aiConfig && enabledProviders.length > 0
+      ? "模型不可用"
+      : "未配置模型";
+  const modelQuery = modelSearch.trim().toLocaleLowerCase();
+  const selectableProviders = enabledProviders
+    .map((provider) => ({
+      provider,
+      models: provider.models.filter((model) => {
+        if (!model.enabled) return false;
+        if (!modelQuery) return true;
+        return `${provider.name} ${provider.id} ${model.id} ${model.name ?? ""}`.toLocaleLowerCase().includes(modelQuery);
+      }),
+    }))
+    .filter((group) => group.models.length > 0);
+  const selectableModels = activeProviderModels.filter((model) => {
+    if (!modelQuery) return true;
+    return `${model.id} ${model.name ?? ""}`.toLocaleLowerCase().includes(modelQuery);
+  });
 
   const commandQuery = inputValue.startsWith("/") ? inputValue.slice(1).trim() : "";
   const visibleCommands = useMemo(() => {
@@ -670,11 +781,14 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
 
   useEffect(() => {
     if (!activeConversation) {
-      const nextConversation = createEmptyConversation();
+      const nextConversation = {
+        ...createEmptyConversation(),
+        ...getDefaultConversationModel(aiConfig),
+      };
       setConversations([nextConversation]);
       setActiveConversationId(nextConversation.id);
     }
-  }, [activeConversation]);
+  }, [activeConversation, aiConfig]);
 
   useEffect(() => {
     const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
@@ -705,6 +819,13 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   }, [commandQuery]);
 
   useEffect(() => {
+    if (!isResponding) return;
+    setElapsedNow(Date.now());
+    const timer = window.setInterval(() => setElapsedNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [isResponding]);
+
+  useEffect(() => {
     if (!isCommandPanelOpen || visibleCommands.length === 0) return;
     const activeCommand = visibleCommands[activeCommandIndex];
     if (!activeCommand) return;
@@ -713,6 +834,25 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
 
   const updateRespondingState = () => {
     setIsResponding(activeStreamsRef.current.size > 0);
+  };
+
+  const isMessagesNearBottom = () => {
+    const element = messagesScrollRef.current;
+    if (!element) return true;
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= AI_SCROLL_BOTTOM_THRESHOLD;
+  };
+
+  const scrollMessagesToBottom = (behavior: ScrollBehavior = "auto") => {
+    const element = messagesScrollRef.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior });
+    setShowScrollToBottom(false);
+  };
+
+  const handleMessagesScroll = () => {
+    const isNearBottom = isMessagesNearBottom();
+    shouldAutoScrollRef.current = isNearBottom;
+    setShowScrollToBottom(!isNearBottom);
   };
 
   const createMessage = (message: Omit<AiChatMessage, "id">): AiChatMessage => {
@@ -768,25 +908,94 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     if (activeConversation && !hasConversationContent(activeConversation)) {
       setActiveConversationId(activeConversation.id);
       setIsHistoryOpen(false);
+      setIsProviderPickerOpen(false);
+      setIsModelPickerOpen(false);
       setActiveCommandIndex(0);
       setIsCommandPanelDismissed(false);
       return;
     }
 
-    const conversation = createEmptyConversation();
+    const conversation = {
+      ...createEmptyConversation(),
+      ...getDefaultConversationModel(aiConfig),
+    };
     setConversations((current) => limitConversations(pruneBlankConversations([conversation, ...current], conversation.id)));
     setActiveConversationId(conversation.id);
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    cancelRenameConversation();
     setIsHistoryOpen(false);
+    setIsProviderPickerOpen(false);
+    setIsModelPickerOpen(false);
     setInputValue("");
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
 
+  const selectConversationProvider = (provider: AiProvider) => {
+    if (!activeConversation) return;
+    const preferredModel = getPreferredModelForProvider(provider, aiConfig);
+    updateConversationMessages(activeConversation.id, (conversation) => ({
+      ...conversation,
+      providerId: provider.id,
+      modelId: preferredModel?.id,
+    }));
+    setIsProviderPickerOpen(false);
+    setIsModelPickerOpen(false);
+    setModelSearch("");
+  };
+
+  const selectConversationModel = (modelOrProvider: AiModel | AiProvider, maybeModel?: AiModel) => {
+    if (!activeConversation) return;
+    const provider = maybeModel ? modelOrProvider as AiProvider : activeProvider;
+    const model = maybeModel ?? modelOrProvider as AiModel;
+    if (!provider) return;
+    updateConversationMessages(activeConversation.id, (conversation) => ({
+      ...conversation,
+      providerId: provider.id,
+      modelId: model.id,
+    }));
+    setIsModelPickerOpen(false);
+    setModelSearch("");
+  };
+
   const selectConversation = (conversationId: string) => {
     setActiveConversationId(conversationId);
     setIsHistoryOpen(false);
+    setIsProviderPickerOpen(false);
+    setIsModelPickerOpen(false);
+    setModelSearch("");
+    setEditingConversationId(null);
+    setEditingConversationTitle("");
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
+  };
+
+  const startRenameConversation = (conversation: AiConversation) => {
+    setEditingConversationId(conversation.id);
+    setEditingConversationTitle(conversation.title);
+  };
+
+  const cancelRenameConversation = () => {
+    setEditingConversationId(null);
+    setEditingConversationTitle("");
+  };
+
+  const saveRenameConversation = (conversationId: string) => {
+    const title = editingConversationTitle.replace(/\s+/g, " ").trim();
+    if (!title) {
+      cancelRenameConversation();
+      return;
+    }
+
+    setConversations((current) => limitConversations(current.map((conversation) => (
+      conversation.id === conversationId
+        ? { ...conversation, title, updatedAt: Date.now() }
+        : conversation
+    ))));
+    cancelRenameConversation();
   };
 
   const deleteConversation = (conversationId: string) => {
@@ -815,6 +1024,9 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       }
     }
 
+    cancelRenameConversation();
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
@@ -843,6 +1055,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         ...message,
         text: message.text.trim().length > 0 ? message.text : "The AI service returned no content. Please retry.",
         state: "done",
+        ...finishAssistantTiming(message),
       }));
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
@@ -861,6 +1074,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         ...currentMessage,
         text: getChatErrorMessage(message),
         state: "error",
+        ...finishAssistantTiming(currentMessage),
       }));
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
@@ -874,8 +1088,19 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeConversationId, messages]);
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    window.requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+  }, [activeConversationId, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (shouldAutoScrollRef.current || isMessagesNearBottom()) {
+      window.requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+      return;
+    }
+    setShowScrollToBottom(true);
+  }, [isOpen, messages]);
 
   const buildChatContext = (): NoteChatContextPayload => {
     const truncatedSelection = truncateText(context.selectedText.trim(), NOTE_CHAT_MAX_SELECTION_CHARS);
@@ -917,10 +1142,27 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     if (!conversationId || !question) return;
 
     if (!isAiConfigured) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
       appendMessages(
         conversationId,
         createMessage({ role: "user", text: question, state: "done" }),
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
+      );
+      setInputValue("");
+      return;
+    }
+    if (!selectedProviderId || !selectedModelId) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: question, state: "done" }),
+        createMessage({
+          role: "system",
+          text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
+          state: "done",
+        }),
       );
       setInputValue("");
       return;
@@ -930,6 +1172,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
 
     const requestId = requestSeqRef.current + 1;
     requestSeqRef.current = requestId;
+    const startedAt = Date.now();
     const streamId = `${Date.now()}-${requestId}`;
     const chatHistory = buildRequestHistory(conversationId);
     const userMessage = createMessage({ role: "user", text: question, state: "done" });
@@ -941,8 +1184,11 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       requestId,
       streamId,
       retryContext: chatContext,
+      startedAt,
     });
 
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
 
     setInputValue("");
@@ -961,6 +1207,8 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
       question,
       context: chatContext,
       chatHistory,
+      providerId: selectedProviderId,
+      modelId: selectedModelId,
     }).catch((error) => {
       console.warn("AI sidebar chat request failed", {
         requestId,
@@ -974,6 +1222,7 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         ...message,
         text: message.state === "error" ? message.text : getChatErrorMessage(error),
         state: "error",
+        ...finishAssistantTiming(message),
       }));
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
@@ -990,6 +1239,8 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     setInputValue(`${commandText} `);
     setIsCommandPanelDismissed(true);
     setActiveCommandIndex(0);
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
     appendMessages(
       conversationId,
       createMessage({
@@ -1008,6 +1259,8 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
     if (!conversationId || !value || isResponding) return;
 
     if (value.startsWith("/")) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
       appendMessages(
         conversationId,
         createMessage({ role: "user", text: value, state: "done" }),
@@ -1079,6 +1332,24 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="truncate text-sm font-semibold">AI Assistant</div>
         </div>
+        <button
+          type="button"
+          className={cn(
+            "mx-2 inline-flex h-7 min-w-0 flex-1 items-center justify-between gap-1 rounded-md border border-border/70 bg-muted/15 px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            isProviderPickerOpen && "bg-accent text-accent-foreground",
+          )}
+          onClick={() => {
+            setIsProviderPickerOpen((open) => !open);
+            setIsHistoryOpen(false);
+            setIsModelPickerOpen(false);
+          }}
+          title={selectedProviderLabel}
+          aria-label="选择 AI 模型"
+          aria-expanded={isProviderPickerOpen}
+        >
+          <span className="truncate">配置组：{selectedProviderLabel}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        </button>
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
@@ -1095,7 +1366,11 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
               "inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               isHistoryOpen && "bg-accent text-accent-foreground",
             )}
-            onClick={() => setIsHistoryOpen((open) => !open)}
+            onClick={() => {
+              setIsHistoryOpen((open) => !open);
+              setIsProviderPickerOpen(false);
+              setIsModelPickerOpen(false);
+            }}
             title="Chat history"
             aria-label="Chat history"
             aria-pressed={isHistoryOpen}
@@ -1113,6 +1388,136 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
           </button>
         </div>
 
+        {isProviderPickerOpen && (
+          <div className="absolute left-3 right-3 top-10 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+            <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+              <span className="text-xs font-medium text-foreground">选择配置组</span>
+              <button
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={() => {
+                  setIsProviderPickerOpen(false);
+                  onOpenAiSettings();
+                }}
+              >
+                <Settings className="h-3 w-3" />
+                API 管理
+              </button>
+            </div>
+            <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+              {enabledProviders.length > 0 ? (
+                enabledProviders.map((provider) => {
+                  const isSelected = provider.id === selectedProviderId;
+                  const modelCount = getEnabledProviderModels(provider).length;
+                  return (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      className={cn(
+                        "grid w-full min-w-0 gap-1 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                        isSelected && "bg-accent text-accent-foreground",
+                      )}
+                      onClick={() => selectConversationProvider(provider)}
+                    >
+                      <span className="truncate text-sm font-medium">{provider.name || provider.id}</span>
+                      <span className="truncate text-[11px] text-muted-foreground">
+                        {modelCount > 0 ? `${modelCount} models` : "无可用模型"}
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="grid gap-2 px-3 py-8 text-center text-sm text-muted-foreground">
+                  <div>还没有可用配置组</div>
+                  <button
+                    type="button"
+                    className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                    onClick={() => {
+                      setIsProviderPickerOpen(false);
+                      onOpenAiSettings();
+                    }}
+                  >
+                    打开 API 管理
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {false && isModelPickerOpen && (
+          <div className="absolute left-3 right-3 top-10 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+            <div className="grid gap-2 border-b border-border/70 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-foreground">选择模型</span>
+                <button
+                  type="button"
+                  className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => {
+                    setIsModelPickerOpen(false);
+                    onOpenAiSettings();
+                  }}
+                >
+                  <Settings className="h-3 w-3" />
+                  API 管理
+                </button>
+              </div>
+              <input
+                value={modelSearch}
+                onChange={(event) => setModelSearch(event.target.value)}
+                placeholder="搜索 provider / model"
+                className="h-7 rounded-md border border-input bg-background/80 px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <div className="max-h-80 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+              {selectableProviders.length > 0 ? (
+                selectableProviders.map(({ provider, models }) => (
+                  <div key={provider.id} className="py-1">
+                    <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                      {provider.name || provider.id}
+                    </div>
+                    <div className="grid gap-0.5">
+                      {models.map((model) => {
+                        const isSelected = provider.id === selectedProviderId && model.id === selectedModelId;
+                        return (
+                          <button
+                            key={`${provider.id}:${model.id}`}
+                            type="button"
+                            className={cn(
+                              "grid min-w-0 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                              isSelected && "bg-accent text-accent-foreground",
+                            )}
+                            onClick={() => selectConversationModel(provider, model)}
+                          >
+                            <span className="truncate text-sm font-medium">{model.name || model.id}</span>
+                            <span className="truncate text-[11px] text-muted-foreground">
+                              {model.id} · {model.source === "manual" ? "手动" : "同步"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="grid gap-2 px-3 py-8 text-center text-sm text-muted-foreground">
+                  <div>还没有可用模型</div>
+                  <button
+                    type="button"
+                    className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                    onClick={() => {
+                      setIsModelPickerOpen(false);
+                      onOpenAiSettings();
+                    }}
+                  >
+                    打开 API 管理
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {isHistoryOpen && (
           <div className="absolute right-3 top-10 z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
@@ -1128,16 +1533,52 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                     conversation.id === activeConversationId && "bg-accent text-accent-foreground",
                   )}
                 >
+                  {editingConversationId === conversation.id ? (
+                    <div className="grid min-w-0 flex-1 gap-1 px-2.5 py-1.5">
+                      <input
+                        autoFocus
+                        className="h-7 min-w-0 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+                        value={editingConversationTitle}
+                        onChange={(event) => setEditingConversationTitle(event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onBlur={() => saveRenameConversation(conversation.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            saveRenameConversation(conversation.id);
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelRenameConversation();
+                          }
+                        }}
+                      />
+                      <span className="truncate text-[11px] text-muted-foreground">Enter 保存，Esc 取消</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="grid min-w-0 flex-1 gap-1 px-2.5 py-2 text-left"
+                      onClick={() => selectConversation(conversation.id)}
+                    >
+                      <span className="truncate text-sm font-medium">{conversation.title}</span>
+                      <span className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                        <span>{conversation.messages.length} messages</span>
+                        <span className="shrink-0 tabular-nums">{new Date(conversation.updatedAt).toLocaleString()}</span>
+                      </span>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="grid min-w-0 flex-1 gap-1 px-2.5 py-2 text-left"
-                    onClick={() => selectConversation(conversation.id)}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startRenameConversation(conversation);
+                    }}
+                    title="Rename chat"
+                    aria-label={`Rename chat ${conversation.title}`}
                   >
-                    <span className="truncate text-sm font-medium">{conversation.title}</span>
-                    <span className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span>{conversation.messages.length} messages</span>
-                      <span className="shrink-0 tabular-nums">{new Date(conversation.updatedAt).toLocaleString()}</span>
-                    </span>
+                    <PenLine className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
@@ -1208,9 +1649,14 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:thin]">
-        {messages.length === 0 ? (
-          <div className="flex h-full min-h-44 items-center justify-center px-5 text-center">
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={messagesScrollRef}
+          className="h-full overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
+          onScroll={handleMessagesScroll}
+        >
+          {messages.length === 0 ? (
+            <div className="flex h-full min-h-44 items-center justify-center px-5 text-center">
             <div className="grid max-w-72 gap-3">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground">
                 <MessageCircle className="h-5 w-5" />
@@ -1220,52 +1666,80 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
                 Switching notes changes only the next request context. This chat stays active.
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "max-w-[92%] rounded-lg px-3 py-2 text-sm leading-6 shadow-sm",
-                  message.role === "user"
-                    ? "ml-auto bg-primary text-primary-foreground"
-                    : message.role === "assistant" && message.state === "error"
-                      ? "mr-auto border border-amber-500/30 bg-amber-500/10 text-foreground"
-                      : message.role === "assistant"
-                        ? "mr-auto border border-border/70 bg-muted/20 text-foreground"
-                        : "mx-auto flex items-start gap-2 border border-border/60 bg-background/80 text-muted-foreground",
-                )}
-              >
-                {message.role === "system" && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
-                {message.role === "assistant" && (message.state === "loading" || message.state === "streaming") && (
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                )}
-                <div className="min-w-0">
-                  {message.role === "assistant" ? (
-                    <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
-                  ) : (
-                    <div className="whitespace-pre-wrap break-words">
-                      {message.text || (message.state === "streaming" ? "Generating..." : "")}
+            </div>
+          ) : (
+            <div className="grid gap-3">
+            {messages.map((message) => {
+              if (message.role === "assistant") {
+                const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
+                const timingLabel = getAssistantTimingLabel(message, elapsedMs);
+                return (
+                  <div key={message.id} className="mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
+                    {timingLabel && (
+                      <div className={cn(
+                        "text-[11px] leading-4 text-muted-foreground/75",
+                        message.state === "error" && "text-amber-600/80 dark:text-amber-300/80",
+                      )}>
+                        {timingLabel}
+                      </div>
+                    )}
+                    <div className={cn(
+                      "min-w-0",
+                      message.state === "error" && "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2",
+                    )}>
+                      <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
+                      {message.state === "error" && message.retryText && (
+                        <button
+                          type="button"
+                          className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => {
+                            if (isResponding) return;
+                            void submitQuestion(message.retryText ?? "", message.retryContext);
+                          }}
+                        >
+                          Retry
+                        </button>
+                      )}
                     </div>
-                  )}
-                  {message.role === "assistant" && message.state === "error" && message.retryText && (
-                    <button
-                      type="button"
-                      className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      onClick={() => {
-                        if (isResponding) return;
-                        void submitQuestion(message.retryText ?? "", message.retryContext);
-                      }}
-                    >
-                      Retry
-                    </button>
-                  )}
+                  </div>
+                );
+              }
+
+              if (message.role === "user") {
+                return (
+                  <div key={message.id} className="ml-auto max-w-[92%] rounded-lg bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
+                    <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={message.id}
+                  className="mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-sm leading-6 text-muted-foreground shadow-sm"
+                >
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
-          </div>
+            </div>
+          )}
+        </div>
+        {showScrollToBottom && (
+          <button
+            type="button"
+            className="absolute bottom-3 left-1/2 z-20 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 dark:bg-[#2f3134]/95"
+            onClick={() => {
+              shouldAutoScrollRef.current = true;
+              scrollMessagesToBottom("smooth");
+            }}
+            title="回到底部"
+            aria-label="回到底部"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
         )}
       </div>
 
@@ -1350,6 +1824,96 @@ export default function AiSidebar({ context, isAiConfigured, isOpen, onClose, wi
             className="max-h-36 min-h-20 w-full resize-none border-0 !bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/75 focus:!shadow-none"
           />
           <div className="flex items-center justify-between gap-2 px-1.5 pt-2 text-[11px] text-muted-foreground">
+            <div className="relative flex min-w-0 flex-1 items-center gap-2">
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex h-7 max-w-[70%] items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
+                  isModelPickerOpen && "bg-accent text-accent-foreground",
+                )}
+                onClick={() => {
+                  setIsModelPickerOpen((open) => !open);
+                  setIsProviderPickerOpen(false);
+                  setIsHistoryOpen(false);
+                }}
+                title={selectedModelLabel}
+                aria-label="选择当前模型"
+                aria-expanded={isModelPickerOpen}
+              >
+                <span className="truncate">模型：{selectedModelLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              </button>
+
+              {isModelPickerOpen && (
+                <div className="absolute bottom-9 left-0 z-40 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+                  <div className="grid gap-2 border-b border-border/70 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-xs font-medium text-foreground">
+                        {activeProvider ? activeProvider.name || activeProvider.id : "未选择配置组"}
+                      </span>
+                      <button
+                        type="button"
+                        className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        onClick={() => {
+                          setIsModelPickerOpen(false);
+                          onOpenAiSettings();
+                        }}
+                      >
+                        <Settings className="h-3 w-3" />
+                        API 管理
+                      </button>
+                    </div>
+                    {activeProviderModels.length > 6 && (
+                      <input
+                        value={modelSearch}
+                        onChange={(event) => setModelSearch(event.target.value)}
+                        placeholder="搜索模型"
+                        className="h-7 rounded-md border border-input bg-background/80 px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+                    {selectableModels.length > 0 ? (
+                      <div className="grid gap-0.5">
+                        {selectableModels.map((model) => {
+                          const isSelected = model.id === selectedModelId;
+                          return (
+                            <button
+                              key={model.id}
+                              type="button"
+                              className={cn(
+                                "grid min-w-0 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                                isSelected && "bg-accent text-accent-foreground",
+                              )}
+                              onClick={() => selectConversationModel(model)}
+                            >
+                              <span className="truncate text-sm font-medium">{model.name || model.id}</span>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {model.id} · {model.source === "manual" ? "手动" : "同步"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 px-3 py-7 text-center text-sm text-muted-foreground">
+                        <div>{activeProvider ? "当前配置组没有可用模型" : "未选择配置组"}</div>
+                        <button
+                          type="button"
+                          className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                          onClick={() => {
+                            setIsModelPickerOpen(false);
+                            onOpenAiSettings();
+                          }}
+                        >
+                          去设置中心同步或手动添加
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <span className="truncate">{inputValue.startsWith("/") ? "选择命令" : composerHint}</span>
             <button
               type="button"
