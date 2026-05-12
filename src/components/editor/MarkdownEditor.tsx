@@ -1,7 +1,7 @@
 ﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
-import { EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
-import { EditorState, Transaction } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
+import { EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { foldGutter } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -33,7 +33,8 @@ import { cn } from "@/lib/utils";
 interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
-  onSelectionChange?: (selectedText: string) => void;
+  aiContextSelectionRange?: MarkdownEditorSelectionRange | null;
+  onSelectionChange?: (selectedText: string, range: MarkdownEditorSelectionRange | null) => void;
   onPasteImage?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
   hideToolbar?: boolean;
@@ -44,6 +45,11 @@ interface MarkdownEditorProps {
 
 export interface MarkdownEditorScrollApi {
   scrollToRatio: (ratio: number) => void;
+}
+
+export interface MarkdownEditorSelectionRange {
+  from: number;
+  to: number;
 }
 
 interface MarkdownSnippet {
@@ -524,6 +530,41 @@ const markdownToolbarActionMap = new Map(
   markdownToolbarGroups.flatMap((group) => group.actions.map((action) => [action.id, action] as const)),
 );
 
+const setAiContextSelectionRange = StateEffect.define<MarkdownEditorSelectionRange | null>();
+
+const aiContextSelectionDecoration = Decoration.mark({
+  class: "cm-ai-context-selection",
+});
+
+const aiContextSelectionField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, transaction) {
+    let nextDecorations = decorations.map(transaction.changes);
+
+    for (const effect of transaction.effects) {
+      if (!effect.is(setAiContextSelectionRange)) continue;
+
+      const range = effect.value;
+      if (!range || range.from === range.to) {
+        nextDecorations = Decoration.none;
+        continue;
+      }
+
+      const docLength = transaction.state.doc.length;
+      const from = Math.max(0, Math.min(docLength, Math.min(range.from, range.to)));
+      const to = Math.max(0, Math.min(docLength, Math.max(range.from, range.to)));
+      nextDecorations = from === to ? Decoration.none : Decoration.set([
+        aiContextSelectionDecoration.range(from, to),
+      ]);
+    }
+
+    return nextDecorations;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 export function MarkdownEditorToolbar({
   disabled = false,
   zoomLabel,
@@ -575,6 +616,7 @@ export function MarkdownEditorToolbar({
 export default function MarkdownEditor({
   value,
   onChange,
+  aiContextSelectionRange,
   onSelectionChange,
   onPasteImage,
   onScroll,
@@ -763,9 +805,15 @@ export default function MarkdownEditor({
             if (update.selectionSet || update.docChanged) {
               const selection = update.state.selection.main;
               const selectedText = selection.empty ? "" : update.state.sliceDoc(selection.from, selection.to);
-              onSelectionChangeFn.current?.(selectedText);
+              const range = selection.empty ? null : {
+                from: Math.min(selection.from, selection.to),
+                to: Math.max(selection.from, selection.to),
+              };
+              onSelectionChangeFn.current?.(selectedText, range);
             }
           }),
+
+          aiContextSelectionField,
 
           // Override CodeMirror defaults so the editor fits the app dark theme.
           EditorView.theme({
@@ -827,6 +875,13 @@ export default function MarkdownEditor({
             ".cm-focused": { outline: "none" },
             "&.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "var(--accent)" },
             ".cm-selectionBackground": { backgroundColor: "var(--muted)" },
+            ".cm-ai-context-selection": {
+              backgroundColor: "color-mix(in oklch, var(--primary) 18%, transparent)",
+              borderRadius: "2px",
+            },
+            "&.cm-focused .cm-ai-context-selection": {
+              backgroundColor: "color-mix(in oklch, var(--primary) 13%, transparent)",
+            },
             ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
             ".cm-activeLine": { backgroundColor: "transparent" },
             ".cm-activeLineGutter": {
@@ -856,9 +911,19 @@ export default function MarkdownEditor({
       view.scrollDOM.removeEventListener("scroll", handleScroll);
       view.destroy();
       viewRef.current = null;
-      onSelectionChangeFn.current?.("");
+      onSelectionChangeFn.current?.("", null);
     };
   }, []);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+
+    view.dispatch({
+      effects: setAiContextSelectionRange.of(aiContextSelectionRange ?? null),
+      annotations: Transaction.addToHistory.of(false),
+    });
+  }, [aiContextSelectionRange]);
 
   useEffect(() => {
     const view = viewRef.current;

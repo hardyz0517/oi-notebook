@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import AiSidebar from "@/components/ai/AiSidebar";
 import type { AiSidebarNoteContext } from "@/components/ai/types";
-import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
+import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import { cn } from "@/lib/utils";
@@ -785,6 +785,7 @@ export default function App() {
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandleId | null>(null);
   const [editorSelectedText, setEditorSelectedText] = useState("");
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
+  const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
@@ -846,6 +847,12 @@ export default function App() {
       });
     });
   }, []);
+
+  useEffect(() => {
+    setEditorSelectedText("");
+    setEditorSelectedTextLength(null);
+    setAiContextSelectionRange(null);
+  }, [currentFilePath]);
 
   const beginColumnResize = useCallback((handleId: ResizeHandleId, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -6244,9 +6251,11 @@ export default function App() {
                   <MarkdownEditor
                     value={markdown}
                     onChange={handleEditorChange}
-                    onSelectionChange={(selectedText) => {
+                    aiContextSelectionRange={aiContextSelectionRange}
+                    onSelectionChange={(selectedText, range) => {
                       setEditorSelectedText(selectedText);
-                      setEditorSelectedTextLength(selectedText.length);
+                      setEditorSelectedTextLength(selectedText.length > 0 ? selectedText.length : null);
+                      setAiContextSelectionRange(range);
                     }}
                     onPasteImage={handlePasteImage}
                     onScroll={(r) => syncEditorPreviewScroll("editor", r)}
