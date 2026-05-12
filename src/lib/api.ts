@@ -212,6 +212,10 @@ export interface NoteTagSuggestion {
   reason: string;
 }
 
+export interface PolishedSelectedText {
+  polishedText: string;
+}
+
 export interface NoteChatHistoryMessage {
   role: "user" | "assistant";
   text: string;
@@ -692,6 +696,22 @@ export async function suggestNoteTags(
 ): Promise<NoteTagSuggestion> {
   try {
     return await invoke<NoteTagSuggestion>("suggest_note_tags", {
+      context,
+      providerId,
+      modelId,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function polishSelectedText(
+  context: NoteChatContextPayload,
+  providerId?: string,
+  modelId?: string,
+): Promise<PolishedSelectedText> {
+  try {
+    return await invoke<PolishedSelectedText>("polish_selected_text", {
       context,
       providerId,
       modelId,

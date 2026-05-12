@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import {
   Archive,
   ArrowDown,
@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
   openExternalUrl,
+  polishSelectedText,
   suggestNoteTags,
   startCurrentNoteChatStream,
   type AiConfig,
@@ -42,9 +43,10 @@ type AiChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
-  kind?: "text" | "tag-suggestion";
+  kind?: "text" | "tag-suggestion" | "polish-preview";
   commandId?: string;
   tagSuggestion?: TagSuggestionResult;
+  polishPreview?: PolishPreviewResult;
   state?: "done" | "loading" | "streaming" | "error";
   retryText?: string;
   retryDisplayText?: string;
@@ -52,6 +54,8 @@ type AiChatMessage = {
   requestId?: number;
   streamId?: string;
   retryContext?: NoteChatContextPayload;
+  retrySelectionRange?: TextRange | null;
+  retrySelectionStartLine?: number | null;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
@@ -65,6 +69,37 @@ type TagSuggestionResult = {
   applied?: boolean;
   ignored?: boolean;
   error?: string;
+};
+
+type TextRange = {
+  from: number;
+  to: number;
+};
+
+type PolishPreviewResult = {
+  previewId: string;
+  notePath: string;
+  originalText: string;
+  polishedText: string;
+  selectionRange: TextRange | null;
+  selectionStartLine?: number | null;
+  applied?: boolean;
+  ignored?: boolean;
+  error?: string;
+};
+
+type DiffSegment = {
+  text: string;
+  type: "context" | "delete" | "add";
+};
+
+type DiffRow = {
+  id: string;
+  type: "context" | "delete" | "add";
+  oldLine: number | null;
+  newLine: number | null;
+  text: string;
+  segments: DiffSegment[];
 };
 
 type AiConversation = {
@@ -96,6 +131,7 @@ type SlashCommand = {
   icon: ComponentType<{ className?: string }>;
   requiresNote?: boolean;
   requiresBody?: boolean;
+  requiresSelection?: boolean;
   requiresSelectionOrCursor?: boolean;
   mode: "readonly" | "preview" | "diff";
   implemented?: boolean;
@@ -118,8 +154,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "文档",
     icon: PenLine,
     requiresNote: true,
-    requiresSelectionOrCursor: true,
+    requiresSelection: true,
     mode: "preview",
+    implemented: true,
   },
   {
     id: "complete-tags",
@@ -196,6 +233,9 @@ const readIncludeCurrentNoteContextPreference = (): boolean => {
 const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteContext): string | null => {
   if (command.requiresNote && !context.filePath) return "需要先打开笔记";
   if (command.requiresBody && !context.hasBody) return "当前笔记还没有正文";
+  if (command.requiresSelection && context.selectionStatus !== "available") {
+    return "需要先选中文本";
+  }
   if (
     command.requiresSelectionOrCursor &&
     context.selectionStatus !== "available" &&
@@ -225,9 +265,227 @@ const getSelectionLabel = (context: AiSidebarNoteContext): string => {
 
 const getCompactPath = (path: string): string => path.replace(/\\/g, "/");
 
+const getFileNameFromPath = (path: string): string => {
+  const normalized = getCompactPath(path);
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || normalized || "未命名文件";
+};
+
 const truncateText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
   if (text.length <= maxChars) return { text, truncated: false };
   return { text: text.slice(0, maxChars), truncated: true };
+};
+
+const splitDiffLines = (text: string): string[] => {
+  if (!text) return [""];
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+};
+
+const tokenizeDiffLine = (text: string): string[] => {
+  const tokens = text.match(/(\s+|[A-Za-z0-9_]+|[\u4e00-\u9fff]+|.)/gu);
+  return tokens ?? [];
+};
+
+const buildTokenSegments = (
+  oldText: string,
+  newText: string,
+): { oldSegments: DiffSegment[]; newSegments: DiffSegment[] } => {
+  const oldTokens = tokenizeDiffLine(oldText);
+  const newTokens = tokenizeDiffLine(newText);
+  const rows = oldTokens.length;
+  const columns = newTokens.length;
+
+  if (rows * columns > 5000) {
+    return {
+      oldSegments: oldText ? [{ text: oldText, type: "delete" }] : [],
+      newSegments: newText ? [{ text: newText, type: "add" }] : [],
+    };
+  }
+
+  const table: number[][] = Array.from({ length: rows + 1 }, () => Array(columns + 1).fill(0));
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    for (let column = columns - 1; column >= 0; column -= 1) {
+      table[row][column] = oldTokens[row] === newTokens[column]
+        ? table[row + 1][column + 1] + 1
+        : Math.max(table[row + 1][column], table[row][column + 1]);
+    }
+  }
+
+  const oldSegments: DiffSegment[] = [];
+  const newSegments: DiffSegment[] = [];
+  let row = 0;
+  let column = 0;
+
+  const pushSegment = (target: DiffSegment[], segment: DiffSegment) => {
+    if (!segment.text) return;
+    const previous = target[target.length - 1];
+    if (previous?.type === segment.type) {
+      previous.text += segment.text;
+      return;
+    }
+    target.push(segment);
+  };
+
+  while (row < rows && column < columns) {
+    if (oldTokens[row] === newTokens[column]) {
+      pushSegment(oldSegments, { text: oldTokens[row], type: "context" });
+      pushSegment(newSegments, { text: newTokens[column], type: "context" });
+      row += 1;
+      column += 1;
+      continue;
+    }
+
+    if (table[row + 1][column] >= table[row][column + 1]) {
+      pushSegment(oldSegments, { text: oldTokens[row], type: "delete" });
+      row += 1;
+    } else {
+      pushSegment(newSegments, { text: newTokens[column], type: "add" });
+      column += 1;
+    }
+  }
+
+  while (row < rows) {
+    pushSegment(oldSegments, { text: oldTokens[row], type: "delete" });
+    row += 1;
+  }
+  while (column < columns) {
+    pushSegment(newSegments, { text: newTokens[column], type: "add" });
+    column += 1;
+  }
+
+  return { oldSegments, newSegments };
+};
+
+const getLineNumberAtOffset = (text: string, offset: number | null | undefined): number | null => {
+  if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0 || offset > text.length) return null;
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (text.charCodeAt(index) === 10) line += 1;
+  }
+  return line;
+};
+
+const buildUnifiedDiffRows = (oldText: string, newText: string, startLine = 1): DiffRow[] => {
+  const oldLines = splitDiffLines(oldText);
+  const newLines = splitDiffLines(newText);
+  const rows = oldLines.length;
+  const columns = newLines.length;
+  const tooLargeForFullDiff = rows * columns > 40000;
+  const operations: DiffRow[] = [];
+  const lineBase = Number.isFinite(startLine) && startLine > 0 ? Math.floor(startLine) : 1;
+
+  if (tooLargeForFullDiff) {
+    oldLines.forEach((line, index) => {
+      operations.push({
+        id: `delete-${index}`,
+        type: "delete",
+        oldLine: lineBase + index,
+        newLine: null,
+        text: line,
+        segments: line ? [{ text: line, type: "delete" }] : [],
+      });
+    });
+    newLines.forEach((line, index) => {
+      operations.push({
+        id: `add-${index}`,
+        type: "add",
+        oldLine: null,
+        newLine: lineBase + index,
+        text: line,
+        segments: line ? [{ text: line, type: "add" }] : [],
+      });
+    });
+    return operations;
+  }
+
+  const table: number[][] = Array.from({ length: rows + 1 }, () => Array(columns + 1).fill(0));
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    for (let column = columns - 1; column >= 0; column -= 1) {
+      table[row][column] = oldLines[row] === newLines[column]
+        ? table[row + 1][column + 1] + 1
+        : Math.max(table[row + 1][column], table[row][column + 1]);
+    }
+  }
+
+  let oldIndex = 0;
+  let newIndex = 0;
+  let sequence = 0;
+  const pushRow = (row: Omit<DiffRow, "id" | "segments"> & { segments?: DiffSegment[] }) => {
+    operations.push({
+      ...row,
+      id: `${row.type}-${sequence}`,
+      segments: row.segments ?? (row.text ? [{ text: row.text, type: "context" }] : []),
+    });
+    sequence += 1;
+  };
+
+  while (oldIndex < rows && newIndex < columns) {
+    if (oldLines[oldIndex] === newLines[newIndex]) {
+      pushRow({
+        type: "context",
+        oldLine: lineBase + oldIndex,
+        newLine: lineBase + newIndex,
+        text: oldLines[oldIndex],
+      });
+      oldIndex += 1;
+      newIndex += 1;
+      continue;
+    }
+
+    if (table[oldIndex + 1][newIndex] >= table[oldIndex][newIndex + 1]) {
+      pushRow({
+        type: "delete",
+        oldLine: lineBase + oldIndex,
+        newLine: null,
+        text: oldLines[oldIndex],
+        segments: oldLines[oldIndex] ? [{ text: oldLines[oldIndex], type: "delete" }] : [],
+      });
+      oldIndex += 1;
+    } else {
+      pushRow({
+        type: "add",
+        oldLine: null,
+        newLine: lineBase + newIndex,
+        text: newLines[newIndex],
+        segments: newLines[newIndex] ? [{ text: newLines[newIndex], type: "add" }] : [],
+      });
+      newIndex += 1;
+    }
+  }
+
+  while (oldIndex < rows) {
+    pushRow({
+      type: "delete",
+      oldLine: lineBase + oldIndex,
+      newLine: null,
+      text: oldLines[oldIndex],
+      segments: oldLines[oldIndex] ? [{ text: oldLines[oldIndex], type: "delete" }] : [],
+    });
+    oldIndex += 1;
+  }
+
+  while (newIndex < columns) {
+    pushRow({
+      type: "add",
+      oldLine: null,
+      newLine: lineBase + newIndex,
+      text: newLines[newIndex],
+      segments: newLines[newIndex] ? [{ text: newLines[newIndex], type: "add" }] : [],
+    });
+    newIndex += 1;
+  }
+
+  for (let index = 0; index < operations.length - 1; index += 1) {
+    const current = operations[index];
+    const next = operations[index + 1];
+    if (current.type === "delete" && next.type === "add") {
+      const { oldSegments, newSegments } = buildTokenSegments(current.text, next.text);
+      current.segments = oldSegments;
+      next.segments = newSegments;
+    }
+  }
+
+  return operations;
 };
 
 const normalizeTagValue = (tag: string): string => tag.trim().replace(/\s+/g, " ");
@@ -315,6 +573,36 @@ const getTagSuggestionErrorMessage = (error: unknown): string => {
   return "标签建议生成失败，请重试。";
 };
 
+const getPolishSelectionErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detailStart = message.indexOf("; debug=");
+  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
+  const normalized = scopedMessage.replace(/^AI selection polish failed:\s*/i, "").trim();
+
+  if (
+    message.includes("base_url is missing") ||
+    message.includes("api_key is missing") ||
+    message.includes("model is missing")
+  ) {
+    return "AI 还没有配置完整，请先在设置里填写 base_url / api_key / model。";
+  }
+  if (message.includes("selected provider does not exist") || message.includes("selected provider is disabled")) {
+    return "当前配置组不可用，请重新选择模型。";
+  }
+  if (message.includes("selected model does not exist")) {
+    return "当前模型不可用，请重新选择模型。";
+  }
+  if (message.includes("request timed out")) return "润色请求超时，请重试。";
+  if (message.includes("network error")) return "无法连接 AI 服务，请检查配置和网络。";
+  if (normalized.includes("response JSON parse failed") || normalized.includes("polishedText")) {
+    return "润色结果解析失败，请重试。";
+  }
+  if (normalized.includes("selected text is empty")) return "请先在编辑器中选中一段需要润色的文字。";
+  if (normalized.includes("HTTP ")) return "AI 服务返回错误响应，请检查配置后重试。";
+  if (normalized) return normalized;
+  return "润色选中内容失败，请重试。";
+};
+
 const createConversationId = (): string =>
   `conv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -377,6 +665,40 @@ const sanitizeTagSuggestionForStorage = (value: unknown): TagSuggestionResult | 
   };
 };
 
+const sanitizeTextRangeForStorage = (value: unknown): TextRange | null => {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Partial<TextRange>;
+  if (typeof item.from !== "number" || typeof item.to !== "number") return null;
+  if (!Number.isFinite(item.from) || !Number.isFinite(item.to)) return null;
+  return { from: item.from, to: item.to };
+};
+
+const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Partial<PolishPreviewResult>;
+  if (typeof item.previewId !== "string") return undefined;
+  if (typeof item.notePath !== "string") return undefined;
+  if (typeof item.originalText !== "string") return undefined;
+  if (typeof item.polishedText !== "string") return undefined;
+  const selectionStartLine = typeof item.selectionStartLine === "number" &&
+    Number.isFinite(item.selectionStartLine) &&
+    item.selectionStartLine > 0
+    ? Math.floor(item.selectionStartLine)
+    : null;
+
+  return {
+    previewId: item.previewId,
+    notePath: item.notePath,
+    originalText: item.originalText,
+    polishedText: item.polishedText,
+    selectionRange: sanitizeTextRangeForStorage(item.selectionRange),
+    selectionStartLine,
+    applied: item.applied === true,
+    ignored: item.ignored === true,
+    error: typeof item.error === "string" ? item.error : undefined,
+  };
+};
+
 const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] =>
   messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => ({
     id: message.id,
@@ -385,11 +707,18 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     kind: message.kind,
     commandId: message.commandId,
     tagSuggestion: sanitizeTagSuggestionForStorage(message.tagSuggestion),
+    polishPreview: sanitizePolishPreviewForStorage(message.polishPreview),
     state: message.state === "error" ? "error" : "done",
     retryText: message.retryText,
     retryDisplayText: message.retryDisplayText,
     retryCommandId: message.retryCommandId,
     requestId: message.requestId,
+    retrySelectionRange: sanitizeTextRangeForStorage(message.retrySelectionRange),
+    retrySelectionStartLine: typeof message.retrySelectionStartLine === "number" &&
+      Number.isFinite(message.retrySelectionStartLine) &&
+      message.retrySelectionStartLine > 0
+      ? Math.floor(message.retrySelectionStartLine)
+      : null,
     startedAt: message.startedAt,
     finishedAt: message.finishedAt,
     elapsedMs: message.elapsedMs,
@@ -930,6 +1259,174 @@ function TagSuggestionCard({
   );
 }
 
+function DiffPreview({
+  title,
+  filePath,
+  status,
+  statusTone = "neutral",
+  oldText,
+  newText,
+  startLine,
+  actions,
+}: {
+  title: string;
+  filePath: string;
+  status?: string;
+  statusTone?: "neutral" | "warning";
+  oldText: string;
+  newText: string;
+  startLine?: number | null;
+  actions?: ReactNode;
+}) {
+  const effectiveStartLine = typeof startLine === "number" && Number.isFinite(startLine) && startLine > 0
+    ? Math.floor(startLine)
+    : 1;
+  const rows = useMemo(
+    () => buildUnifiedDiffRows(oldText, newText, effectiveStartLine),
+    [effectiveStartLine, oldText, newText],
+  );
+  const addedRows = rows.filter((row) => row.type === "add").length;
+  const deletedRows = rows.filter((row) => row.type === "delete").length;
+  const fileName = getFileNameFromPath(filePath);
+  const oldLineCount = splitDiffLines(oldText).length;
+  const newLineCount = splitDiffLines(newText).length;
+  const hunkHeader = `@@ -${effectiveStartLine},${oldLineCount} +${effectiveStartLine},${newLineCount} @@`;
+
+  const renderSegments = (row: DiffRow) => {
+    if (row.segments.length === 0) return <span>&nbsp;</span>;
+    return row.segments.map((segment, index) => (
+      <span
+        key={`${row.id}-segment-${index}`}
+        className={cn(
+          segment.type === "delete" && "rounded-sm bg-red-500/20 text-red-950 dark:bg-red-400/25 dark:text-red-50",
+          segment.type === "add" && "rounded-sm bg-emerald-500/20 text-emerald-950 dark:bg-emerald-400/25 dark:text-emerald-50",
+        )}
+      >
+        {segment.text}
+      </span>
+    ));
+  };
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/45 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-sm font-medium leading-5 text-foreground">{title}</div>
+            {status && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-4",
+                  statusTone === "warning"
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                    : "bg-background/80 text-muted-foreground dark:bg-white/[0.08]",
+                )}
+              >
+                {status}
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] leading-4 text-muted-foreground">
+            <span className="truncate" title={filePath}>{fileName}</span>
+            <span className="shrink-0 text-emerald-700 dark:text-emerald-300">+{addedRows}</span>
+            <span className="shrink-0 text-red-700 dark:text-red-300">-{deletedRows}</span>
+          </div>
+        </div>
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      </div>
+
+      <div className="max-h-72 overflow-auto bg-background font-mono text-[11px] leading-5 dark:bg-zinc-950">
+        <div className="min-w-max border-b border-border/40 bg-muted/35 px-3 py-1 text-muted-foreground dark:border-white/[0.06] dark:bg-white/[0.03]">
+          {hunkHeader}
+        </div>
+        {rows.map((row) => (
+          <div
+            key={row.id}
+            className={cn(
+              "grid min-w-max grid-cols-[3rem_3rem_1.5rem_minmax(0,1fr)] border-b border-border/35 last:border-b-0 dark:border-white/[0.06]",
+              row.type === "delete" && "bg-red-500/[0.08] dark:bg-red-400/[0.10]",
+              row.type === "add" && "bg-emerald-500/[0.08] dark:bg-emerald-400/[0.10]",
+              row.type === "context" && "bg-background dark:bg-zinc-950",
+            )}
+          >
+            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
+              {row.oldLine ?? ""}
+            </div>
+            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
+              {row.newLine ?? ""}
+            </div>
+            <div
+              className={cn(
+                "select-none px-1 text-center font-semibold",
+                row.type === "delete" && "text-red-700 dark:text-red-300",
+                row.type === "add" && "text-emerald-700 dark:text-emerald-300",
+                row.type === "context" && "text-muted-foreground/60",
+              )}
+            >
+              {row.type === "delete" ? "-" : row.type === "add" ? "+" : " "}
+            </div>
+            <pre className="m-0 whitespace-pre-wrap break-words px-2 py-0.5 text-foreground">
+              {renderSegments(row)}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PolishPreviewCard({
+  preview,
+  isApplying,
+  onApply,
+  onIgnore,
+}: {
+  preview: PolishPreviewResult;
+  isApplying: boolean;
+  onApply: () => void;
+  onIgnore: () => void;
+}) {
+  const statusText = preview.applied
+    ? "已应用"
+    : preview.ignored
+      ? "已取消"
+      : preview.error || "未应用";
+
+  const actions = !preview.applied && !preview.ignored ? (
+    <>
+      <button
+        type="button"
+        className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-55"
+        onClick={onIgnore}
+        disabled={isApplying}
+      >
+        取消
+      </button>
+      <button
+        type="button"
+        className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
+        onClick={onApply}
+        disabled={isApplying || !preview.polishedText.trim()}
+      >
+        {isApplying ? "应用中..." : "应用到选区"}
+      </button>
+    </>
+  ) : undefined;
+
+  return (
+    <DiffPreview
+      title="润色预览"
+      filePath={preview.notePath}
+      status={statusText}
+      statusTone={preview.error ? "warning" : "neutral"}
+      oldText={preview.originalText}
+      newText={preview.polishedText}
+      startLine={preview.selectionStartLine}
+      actions={actions}
+    />
+  );
+}
+
 export default function AiSidebar({
   context,
   isAiConfigured,
@@ -939,6 +1436,7 @@ export default function AiSidebar({
   aiConfig,
   onOpenAiSettings,
   onApplySuggestedTags,
+  onApplyPolishedSelection,
 }: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
@@ -965,6 +1463,7 @@ export default function AiSidebar({
   const [isResponding, setIsResponding] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   const [applyingTagMessageId, setApplyingTagMessageId] = useState<string | null>(null);
+  const [applyingPolishMessageId, setApplyingPolishMessageId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1439,6 +1938,20 @@ export default function AiSidebar({
     });
   };
 
+  const updatePolishPreviewMessage = (
+    conversationId: string,
+    messageId: string,
+    updater: (preview: PolishPreviewResult) => PolishPreviewResult,
+  ) => {
+    replaceMessage(conversationId, messageId, (message) => {
+      if (!message.polishPreview) return message;
+      return {
+        ...message,
+        polishPreview: updater(message.polishPreview),
+      };
+    });
+  };
+
   const buildSummarizePrompt = (): string => [
     "请执行只读 slash command：/总结本文。",
     "",
@@ -1580,6 +2093,140 @@ export default function AiSidebar({
     }
   };
 
+  const submitPolishSelectionCommand = async (
+    originalText: string,
+    selectionRange: TextRange | null,
+    displayText = "/润色选中",
+    selectionStartLine?: number | null,
+  ) => {
+    if (isResponding) return;
+
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
+    if (!context.filePath) {
+      appendCommandNotice(conversationId, displayText, "请先打开一篇笔记。");
+      return;
+    }
+
+    if (!originalText.trim()) {
+      appendCommandNotice(conversationId, displayText, "请先在编辑器中选中一段需要润色的文字。");
+      return;
+    }
+
+    if (!isAiConfigured) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
+      );
+      setInputValue("");
+      return;
+    }
+    if (!selectedProviderId || !selectedModelId) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({
+          role: "system",
+          text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
+          state: "done",
+        }),
+      );
+      setInputValue("");
+      return;
+    }
+
+    const chatContext: NoteChatContextPayload = {
+      noteTitle: context.title,
+      notePath: context.filePath,
+      tags: context.tags,
+      summary: context.summary.trim(),
+      selectedText: originalText,
+      markdown: "",
+      markdownTruncated: false,
+    };
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const startedAt = Date.now();
+    const previewId = `polish-${Date.now().toString(36)}-${requestId}`;
+    const previewStartLine = selectionStartLine ?? getLineNumberAtOffset(context.markdownBody, selectionRange?.from);
+    const userMessage = createMessage({ role: "user", text: displayText, state: "done" });
+    const assistantMessage = createMessage({
+      role: "assistant",
+      text: "正在生成润色预览...",
+      kind: "polish-preview",
+      commandId: "polish-selection",
+      state: "loading",
+      retryText: "polish-selection",
+      retryDisplayText: displayText,
+      retryCommandId: "polish-selection",
+      retryContext: chatContext,
+      retrySelectionRange: selectionRange,
+      retrySelectionStartLine: previewStartLine,
+      requestId,
+      startedAt,
+    });
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(conversationId, userMessage, assistantMessage);
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+    setIsResponding(true);
+
+    try {
+      const result = await polishSelectedText(chatContext, selectedProviderId, selectedModelId);
+      const polishedText = result.polishedText;
+      if (!polishedText.trim()) {
+        throw new Error("AI selection polish failed: polishedText was empty");
+      }
+
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: "润色预览已生成。",
+        kind: "polish-preview",
+        polishPreview: {
+          previewId,
+          notePath: context.filePath ?? chatContext.notePath,
+          originalText,
+          polishedText,
+          selectionRange,
+          selectionStartLine: previewStartLine,
+        },
+        state: "done",
+        retryText: undefined,
+        retryDisplayText: undefined,
+        retryCommandId: undefined,
+        retryContext: undefined,
+        retrySelectionRange: undefined,
+        retrySelectionStartLine: undefined,
+        ...finishAssistantTiming(message),
+      }));
+    } catch (error) {
+      console.warn("AI selection polish request failed", {
+        requestId,
+        notePath: chatContext.notePath,
+        error,
+      });
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: getPolishSelectionErrorMessage(error),
+        kind: "text",
+        state: "error",
+        ...finishAssistantTiming(message),
+      }));
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
   const executeSlashCommand = (command: SlashCommand) => {
     const conversationId = activeConversation?.id;
     if (!conversationId) return;
@@ -1597,6 +2244,24 @@ export default function AiSidebar({
       }
       const chatContext = buildChatContext({ includeNoteContext: true });
       void submitTagSuggestionCommand(chatContext, commandText);
+      return;
+    }
+
+    if (command.id === "polish-selection") {
+      if (!context.filePath) {
+        appendCommandNotice(conversationId, commandText, "请先打开一篇笔记。");
+        return;
+      }
+      if (context.selectionStatus !== "available" || !context.selectedText.trim()) {
+        appendCommandNotice(conversationId, commandText, "请先在编辑器中选中一段需要润色的文字。");
+        return;
+      }
+      void submitPolishSelectionCommand(
+        context.selectedText,
+        context.selectedTextRange,
+        commandText,
+        getLineNumberAtOffset(context.markdownBody, context.selectedTextRange?.from),
+      );
       return;
     }
 
@@ -1784,6 +2449,46 @@ export default function AiSidebar({
     const conversationId = activeConversation?.id;
     if (!conversationId || !message.tagSuggestion) return;
     updateTagSuggestionMessage(conversationId, message.id, (current) => ({
+      ...current,
+      ignored: true,
+      error: undefined,
+    }));
+  };
+
+  const applyPolishPreview = async (message: AiChatMessage) => {
+    const conversationId = activeConversation?.id;
+    const preview = message.polishPreview;
+    if (!conversationId || !preview || applyingPolishMessageId) return;
+
+    setApplyingPolishMessageId(message.id);
+    updatePolishPreviewMessage(conversationId, message.id, (current) => ({ ...current, error: undefined }));
+    try {
+      await onApplyPolishedSelection({
+        notePath: preview.notePath,
+        originalText: preview.originalText,
+        polishedText: preview.polishedText,
+        selectionRange: preview.selectionRange,
+      });
+      updatePolishPreviewMessage(conversationId, message.id, (current) => ({
+        ...current,
+        applied: true,
+        ignored: false,
+        error: undefined,
+      }));
+    } catch (error) {
+      updatePolishPreviewMessage(conversationId, message.id, (current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setApplyingPolishMessageId(null);
+    }
+  };
+
+  const ignorePolishPreview = (message: AiChatMessage) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !message.polishPreview) return;
+    updatePolishPreviewMessage(conversationId, message.id, (current) => ({
       ...current,
       ignored: true,
       error: undefined,
@@ -2243,6 +2948,13 @@ export default function AiSidebar({
                           onApply={() => void applyTagSuggestion(message)}
                           onIgnore={() => ignoreTagSuggestion(message)}
                         />
+                      ) : message.kind === "polish-preview" && message.polishPreview ? (
+                        <PolishPreviewCard
+                          preview={message.polishPreview}
+                          isApplying={applyingPolishMessageId === message.id}
+                          onApply={() => void applyPolishPreview(message)}
+                          onIgnore={() => ignorePolishPreview(message)}
+                        />
                       ) : (
                         <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
                       )}
@@ -2254,6 +2966,15 @@ export default function AiSidebar({
                             if (isResponding) return;
                             if (message.retryCommandId === "complete-tags") {
                               void submitTagSuggestionCommand(message.retryContext, message.retryDisplayText);
+                              return;
+                            }
+                            if (message.retryCommandId === "polish-selection" && message.retryContext) {
+                              void submitPolishSelectionCommand(
+                                message.retryContext.selectedText,
+                                message.retrySelectionRange ?? null,
+                                message.retryDisplayText,
+                                message.retrySelectionStartLine ?? null,
+                              );
                               return;
                             }
                             void submitQuestion(message.retryText ?? "", message.retryContext, message.retryDisplayText);

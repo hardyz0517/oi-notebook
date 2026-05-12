@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import AiSidebar from "@/components/ai/AiSidebar";
-import type { AiSidebarNoteContext } from "@/components/ai/types";
+import type { AiSidebarNoteContext, ApplyPolishedSelectionInput } from "@/components/ai/types";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
@@ -1487,6 +1487,7 @@ export default function App() {
       summary: hasOpenNote ? frontmatter.fields.summary : "",
       selectedText: hasOpenNote ? editorSelectedText : "",
       selectedTextLength: hasOpenNote ? editorSelectedTextLength : null,
+      selectedTextRange: hasOpenNote ? aiContextSelectionRange : null,
       selectionStatus: hasOpenNote
         ? editorSelectedTextLength && editorSelectedTextLength > 0
           ? "available"
@@ -1498,7 +1499,7 @@ export default function App() {
       currentParagraphIsCode: currentParagraphContext?.isCode ?? false,
       markdownBody: hasOpenNote ? markdown : "",
     };
-  }, [activeNoteFile, currentFilePath, currentParagraphContext, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
+  }, [activeNoteFile, aiContextSelectionRange, currentFilePath, currentParagraphContext, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
   const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
@@ -2980,6 +2981,68 @@ export default function App() {
     const nextTags = mergeTagsStable(frontmatter.fields.tags, suggestedTags);
     if (nextTags.length === frontmatter.fields.tags.length) return;
     updateFrontmatter({ tags: nextTags });
+  };
+
+  const handleApplyPolishedSelection = async ({
+    notePath,
+    originalText,
+    polishedText,
+    selectionRange,
+  }: ApplyPolishedSelectionInput) => {
+    if (!currentFilePath || currentFilePath !== notePath) {
+      throw new Error("原选区已经变化，请重新选择文本后再润色。");
+    }
+    if (!originalText || !polishedText) {
+      throw new Error("原选区已经变化，请重新选择文本后再润色。");
+    }
+
+    let from: number | null = null;
+    let to: number | null = null;
+    if (
+      selectionRange &&
+      Number.isFinite(selectionRange.from) &&
+      Number.isFinite(selectionRange.to) &&
+      selectionRange.from >= 0 &&
+      selectionRange.to >= selectionRange.from &&
+      selectionRange.to <= markdown.length &&
+      markdown.slice(selectionRange.from, selectionRange.to) === originalText
+    ) {
+      from = selectionRange.from;
+      to = selectionRange.to;
+    }
+
+    if (from === null || to === null) {
+      const currentRange = aiContextSelectionRange;
+      if (
+        currentRange &&
+        currentRange.from >= 0 &&
+        currentRange.to >= currentRange.from &&
+        currentRange.to <= markdown.length &&
+        markdown.slice(currentRange.from, currentRange.to) === originalText
+      ) {
+        from = currentRange.from;
+        to = currentRange.to;
+      }
+    }
+
+    if (from === null || to === null) {
+      const firstIndex = markdown.indexOf(originalText);
+      const lastIndex = markdown.lastIndexOf(originalText);
+      if (firstIndex >= 0 && firstIndex === lastIndex) {
+        from = firstIndex;
+        to = firstIndex + originalText.length;
+      }
+    }
+
+    if (from === null || to === null) {
+      throw new Error("原选区已经变化，请重新选择文本后再润色。");
+    }
+
+    const nextMarkdown = `${markdown.slice(0, from)}${polishedText}${markdown.slice(to)}`;
+    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, nextMarkdown);
+    setMarkdown(nextMarkdown);
+    setIsDirty(nextDirty);
+    toast.success("润色内容已应用到选区，请确认后保存");
   };
 
   const handleGenerateNoteMetadata = async () => {
@@ -6571,6 +6634,7 @@ export default function App() {
           aiConfig={aiConfig}
           onOpenAiSettings={() => void openAiSettings()}
           onApplySuggestedTags={handleApplyAiSuggestedTags}
+          onApplyPolishedSelection={handleApplyPolishedSelection}
         />
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">

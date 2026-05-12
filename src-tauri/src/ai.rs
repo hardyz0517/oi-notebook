@@ -86,6 +86,12 @@ pub struct NoteTagSuggestion {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PolishedSelectedText {
+    pub polished_text: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteChatContextInput {
@@ -1560,6 +1566,25 @@ fn validate_note_tag_suggestion(
     })
 }
 
+fn validate_polished_selected_text(
+    value: JsonValue,
+    scope: &str,
+) -> Result<PolishedSelectedText, String> {
+    let polished_text = value
+        .get("polishedText")
+        .and_then(JsonValue::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{scope}: response JSON schema failed: polishedText was missing or empty; json_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })?
+        .to_string();
+
+    Ok(PolishedSelectedText { polished_text })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -1827,6 +1852,95 @@ pub async fn suggest_note_tags(
     })
     .await
     .map_err(|e| format!("AI tag suggestion failed: task join failed: {e}"))?
+}
+
+fn polish_selected_text_blocking(
+    context: NoteChatContextInput,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<PolishedSelectedText, String> {
+    let selected_text = context.selected_text.trim();
+    if selected_text.is_empty() {
+        return Err("AI selection polish failed: selected text is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let resolved = resolve_ai_config(
+        &config,
+        provider_id.as_deref(),
+        model_id.as_deref(),
+    )?;
+    require_resolved_ai_config(&resolved)?;
+    let selected_config = config_from_resolved(resolved.clone());
+
+    let tags_text = if context.tags.is_empty() {
+        "Not provided".to_string()
+    } else {
+        context
+            .tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let summary_text = if context.summary.trim().is_empty() {
+        "Not provided".to_string()
+    } else {
+        context.summary.trim().to_string()
+    };
+    let note_title = if context.note_title.trim().is_empty() {
+        "Not provided"
+    } else {
+        context.note_title.trim()
+    };
+
+    let user_prompt = format!(
+        "Polish the selected text from an OI / competitive programming Markdown note.\n\
+Only polish the selected text. Do not modify the note title, tags, summary, path, or frontmatter.\n\
+Return only strict JSON. Do not use markdown code fences. Do not add an explanation.\n\
+The JSON schema must be: {{\"polishedText\":\"...\"}}\n\n\
+Writing requirements:\n\
+- Preserve the original meaning, terms, formulas, Markdown structure, and links.\n\
+- If the selection contains fenced code blocks or inline code, keep code content unchanged by default.\n\
+- You may polish prose around code blocks, but do not rewrite code logic.\n\
+- If the original text is already clear, make only light improvements.\n\
+- Do not add a title or extra sections unless they already exist in the selected text.\n\n\
+Light note context:\n\
+Title: {note_title}\n\
+Tags: {tags_text}\n\
+Summary: {summary_text}\n\n\
+Selected text:\n{selected_text}"
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": format!(
+                "Return only strict JSON with a polishedText field. Do not claim that files were modified. Do not force a fixed assistant identity.\n\n{}",
+                build_model_identity_context(&resolved)
+            )
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion(&selected_config, messages, 0.2, "AI selection polish failed")?;
+    let value = parse_json_object_from_ai_content(&content, "AI selection polish failed")?;
+    validate_polished_selected_text(value, "AI selection polish failed")
+}
+
+#[tauri::command]
+pub async fn polish_selected_text(
+    context: NoteChatContextInput,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<PolishedSelectedText, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        polish_selected_text_blocking(context, provider_id, model_id)
+    })
+    .await
+    .map_err(|e| format!("AI selection polish failed: task join failed: {e}"))?
 }
 
 #[tauri::command]
