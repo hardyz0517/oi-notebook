@@ -1,19 +1,19 @@
 ---
-title: "Post Navigation Test Draft"
+title: Post Navigation Test Draft
 tags:
-  - navigation
-  - toc
-  - blog-test
-difficulty: "test"
-source: "manual-test"
-created: "2026-05-03T12:05:00+08:00"
-updated: "2026-05-03T12:05:00+08:00"
-summary: "Tracked draft note for testing post ordering, previous/next links, TOC, code, and math."
+- navigation
+- toc
+- blog-test
+difficulty: test
+source: manual-test
+created: 2026-05-03T12:05:00+08:00
+updated: 2026-05-13T18:46:04.407144900+08:00
+summary: Tracked draft note for testing post ordering, previous/next links, TOC, code, and math.
 draft: true
 ---
 
 ## Test Purpose
-
+123
 This draft note is intentionally created for checking post navigation and article layout. It is not a real competitive programming note.
 
 ### Previous And Next Links
