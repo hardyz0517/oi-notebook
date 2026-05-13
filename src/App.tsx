@@ -2,8 +2,7 @@
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, ChevronRight, Download, ExternalLink, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
+import { Bot, ChevronRight, Columns2, Download, ExternalLink, Eye, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,6 +52,7 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 普通写笔记和本地博客不需要配置 AI 或洛谷；这些能力可以等你熟悉后再打开。
 `;
 
+const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
 const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
 const THEME_STORAGE_KEY = "oi-notebook.theme";
@@ -1399,38 +1399,40 @@ export default function App() {
   const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
   const showEditorPane = editorViewMode !== "preview";
   const showPreviewPane = editorViewMode !== "editor";
+  const editorViewModeButtons: Array<{
+    id: EditorViewMode;
+    label: string;
+    icon: typeof Columns2;
+  }> = [
+    { id: "split", label: "双栏", icon: Columns2 },
+    { id: "editor", label: "仅编辑", icon: SquarePen },
+    { id: "preview", label: "仅预览", icon: Eye },
+  ];
   const editorViewModeSwitcher = (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        variant={editorViewMode === "split" ? "secondary" : "ghost"}
-        size="sm"
-        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
-        onClick={() => setEditorViewMode("split")}
-        aria-pressed={editorViewMode === "split"}
-      >
-        双栏
-      </Button>
-      <Button
-        type="button"
-        variant={editorViewMode === "editor" ? "secondary" : "ghost"}
-        size="sm"
-        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
-        onClick={() => setEditorViewMode("editor")}
-        aria-pressed={editorViewMode === "editor"}
-      >
-        仅编辑
-      </Button>
-      <Button
-        type="button"
-        variant={editorViewMode === "preview" ? "secondary" : "ghost"}
-        size="sm"
-        className="h-6 px-2 text-[10px] font-medium text-muted-foreground"
-        onClick={() => setEditorViewMode("preview")}
-        aria-pressed={editorViewMode === "preview"}
-      >
-        仅预览
-      </Button>
+    <div className="editor-view-mode-switcher flex items-center gap-1" aria-label="编辑器视图模式">
+      {editorViewModeButtons.map((mode) => {
+        const Icon = mode.icon;
+        const isActive = editorViewMode === mode.id;
+
+        return (
+          <Button
+            key={mode.id}
+            type="button"
+            variant={isActive ? "secondary" : "ghost"}
+            size="icon"
+            className={cn(
+              "editor-view-mode-button h-7 w-7 text-muted-foreground",
+              isActive && "editor-view-mode-button-active text-foreground",
+            )}
+            onClick={() => setEditorViewMode(mode.id)}
+            aria-pressed={isActive}
+            aria-label={mode.label}
+            title={mode.label}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        );
+      })}
     </div>
   );
   const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
@@ -6349,52 +6351,22 @@ export default function App() {
     </Dialog>
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
-      <header className="app-top-toolbar flex min-h-12 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-4 py-2">
-        <div className="flex min-w-0 items-center gap-3" data-tauri-drag-region>
-          <div className="grid shrink-0 gap-0.5">
-            <span className="toolbar-primary-text font-semibold tracking-wide text-foreground">OI Notebook</span>
-            <span className="toolbar-secondary-text text-muted-foreground">桌面工作区</span>
-          </div>
-          <Separator orientation="vertical" className="hidden h-7 sm:block" />
-          <div className="grid min-w-0 gap-0.5">
-            <span className="toolbar-primary-text truncate text-foreground">{currentFilePath ?? "未选择文件"}</span>
-            <span
-              className={cn(
-                "toolbar-secondary-text truncate text-muted-foreground",
-                isDirty && !isSavingNote && "text-amber-300",
-              )}
-              title={saveStatusLabel}
-            >
-              保存状态：{saveStatusLabel}
+      <header className="app-top-toolbar flex min-h-10 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-2.5" data-tauri-drag-region>
+          <div className="flex h-7 min-w-0 items-center">
+            <span className="app-brand-mark grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border/70 bg-muted/35">
+              <img
+                src={APP_ICON_URL}
+                alt=""
+                className="h-5 w-5 object-contain"
+                draggable={false}
+                aria-hidden="true"
+              />
             </span>
           </div>
         </div>
         <div className="min-w-4 flex-1 self-stretch" data-tauri-drag-region />
         <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2"
-            onClick={openCreateDialog}
-            title="新建笔记"
-            aria-label="新建笔记"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            新建
-          </Button>
-          <Button
-            variant={isDirty ? "default" : "outline"}
-            size="sm"
-            className="h-7 gap-1.5 px-2"
-            onClick={handleSaveCurrentNote}
-            disabled={!currentFilePath || !isDirty || isSavingNote}
-            title={saveStatusLabel}
-            aria-label={isDirty ? "保存当前笔记" : "当前笔记已保存"}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {isDirty ? "保存" : "已保存"}
-          </Button>
-          <Separator orientation="vertical" className="mx-1 h-6" />
           <div className="flex items-center" aria-label="窗口控制">
             <button
               type="button"
@@ -6556,7 +6528,7 @@ export default function App() {
           </>
         )}
 
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <section className="app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden">
           <OpenTabsBar
             tabs={workspaceTabs}
             activeTabId={activeWorkspaceTabId ?? currentFilePath}
@@ -7065,12 +7037,26 @@ export default function App() {
           onPolishReviewChange={handlePolishReviewChange}
         />
       </div>
-      <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
+      <footer className="app-status-bar shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <span className={cn("whitespace-nowrap", isDirty && !isSavingNote && "text-amber-300")}>
+            <button
+              type="button"
+              className={cn(
+                "inline-flex h-5 items-center gap-1 rounded px-1.5 transition-colors",
+                isDirty && !isSavingNote
+                  ? "text-amber-300 hover:bg-amber-400/10 hover:text-amber-200"
+                  : "cursor-default text-muted-foreground",
+                (!currentFilePath || !isDirty || isSavingNote) && "pointer-events-none",
+              )}
+              onClick={handleSaveCurrentNote}
+              disabled={!currentFilePath || !isDirty || isSavingNote}
+              title={isDirty ? "保存当前笔记" : saveStatusLabel}
+              aria-label={isDirty ? "保存当前笔记" : saveStatusLabel}
+            >
+              <Save className="h-3 w-3" aria-hidden="true" />
               保存：{saveStatusLabel}
-            </span>
+            </button>
             <span className="whitespace-nowrap">类型：Markdown</span>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

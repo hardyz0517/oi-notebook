@@ -49,8 +49,8 @@ export default function OpenTabsBar({
   }
 
   return (
-    <div className="flex h-9 shrink-0 items-end overflow-hidden border-b border-border/80 bg-muted/20">
-      <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden open-tabs-scrollbar">
+    <div className="open-tabs-bar flex h-9 shrink-0 items-end overflow-hidden border-b border-border/80 bg-muted/20">
+      <div className="open-tabs-scrollbar flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {tabs.map((tab) => {
           const tabId = tab.kind === "file" ? tab.path : tab.id;
           const isActive = tabId === activeTabId;
@@ -63,31 +63,34 @@ export default function OpenTabsBar({
               key={tabId}
               ref={isActive ? activeTabRef : undefined}
               className={cn(
-                "group relative flex h-9 min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
+                "open-tab group relative flex h-9 min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
                 isActive
-                  ? "border-t border-t-primary/45 bg-background text-foreground"
+                  ? "open-tab-active border-t border-t-primary/45 bg-background text-foreground"
                   : "bg-muted/10 text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+                tab.kind === "review" && "open-tab-review",
               )}
+              data-active={isActive ? "true" : "false"}
+              data-kind={tab.kind}
               title={tooltip}
             >
               <button
                 type="button"
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left"
+                className="open-tab-button flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left"
                 onClick={() => onSelect(tab)}
                 aria-current={isActive ? "page" : undefined}
               >
-                <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                <Icon className="open-tab-icon h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
                 <span className="min-w-0 truncate">{label}</span>
                 {tab.kind === "file" && tab.dirty && (
                   <span
-                    className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                    className="open-tab-status-dot ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
                     aria-label="unsaved"
                   />
                 )}
                 {tab.kind === "review" && (
                   <span
                     className={cn(
-                      "ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                      "open-tab-status-dot ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full",
                       tab.status === "pending" && "bg-sky-400",
                       tab.status === "applied" && "bg-emerald-400",
                       tab.status === "cancelled" && "bg-muted-foreground/45",
@@ -100,7 +103,7 @@ export default function OpenTabsBar({
               <button
                 type="button"
                 className={cn(
-                  "mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  "open-tab-close mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
                   !isActive && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
                   tab.kind === "file" && tab.dirty && "opacity-100",
                 )}
