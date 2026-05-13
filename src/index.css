@@ -193,6 +193,15 @@
   }
 }
 
+.open-tabs-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.open-tabs-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+
 [data-markdown-preview-content] pre.oi-code-with-lines {
   counter-reset: oi-code-line;
 }

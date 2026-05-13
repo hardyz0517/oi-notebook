@@ -11,10 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import AiSidebar from "@/components/ai/AiSidebar";
-import type { AiSidebarNoteContext, ApplyPolishedSelectionInput } from "@/components/ai/types";
+import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
+import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
+import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
@@ -81,6 +83,8 @@ const AI_CONFIG_MISSING_MESSAGE =
 const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
 const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
 const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
+const OPEN_TABS_STORAGE_KEY = "oi-notebook.openTabs";
+const OPEN_TABS_ACTIVE_STORAGE_KEY = "oi-notebook.openTabs.activePath";
 const LEFT_SIDEBAR_WIDTH_DEFAULT = 260;
 const LEFT_SIDEBAR_WIDTH_MIN = 200;
 const LEFT_SIDEBAR_WIDTH_MAX = 420;
@@ -110,10 +114,122 @@ type SettingsSection = "general" | "appearance" | "editor" | "ai" | "luogu" | "b
 type AiSettingsTab = "api" | "prompts";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
+type WorkspaceTabId = string;
+
+interface PolishReviewTab {
+  id: string;
+  preview: AiPolishPreview;
+}
 
 interface CursorParagraphContext {
   text: string;
   isCode: boolean;
+}
+
+function getReviewStatusLabel(preview: AiPolishPreview, currentFilePath: string | null, currentMarkdown: string): string {
+  if (preview.applied) return "已应用";
+  if (preview.ignored) return "已取消";
+  if (preview.error) return "已过期";
+  if (preview.notePath === currentFilePath && preview.scope === "full-note" && currentMarkdown !== preview.originalText) {
+    return "内容已变化";
+  }
+  return "未应用";
+}
+
+function getPolishPreviewDisplayStartLine(preview: AiPolishPreview): number {
+  if (preview.scope === "full-note") return 1;
+  return typeof preview.selectionStartLine === "number" &&
+    Number.isFinite(preview.selectionStartLine) &&
+    preview.selectionStartLine > 0
+    ? Math.floor(preview.selectionStartLine)
+    : 1;
+}
+
+function PolishReviewPane({
+  reviewTab,
+  currentFilePath,
+  currentMarkdown,
+  onApply,
+  onIgnore,
+  onBackToFile,
+  onClose,
+}: {
+  reviewTab: PolishReviewTab;
+  currentFilePath: string | null;
+  currentMarkdown: string;
+  onApply: () => void;
+  onIgnore: () => void;
+  onBackToFile: () => void;
+  onClose: () => void;
+}) {
+  const { preview } = reviewTab;
+  const isFullNotePreview = preview.scope === "full-note";
+  const title = isFullNotePreview ? "全文润色审核" : "润色选中审核";
+  const applyLabel = isFullNotePreview ? "应用全文润色" : "应用到选区";
+  const statusLabel = getReviewStatusLabel(preview, currentFilePath, currentMarkdown);
+  const displayStartLine = getPolishPreviewDisplayStartLine(preview);
+  const stats = getDiffStats(preview.originalText, preview.polishedText, displayStartLine);
+  const canApply = !preview.applied && !preview.ignored && !preview.error && statusLabel !== "内容已变化" && preview.polishedText.trim().length > 0;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border/80 bg-muted/15 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-base font-semibold text-foreground">{title}</div>
+            <span className={cn(
+              "rounded-full px-2 py-0.5 text-[11px]",
+              statusLabel === "内容已变化"
+                ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "bg-muted text-muted-foreground",
+            )}>
+              {statusLabel}
+            </span>
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <span className="truncate" title={preview.notePath}>{preview.notePath}</span>
+            <span>1 file changed</span>
+            <span className="text-emerald-700 dark:text-emerald-300">+{stats.addedRows}</span>
+            <span className="text-red-700 dark:text-red-300">-{stats.deletedRows}</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs" onClick={onBackToFile}>
+            回到文件
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs" onClick={onClose}>
+            关闭审核
+          </Button>
+          {!preview.applied && !preview.ignored && (
+            <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs" onClick={onIgnore}>
+              取消
+            </Button>
+          )}
+          <Button size="sm" className="h-8 px-2.5 text-xs" onClick={onApply} disabled={!canApply}>
+            {preview.applied ? "已应用" : applyLabel}
+          </Button>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+        <CodexDiffPreview
+          title={title}
+          filePath={preview.notePath}
+          status={statusLabel}
+          statusTone={statusLabel === "内容已变化" || preview.error ? "warning" : "neutral"}
+          oldText={preview.originalText}
+          newText={preview.polishedText}
+          startLine={displayStartLine}
+          density="review"
+          maxHeightClassName="max-h-full"
+        />
+        {preview.error && (
+          <div className="mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+            {preview.error}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const LUOGU_SCAN_PAGE_DELAY_MS = 1500;
@@ -669,6 +785,38 @@ function getInitialReadingDensity(): ReadingDensity {
   return isReadingDensity(stored) ? stored : "standard";
 }
 
+function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
+  const file = files.find((item) => item.path === path);
+  const name = file?.name ?? path.split("/").pop() ?? path;
+  return name.replace(/\.md$/i, "") || path;
+}
+
+function getInitialOpenTabPaths(): string[] {
+  const stored = window.localStorage.getItem(OPEN_TABS_STORAGE_KEY);
+  if (stored === null) return [];
+
+  try {
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    const paths: string[] = [];
+    for (const value of parsed) {
+      if (typeof value !== "string") continue;
+      const path = value.trim();
+      if (!path || paths.includes(path)) continue;
+      paths.push(path);
+    }
+    return paths;
+  } catch {
+    return [];
+  }
+}
+
+function getInitialOpenTabsActivePath(): string | null {
+  const stored = window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
+  const path = stored?.trim();
+  return path || null;
+}
+
 function isAiConfigMissingError(message: string): boolean {
   return (
     message.includes("base_url is missing") ||
@@ -945,7 +1093,11 @@ function getDashboardNoteCategory(path: string): string {
 
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
+  const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const [openTabPaths, setOpenTabPaths] = useState<string[]>(getInitialOpenTabPaths);
+  const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
   // null 时显示欢迎内容，选中文件后只把正文 body 放进主编辑器。
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   const [frontmatterPrefix, setFrontmatterPrefix] = useState("");
@@ -1192,6 +1344,8 @@ export default function App() {
   const luoguPrepareRunSeqRef = useRef(0);
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
   const isMountedRef = useRef(true);
+  const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
+  const hasRestoredOpenTabsRef = useRef(false);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
     frontmatterPrefix: "",
@@ -1211,6 +1365,7 @@ export default function App() {
     () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
     [currentFilePath, frontmatterPrefix, markdown],
   );
+  const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
   const luoguRuleSummary = useMemo(
     () => getLuoguImportRuleSummary(luoguImportRules),
@@ -1470,6 +1625,43 @@ export default function App() {
     () => files.find((file) => file.path === currentFilePath) ?? null,
     [files, currentFilePath],
   );
+  const openTabs = useMemo<OpenFileTab[]>(
+    () =>
+      openTabPaths.map((path) => ({
+        kind: "file",
+        path,
+        displayName: getNoteDisplayName(path, files),
+        title:
+          path === currentFilePath && frontmatter.fields.title.trim()
+            ? frontmatter.fields.title.trim()
+            : undefined,
+        dirty: path === currentFilePath && isDirty,
+      })),
+    [currentFilePath, files, frontmatter.fields.title, isDirty, openTabPaths],
+  );
+  const reviewTabs = useMemo<OpenReviewTab[]>(
+    () =>
+      openReviewTabs.map(({ id, preview }) => {
+        const isStale = preview.notePath === currentFilePath && preview.scope === "full-note" && markdown !== preview.originalText;
+        return {
+          kind: "review",
+          id,
+          sourcePath: preview.notePath,
+          title: preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+          displayName: preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+          status: preview.applied ? "applied" : preview.ignored ? "cancelled" : isStale ? "stale" : "pending",
+        };
+      }),
+    [currentFilePath, markdown, openReviewTabs],
+  );
+  const workspaceTabs = useMemo<OpenTab[]>(
+    () => [...openTabs, ...reviewTabs],
+    [openTabs, reviewTabs],
+  );
+  const activeReviewTab = useMemo(
+    () => openReviewTabs.find((tab) => tab.id === activeWorkspaceTabId) ?? null,
+    [activeWorkspaceTabId, openReviewTabs],
+  );
   const currentParagraphContext = useMemo(
     () => currentFilePath === null ? null : extractCursorParagraph(markdown, editorCursorOffset),
     [currentFilePath, editorCursorOffset, markdown],
@@ -1498,8 +1690,9 @@ export default function App() {
       currentParagraphStatus: hasOpenNote ? currentParagraphText ? "available" : "empty" : "unavailable",
       currentParagraphIsCode: currentParagraphContext?.isCode ?? false,
       markdownBody: hasOpenNote ? markdown : "",
+      bodyStartLine: hasOpenNote ? bodyStartLine : null,
     };
-  }, [activeNoteFile, aiContextSelectionRange, currentFilePath, currentParagraphContext, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
+  }, [activeNoteFile, aiContextSelectionRange, bodyStartLine, currentFilePath, currentParagraphContext, editorSelectedText, editorSelectedTextLength, frontmatter.fields, markdown]);
   const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
@@ -1644,6 +1837,7 @@ export default function App() {
       }
       const updated = await listNotes();
       setFiles(updated);
+      setOpenTabPaths((current) => current.map((path) => (path === renameTarget ? newPath : path)));
       if (renameTarget === currentFilePath) {
         setCurrentFilePath(newPath);
         setIsDirty(false);
@@ -1671,6 +1865,7 @@ export default function App() {
       }
       const updated = await listNotes();
       setFiles(updated);
+      setOpenTabPaths((current) => current.filter((tabPath) => tabPath !== path));
       if (path === currentFilePath) {
         setCurrentFilePath(null);
         setIsDirty(false);
@@ -3045,6 +3240,90 @@ export default function App() {
     toast.success("润色内容已应用到选区，请确认后保存");
   };
 
+  const handleApplyPolishedFullNote = async ({
+    notePath,
+    originalBody,
+    polishedBody,
+  }: ApplyPolishedFullNoteInput) => {
+    if (!currentFilePath || currentFilePath !== notePath) {
+      throw new Error("当前打开的笔记已变化，无法应用这次全文润色。");
+    }
+    if (!originalBody || !polishedBody) {
+      throw new Error("当前笔记内容已经变化，请重新执行全文润色。");
+    }
+    if (markdown !== originalBody) {
+      throw new Error("当前笔记内容已经变化，请重新执行全文润色。");
+    }
+
+    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, polishedBody);
+    setMarkdown(polishedBody);
+    setIsDirty(nextDirty);
+    toast.success("全文润色已应用到正文，请确认后保存");
+  };
+
+  const getPolishReviewTabId = (previewId: string) => `review:${previewId}`;
+
+  const handleOpenPolishReview = (preview: AiPolishPreview) => {
+    const id = getPolishReviewTabId(preview.previewId);
+    setOpenReviewTabs((current) => {
+      const nextTab = { id, preview };
+      const index = current.findIndex((item) => item.id === id);
+      if (index === -1) return [...current, nextTab];
+      return current.map((item) => (item.id === id ? nextTab : item));
+    });
+    setActiveWorkspaceTabId(id);
+  };
+
+  const handlePolishReviewChange = (preview: AiPolishPreview) => {
+    const id = getPolishReviewTabId(preview.previewId);
+    setOpenReviewTabs((current) =>
+      current.map((item) => (item.id === id ? { ...item, preview } : item)),
+    );
+  };
+
+  const applyPolishReview = async (reviewTab: PolishReviewTab) => {
+    const { preview } = reviewTab;
+    if (preview.applied || preview.ignored) return;
+
+    try {
+      if (preview.scope === "full-note") {
+        await handleApplyPolishedFullNote({
+          notePath: preview.notePath,
+          originalBody: preview.originalText,
+          polishedBody: preview.polishedText,
+        });
+      } else {
+        await handleApplyPolishedSelection({
+          notePath: preview.notePath,
+          originalText: preview.originalText,
+          polishedText: preview.polishedText,
+          selectionRange: preview.selectionRange,
+        });
+      }
+      handlePolishReviewChange({
+        ...preview,
+        applied: true,
+        ignored: false,
+        error: undefined,
+      });
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      handlePolishReviewChange({
+        ...preview,
+        error: errorText,
+      });
+      toast.error(errorText);
+    }
+  };
+
+  const ignorePolishReview = (reviewTab: PolishReviewTab) => {
+    handlePolishReviewChange({
+      ...reviewTab.preview,
+      ignored: true,
+      error: undefined,
+    });
+  };
+
   const handleGenerateNoteMetadata = async () => {
     if (!currentFilePath) {
       toast.info("请先打开一个笔记");
@@ -3126,6 +3405,7 @@ export default function App() {
 
   const finishFileSelection = (path: string, closeSearchOnSuccess: boolean) => {
     setCurrentFilePath(path);
+    setActiveWorkspaceTabId(path);
     if (closeSearchOnSuccess) {
       setIsSearchOpen(false);
       setSearchQuery("");
@@ -3144,7 +3424,14 @@ export default function App() {
   };
 
   const handleSelectFile = (path: string, options?: { closeSearchOnSuccess?: boolean }): boolean => {
-    if (path === currentFilePath) return true;
+    if (path === currentFilePath) {
+      setActiveWorkspaceTabId(path);
+      if (options?.closeSearchOnSuccess) {
+        setIsSearchOpen(false);
+        setSearchQuery("");
+      }
+      return true;
+    }
     if (isSavingNote) {
       toast.info("当前笔记正在保存，请稍候再切换");
       return false;
@@ -3155,6 +3442,51 @@ export default function App() {
     }
     finishFileSelection(path, options?.closeSearchOnSuccess ?? false);
     return true;
+  };
+
+  const handleSelectOpenTab = (tab: OpenTab) => {
+    if (tab.kind === "review") {
+      setActiveWorkspaceTabId(tab.id);
+      return;
+    }
+    handleSelectFile(tab.path);
+  };
+
+  const handleCloseOpenTab = (tab: OpenTab) => {
+    if (tab.kind === "review") {
+      setOpenReviewTabs((current) => current.filter((item) => item.id !== tab.id));
+      if (activeWorkspaceTabId === tab.id) {
+        setActiveWorkspaceTabId(currentFilePath ?? openTabPaths[0] ?? null);
+      }
+      return;
+    }
+
+    const path = tab.path;
+    const tabIndex = openTabPaths.indexOf(path);
+    if (tabIndex === -1) return;
+
+    const isClosingActiveTab = path === currentFilePath;
+    if (isClosingActiveTab && isDirty) {
+      const ok = window.confirm("该笔记有未保存更改，确定关闭吗？");
+      if (!ok) return;
+    }
+
+    const nextTabs = openTabPaths.filter((tabPath) => tabPath !== path);
+    setOpenTabPaths(nextTabs);
+
+    if (!isClosingActiveTab) return;
+
+    setPendingFileSelection(null);
+    setPolishedBodyPreview(null);
+    setIsDirty(false);
+
+    const nextPath = nextTabs[tabIndex] ?? nextTabs[tabIndex - 1] ?? null;
+    if (nextPath) {
+      finishFileSelection(nextPath, false);
+    } else {
+      setCurrentFilePath(null);
+      setActiveWorkspaceTabId(openReviewTabs[0]?.id ?? null);
+    }
   };
 
   const handleSearchResultSelect = (path: string) => {
@@ -3535,7 +3867,10 @@ export default function App() {
   // 挂载时从后端加载笔记列表
   useEffect(() => {
     listNotes()
-      .then(setFiles)
+      .then((loaded) => {
+        setFiles(loaded);
+        setHasLoadedNotes(true);
+      })
       .catch((e: Error) => console.error("加载笔记列表失败：", e.message));
   }, []);
 
@@ -3546,7 +3881,10 @@ export default function App() {
     listen("notes-changed", () => {
       listNotes()
         .then((updated) => {
-          if (!cancelled) setFiles(updated);
+          if (!cancelled) {
+            setFiles(updated);
+            setHasLoadedNotes(true);
+          }
         })
         .catch((e: Error) =>
           console.error("收到 notes-changed 后刷新列表失败：", e.message),
@@ -3569,6 +3907,66 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedNotes) return;
+
+    const validPaths = new Set(files.map((file) => file.path));
+    setOpenTabPaths((current) => current.filter((path) => validPaths.has(path)));
+
+    if (currentFilePath && !validPaths.has(currentFilePath)) {
+      setCurrentFilePath(null);
+    }
+  }, [currentFilePath, files, hasLoadedNotes]);
+
+  useEffect(() => {
+    if (!currentFilePath) return;
+
+    setOpenTabPaths((current) => {
+      if (current.includes(currentFilePath)) return current;
+      return [...current, currentFilePath];
+    });
+  }, [currentFilePath]);
+
+  useEffect(() => {
+    if (!currentFilePath) return;
+    const isReviewActive = openReviewTabs.some((tab) => tab.id === activeWorkspaceTabId);
+    if (!activeWorkspaceTabId || (!isReviewActive && activeWorkspaceTabId !== currentFilePath)) {
+      setActiveWorkspaceTabId(currentFilePath);
+    }
+  }, [activeWorkspaceTabId, currentFilePath, openReviewTabs]);
+
+  useEffect(() => {
+    if (!hasLoadedNotes || hasRestoredOpenTabsRef.current) return;
+
+    const validPaths = new Set(files.map((file) => file.path));
+    const restoredPaths = openTabPaths.filter((path) => validPaths.has(path));
+    const storedActivePath = initialOpenTabsActivePathRef.current;
+    const activePath =
+      storedActivePath && validPaths.has(storedActivePath)
+        ? storedActivePath
+        : restoredPaths[0] ?? null;
+
+    hasRestoredOpenTabsRef.current = true;
+    if (restoredPaths.length !== openTabPaths.length) {
+      setOpenTabPaths(restoredPaths);
+    }
+    if (!currentFilePath && activePath) {
+      setCurrentFilePath(activePath);
+    }
+  }, [currentFilePath, files, hasLoadedNotes, openTabPaths]);
+
+  useEffect(() => {
+    window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, JSON.stringify(openTabPaths));
+  }, [openTabPaths]);
+
+  useEffect(() => {
+    if (currentFilePath) {
+      window.localStorage.setItem(OPEN_TABS_ACTIVE_STORAGE_KEY, currentFilePath);
+    } else {
+      window.localStorage.removeItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
+    }
+  }, [currentFilePath]);
 
   // 当选中文件变化时，从后端读取内容
   // 使用 cancelled flag 防御 race condition：
@@ -6159,7 +6557,34 @@ export default function App() {
         )}
 
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {!currentFilePath ? (
+          <OpenTabsBar
+            tabs={workspaceTabs}
+            activeTabId={activeWorkspaceTabId ?? currentFilePath}
+            onSelect={handleSelectOpenTab}
+            onClose={handleCloseOpenTab}
+          />
+          {activeReviewTab ? (
+            <PolishReviewPane
+              reviewTab={activeReviewTab}
+              currentFilePath={currentFilePath}
+              currentMarkdown={markdown}
+              onApply={() => void applyPolishReview(activeReviewTab)}
+              onIgnore={() => ignorePolishReview(activeReviewTab)}
+              onBackToFile={() => {
+                if (activeReviewTab.preview.notePath) {
+                  handleSelectFile(activeReviewTab.preview.notePath);
+                }
+              }}
+              onClose={() => handleCloseOpenTab({
+                kind: "review",
+                id: activeReviewTab.id,
+                sourcePath: activeReviewTab.preview.notePath,
+                title: activeReviewTab.preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+                displayName: activeReviewTab.preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+                status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : "pending",
+              })}
+            />
+          ) : !currentFilePath ? (
             <div className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
               <div className="grid w-full max-w-6xl gap-5">
                 <section className="rounded-lg border border-border bg-background/90 p-6 shadow-sm">
@@ -6635,6 +7060,9 @@ export default function App() {
           onOpenAiSettings={() => void openAiSettings()}
           onApplySuggestedTags={handleApplyAiSuggestedTags}
           onApplyPolishedSelection={handleApplyPolishedSelection}
+          onApplyPolishedFullNote={handleApplyPolishedFullNote}
+          onOpenPolishReview={handleOpenPolishReview}
+          onPolishReviewChange={handlePolishReviewChange}
         />
       </div>
       <footer className="shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">

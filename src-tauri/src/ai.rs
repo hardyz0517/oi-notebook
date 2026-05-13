@@ -18,6 +18,8 @@ const NOTE_METADATA_TASK: &str = "note-metadata";
 const NOTE_POLISH_TASK: &str = "note-polish";
 const AI_DIAGNOSTIC_PREVIEW_CHARS: usize = 500;
 const AI_RESPONSE_RETRY_ATTEMPTS: usize = 2;
+const AI_DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 20;
+const AI_FULL_NOTE_POLISH_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
 
@@ -92,6 +94,12 @@ pub struct PolishedSelectedText {
     pub polished_text: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PolishedFullNote {
+    pub polished_body: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteChatContextInput {
@@ -164,6 +172,13 @@ struct AiResponseIssue {
     kind: AiResponseIssueKind,
     message: String,
     debug: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ChatCompletionRequestOptions {
+    timeout_secs: u64,
+    json_response: bool,
+    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -548,6 +563,23 @@ If the user asks what model you are, answer from this visible provider/model con
     )
 }
 
+fn ai_request_target_debug(resolved: &ResolvedAiConfig) -> String {
+    let provider = resolved
+        .provider_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or(resolved.provider_id.as_deref())
+        .unwrap_or("not provided");
+    let model = resolved.model.trim();
+    let model = if model.is_empty() { "not provided" } else { model };
+    format!(
+        "provider={}; model={}",
+        sanitize_ai_detail(provider),
+        sanitize_ai_detail(model)
+    )
+}
+
 fn stable_hash_hex(content: &str) -> String {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x00000100000001b3;
@@ -837,21 +869,52 @@ fn request_chat_completion(
     temperature: f32,
     scope: &str,
 ) -> Result<String, String> {
+    request_chat_completion_with_options(
+        config,
+        messages,
+        temperature,
+        scope,
+        ChatCompletionRequestOptions {
+            timeout_secs: AI_DEFAULT_REQUEST_TIMEOUT_SECS,
+            json_response: true,
+            max_tokens: None,
+        },
+    )
+}
+
+fn request_chat_completion_with_options(
+    config: &AiConfigFields,
+    messages: JsonValue,
+    temperature: f32,
+    scope: &str,
+    options: ChatCompletionRequestOptions,
+) -> Result<String, String> {
     let resolved = require_ai_config_resolved(config)?;
     let (base_url, api_key, model) = require_resolved_ai_config(&resolved)?;
+    let target_debug = ai_request_target_debug(&resolved);
     let url = format!("{base_url}/chat/completions");
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(options.timeout_secs))
         .user_agent("oi-notebook/0.1")
         .build()
         .map_err(|e| format!("AI connection failed: cannot create HTTP client: {e}"))?;
 
-    let request_body = json!({
+    let mut request_body = json!({
         "model": model,
         "messages": messages,
-        "temperature": temperature,
-        "response_format": { "type": "json_object" }
+        "temperature": temperature
     });
+    if let JsonValue::Object(body) = &mut request_body {
+        if options.json_response {
+            body.insert(
+                "response_format".to_string(),
+                json!({ "type": "json_object" }),
+            );
+        }
+        if let Some(max_tokens) = options.max_tokens {
+            body.insert("max_tokens".to_string(), json!(max_tokens));
+        }
+    }
 
     let mut last_issue: Option<AiResponseIssue> = None;
 
@@ -864,9 +927,12 @@ fn request_chat_completion(
             .send()
             .map_err(|e| {
                 if e.is_timeout() {
-                    format!("{scope}: request timed out")
+                    format!(
+                        "{scope}: request timed out after {}s; debug={target_debug}",
+                        options.timeout_secs
+                    )
                 } else {
-                    format!("{scope}: network error")
+                    format!("{scope}: network error; debug={target_debug}; error={e}")
                 }
             })?;
 
@@ -874,16 +940,17 @@ fn request_chat_completion(
             Ok(content) => return Ok(content),
             Err(issue) => {
                 let should_retry = issue.is_retryable() && attempt < AI_RESPONSE_RETRY_ATTEMPTS;
+                let issue_error = issue.clone().into_error(scope);
                 eprintln!(
-                    "{scope}: attempt {attempt}/{} failed: {}",
+                    "{scope}: attempt {attempt}/{} failed: {}; target={target_debug}",
                     AI_RESPONSE_RETRY_ATTEMPTS,
-                    issue.clone().into_error(scope)
+                    issue_error
                 );
                 if should_retry {
                     last_issue = Some(issue);
                     continue;
                 }
-                return Err(issue.into_error(scope));
+                return Err(format!("{}; target={target_debug}", issue.into_error(scope)));
             }
         }
     }
@@ -1585,6 +1652,77 @@ fn validate_polished_selected_text(
     Ok(PolishedSelectedText { polished_text })
 }
 
+fn strip_wrapping_markdown_fence(value: &str) -> String {
+    let trimmed = value.trim();
+    let Some(after_open) = trimmed.strip_prefix("```") else {
+        return value.to_string();
+    };
+    let Some(close_index) = after_open.rfind("```") else {
+        return value.to_string();
+    };
+    if !after_open[close_index + 3..].trim().is_empty() {
+        return value.to_string();
+    }
+
+    let inner = &after_open[..close_index];
+    let inner = if let Some(newline_index) = inner.find('\n') {
+        let first_line = inner[..newline_index].trim();
+        if first_line.is_empty()
+            || first_line.eq_ignore_ascii_case("markdown")
+            || first_line.eq_ignore_ascii_case("md")
+            || first_line.eq_ignore_ascii_case("text")
+        {
+            &inner[newline_index + 1..]
+        } else {
+            inner
+        }
+    } else {
+        inner
+    };
+
+    inner.trim_matches(['\r', '\n']).to_string()
+}
+
+fn validate_polished_full_note(value: JsonValue, scope: &str) -> Result<PolishedFullNote, String> {
+    let raw_body = value
+        .get("polishedBody")
+        .and_then(JsonValue::as_str)
+        .filter(|body| !body.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{scope}: response JSON schema failed: polishedBody was missing or empty; json_preview={}",
+                diagnostic_json_preview(&value)
+            )
+        })?;
+    let polished_body = strip_wrapping_markdown_fence(raw_body);
+    if polished_body.trim().is_empty() {
+        return Err(format!("{scope}: response polishedBody was empty after cleanup"));
+    }
+
+    Ok(PolishedFullNote { polished_body })
+}
+
+fn parse_polished_full_note_content(
+    content: &str,
+    scope: &str,
+) -> Result<PolishedFullNote, String> {
+    if let Ok(value) = parse_json_object_from_ai_content(content, scope) {
+        if let Ok(result) = validate_polished_full_note(value, scope) {
+            return Ok(result);
+        }
+    }
+
+    let polished_body = strip_wrapping_markdown_fence(content);
+    let polished_body = polished_body.trim();
+    if polished_body.is_empty() {
+        return Err(format!("{scope}: AI returned empty polished body"));
+    }
+
+    Ok(PolishedFullNote {
+        polished_body: polished_body.to_string(),
+    })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -1941,6 +2079,119 @@ pub async fn polish_selected_text(
     })
     .await
     .map_err(|e| format!("AI selection polish failed: task join failed: {e}"))?
+}
+
+fn polish_full_note_blocking(
+    context: NoteChatContextInput,
+    instruction: String,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<PolishedFullNote, String> {
+    let note_path = context.note_path.trim();
+    if note_path.is_empty() {
+        return Err("AI full note polish failed: note path is missing".to_string());
+    }
+    let markdown_body = context.markdown.trim();
+    if markdown_body.is_empty() {
+        return Err("AI full note polish failed: note body is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let resolved = resolve_ai_config(
+        &config,
+        provider_id.as_deref(),
+        model_id.as_deref(),
+    )?;
+    require_resolved_ai_config(&resolved)?;
+    let selected_config = config_from_resolved(resolved.clone());
+
+    let tags_text = if context.tags.is_empty() {
+        "Not provided".to_string()
+    } else {
+        context
+            .tags
+            .iter()
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let summary_text = if context.summary.trim().is_empty() {
+        "Not provided".to_string()
+    } else {
+        context.summary.trim().to_string()
+    };
+    let note_title = if context.note_title.trim().is_empty() {
+        "Not provided"
+    } else {
+        context.note_title.trim()
+    };
+    let instruction_text = if instruction.trim().is_empty() {
+        "No extra instruction.".to_string()
+    } else {
+        instruction.trim().to_string()
+    };
+
+    let user_prompt = format!(
+        "Polish the full Markdown body of one OI / competitive programming note.\n\
+Only polish the body text provided below. Do not create, edit, or output frontmatter.\n\
+Do not modify the note title, tags, summary, path, or any metadata.\n\
+Return only the polished Markdown body. Do not wrap it in a markdown code fence. Do not add an explanation.\n\
+Writing requirements:\n\
+- Preserve Markdown structure, formulas, tables, links, headings, lists, and important derivations.\n\
+- Preserve fenced code blocks, inline code, code comments, problem IDs, problem names, complexity conclusions, and core algorithm names.\n\
+- Do not rewrite code logic.\n\
+- Polish wording, sentence flow, and obvious awkward phrasing only where useful.\n\
+- Keep the user's original style. Do not turn concise notes into template-like AI prose.\n\
+- Do not add vague filler, generic conclusions, or high-frequency AI-style endings.\n\
+- Do not delete important reasoning or expand short expressions into long explanations without need.\n\n\
+Light note context:\n\
+Title: {note_title}\n\
+Path: {note_path}\n\
+Tags: {tags_text}\n\
+Summary: {summary_text}\n\
+Extra instruction: {instruction_text}\n\n\
+Markdown body to polish:\n{markdown_body}"
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": format!(
+                "Return only the polished Markdown body. Do not claim that files were modified. Do not force a fixed assistant identity.\n\n{}",
+                build_model_identity_context(&resolved)
+            )
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion_with_options(
+        &selected_config,
+        messages,
+        0.2,
+        "AI full note polish failed",
+        ChatCompletionRequestOptions {
+            timeout_secs: AI_FULL_NOTE_POLISH_TIMEOUT_SECS,
+            json_response: false,
+            max_tokens: None,
+        },
+    )?;
+    parse_polished_full_note_content(&content, "AI full note polish failed")
+}
+
+#[tauri::command]
+pub async fn polish_full_note(
+    context: NoteChatContextInput,
+    instruction: String,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<PolishedFullNote, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        polish_full_note_blocking(context, instruction, provider_id, model_id)
+    })
+    .await
+    .map_err(|e| format!("AI full note polish failed: task join failed: {e}"))?
 }
 
 #[tauri::command]

@@ -216,6 +216,10 @@ export interface PolishedSelectedText {
   polishedText: string;
 }
 
+export interface PolishedFullNote {
+  polishedBody: string;
+}
+
 export interface NoteChatHistoryMessage {
   role: "user" | "assistant";
   text: string;
@@ -713,6 +717,24 @@ export async function polishSelectedText(
   try {
     return await invoke<PolishedSelectedText>("polish_selected_text", {
       context,
+      providerId,
+      modelId,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function polishFullNote(
+  context: NoteChatContextPayload,
+  instruction: string,
+  providerId?: string,
+  modelId?: string,
+): Promise<PolishedFullNote> {
+  try {
+    return await invoke<PolishedFullNote>("polish_full_note", {
+      context,
+      instruction,
       providerId,
       modelId,
     });

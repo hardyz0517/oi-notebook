@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
   ArrowDown,
@@ -6,6 +6,7 @@ import {
   Bot,
   BookOpen,
   ChevronDown,
+  ChevronRight,
   CheckCircle2,
   ClipboardList,
   FileText,
@@ -21,11 +22,13 @@ import {
   X,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { renderMarkdownForTheme } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
-import type { AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
+import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
   openExternalUrl,
+  polishFullNote,
   polishSelectedText,
   suggestNoteTags,
   startCurrentNoteChatStream,
@@ -56,6 +59,7 @@ type AiChatMessage = {
   retryContext?: NoteChatContextPayload;
   retrySelectionRange?: TextRange | null;
   retrySelectionStartLine?: number | null;
+  retryInstruction?: string;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
@@ -76,31 +80,7 @@ type TextRange = {
   to: number;
 };
 
-type PolishPreviewResult = {
-  previewId: string;
-  notePath: string;
-  originalText: string;
-  polishedText: string;
-  selectionRange: TextRange | null;
-  selectionStartLine?: number | null;
-  applied?: boolean;
-  ignored?: boolean;
-  error?: string;
-};
-
-type DiffSegment = {
-  text: string;
-  type: "context" | "delete" | "add";
-};
-
-type DiffRow = {
-  id: string;
-  type: "context" | "delete" | "add";
-  oldLine: number | null;
-  newLine: number | null;
-  text: string;
-  segments: DiffSegment[];
-};
+type PolishPreviewResult = AiPolishPreview;
 
 type AiConversation = {
   id: string;
@@ -145,7 +125,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "文档",
     icon: Sparkles,
     requiresNote: true,
+    requiresBody: true,
     mode: "preview",
+    implemented: true,
   },
   {
     id: "polish-selection",
@@ -257,6 +239,25 @@ const getCommandByInput = (value: string): SlashCommand | undefined => {
   ));
 };
 
+const getCommandDisplayText = (command: SlashCommand, rawInput?: string): string => {
+  const value = rawInput?.trim();
+  return value?.startsWith("/") ? value : `/${command.label}`;
+};
+
+const getCommandArgument = (command: SlashCommand, rawInput?: string): string => {
+  const value = rawInput?.trim().replace(/^\/+/, "").trim();
+  if (!value) return "";
+  if (value === command.label || value === command.id) return "";
+
+  for (const prefix of [command.label, command.id]) {
+    if (value.startsWith(`${prefix} `)) {
+      return value.slice(prefix.length).trim();
+    }
+  }
+
+  return "";
+};
+
 const getSelectionLabel = (context: AiSidebarNoteContext): string => {
   if (context.selectionStatus === "available") return `selected ${context.selectedTextLength ?? 0} chars`;
   if (context.selectionStatus === "empty") return "no selection";
@@ -276,86 +277,6 @@ const truncateText = (text: string, maxChars: number): { text: string; truncated
   return { text: text.slice(0, maxChars), truncated: true };
 };
 
-const splitDiffLines = (text: string): string[] => {
-  if (!text) return [""];
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-};
-
-const tokenizeDiffLine = (text: string): string[] => {
-  const tokens = text.match(/(\s+|[A-Za-z0-9_]+|[\u4e00-\u9fff]+|.)/gu);
-  return tokens ?? [];
-};
-
-const buildTokenSegments = (
-  oldText: string,
-  newText: string,
-): { oldSegments: DiffSegment[]; newSegments: DiffSegment[] } => {
-  const oldTokens = tokenizeDiffLine(oldText);
-  const newTokens = tokenizeDiffLine(newText);
-  const rows = oldTokens.length;
-  const columns = newTokens.length;
-
-  if (rows * columns > 5000) {
-    return {
-      oldSegments: oldText ? [{ text: oldText, type: "delete" }] : [],
-      newSegments: newText ? [{ text: newText, type: "add" }] : [],
-    };
-  }
-
-  const table: number[][] = Array.from({ length: rows + 1 }, () => Array(columns + 1).fill(0));
-  for (let row = rows - 1; row >= 0; row -= 1) {
-    for (let column = columns - 1; column >= 0; column -= 1) {
-      table[row][column] = oldTokens[row] === newTokens[column]
-        ? table[row + 1][column + 1] + 1
-        : Math.max(table[row + 1][column], table[row][column + 1]);
-    }
-  }
-
-  const oldSegments: DiffSegment[] = [];
-  const newSegments: DiffSegment[] = [];
-  let row = 0;
-  let column = 0;
-
-  const pushSegment = (target: DiffSegment[], segment: DiffSegment) => {
-    if (!segment.text) return;
-    const previous = target[target.length - 1];
-    if (previous?.type === segment.type) {
-      previous.text += segment.text;
-      return;
-    }
-    target.push(segment);
-  };
-
-  while (row < rows && column < columns) {
-    if (oldTokens[row] === newTokens[column]) {
-      pushSegment(oldSegments, { text: oldTokens[row], type: "context" });
-      pushSegment(newSegments, { text: newTokens[column], type: "context" });
-      row += 1;
-      column += 1;
-      continue;
-    }
-
-    if (table[row + 1][column] >= table[row][column + 1]) {
-      pushSegment(oldSegments, { text: oldTokens[row], type: "delete" });
-      row += 1;
-    } else {
-      pushSegment(newSegments, { text: newTokens[column], type: "add" });
-      column += 1;
-    }
-  }
-
-  while (row < rows) {
-    pushSegment(oldSegments, { text: oldTokens[row], type: "delete" });
-    row += 1;
-  }
-  while (column < columns) {
-    pushSegment(newSegments, { text: newTokens[column], type: "add" });
-    column += 1;
-  }
-
-  return { oldSegments, newSegments };
-};
-
 const getLineNumberAtOffset = (text: string, offset: number | null | undefined): number | null => {
   if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0 || offset > text.length) return null;
   let line = 1;
@@ -365,127 +286,13 @@ const getLineNumberAtOffset = (text: string, offset: number | null | undefined):
   return line;
 };
 
-const buildUnifiedDiffRows = (oldText: string, newText: string, startLine = 1): DiffRow[] => {
-  const oldLines = splitDiffLines(oldText);
-  const newLines = splitDiffLines(newText);
-  const rows = oldLines.length;
-  const columns = newLines.length;
-  const tooLargeForFullDiff = rows * columns > 40000;
-  const operations: DiffRow[] = [];
-  const lineBase = Number.isFinite(startLine) && startLine > 0 ? Math.floor(startLine) : 1;
-
-  if (tooLargeForFullDiff) {
-    oldLines.forEach((line, index) => {
-      operations.push({
-        id: `delete-${index}`,
-        type: "delete",
-        oldLine: lineBase + index,
-        newLine: null,
-        text: line,
-        segments: line ? [{ text: line, type: "delete" }] : [],
-      });
-    });
-    newLines.forEach((line, index) => {
-      operations.push({
-        id: `add-${index}`,
-        type: "add",
-        oldLine: null,
-        newLine: lineBase + index,
-        text: line,
-        segments: line ? [{ text: line, type: "add" }] : [],
-      });
-    });
-    return operations;
-  }
-
-  const table: number[][] = Array.from({ length: rows + 1 }, () => Array(columns + 1).fill(0));
-  for (let row = rows - 1; row >= 0; row -= 1) {
-    for (let column = columns - 1; column >= 0; column -= 1) {
-      table[row][column] = oldLines[row] === newLines[column]
-        ? table[row + 1][column + 1] + 1
-        : Math.max(table[row + 1][column], table[row][column + 1]);
-    }
-  }
-
-  let oldIndex = 0;
-  let newIndex = 0;
-  let sequence = 0;
-  const pushRow = (row: Omit<DiffRow, "id" | "segments"> & { segments?: DiffSegment[] }) => {
-    operations.push({
-      ...row,
-      id: `${row.type}-${sequence}`,
-      segments: row.segments ?? (row.text ? [{ text: row.text, type: "context" }] : []),
-    });
-    sequence += 1;
-  };
-
-  while (oldIndex < rows && newIndex < columns) {
-    if (oldLines[oldIndex] === newLines[newIndex]) {
-      pushRow({
-        type: "context",
-        oldLine: lineBase + oldIndex,
-        newLine: lineBase + newIndex,
-        text: oldLines[oldIndex],
-      });
-      oldIndex += 1;
-      newIndex += 1;
-      continue;
-    }
-
-    if (table[oldIndex + 1][newIndex] >= table[oldIndex][newIndex + 1]) {
-      pushRow({
-        type: "delete",
-        oldLine: lineBase + oldIndex,
-        newLine: null,
-        text: oldLines[oldIndex],
-        segments: oldLines[oldIndex] ? [{ text: oldLines[oldIndex], type: "delete" }] : [],
-      });
-      oldIndex += 1;
-    } else {
-      pushRow({
-        type: "add",
-        oldLine: null,
-        newLine: lineBase + newIndex,
-        text: newLines[newIndex],
-        segments: newLines[newIndex] ? [{ text: newLines[newIndex], type: "add" }] : [],
-      });
-      newIndex += 1;
-    }
-  }
-
-  while (oldIndex < rows) {
-    pushRow({
-      type: "delete",
-      oldLine: lineBase + oldIndex,
-      newLine: null,
-      text: oldLines[oldIndex],
-      segments: oldLines[oldIndex] ? [{ text: oldLines[oldIndex], type: "delete" }] : [],
-    });
-    oldIndex += 1;
-  }
-
-  while (newIndex < columns) {
-    pushRow({
-      type: "add",
-      oldLine: null,
-      newLine: lineBase + newIndex,
-      text: newLines[newIndex],
-      segments: newLines[newIndex] ? [{ text: newLines[newIndex], type: "add" }] : [],
-    });
-    newIndex += 1;
-  }
-
-  for (let index = 0; index < operations.length - 1; index += 1) {
-    const current = operations[index];
-    const next = operations[index + 1];
-    if (current.type === "delete" && next.type === "add") {
-      const { oldSegments, newSegments } = buildTokenSegments(current.text, next.text);
-      current.segments = oldSegments;
-      next.segments = newSegments;
-    }
-  }
-
-  return operations;
+const getPolishPreviewDisplayStartLine = (preview: Pick<PolishPreviewResult, "scope" | "selectionStartLine">): number => {
+  if (preview.scope === "full-note") return 1;
+  return typeof preview.selectionStartLine === "number" &&
+    Number.isFinite(preview.selectionStartLine) &&
+    preview.selectionStartLine > 0
+    ? Math.floor(preview.selectionStartLine)
+    : 1;
 };
 
 const normalizeTagValue = (tag: string): string => tag.trim().replace(/\s+/g, " ");
@@ -603,6 +410,42 @@ const getPolishSelectionErrorMessage = (error: unknown): string => {
   return "润色选中内容失败，请重试。";
 };
 
+const getPolishFullNoteErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detailStart = message.indexOf("; debug=");
+  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
+  const normalized = scopedMessage.replace(/^AI full note polish failed:\s*/i, "").trim();
+
+  if (
+    message.includes("base_url is missing") ||
+    message.includes("api_key is missing") ||
+    message.includes("model is missing")
+  ) {
+    return "AI 还没有配置完整，请先在设置里填写 base_url / api_key / model。";
+  }
+  if (message.includes("selected provider does not exist") || message.includes("selected provider is disabled")) {
+    return "当前配置组不可用，请重新选择模型。";
+  }
+  if (message.includes("selected model does not exist")) {
+    return "当前模型不可用，请重新选择模型。";
+  }
+  if (message.includes("request timed out")) return "全文润色请求超时，请重试。";
+  if (message.includes("network error")) return "无法连接 AI 服务，请检查配置和网络。";
+  if (message.includes("read_error=") && message.toLowerCase().includes("timed out")) {
+    return "全文润色响应读取超时，可能是正文较长或服务端生成太慢，请稍后重试。";
+  }
+  if (message.includes("read_error=")) {
+    return "全文润色响应体读取失败，可能是服务端中途断开连接，请稍后重试。";
+  }
+  if (normalized.includes("response JSON parse failed") || normalized.includes("polishedBody")) {
+    return "全文润色结果解析失败，请重试。";
+  }
+  if (normalized.includes("note body is empty")) return "当前笔记正文为空，无法全文润色。";
+  if (normalized.includes("HTTP ")) return "AI 服务返回错误响应，请检查配置后重试。";
+  if (normalized) return normalized;
+  return "全文润色失败，请重试。";
+};
+
 const createConversationId = (): string =>
   `conv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -680,6 +523,7 @@ const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | 
   if (typeof item.notePath !== "string") return undefined;
   if (typeof item.originalText !== "string") return undefined;
   if (typeof item.polishedText !== "string") return undefined;
+  const scope = item.scope === "full-note" ? "full-note" : "selection";
   const selectionStartLine = typeof item.selectionStartLine === "number" &&
     Number.isFinite(item.selectionStartLine) &&
     item.selectionStartLine > 0
@@ -688,11 +532,13 @@ const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | 
 
   return {
     previewId: item.previewId,
+    scope,
     notePath: item.notePath,
     originalText: item.originalText,
     polishedText: item.polishedText,
     selectionRange: sanitizeTextRangeForStorage(item.selectionRange),
-    selectionStartLine,
+    selectionStartLine: scope === "full-note" ? 1 : selectionStartLine,
+    instruction: typeof item.instruction === "string" ? item.instruction : undefined,
     applied: item.applied === true,
     ignored: item.ignored === true,
     error: typeof item.error === "string" ? item.error : undefined,
@@ -719,6 +565,7 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
       message.retrySelectionStartLine > 0
       ? Math.floor(message.retrySelectionStartLine)
       : null,
+    retryInstruction: message.retryInstruction,
     startedAt: message.startedAt,
     finishedAt: message.finishedAt,
     elapsedMs: message.elapsedMs,
@@ -1259,171 +1106,117 @@ function TagSuggestionCard({
   );
 }
 
-function DiffPreview({
-  title,
-  filePath,
-  status,
-  statusTone = "neutral",
-  oldText,
-  newText,
-  startLine,
-  actions,
-}: {
-  title: string;
-  filePath: string;
-  status?: string;
-  statusTone?: "neutral" | "warning";
-  oldText: string;
-  newText: string;
-  startLine?: number | null;
-  actions?: ReactNode;
-}) {
-  const effectiveStartLine = typeof startLine === "number" && Number.isFinite(startLine) && startLine > 0
-    ? Math.floor(startLine)
-    : 1;
-  const rows = useMemo(
-    () => buildUnifiedDiffRows(oldText, newText, effectiveStartLine),
-    [effectiveStartLine, oldText, newText],
-  );
-  const addedRows = rows.filter((row) => row.type === "add").length;
-  const deletedRows = rows.filter((row) => row.type === "delete").length;
-  const fileName = getFileNameFromPath(filePath);
-  const oldLineCount = splitDiffLines(oldText).length;
-  const newLineCount = splitDiffLines(newText).length;
-  const hunkHeader = `@@ -${effectiveStartLine},${oldLineCount} +${effectiveStartLine},${newLineCount} @@`;
-
-  const renderSegments = (row: DiffRow) => {
-    if (row.segments.length === 0) return <span>&nbsp;</span>;
-    return row.segments.map((segment, index) => (
-      <span
-        key={`${row.id}-segment-${index}`}
-        className={cn(
-          segment.type === "delete" && "rounded-sm bg-red-500/20 text-red-950 dark:bg-red-400/25 dark:text-red-50",
-          segment.type === "add" && "rounded-sm bg-emerald-500/20 text-emerald-950 dark:bg-emerald-400/25 dark:text-emerald-50",
-        )}
-      >
-        {segment.text}
-      </span>
-    ));
-  };
-
-  return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
-      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/45 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="truncate text-sm font-medium leading-5 text-foreground">{title}</div>
-            {status && (
-              <span
-                className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-4",
-                  statusTone === "warning"
-                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                    : "bg-background/80 text-muted-foreground dark:bg-white/[0.08]",
-                )}
-              >
-                {status}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] leading-4 text-muted-foreground">
-            <span className="truncate" title={filePath}>{fileName}</span>
-            <span className="shrink-0 text-emerald-700 dark:text-emerald-300">+{addedRows}</span>
-            <span className="shrink-0 text-red-700 dark:text-red-300">-{deletedRows}</span>
-          </div>
-        </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
-      </div>
-
-      <div className="max-h-72 overflow-auto bg-background font-mono text-[11px] leading-5 dark:bg-zinc-950">
-        <div className="min-w-max border-b border-border/40 bg-muted/35 px-3 py-1 text-muted-foreground dark:border-white/[0.06] dark:bg-white/[0.03]">
-          {hunkHeader}
-        </div>
-        {rows.map((row) => (
-          <div
-            key={row.id}
-            className={cn(
-              "grid min-w-max grid-cols-[3rem_3rem_1.5rem_minmax(0,1fr)] border-b border-border/35 last:border-b-0 dark:border-white/[0.06]",
-              row.type === "delete" && "bg-red-500/[0.08] dark:bg-red-400/[0.10]",
-              row.type === "add" && "bg-emerald-500/[0.08] dark:bg-emerald-400/[0.10]",
-              row.type === "context" && "bg-background dark:bg-zinc-950",
-            )}
-          >
-            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
-              {row.oldLine ?? ""}
-            </div>
-            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
-              {row.newLine ?? ""}
-            </div>
-            <div
-              className={cn(
-                "select-none px-1 text-center font-semibold",
-                row.type === "delete" && "text-red-700 dark:text-red-300",
-                row.type === "add" && "text-emerald-700 dark:text-emerald-300",
-                row.type === "context" && "text-muted-foreground/60",
-              )}
-            >
-              {row.type === "delete" ? "-" : row.type === "add" ? "+" : " "}
-            </div>
-            <pre className="m-0 whitespace-pre-wrap break-words px-2 py-0.5 text-foreground">
-              {renderSegments(row)}
-            </pre>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function PolishPreviewCard({
   preview,
   isApplying,
   onApply,
   onIgnore,
+  onOpenReview,
 }: {
   preview: PolishPreviewResult;
   isApplying: boolean;
   onApply: () => void;
   onIgnore: () => void;
+  onOpenReview: () => void;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isFullNotePreview = preview.scope === "full-note";
   const statusText = preview.applied
-    ? "已应用"
+    ? "\u5df2\u5e94\u7528"
     : preview.ignored
-      ? "已取消"
-      : preview.error || "未应用";
+      ? "\u5df2\u53d6\u6d88"
+      : preview.error
+        ? "\u5df2\u8fc7\u671f"
+        : "\u672a\u5e94\u7528";
+  const title = isFullNotePreview ? "\u5168\u6587\u6da6\u8272\u9884\u89c8" : "\u6da6\u8272\u9884\u89c8";
+  const applyLabel = isFullNotePreview ? "\u5e94\u7528\u5168\u6587\u6da6\u8272" : "\u5e94\u7528\u5230\u9009\u533a";
+  const canApply = !preview.applied && !preview.ignored && !preview.error && preview.polishedText.trim().length > 0;
+  const displayStartLine = getPolishPreviewDisplayStartLine(preview);
 
-  const actions = !preview.applied && !preview.ignored ? (
-    <>
-      <button
-        type="button"
-        className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-55"
-        onClick={onIgnore}
-        disabled={isApplying}
-      >
-        取消
-      </button>
-      <button
-        type="button"
-        className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
-        onClick={onApply}
-        disabled={isApplying || !preview.polishedText.trim()}
-      >
-        {isApplying ? "应用中..." : "应用到选区"}
-      </button>
-    </>
-  ) : undefined;
+  const stats = useMemo(
+    () => getDiffStats(preview.originalText, preview.polishedText, displayStartLine),
+    [displayStartLine, preview.originalText, preview.polishedText],
+  );
 
   return (
-    <DiffPreview
-      title="润色预览"
-      filePath={preview.notePath}
-      status={statusText}
-      statusTone={preview.error ? "warning" : "neutral"}
-      oldText={preview.originalText}
-      newText={preview.polishedText}
-      startLine={preview.selectionStartLine}
-      actions={actions}
-    />
+    <div className="overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
+      <div className="grid min-w-0 gap-2 px-3 py-2">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] leading-4",
+                preview.error
+                  ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground dark:bg-white/[0.08]",
+              )}
+            >
+              {statusText}
+            </span>
+            <button
+              type="button"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setIsExpanded((value) => !value)}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? "收起预览" : "展开预览"}
+              title={isExpanded ? "收起预览" : "展开预览"}
+            >
+              {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-muted-foreground">
+          <span className="truncate" title={preview.notePath}>{getFileNameFromPath(preview.notePath)}</span>
+          <span>1 file changed</span>
+          <span className="shrink-0 text-emerald-700 dark:text-emerald-300">+{stats.addedRows}</span>
+          <span className="shrink-0 text-red-700 dark:text-red-300">-{stats.deletedRows}</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-opacity hover:opacity-90 dark:bg-zinc-100 dark:text-zinc-950"
+            onClick={onOpenReview}
+          >
+            审核
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center rounded-md border border-emerald-500/45 bg-emerald-500/10 px-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 disabled:pointer-events-none disabled:opacity-50 dark:text-emerald-300"
+            onClick={onApply}
+            disabled={isApplying || !canApply}
+          >
+            {isApplying ? "\u5e94\u7528\u4e2d..." : applyLabel}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+            onClick={onIgnore}
+            disabled={isApplying || preview.applied || preview.ignored}
+          >
+            取消
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="border-t border-border/60 dark:border-white/10">
+          <CodexDiffPreview
+            title={title}
+            filePath={preview.notePath}
+            status={statusText}
+            statusTone={preview.error ? "warning" : "neutral"}
+            oldText={preview.originalText}
+            newText={preview.polishedText}
+            startLine={displayStartLine}
+            maxHeightClassName={isFullNotePreview ? "max-h-96" : "max-h-72"}
+            showHeader={false}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1437,6 +1230,9 @@ export default function AiSidebar({
   onOpenAiSettings,
   onApplySuggestedTags,
   onApplyPolishedSelection,
+  onApplyPolishedFullNote,
+  onOpenPolishReview,
+  onPolishReviewChange,
 }: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
@@ -2194,6 +1990,7 @@ export default function AiSidebar({
         kind: "polish-preview",
         polishPreview: {
           previewId,
+          scope: "selection",
           notePath: context.filePath ?? chatContext.notePath,
           originalText,
           polishedText,
@@ -2227,11 +2024,139 @@ export default function AiSidebar({
     }
   };
 
-  const executeSlashCommand = (command: SlashCommand) => {
+  const submitPolishFullNoteCommand = async (
+    snapshot: NoteChatContextPayload,
+    displayText = "/全文润色",
+    instruction = "",
+  ) => {
+    if (isResponding) return;
+
     const conversationId = activeConversation?.id;
     if (!conversationId) return;
 
-    const commandText = `/${command.label}`;
+    if (!snapshot.notePath) {
+      appendCommandNotice(conversationId, displayText, "请先打开一篇笔记后再使用全文润色。");
+      return;
+    }
+
+    if (!snapshot.markdown.trim()) {
+      appendCommandNotice(conversationId, displayText, "当前笔记正文为空，无法全文润色。");
+      return;
+    }
+
+    if (!isAiConfigured) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
+      );
+      setInputValue("");
+      return;
+    }
+    if (!selectedProviderId || !selectedModelId) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      appendMessages(
+        conversationId,
+        createMessage({ role: "user", text: displayText, state: "done" }),
+        createMessage({
+          role: "system",
+          text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
+          state: "done",
+        }),
+      );
+      setInputValue("");
+      return;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const startedAt = Date.now();
+    const previewId = `full-polish-${Date.now().toString(36)}-${requestId}`;
+    const previewStartLine = 1;
+    const userMessage = createMessage({ role: "user", text: displayText, state: "done" });
+    const assistantMessage = createMessage({
+      role: "assistant",
+      text: "正在润色全文...",
+      kind: "polish-preview",
+      commandId: "polish-all",
+      state: "loading",
+      retryText: "polish-full-note",
+      retryDisplayText: displayText,
+      retryCommandId: "polish-all",
+      retryContext: snapshot,
+      retrySelectionRange: null,
+      retrySelectionStartLine: previewStartLine,
+      retryInstruction: instruction,
+      requestId,
+      startedAt,
+    });
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(conversationId, userMessage, assistantMessage);
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+    setIsResponding(true);
+
+    try {
+      const result = await polishFullNote(snapshot, instruction, selectedProviderId, selectedModelId);
+      const polishedText = result.polishedBody;
+      if (!polishedText.trim()) {
+        throw new Error("AI full note polish failed: polishedBody was empty");
+      }
+
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: "全文润色预览已生成。",
+        kind: "polish-preview",
+        polishPreview: {
+          previewId,
+          scope: "full-note",
+          notePath: snapshot.notePath,
+          originalText: snapshot.markdown,
+          polishedText,
+          selectionRange: null,
+          selectionStartLine: previewStartLine,
+          instruction: instruction.trim() || undefined,
+        },
+        state: "done",
+        retryText: undefined,
+        retryDisplayText: undefined,
+        retryCommandId: undefined,
+        retryContext: undefined,
+        retrySelectionRange: undefined,
+        retrySelectionStartLine: undefined,
+        retryInstruction: undefined,
+        ...finishAssistantTiming(message),
+      }));
+    } catch (error) {
+      console.warn("AI full note polish request failed", {
+        requestId,
+        notePath: snapshot.notePath,
+        error,
+      });
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: getPolishFullNoteErrorMessage(error),
+        kind: "text",
+        state: "error",
+        ...finishAssistantTiming(message),
+      }));
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
+  const executeSlashCommand = (command: SlashCommand, rawInput?: string) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
+    const commandText = getCommandDisplayText(command, rawInput);
+    const commandArgument = getCommandArgument(command, rawInput);
 
     if (command.id === "complete-tags") {
       if (!context.filePath) {
@@ -2244,6 +2169,37 @@ export default function AiSidebar({
       }
       const chatContext = buildChatContext({ includeNoteContext: true });
       void submitTagSuggestionCommand(chatContext, commandText);
+      return;
+    }
+
+    if (command.id === "polish-all") {
+      if (!context.filePath) {
+        appendCommandNotice(conversationId, commandText, "请先打开一篇笔记后再使用全文润色。");
+        return;
+      }
+      if (!includeCurrentNoteContext) {
+        appendCommandNotice(conversationId, commandText, "全文润色需要包含当前笔记信息，请先打开该开关。");
+        return;
+      }
+      if (!context.markdownBody.trim()) {
+        appendCommandNotice(conversationId, commandText, "当前笔记正文为空，无法全文润色。");
+        return;
+      }
+      if (context.markdownBody.replace(/\s+/g, "").length < 20) {
+        appendCommandNotice(conversationId, commandText, "当前笔记正文较短，更适合使用 /润色选中。");
+        return;
+      }
+
+      const chatContext: NoteChatContextPayload = {
+        noteTitle: context.title,
+        notePath: context.filePath,
+        tags: context.tags,
+        summary: context.summary.trim(),
+        selectedText: "",
+        markdown: context.markdownBody,
+        markdownTruncated: false,
+      };
+      void submitPolishFullNoteCommand(chatContext, commandText, commandArgument);
       return;
     }
 
@@ -2463,23 +2419,42 @@ export default function AiSidebar({
     setApplyingPolishMessageId(message.id);
     updatePolishPreviewMessage(conversationId, message.id, (current) => ({ ...current, error: undefined }));
     try {
-      await onApplyPolishedSelection({
-        notePath: preview.notePath,
-        originalText: preview.originalText,
-        polishedText: preview.polishedText,
-        selectionRange: preview.selectionRange,
-      });
+      if (preview.scope === "full-note") {
+        await onApplyPolishedFullNote({
+          notePath: preview.notePath,
+          originalBody: preview.originalText,
+          polishedBody: preview.polishedText,
+        });
+      } else {
+        await onApplyPolishedSelection({
+          notePath: preview.notePath,
+          originalText: preview.originalText,
+          polishedText: preview.polishedText,
+          selectionRange: preview.selectionRange,
+        });
+      }
       updatePolishPreviewMessage(conversationId, message.id, (current) => ({
         ...current,
         applied: true,
         ignored: false,
         error: undefined,
       }));
+      onPolishReviewChange({
+        ...preview,
+        applied: true,
+        ignored: false,
+        error: undefined,
+      });
     } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
       updatePolishPreviewMessage(conversationId, message.id, (current) => ({
         ...current,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorText,
       }));
+      onPolishReviewChange({
+        ...preview,
+        error: errorText,
+      });
     } finally {
       setApplyingPolishMessageId(null);
     }
@@ -2493,6 +2468,11 @@ export default function AiSidebar({
       ignored: true,
       error: undefined,
     }));
+    onPolishReviewChange({
+      ...message.polishPreview,
+      ignored: true,
+      error: undefined,
+    });
   };
 
   const selectCommand = (command: SlashCommand) => {
@@ -2510,7 +2490,7 @@ export default function AiSidebar({
     if (value.startsWith("/")) {
       const command = getCommandByInput(value);
       if (command) {
-        executeSlashCommand(command);
+        executeSlashCommand(command, value);
       } else {
         appendCommandNotice(conversationId, value, "这个命令稍后接入。");
       }
@@ -2954,6 +2934,7 @@ export default function AiSidebar({
                           isApplying={applyingPolishMessageId === message.id}
                           onApply={() => void applyPolishPreview(message)}
                           onIgnore={() => ignorePolishPreview(message)}
+                          onOpenReview={() => onOpenPolishReview(message.polishPreview!)}
                         />
                       ) : (
                         <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
@@ -2966,6 +2947,14 @@ export default function AiSidebar({
                             if (isResponding) return;
                             if (message.retryCommandId === "complete-tags") {
                               void submitTagSuggestionCommand(message.retryContext, message.retryDisplayText);
+                              return;
+                            }
+                            if (message.retryCommandId === "polish-all" && message.retryContext) {
+                              void submitPolishFullNoteCommand(
+                                message.retryContext,
+                                message.retryDisplayText,
+                                message.retryInstruction ?? "",
+                              );
                               return;
                             }
                             if (message.retryCommandId === "polish-selection" && message.retryContext) {

@@ -1,0 +1,122 @@
+import { useEffect, useRef } from "react";
+import { FileText, GitCompare, X } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+export interface OpenFileTab {
+  kind: "file";
+  path: string;
+  title?: string;
+  displayName: string;
+  dirty?: boolean;
+}
+
+export interface OpenReviewTab {
+  kind: "review";
+  id: string;
+  sourcePath: string;
+  title: string;
+  displayName: string;
+  status: "pending" | "applied" | "cancelled" | "stale";
+}
+
+export type OpenTab = OpenFileTab | OpenReviewTab;
+
+interface OpenTabsBarProps {
+  tabs: OpenTab[];
+  activeTabId: string | null;
+  onSelect: (tab: OpenTab) => void;
+  onClose: (tab: OpenTab) => void;
+}
+
+export default function OpenTabsBar({
+  tabs,
+  activeTabId,
+  onSelect,
+  onClose,
+}: OpenTabsBarProps) {
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeTabId, tabs.length]);
+
+  if (tabs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex h-9 shrink-0 items-end overflow-hidden border-b border-border/80 bg-muted/20">
+      <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden open-tabs-scrollbar">
+        {tabs.map((tab) => {
+          const tabId = tab.kind === "file" ? tab.path : tab.id;
+          const isActive = tabId === activeTabId;
+          const label = tab.title?.trim() || tab.displayName;
+          const tooltip = tab.kind === "file" ? tab.path : `${tab.title}: ${tab.sourcePath}`;
+          const Icon = tab.kind === "file" ? FileText : GitCompare;
+
+          return (
+            <div
+              key={tabId}
+              ref={isActive ? activeTabRef : undefined}
+              className={cn(
+                "group relative flex h-9 min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
+                isActive
+                  ? "border-t border-t-primary/45 bg-background text-foreground"
+                  : "bg-muted/10 text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+              )}
+              title={tooltip}
+            >
+              <button
+                type="button"
+                className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left"
+                onClick={() => onSelect(tab)}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                <span className="min-w-0 truncate">{label}</span>
+                {tab.kind === "file" && tab.dirty && (
+                  <span
+                    className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                    aria-label="unsaved"
+                  />
+                )}
+                {tab.kind === "review" && (
+                  <span
+                    className={cn(
+                      "ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                      tab.status === "pending" && "bg-sky-400",
+                      tab.status === "applied" && "bg-emerald-400",
+                      tab.status === "cancelled" && "bg-muted-foreground/45",
+                      tab.status === "stale" && "bg-amber-400",
+                    )}
+                    aria-label={tab.status}
+                  />
+                )}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  !isActive && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+                  tab.kind === "file" && tab.dirty && "opacity-100",
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClose(tab);
+                }}
+                title={`Close ${label}`}
+                aria-label={`Close ${label}`}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
