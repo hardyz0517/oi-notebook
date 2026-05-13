@@ -448,6 +448,8 @@ html[data-theme="light"] [data-markdown-preview-content] hr {
 }
 
 .app-shell {
+  --app-zoom: 1;
+  --chrome-zoom: 1;
   --app-ui-gap-scale: var(--app-ui-scale, 1);
 }
 
@@ -484,9 +486,9 @@ html[data-theme="light"] .shadow-2xl {
 }
 
 .app-top-toolbar {
-  min-height: calc(2.5rem * var(--app-ui-gap-scale));
-  gap: calc(0.625rem * var(--app-ui-gap-scale));
-  padding: calc(0.375rem * var(--app-ui-gap-scale)) calc(0.75rem * var(--app-ui-gap-scale));
+  min-height: calc(34px * var(--chrome-zoom, 1));
+  gap: calc(0.5rem * var(--app-ui-gap-scale));
+  padding: calc(3px * var(--chrome-zoom, 1)) calc(0.625rem * var(--app-ui-gap-scale));
   background: var(--surface-window);
   border-color: var(--separator-strong);
   font-size: var(--toolbar-font-size, 12px);
@@ -523,7 +525,17 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 }
 
 .app-brand-mark {
-  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--foreground) 9%, transparent);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.app-brand-mark img {
+  display: block;
+  height: calc(28px * var(--app-zoom, 1));
+  width: calc(28px * var(--app-zoom, 1));
+  object-fit: contain;
 }
 
 .app-editor-workspace {
@@ -531,12 +543,14 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 }
 
 .open-tabs-bar {
+  height: calc(30px * var(--chrome-zoom, 1));
   background:
     linear-gradient(to bottom, color-mix(in oklch, var(--surface-toolbar) 96%, var(--foreground) 4%), var(--surface-toolbar));
   border-color: var(--separator-strong);
 }
 
 .open-tab {
+  height: calc(30px * var(--chrome-zoom, 1));
   border-color: color-mix(in oklch, var(--separator-strong) 78%, transparent);
 }
 
@@ -572,6 +586,7 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 
 .open-tab-button {
   min-width: 0;
+  padding-inline: calc(0.55rem * var(--app-ui-gap-scale));
 }
 
 .open-tab-icon {
@@ -603,8 +618,10 @@ html[data-theme="light"] .open-tab[data-active="true"]::after {
 }
 
 .app-activity-bar {
-  width: calc(3.25rem * var(--app-ui-gap-scale));
+  width: calc(52px * var(--app-zoom, 1));
   padding-block: calc(0.625rem * var(--app-ui-gap-scale));
+  background: var(--surface-activity);
+  border-color: var(--separator-strong);
 }
 
 html[data-theme="light"] .app-activity-bar {
@@ -613,15 +630,38 @@ html[data-theme="light"] .app-activity-bar {
 }
 
 .app-activity-bar button {
-  height: calc(2.5rem * var(--app-ui-gap-scale));
-  width: calc(2.5rem * var(--app-ui-gap-scale));
-  border-radius: calc(0.5rem * var(--app-ui-gap-scale));
+  height: calc(48px * var(--app-zoom, 1));
+  width: calc(48px * var(--app-zoom, 1));
+  border-radius: calc(0.45rem * var(--app-ui-gap-scale));
 }
 
 .app-activity-bar button svg {
-  height: calc(1.2rem * var(--app-ui-gap-scale));
-  width: calc(1.2rem * var(--app-ui-gap-scale));
-  stroke-width: 2.15;
+  height: calc(24px * var(--app-zoom, 1)) !important;
+  width: calc(24px * var(--app-zoom, 1)) !important;
+  min-height: calc(24px * var(--app-zoom, 1));
+  min-width: calc(24px * var(--app-zoom, 1));
+  stroke-width: 2.18;
+}
+
+.app-activity-button {
+  color: color-mix(in oklch, var(--text-secondary) 72%, var(--foreground));
+}
+
+.app-activity-button:hover {
+  background: var(--hover-bg);
+  color: var(--foreground);
+}
+
+.app-activity-button[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--selected-bg) 82%, var(--surface-activity));
+  color: var(--foreground);
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--primary) 86%, var(--foreground)),
+    inset 0 0 0 1px color-mix(in oklch, var(--border) 72%, transparent);
+}
+
+.app-activity-button[aria-pressed="true"] svg {
+  color: color-mix(in oklch, var(--foreground) 92%, var(--primary));
 }
 
 html[data-theme="light"] .app-activity-bar button {
@@ -635,7 +675,7 @@ html[data-theme="light"] .app-activity-bar button:hover {
 
 html[data-theme="light"] .app-activity-bar button[aria-pressed="true"] {
   background: var(--selected-bg);
-  color: var(--primary);
+  color: var(--foreground);
   box-shadow:
     inset 2px 0 0 var(--primary),
     inset 0 0 0 1px rgb(52 152 219 / 10%);
@@ -654,6 +694,109 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 .app-notes-sidebar {
   width: calc(15rem * var(--app-ui-gap-scale));
   font-size: calc(0.875rem * var(--app-ui-gap-scale));
+  background: var(--surface-sidebar);
+  border-color: var(--separator-strong);
+}
+
+.app-notes-sidebar-header {
+  background: color-mix(in oklch, var(--surface-sidebar) 86%, var(--surface-toolbar));
+  border-color: var(--separator-strong);
+  min-height: calc(32px * var(--chrome-zoom, 1));
+}
+
+.app-notes-sidebar-action {
+  border-radius: calc(0.375rem * var(--app-ui-gap-scale));
+  color: color-mix(in oklch, var(--text-secondary) 70%, var(--foreground));
+}
+
+.app-notes-sidebar-action svg {
+  height: calc(17px * var(--app-zoom, 1)) !important;
+  width: calc(17px * var(--app-zoom, 1)) !important;
+  min-height: calc(17px * var(--app-zoom, 1));
+  min-width: calc(17px * var(--app-zoom, 1));
+  stroke-width: 2.2;
+}
+
+.app-notes-sidebar-action:hover {
+  background: var(--hover-bg);
+  color: var(--foreground);
+}
+
+.app-file-tree {
+  color: var(--foreground);
+}
+
+.app-file-group-header {
+  min-height: calc(1.25rem * var(--app-ui-gap-scale));
+}
+
+.app-file-group-icon,
+.app-file-group-count,
+.app-file-empty {
+  color: var(--text-muted);
+}
+
+.app-file-group-icon {
+  height: calc(13px * var(--app-zoom, 1)) !important;
+  width: calc(13px * var(--app-zoom, 1)) !important;
+  min-width: calc(15px * var(--app-zoom, 1));
+  color: color-mix(in oklch, var(--text-muted) 50%, var(--text-secondary));
+  stroke-width: 2.18;
+}
+
+.app-file-group-label {
+  color: color-mix(in oklch, var(--text-secondary) 88%, var(--foreground));
+  letter-spacing: 0.13em;
+}
+
+.app-file-group-count {
+  min-width: 1.15rem;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-card-soft) 82%, transparent);
+  padding: 0 0.35rem;
+  text-align: center;
+}
+
+.app-file-row {
+  min-height: calc(1.75rem * var(--app-ui-gap-scale));
+  color: color-mix(in oklch, var(--foreground) 92%, var(--text-secondary));
+}
+
+.app-file-row:hover {
+  background: color-mix(in oklch, var(--hover-bg) 78%, transparent);
+}
+
+.app-file-row[data-active="true"] {
+  background: color-mix(in oklch, var(--selected-bg) 72%, var(--surface-sidebar));
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--primary) 76%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--border) 64%, transparent);
+}
+
+.app-file-row[data-active="true"] .app-file-name {
+  color: var(--foreground);
+}
+
+.app-file-actions {
+  border-radius: 0.35rem;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--surface-sidebar) 0%, transparent),
+    var(--surface-sidebar) 30%
+  );
+  padding-left: 0.4rem;
+}
+
+.app-file-action {
+  border-radius: 0.3rem;
+}
+
+.app-file-action:hover {
+  background: var(--hover-bg);
+}
+
+.app-file-action-danger:hover {
+  background: color-mix(in oklch, var(--destructive) 14%, transparent);
 }
 
 .app-column-resizer {
@@ -742,12 +885,15 @@ html[data-theme="light"] .markdown-toolbar button:hover {
 }
 
 .markdown-toolbar {
+  min-height: calc(30px * var(--chrome-zoom, 1));
   background:
     linear-gradient(to bottom, color-mix(in oklch, var(--surface-toolbar) 92%, var(--foreground) 3%), var(--surface-toolbar));
   border-color: var(--separator-strong);
 }
 
 .markdown-toolbar-button {
+  min-height: calc(24px * var(--chrome-zoom, 1));
+  min-width: calc(24px * var(--chrome-zoom, 1));
   border: 1px solid transparent;
   color: var(--text-secondary);
 }
@@ -790,10 +936,44 @@ html[data-theme="light"] .markdown-toolbar button:hover {
   min-height: calc(1.75rem * var(--app-ui-gap-scale));
   background: color-mix(in oklch, var(--surface-toolbar) 76%, var(--surface-window));
   border-color: var(--separator-strong);
+  color: var(--text-muted);
 }
 
 .app-status-bar button:disabled {
   opacity: 1;
+}
+
+.app-status-group {
+  gap: 0;
+}
+
+.app-status-item {
+  min-height: 1.25rem;
+  color: var(--text-muted);
+}
+
+.app-status-item + .app-status-item {
+  margin-left: 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+}
+
+.app-status-button {
+  color: var(--text-secondary);
+}
+
+.app-status-button:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--hover-bg) 78%, transparent);
+  color: var(--foreground);
+}
+
+.app-status-save-dirty {
+  color: color-mix(in oklch, #fbbf24 78%, var(--foreground));
+}
+
+.app-status-save-dirty:hover:not(:disabled) {
+  background: color-mix(in oklch, #fbbf24 12%, transparent);
+  color: color-mix(in oklch, #fde68a 86%, var(--foreground));
 }
 
 .settings-center {

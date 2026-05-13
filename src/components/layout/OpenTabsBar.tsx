@@ -49,7 +49,7 @@ export default function OpenTabsBar({
   }
 
   return (
-    <div className="open-tabs-bar flex h-9 shrink-0 items-end overflow-hidden border-b border-border/80 bg-muted/20">
+    <div className="open-tabs-bar flex h-8 shrink-0 items-end overflow-hidden border-b border-border/80 bg-muted/20">
       <div className="open-tabs-scrollbar flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {tabs.map((tab) => {
           const tabId = tab.kind === "file" ? tab.path : tab.id;
@@ -63,7 +63,7 @@ export default function OpenTabsBar({
               key={tabId}
               ref={isActive ? activeTabRef : undefined}
               className={cn(
-                "open-tab group relative flex h-9 min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
+                "open-tab group relative flex h-8 min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
                 isActive
                   ? "open-tab-active border-t border-t-primary/45 bg-background text-foreground"
                   : "bg-muted/10 text-muted-foreground hover:bg-accent/35 hover:text-foreground",
@@ -75,7 +75,7 @@ export default function OpenTabsBar({
             >
               <button
                 type="button"
-                className="open-tab-button flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left"
+                className="open-tab-button flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-left"
                 onClick={() => onSelect(tab)}
                 aria-current={isActive ? "page" : undefined}
               >
@@ -103,7 +103,7 @@ export default function OpenTabsBar({
               <button
                 type="button"
                 className={cn(
-                  "open-tab-close mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  "open-tab-close mr-1 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
                   !isActive && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
                   tab.kind === "file" && tab.dirty && "opacity-100",
                 )}

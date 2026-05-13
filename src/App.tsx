@@ -57,8 +57,13 @@ const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
 const THEME_STORAGE_KEY = "oi-notebook.theme";
 const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
+const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
+const APP_ZOOM_MIN = 0.8;
+const APP_ZOOM_MAX = 1.6;
+const APP_ZOOM_STEP = 0.1;
+const APP_ZOOM_DEFAULT = 1;
 const CONTENT_ZOOM_MIN = 0.8;
-const CONTENT_ZOOM_MAX = 1.6;
+const CONTENT_ZOOM_MAX = 2;
 const CONTENT_ZOOM_STEP = 0.1;
 const CONTENT_ZOOM_DEFAULT = 1;
 const UI_SCALE_STORAGE_KEY = "oi-notebook.uiScale";
@@ -240,7 +245,8 @@ const THEME_OPTIONS: Array<{ id: AppTheme; label: string; description: string }>
   { id: "dark", label: "黑色主题", description: "保持当前深色工作台视觉，适合长时间编辑。" },
   { id: "light", label: "白色主题", description: "切换到浅色界面，适合明亮环境和投屏演示。" },
 ];
-const CONTENT_ZOOM_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
+const APP_ZOOM_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
+const CONTENT_ZOOM_PRESETS = [0.9, 1, 1.1, 1.25, 1.5];
 const UI_SCALE_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
 const READING_DENSITY_OPTIONS: Array<{
   id: ReadingDensity;
@@ -672,6 +678,11 @@ function getLuoguPreviewWorkflowStatusText(
   return submission.statusLabel;
 }
 
+function clampAppZoom(value: number): number {
+  const stepped = Math.round(value * 10) / 10;
+  return Math.min(APP_ZOOM_MAX, Math.max(APP_ZOOM_MIN, stepped));
+}
+
 function clampContentZoom(value: number): number {
   const stepped = Math.round(value * 10) / 10;
   return Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, stepped));
@@ -690,6 +701,15 @@ function clampFontSize(value: number): number {
 function clampNumberRange(value: number, min: number, max: number): number {
   const rounded = Math.round(value);
   return Math.min(max, Math.max(min, rounded));
+}
+
+function getInitialAppZoom(): number {
+  const stored = window.localStorage.getItem(APP_ZOOM_STORAGE_KEY);
+  if (stored === null) return APP_ZOOM_DEFAULT;
+
+  const parsed = Number(stored);
+  if (!Number.isFinite(parsed)) return APP_ZOOM_DEFAULT;
+  return clampAppZoom(parsed);
 }
 
 function getInitialContentZoom(): number {
@@ -1121,6 +1141,7 @@ export default function App() {
   const [editorCursorOffset, setEditorCursorOffset] = useState<number | null>(null);
   const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
+  const [appZoom, setAppZoom] = useState(getInitialAppZoom);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
@@ -1595,18 +1616,22 @@ export default function App() {
               ? "notes"
               : null;
   const isAiActivityActive = isAiSidebarOpen || (isAdvancedActionsOpen && settingsSection === "ai");
+  const appZoomLabel = `${Math.round(appZoom * 100)}%`;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
+  const chromeZoom = 1 + (appZoom - 1) * 0.45;
   const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
   const activeReadingDensity =
     READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
   const appearanceStyle = {
+    "--app-zoom": appZoom,
+    "--chrome-zoom": chromeZoom,
     "--md-content-zoom": contentZoom,
     "--app-ui-scale": uiScale,
-    "--editor-font-size": `${editorFontSize}px`,
-    "--preview-font-size": `${previewFontSize}px`,
-    "--toolbar-font-size": `${toolbarFontSize}px`,
-    "--settings-font-size": `${settingsFontSize}px`,
+    "--editor-font-size": `${editorFontSize * appZoom}px`,
+    "--preview-font-size": `${previewFontSize * appZoom}px`,
+    "--toolbar-font-size": `${toolbarFontSize * appZoom}px`,
+    "--settings-font-size": `${settingsFontSize * appZoom}px`,
     "--content-line-height": activeReadingDensity.lineHeight,
     "--content-block-spacing": activeReadingDensity.blockSpacing,
     "--content-list-item-spacing": activeReadingDensity.listItemSpacing,
@@ -1716,6 +1741,13 @@ export default function App() {
 
     return backendSearchResults.map(toSearchResultItem);
   }, [backendSearchResults, files, searchError, searchQuery, trimmedSearchQuery]);
+
+  const updateAppZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
+    setAppZoom((currentZoom) => {
+      const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
+      return clampAppZoom(rawZoom);
+    });
+  };
 
   const updateContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setContentZoom((currentZoom) => {
@@ -3627,13 +3659,10 @@ export default function App() {
     void handleOpenBlog();
   };
 
-  const activityButtonClass = (item: ActivityBarItem) =>
+  const activityButtonClass = (_item: ActivityBarItem) =>
     cn(
-      "relative flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+      "app-activity-button relative flex h-12 w-12 items-center justify-center rounded-md text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
       "disabled:pointer-events-none disabled:opacity-40",
-      (item === "ai" ? isAiActivityActive : activeActivityItem === item) && "bg-accent/60 text-foreground",
-      (item === "ai" ? isAiActivityActive : activeActivityItem === item) &&
-        "before:absolute before:left-1 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary",
     );
 
   // Ctrl+S / Cmd+S 保存当前笔记
@@ -3660,8 +3689,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
-  }, [contentZoom]);
+    const root = document.documentElement;
+    root.style.fontSize = `${16 * appZoom}px`;
+    root.style.setProperty("--app-zoom", String(appZoom));
+    window.localStorage.setItem(APP_ZOOM_STORAGE_KEY, String(appZoom));
+
+    return () => {
+      root.style.fontSize = "";
+      root.style.removeProperty("--app-zoom");
+    };
+  }, [appZoom]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -3673,6 +3710,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
   }, [uiScale]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
+  }, [contentZoom]);
 
   useEffect(() => {
     window.localStorage.setItem(EDITOR_FONT_SIZE_STORAGE_KEY, String(editorFontSize));
@@ -3794,7 +3835,7 @@ export default function App() {
     };
   }, []);
 
-  // Ctrl/Cmd + Plus/Minus/0 缩放编辑器正文和右侧预览正文，不拦截 Ctrl+S 保存。
+  // Ctrl/Cmd + Plus/Minus/0 缩放整个应用界面，不拦截 Ctrl+S 保存；内容缩放由 Ctrl+滚轮处理。
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -3802,13 +3843,13 @@ export default function App() {
       const key = e.key.toLowerCase();
       if (key === "+" || key === "=") {
         e.preventDefault();
-        updateContentZoom((currentZoom) => currentZoom + CONTENT_ZOOM_STEP);
+        updateAppZoom((currentZoom) => currentZoom + APP_ZOOM_STEP);
       } else if (key === "-" || key === "_") {
         e.preventDefault();
-        updateContentZoom((currentZoom) => currentZoom - CONTENT_ZOOM_STEP);
+        updateAppZoom((currentZoom) => currentZoom - APP_ZOOM_STEP);
       } else if (key === "0") {
         e.preventDefault();
-        updateContentZoom(CONTENT_ZOOM_DEFAULT);
+        updateAppZoom(APP_ZOOM_DEFAULT);
       }
     };
 
@@ -5611,9 +5652,9 @@ export default function App() {
                     <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
                       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="grid min-w-0 gap-1">
-                          <div className="text-sm font-medium text-foreground">界面缩放</div>
+                          <div className="text-sm font-medium text-foreground">界面密度</div>
                           <div className="text-sm leading-6 text-muted-foreground">
-                            调整软件界面控件、间距和面板文字，不改变状态栏里的 Markdown 内容缩放。当前界面缩放为 {uiScaleLabel}。
+                            微调软件界面控件、间距和面板密度；全局缩放由下方“全局界面缩放”和快捷键控制。当前界面密度为 {uiScaleLabel}。
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -5639,9 +5680,37 @@ export default function App() {
                     <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
                       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="grid min-w-0 gap-1">
+                          <div className="text-sm font-medium text-foreground">全局界面缩放</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            影响整个应用界面，包括侧栏、标签页、工具栏、编辑区、预览区和 AI Sidebar；状态栏“界面：{appZoomLabel}”显示同一数值。
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {APP_ZOOM_PRESETS.map((zoom) => {
+                            const isActive = Math.round(appZoom * 100) === Math.round(zoom * 100);
+                            return (
+                              <Button
+                                key={zoom}
+                                type="button"
+                                variant={isActive ? "default" : "outline"}
+                                size="sm"
+                                className="h-8 min-w-14 px-3"
+                                onClick={() => updateAppZoom(zoom)}
+                              >
+                                {Math.round(zoom * 100)}%
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="grid min-w-0 gap-1">
                           <div className="text-sm font-medium text-foreground">Markdown 内容缩放</div>
                           <div className="text-sm leading-6 text-muted-foreground">
-                            影响编辑区和预览区的 Markdown 内容，和状态栏“缩放：{contentZoomLabel}”保持一致；也会响应 Ctrl + 鼠标滚轮。
+                            只影响 Markdown 编辑正文和预览正文；Ctrl + 鼠标滚轮会调整这个值，状态栏“内容：{contentZoomLabel}”显示同一数值。
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -6351,14 +6420,14 @@ export default function App() {
     </Dialog>
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
-      <header className="app-top-toolbar flex min-h-10 shrink-0 select-none items-center gap-3 border-b border-border bg-background px-3 py-1.5">
+      <header className="app-top-toolbar flex min-h-9 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-1">
         <div className="flex min-w-0 items-center gap-2.5" data-tauri-drag-region>
-          <div className="flex h-7 min-w-0 items-center">
-            <span className="app-brand-mark grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border/70 bg-muted/35">
+          <div className="flex h-9 min-w-0 items-center">
+            <span className="app-brand-mark grid h-9 w-9 shrink-0 place-items-center">
               <img
                 src={APP_ICON_URL}
                 alt=""
-                className="h-5 w-5 object-contain"
+                className="h-6 w-6 object-contain"
                 draggable={false}
                 aria-hidden="true"
               />
@@ -6370,7 +6439,7 @@ export default function App() {
           <div className="flex items-center" aria-label="窗口控制">
             <button
               type="button"
-              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               onClick={() => void handleMinimizeWindow()}
               title="最小化"
               aria-label="最小化窗口"
@@ -6379,7 +6448,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               onClick={() => void handleToggleMaximizeWindow()}
               title="最大化 / 还原"
               aria-label="最大化或还原窗口"
@@ -6388,7 +6457,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="flex h-8 w-9 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
+              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
               onClick={() => void handleCloseWindow()}
               title="关闭"
               aria-label="关闭窗口"
@@ -6405,7 +6474,7 @@ export default function App() {
           className="app-activity-bar flex w-13 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2.5"
           aria-label="主活动栏"
         >
-          <div className="flex flex-col items-center gap-1">
+          <div className="flex flex-col items-center gap-1.5">
             <button
               type="button"
               className={activityButtonClass("notes")}
@@ -6414,7 +6483,7 @@ export default function App() {
               aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
               aria-pressed={activeActivityItem === "notes"}
             >
-              <FileText className="h-5 w-5" />
+              <FileText size={24} strokeWidth={2.18} />
             </button>
             <button
               type="button"
@@ -6424,7 +6493,7 @@ export default function App() {
               aria-label="搜索笔记"
               aria-pressed={activeActivityItem === "search"}
             >
-              <Search className="h-5 w-5" />
+              <Search size={24} strokeWidth={2.18} />
             </button>
             <button
               type="button"
@@ -6435,7 +6504,7 @@ export default function App() {
               aria-pressed={activeActivityItem === "luogu"}
               disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
             >
-              <RefreshCw className="h-5 w-5" />
+              <RefreshCw size={24} strokeWidth={2.18} />
             </button>
             <button
               type="button"
@@ -6445,7 +6514,7 @@ export default function App() {
               aria-label={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
               aria-pressed={isAiActivityActive}
             >
-              <Bot className="h-5 w-5" />
+              <Bot size={24} strokeWidth={2.18} />
             </button>
             <button
               type="button"
@@ -6455,7 +6524,7 @@ export default function App() {
               aria-label="打开博客"
               aria-pressed={activeActivityItem === "blog"}
             >
-              <ExternalLink className="h-5 w-5" />
+              <ExternalLink size={24} strokeWidth={2.18} />
             </button>
           </div>
           <button
@@ -6466,7 +6535,7 @@ export default function App() {
             aria-label="设置中心"
             aria-pressed={activeActivityItem === "settings"}
           >
-            <Settings className="h-5 w-5" />
+            <Settings size={24} strokeWidth={2.18} />
           </button>
         </nav>
 
@@ -6476,30 +6545,30 @@ export default function App() {
               className="app-notes-sidebar flex shrink-0 flex-col overflow-hidden bg-background/70"
               style={leftSidebarStyle}
             >
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="app-notes-sidebar-header flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   笔记
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6"
+                    className="app-notes-sidebar-action h-[30px] w-[30px]"
                     onClick={() => setIsSearchOpen(true)}
                     title="搜索笔记 Ctrl+K"
                     aria-label="搜索笔记"
                   >
-                    <Search className="h-3.5 w-3.5" />
+                    <Search size={18} strokeWidth={2.2} />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6"
+                    className="app-notes-sidebar-action h-[30px] w-[30px]"
                     onClick={openCreateDialog}
                     title="新建笔记"
                     aria-label="新建笔记"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus size={18} strokeWidth={2.2} />
                   </Button>
                 </div>
               </div>
@@ -7039,13 +7108,13 @@ export default function App() {
       </div>
       <footer className="app-status-bar shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="app-status-group flex min-w-0 flex-wrap items-center gap-y-1">
             <button
               type="button"
               className={cn(
-                "inline-flex h-5 items-center gap-1 rounded px-1.5 transition-colors",
+                "app-status-item app-status-button inline-flex h-5 items-center gap-1 rounded px-1.5 transition-colors",
                 isDirty && !isSavingNote
-                  ? "text-amber-300 hover:bg-amber-400/10 hover:text-amber-200"
+                  ? "app-status-save-dirty"
                   : "cursor-default text-muted-foreground",
                 (!currentFilePath || !isDirty || isSavingNote) && "pointer-events-none",
               )}
@@ -7057,12 +7126,12 @@ export default function App() {
               <Save className="h-3 w-3" aria-hidden="true" />
               保存：{saveStatusLabel}
             </button>
-            <span className="whitespace-nowrap">类型：Markdown</span>
+            <span className="app-status-item whitespace-nowrap">类型：Markdown</span>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="app-status-group flex min-w-0 flex-wrap items-center gap-y-1">
             <button
               type="button"
-              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
               onClick={() => openSettingsSection("blog")}
               title="打开博客相关工具"
             >
@@ -7070,7 +7139,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
               onClick={() => openSettingsSection("ai")}
               title="打开 AI 分类"
             >
@@ -7078,25 +7147,26 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
               onClick={() => openSettingsSection("luogu")}
               title="打开洛谷分类"
             >
               洛谷：{luoguStatusLabel}
             </button>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+          <div className="app-status-group flex min-w-0 flex-wrap items-center justify-end gap-y-1">
             <button
               type="button"
-              className="truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors hover:bg-accent/50 hover:text-foreground"
+              className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
               onClick={() => void handlePushGit()}
               disabled={isPushingGit}
               title="同步 Git"
             >
               Git：{gitStatusLabel}
             </button>
-            <span className="whitespace-nowrap">视图：{editorViewModeLabel}</span>
-            <span className="whitespace-nowrap">缩放：{contentZoomLabel}</span>
+            <span className="app-status-item whitespace-nowrap">视图：{editorViewModeLabel}</span>
+            <span className="app-status-item whitespace-nowrap">界面：{appZoomLabel}</span>
+            <span className="app-status-item whitespace-nowrap">内容：{contentZoomLabel}</span>
           </div>
         </div>
       </footer>

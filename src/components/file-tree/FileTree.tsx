@@ -1,6 +1,5 @@
-import { FileText, FolderOpen, Pencil, Trash2 } from "lucide-react";
+import { FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatRelativeTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -72,7 +71,7 @@ export default function FileTree({
 
   return (
     <ScrollArea className="h-full w-full">
-      <div className="w-full px-2 py-2">
+      <div className="app-file-tree w-full px-1.5 py-1.5">
         {GROUP_ORDER.map((groupKey, index) => {
           const groupFiles = groups.get(groupKey)!;
           const count = groupFiles.length;
@@ -81,28 +80,23 @@ export default function FileTree({
           if (groupKey === "other" && count === 0) return null;
 
           return (
-            <section key={groupKey} className={cn(index > 0 && "mt-4")}>
-              <div className="mb-1 flex items-center justify-between px-2">
-                <div className="flex min-w-0 items-center gap-2 text-muted-foreground/85">
-                  <FolderOpen className="h-3 w-3 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90">
-                      {groupMeta.label}
-                    </div>
-                    <div className="truncate text-[10px] text-muted-foreground/65">
-                      {groupMeta.directory}
-                    </div>
+            <section key={groupKey} className={cn("app-file-group", index > 0 && "mt-2.5")}>
+              <div className="app-file-group-header mb-0.5 flex items-center justify-between px-2">
+                <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground/85">
+                  <FolderOpen className="app-file-group-icon shrink-0" size={18} strokeWidth={2.18} />
+                  <div className="app-file-group-label min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90">
+                    {groupMeta.label}
                   </div>
                 </div>
-                <span className="shrink-0 text-[10px] text-muted-foreground/65">{count}</span>
+                <span className="app-file-group-count shrink-0 text-[10px] text-muted-foreground/65">{count}</span>
               </div>
 
               {count === 0 ? (
-                <p className="px-7 py-1.5 text-[10px] leading-4 text-muted-foreground/75">
+                <p className="app-file-empty px-7 py-1.5 text-[10px] leading-4 text-muted-foreground/75">
                   {groupMeta.emptyText}
                 </p>
               ) : (
-                <ul className="w-full space-y-0.5 pl-2">
+                <ul className="w-full space-y-px pl-1">
                   {groupFiles.map((file) => {
                     const isActive = file.path === activeFilePath;
 
@@ -112,30 +106,22 @@ export default function FileTree({
                           type="button"
                           onClick={() => onSelectFile(file.path)}
                           title={file.path}
+                          data-active={isActive ? "true" : "false"}
                           className={cn(
-                            "relative flex w-full min-w-0 items-start gap-2 rounded-sm border border-transparent py-2 pl-2.5 pr-14 text-left transition-colors duration-100",
+                            "app-file-row relative flex w-full min-w-0 items-center rounded-sm border border-transparent py-1 pl-2.5 pr-14 text-left transition-colors duration-100",
                             isActive
-                              ? "bg-accent/75 text-accent-foreground before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-px before:bg-primary"
-                              : "text-foreground/92 hover:bg-muted/60",
+                              ? "text-accent-foreground"
+                              : "text-foreground/92",
                           )}
                         >
-                          <FileText
-                            className={cn(
-                              "mt-0.5 h-3.5 w-3.5 shrink-0",
-                              isActive ? "text-primary" : "text-muted-foreground/70",
-                            )}
-                          />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-[12px] font-medium leading-4">
+                            <p className="app-file-name truncate text-[12px] font-medium leading-5">
                               {stripMdExtension(file.name)}
-                            </p>
-                            <p className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground/70">
-                              {formatRelativeTime(file.modified)}
                             </p>
                           </div>
                         </button>
 
-                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        <div className="app-file-actions absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <button
                             type="button"
                             title="\u91cd\u547d\u540d"
@@ -144,7 +130,7 @@ export default function FileTree({
                               e.stopPropagation();
                               onRenameFile(file.path);
                             }}
-                            className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+                            className="app-file-action flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted hover:text-foreground"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
@@ -156,7 +142,7 @@ export default function FileTree({
                               e.stopPropagation();
                               onDeleteFile(file.path);
                             }}
-                            className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
+                            className="app-file-action app-file-action-danger flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>

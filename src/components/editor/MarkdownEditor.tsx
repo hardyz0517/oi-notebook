@@ -579,7 +579,7 @@ export function MarkdownEditorToolbar({
   onAction,
 }: MarkdownEditorToolbarProps) {
   return (
-    <div className="markdown-toolbar flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b border-border bg-background px-2.5 py-1.5">
+    <div className="markdown-toolbar flex min-h-8 shrink-0 flex-wrap items-center gap-1 border-b border-border bg-background px-2 py-1">
       {markdownToolbarGroups.map((group, groupIndex) => (
         <div
           key={group.id}
@@ -596,7 +596,7 @@ export function MarkdownEditorToolbar({
                 title={action.title}
                 aria-label={action.title}
                 disabled={disabled}
-                className="markdown-toolbar-button inline-flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+                className="markdown-toolbar-button inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
                 onMouseDown={(event) => {
                   event.preventDefault();
                   if (disabled) return;
