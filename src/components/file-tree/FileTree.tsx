@@ -1,5 +1,5 @@
-import { FolderOpen, Pencil, Trash2 } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronRight, Folder, FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -18,7 +18,6 @@ function stripMdExtension(name: string): string {
 type GroupKey = "tricks" | "problems" | "luogu" | "inbox" | "other";
 
 const GROUP_ORDER: GroupKey[] = ["tricks", "problems", "luogu", "inbox", "other"];
-const STANDARD_DIRS = new Set<string>(["tricks", "problems", "luogu", "inbox"]);
 const GROUP_META: Record<GroupKey, { label: string; directory: string; emptyText: string }> = {
   tricks: {
     label: "\u6280\u5de7",
@@ -47,17 +46,74 @@ const GROUP_META: Record<GroupKey, { label: string; directory: string; emptyText
   },
 };
 
-function buildGroupMap(files: NoteFileInfo[]): Map<GroupKey, NoteFileInfo[]> {
-  const map = new Map<GroupKey, NoteFileInfo[]>(GROUP_ORDER.map((key) => [key, []]));
+const COLLAPSED_FOLDERS_STORAGE_KEY = "oi-notebook.collapsedFolders";
+
+interface FileGroup {
+  id: string;
+  label: string;
+  directory: string;
+  emptyText: string;
+  files: NoteFileInfo[];
+}
+
+function normalizeFolderKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getTopLevelDirectory(path: string): string | null {
+  const slashIndex = path.indexOf("/");
+  return slashIndex === -1 ? null : path.slice(0, slashIndex);
+}
+
+function readStoredStringArray(key: string): string[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function buildGroups(files: NoteFileInfo[]): FileGroup[] {
+  const standardGroups: FileGroup[] = GROUP_ORDER
+    .filter((key) => key !== "other")
+    .map((key) => ({
+      id: key,
+      label: GROUP_META[key].label,
+      directory: GROUP_META[key].directory,
+      emptyText: GROUP_META[key].emptyText,
+      files: [],
+    }));
+  const otherGroup: FileGroup = {
+    id: "other",
+    label: GROUP_META.other.label,
+    directory: GROUP_META.other.directory,
+    emptyText: GROUP_META.other.emptyText,
+    files: [],
+  };
+
+  const standardByDirectory = new Map<string, FileGroup>(
+    standardGroups.map((group) => [normalizeFolderKey(group.directory), group]),
+  );
 
   for (const file of files) {
-    const slashIndex = file.path.indexOf("/");
-    const dir = slashIndex === -1 ? null : file.path.slice(0, slashIndex);
-    const key: GroupKey = dir !== null && STANDARD_DIRS.has(dir) ? (dir as GroupKey) : "other";
-    map.get(key)!.push(file);
+    const dir = getTopLevelDirectory(file.path);
+    const normalizedDir = dir === null ? "" : normalizeFolderKey(dir);
+    const standardGroup = standardByDirectory.get(normalizedDir);
+    if (standardGroup) {
+      standardGroup.files.push(file);
+      continue;
+    }
+
+    otherGroup.files.push(file);
   }
 
-  return map;
+  return [...standardGroups, otherGroup].filter((group) => group.id !== "other" || group.files.length > 0);
 }
 
 export default function FileTree({
@@ -67,33 +123,72 @@ export default function FileTree({
   onDeleteFile,
   onRenameFile,
 }: FileTreeProps) {
-  const groups = buildGroupMap(files);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
+    () => new Set(readStoredStringArray(COLLAPSED_FOLDERS_STORAGE_KEY)),
+  );
+  const groups = useMemo(() => buildGroups(files), [files]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      COLLAPSED_FOLDERS_STORAGE_KEY,
+      JSON.stringify(Array.from(collapsedFolders)),
+    );
+  }, [collapsedFolders]);
+
+  const toggleFolder = (folderId: string) => {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  };
 
   return (
-    <ScrollArea className="h-full w-full">
+    <div className="app-file-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden">
       <div className="app-file-tree w-full px-1.5 py-1.5">
-        {GROUP_ORDER.map((groupKey, index) => {
-          const groupFiles = groups.get(groupKey)!;
+        {groups.map((group, index) => {
+          const groupFiles = group.files;
           const count = groupFiles.length;
-          const groupMeta = GROUP_META[groupKey];
-
-          if (groupKey === "other" && count === 0) return null;
+          const isCollapsed = collapsedFolders.has(group.id);
+          const hasActiveFile = groupFiles.some((file) => file.path === activeFilePath);
+          const FolderIcon = isCollapsed ? Folder : FolderOpen;
 
           return (
-            <section key={groupKey} className={cn("app-file-group", index > 0 && "mt-2.5")}>
-              <div className="app-file-group-header mb-0.5 flex items-center justify-between px-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground/85">
-                  <FolderOpen className="app-file-group-icon shrink-0" size={18} strokeWidth={2.18} />
+            <section key={group.id} className={cn("app-file-group", index > 0 && "mt-2.5")}>
+              <button
+                type="button"
+                className={cn(
+                  "app-file-group-header mb-0.5 flex w-full items-center justify-between rounded-sm px-1.5 text-left transition-colors hover:bg-muted/45",
+                  hasActiveFile && isCollapsed && "app-file-group-header-active",
+                )}
+                onClick={() => toggleFolder(group.id)}
+                aria-expanded={!isCollapsed}
+                title={`${isCollapsed ? "展开" : "折叠"} ${group.label}`}
+              >
+                <div className="flex min-w-0 items-center gap-1 text-muted-foreground/85">
+                  <ChevronRight
+                    className={cn(
+                      "app-file-group-chevron shrink-0 transition-transform",
+                      !isCollapsed && "rotate-90",
+                    )}
+                    size={13}
+                    strokeWidth={2.35}
+                  />
+                  <FolderIcon className="app-file-group-icon shrink-0" size={16} strokeWidth={2.15} />
                   <div className="app-file-group-label min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90">
-                    {groupMeta.label}
+                    {group.label}
                   </div>
                 </div>
                 <span className="app-file-group-count shrink-0 text-[10px] text-muted-foreground/65">{count}</span>
-              </div>
+              </button>
 
-              {count === 0 ? (
+              {isCollapsed ? null : count === 0 ? (
                 <p className="app-file-empty px-7 py-1.5 text-[10px] leading-4 text-muted-foreground/75">
-                  {groupMeta.emptyText}
+                  {group.emptyText}
                 </p>
               ) : (
                 <ul className="w-full space-y-px pl-1">
@@ -108,7 +203,7 @@ export default function FileTree({
                           title={file.path}
                           data-active={isActive ? "true" : "false"}
                           className={cn(
-                            "app-file-row relative flex w-full min-w-0 items-center rounded-sm border border-transparent py-1 pl-2.5 pr-14 text-left transition-colors duration-100",
+                            "app-file-row relative flex w-full min-w-0 items-center rounded-sm border border-transparent py-1 pl-2.5 pr-11 text-left transition-colors duration-100",
                             isActive
                               ? "text-accent-foreground"
                               : "text-foreground/92",
@@ -121,7 +216,7 @@ export default function FileTree({
                           </div>
                         </button>
 
-                        <div className="app-file-actions absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        <div className="app-file-actions absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <button
                             type="button"
                             title="\u91cd\u547d\u540d"
@@ -130,9 +225,9 @@ export default function FileTree({
                               e.stopPropagation();
                               onRenameFile(file.path);
                             }}
-                            className="app-file-action flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+                            className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
                           >
-                            <Pencil className="h-3 w-3" />
+                            <Pencil />
                           </button>
                           <button
                             type="button"
@@ -142,9 +237,9 @@ export default function FileTree({
                               e.stopPropagation();
                               onDeleteFile(file.path);
                             }}
-                            className="app-file-action app-file-action-danger flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
+                            className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 />
                           </button>
                         </div>
                       </li>
@@ -156,6 +251,6 @@ export default function FileTree({
           );
         })}
       </div>
-    </ScrollArea>
+    </div>
   );
 }
