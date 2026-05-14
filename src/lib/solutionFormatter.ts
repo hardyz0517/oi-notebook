@@ -272,11 +272,68 @@ function isListLine(line: string): boolean {
   return /^(\s*)([-+*]|\d+\.)\s*/.test(line);
 }
 
+function getListKind(line: string): "ordered" | "unordered" | null {
+  const match = line.match(/^\s*([-+*]|\d+\.)\s*/);
+  if (!match) return null;
+  return /\d+\./.test(match[1]) ? "ordered" : "unordered";
+}
+
 function repairProtectedLiterals(input: string): string {
   let value = input;
   value = value.replace(/(\d)\u3002(?=\d)/g, "$1.");
   value = value.replace(/([A-Za-z0-9_])\u3002(?=[A-Za-z0-9_])/g, "$1.");
   return value;
+}
+
+function formatMathOperatorSpacing(input: string): string {
+  let output = "";
+  let braceDepth = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    if (char === "{") {
+      braceDepth += 1;
+      output += char;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      output += char;
+      continue;
+    }
+    if (braceDepth > 0) {
+      output += char;
+      continue;
+    }
+    if (char === ",") {
+      output = output.replace(/[ \t]+$/, "");
+      output += ", ";
+      while (input[index + 1] === " " || input[index + 1] === "\t") index += 1;
+      continue;
+    }
+    if (char === "=" || char === "<" || char === ">" || char === "+") {
+      output = output.replace(/[ \t]+$/, "");
+      output += ` ${char} `;
+      while (input[index + 1] === " " || input[index + 1] === "\t") index += 1;
+      continue;
+    }
+    if (char === "-") {
+      const prev = output.replace(/[ \t]+$/, "").slice(-1);
+      const next = input[index + 1];
+      const isUnary = !prev || /[(,=<>+\-*/]/.test(prev) || /\s/.test(next ?? "");
+      if (isUnary) {
+        output += char;
+        continue;
+      }
+      output = output.replace(/[ \t]+$/, "");
+      output += " - ";
+      while (input[index + 1] === " " || input[index + 1] === "\t") index += 1;
+      continue;
+    }
+    output += char;
+  }
+
+  return output.replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function normalizeMathFunctions(input: string): string {
@@ -315,9 +372,14 @@ function formatMathContent(input: string, counts: CountMap): string {
     counts.math_symbol_latex += replacementCount;
   }
 
+  const spacedValue = formatMathOperatorSpacing(value);
+  if (spacedValue !== value) {
+    counts.math_spacing += 1;
+    value = spacedValue;
+  }
+
   value = value.replace(/[ \t]+/g, " ");
   value = value.replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");
-  value = value.replace(/([=<>])\s+(\\(?:infty|min|sum)\b)/g, "$1$2");
   value = value.replace(/\s+([,.;!?])/g, "$1");
   return value.trim();
 }
@@ -565,6 +627,12 @@ function isLikelyMathAtom(token: string): boolean {
   return false;
 }
 
+function formatVariableListExpression(expr: string, counts: CountMap): string {
+  const parts = expr.split(/\s*,\s*/);
+  counts.inline_math_wrap += 1;
+  return parts.map((part) => `$${formatMathContent(part, counts)}$`).join("\uFF0C");
+}
+
 function formatInlineMathWrap(input: string, counts: CountMap): string {
   let value = input;
   const wrappedSegments: string[] = [];
@@ -703,10 +771,12 @@ function formatInlineMathWrap(input: string, counts: CountMap): string {
   });
 
   for (const pattern of [variableListPattern, plainVariableListPattern]) {
-    value = wrapIf(value, pattern, (expr, offset, whole) => {
-      if (whole[offset - 1] === "$" || whole[offset + expr.length] === "$") return false;
-      return hasCjkContextAround(whole, offset, offset + expr.length);
-    }, (expr) => expr.replace(/\s+/g, ""));
+    value = value.replace(pattern, (expr, offset: number, whole: string) => {
+      if (isInsideProtectedPlaceholder(whole, offset)) return expr;
+      if (whole[offset - 1] === "$" || whole[offset + expr.length] === "$") return expr;
+      if (!hasCjkContextAround(whole, offset, offset + expr.length)) return expr;
+      return formatVariableListExpression(expr.replace(/\s+/g, ""), counts);
+    });
   }
 
   value = value.replace(/\$[^$\n]+\$/g, (match) => pushToken(wrappedSegments, WRAPPED_MATH_TOKEN, match));
@@ -894,8 +964,7 @@ function formatTableLine(
       return ` ${trimmedCell} `;
     }
     if (/^[A-Za-z](?:\s*,\s*[A-Za-z])+$/i.test(trimmedCell)) {
-      counts.inline_math_wrap += 1;
-      return ` $${formatMathContent(trimmedCell.replace(/\s+/g, ""), counts)}$ `;
+      return ` ${formatVariableListExpression(trimmedCell.replace(/\s+/g, ""), counts)} `;
     }
     if (!trimmedCell.includes("`") && !trimmedCell.includes("$") && isLikelyMathAtom(trimmedCell) && !/^\d+\.\d+$/.test(trimmedCell)) {
       counts.inline_math_wrap += 1;
@@ -1100,10 +1169,12 @@ function normalizeBlankLinesAroundBlocks(
     const isTable = rules.blank_lines_around_lists && isTableLikeLine(line);
     const prevIsTable = index > 0 && isTableLikeLine(lines[index - 1] ?? "");
     const nextIsTable = index + 1 < lines.length && isTableLikeLine(lines[index + 1] ?? "");
-    const prevIsList = index > 0 && isListLine(lines[index - 1] ?? "");
+    const currentListKind = isList ? getListKind(line) : null;
+    const prevListKind = index > 0 ? getListKind(lines[index - 1] ?? "") : null;
+    const prevIsList = prevListKind !== null;
 
     if (isHeading) ensureBlankBefore("blank_lines_around_headings");
-    if ((isList && !prevIsList) || (isTable && !prevIsTable)) {
+    if ((isList && (!prevIsList || prevListKind !== currentListKind)) || (isTable && !prevIsTable)) {
       ensureBlankBefore("blank_lines_around_lists");
     }
 
@@ -1116,7 +1187,8 @@ function normalizeBlankLinesAroundBlocks(
     }
     if (isList) {
       const next = lines[index + 1];
-      const nextIsSameBlock = typeof next === "string" && (isListLine(next) || isQuoteLine(next));
+      const nextListKind = typeof next === "string" ? getListKind(next) : null;
+      const nextIsSameBlock = typeof next === "string" && (nextListKind === currentListKind || isQuoteLine(next));
       if (!nextIsSameBlock) ensureBlankAfterCurrent(index, "blank_lines_around_lists");
     }
   }
@@ -1164,7 +1236,7 @@ export function runSolutionFormatterSelfCheck(): void {
     {
       name: "assignment and comparison",
       input: "\u521d\u59cb\u5316\u65f6dis_1=0,\u5176\u5b83\u70b9dis_i=inf.\u5982\u679cdis_u+w<dis_v,\u5c31\u66f4\u65b0dis_v=dis_u+w.\u7531\u4e8ew>=0,\u6240\u4ee5\u6b63\u786e.",
-      includes: ["$dis_1=0$", "$dis_i=\\infty$", "$dis_u+w<dis_v$", "$dis_v=dis_u+w$", "$w \\ge 0$"],
+      includes: ["$dis_1 = 0$", "$dis_i = \\infty$", "$dis_u + w < dis_v$", "$dis_v = dis_u + w$", "$w \\ge 0$"],
     },
     {
       name: "edge arrow",
@@ -1175,13 +1247,13 @@ export function runSolutionFormatterSelfCheck(): void {
     {
       name: "simple expression",
       input: "\u7b2ci+1\u4e2a\u70b9\u53ef\u80fd\u4ece\u7b2ci\u4e2a\u70b9\u8f6c\u79fb\u3002",
-      includes: ["\u7b2c $i+1$ \u4e2a\u70b9\u53ef\u80fd\u4ece\u7b2c $i$ \u4e2a\u70b9\u8f6c\u79fb\u3002"],
+      includes: ["\u7b2c $i + 1$ \u4e2a\u70b9\u53ef\u80fd\u4ece\u7b2c $i$ \u4e2a\u70b9\u8f6c\u79fb\u3002"],
       excludes: ["\u7b2c $i$+$1$ \u4e2a\u70b9"],
     },
     {
       name: "table decimal and variable list",
       input: "| \u5c0f\u6570 | 3.14 | \u4e0d\u5e94\u8be5\u6539 |\n| --- | --- | --- |\n| \u591a\u53d8\u91cf | n,m,l,r | \u5e94\u8be5\u53d8\u6210\u516c\u5f0f |",
-      includes: ["| \u5c0f\u6570 | 3.14 | \u4e0d\u5e94\u8be5\u6539 |", "| \u591a\u53d8\u91cf | $n,m,l,r$ | \u5e94\u8be5\u53d8\u6210\u516c\u5f0f |"],
+      includes: ["| \u5c0f\u6570 | 3.14 | \u4e0d\u5e94\u8be5\u6539 |", "| \u591a\u53d8\u91cf | $n$\uFF0C$m$\uFF0C$l$\uFF0C$r$ | \u5e94\u8be5\u53d8\u6210\u516c\u5f0f |"],
       excludes: ["$3.14$"],
     },
     {
