@@ -50,61 +50,69 @@
 }
 
 :root {
-    --background: #ffffff;
-    --foreground: #444444;
-    --card: #ffffff;
-    --card-foreground: #444444;
-    --popover: #ffffff;
-    --popover-foreground: #444444;
-    --primary: #3498db;
+    --background: #f4f4f3;
+    --foreground: #2f2f2d;
+    --card: #fbfbfa;
+    --card-foreground: #2f2f2d;
+    --popover: #fbfbfa;
+    --popover-foreground: #2f2f2d;
+    --primary: #55514b;
     --primary-foreground: #ffffff;
-    --secondary: #f5f7fa;
-    --secondary-foreground: #333333;
-    --muted: #f5f5f5;
-    --muted-foreground: #777777;
-    --accent: #eef6ff;
-    --accent-foreground: #333333;
+    --secondary: #ededeb;
+    --secondary-foreground: #30302e;
+    --muted: #ececea;
+    --muted-foreground: #6f6f6a;
+    --accent: #e8e8e5;
+    --accent-foreground: #2f2f2d;
     --destructive: oklch(0.577 0.245 27.325);
-    --border: #e5e5e5;
-    --input: #dcdfe6;
-    --ring: #66afe9;
+    --border: #d8d8d5;
+    --input: #d1d1cd;
+    --ring: #7a766f;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
-    --sidebar: #ffffff;
-    --sidebar-foreground: #444444;
-    --sidebar-primary: #3498db;
+    --sidebar: #ededeb;
+    --sidebar-foreground: #333331;
+    --sidebar-primary: #55514b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #eef6ff;
-    --sidebar-accent-foreground: #333333;
-    --sidebar-border: #e5e5e5;
-    --sidebar-ring: #66afe9;
-    --surface-window: #ffffff;
-    --surface-activity: #fafafa;
-    --surface-sidebar: #ffffff;
-    --surface-toolbar: #fafafa;
-    --surface-workspace: #ffffff;
-    --surface-editor: #ffffff;
-    --surface-preview: #ffffff;
-    --surface-paper: #ffffff;
-    --surface-card-soft: #fafafa;
-    --separator-strong: #e5e5e5;
-    --border-subtle: #eeeeee;
-    --text-title: #333333;
-    --text-secondary: #777777;
-    --text-muted: #999999;
-    --text-disabled: #b8b8b8;
-    --hover-bg: #f5f7fa;
-    --selected-bg: #eef6ff;
-    --focus-ring-soft: rgb(102 175 233 / 24%);
-    --code-bg: #f7f7f7;
-    --code-border: #eeeeee;
-    --code-text: #444444;
-    --scrollbar-thumb: #d8d8d8;
-    --scrollbar-thumb-hover: #b8b8b8;
+    --sidebar-accent: #e4e4e1;
+    --sidebar-accent-foreground: #2f2f2d;
+    --sidebar-border: #d8d8d5;
+    --sidebar-ring: #7a766f;
+    --surface-window: #f1f1ef;
+    --surface-activity: #e6e6e3;
+    --surface-sidebar: #efefed;
+    --surface-toolbar: #e9e9e6;
+    --surface-workspace: #f5f5f3;
+    --surface-editor: #fafaf8;
+    --surface-preview: #f4f4f2;
+    --surface-paper: #fcfcfb;
+    --surface-card-soft: #f2f2ef;
+    --separator-strong: #c9c9c5;
+    --border-subtle: #e0e0dc;
+    --text-title: #2b2b29;
+    --text-secondary: #64645f;
+    --text-muted: #8a8a84;
+    --text-disabled: #aaa9a3;
+    --hover-bg: #eeeeeb;
+    --selected-bg: #e4e4e0;
+    --focus-ring-soft: rgb(110 106 98 / 20%);
+    --code-bg: #eeeeeb;
+    --code-border: #d4d4cf;
+    --code-text: #2f302d;
+    --inline-code-bg: #ece9e3;
+    --inline-code-text: #6f3f32;
+    --scrollbar-thumb: #c3c3bd;
+    --scrollbar-thumb-hover: #999991;
+    --editor-selection-bg: rgb(120 132 150 / 34%);
+    --editor-selection-bg-unfocused: rgb(120 132 150 / 24%);
+    --editor-active-line-bg: rgb(0 0 0 / 3.5%);
+    --editor-active-line-gutter-bg: rgb(0 0 0 / 4%);
+    --editor-search-match-bg: rgb(120 132 150 / 20%);
+    --editor-search-match-selected-bg: rgb(120 132 150 / 30%);
 }
 
 .dark {
@@ -157,6 +165,12 @@
     --sidebar-accent-foreground: oklch(0.93 0 0);
     --sidebar-border: oklch(0.38 0 0 / 55%);
     --sidebar-ring: oklch(0.58 0 0 / 75%);
+    --editor-selection-bg: var(--accent);
+    --editor-selection-bg-unfocused: var(--muted);
+    --editor-active-line-bg: transparent;
+    --editor-active-line-gutter-bg: transparent;
+    --editor-search-match-bg: color-mix(in oklch, var(--primary) 22%, transparent);
+    --editor-search-match-selected-bg: color-mix(in oklch, var(--primary) 30%, transparent);
 }
 
 @layer base {
@@ -191,8 +205,8 @@
   }
 
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track {
@@ -212,7 +226,7 @@
 }
 
 .open-tabs-scrollbar {
-  scrollbar-width: thin;
+  scrollbar-width: none;
   scrollbar-color: transparent transparent;
   scrollbar-gutter: auto;
   overscroll-behavior-x: contain;
@@ -221,6 +235,7 @@
 
 .open-tabs-scrollbar:hover,
 .open-tabs-scrollbar:focus-within {
+  scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted-foreground) 34%, transparent) transparent;
 }
 
@@ -269,29 +284,29 @@
 }
 
 html[data-theme="light"] .cm-editor .cm-line span {
-  color: var(--foreground) !important;
+  color: #333330;
 }
 
 html[data-theme="light"] .cm-editor .cm-gutters,
 html[data-theme="light"] .cm-editor .cm-gutterElement {
-  color: var(--text-muted);
-  background-color: var(--surface-editor) !important;
+  color: color-mix(in oklch, var(--text-muted) 78%, var(--surface-editor));
+  background-color: color-mix(in oklch, var(--surface-card-soft) 76%, var(--surface-editor)) !important;
 }
 
 html[data-theme="light"] .cm-editor .cm-gutters {
-  border-right-color: #f0f0f0 !important;
+  border-right-color: color-mix(in oklch, var(--separator-strong) 86%, transparent) !important;
 }
 
 html[data-theme="light"] .cm-editor .cm-activeLineGutter {
-  color: #4b5563;
+  color: var(--text-secondary);
 }
 
 html[data-theme="light"] .cm-editor .cm-foldGutter .cm-gutterElement {
-  color: #9aa4b2;
+  color: var(--text-muted);
 }
 
 html[data-theme="light"] .cm-editor .cm-foldGutter .cm-gutterElement:hover {
-  color: #4b5563;
+  color: var(--text-secondary);
 }
 
 html[data-theme="light"] .cm-editor,
@@ -325,17 +340,59 @@ html[data-theme="dark"] .cm-editor .cm-foldGutter .cm-gutterElement:hover {
   color: #c9d1d9;
 }
 
-html[data-theme="light"] .cm-editor .cm-selectionBackground {
-  background-color: #d7ecff !important;
+html[data-theme="light"] .cm-editor .cm-selectionBackground,
+html[data-theme="light"] .cm-editor.cm-focused .cm-selectionBackground {
+  background-color: var(--editor-selection-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor:not(.cm-focused) .cm-selectionBackground {
+  background-color: var(--editor-selection-bg-unfocused) !important;
 }
 
 html[data-theme="light"] .cm-editor .cm-activeLine {
-  background-color: #fbfbfb !important;
+  background-color: var(--editor-active-line-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor .cm-activeLineGutter {
+  background-color: var(--editor-active-line-gutter-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor .cm-searchMatch {
+  background-color: var(--editor-search-match-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor .cm-searchMatch.cm-searchMatch-selected {
+  background-color: var(--editor-search-match-selected-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor .cm-selectionMatch {
+  background-color: var(--editor-search-match-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor ::selection {
+  background-color: var(--editor-selection-bg) !important;
+}
+
+html[data-theme="light"] .cm-editor {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 62%);
+}
+
+html[data-theme="light"] .cm-editor .cm-content {
+  color: #333330;
 }
 
 html[data-theme="light"] .cm-editor .cm-cursor,
 html[data-theme="light"] .cm-editor .cm-dropCursor {
-  border-left-color: #333333 !important;
+  border-left-color: var(--text-title) !important;
+}
+
+html[data-theme="light"] .cm-editor .cm-scroller::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+
+html[data-theme="light"] .cm-editor .cm-scroller:hover::-webkit-scrollbar-thumb,
+html[data-theme="light"] .cm-editor .cm-scroller:focus-within::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--scrollbar-thumb) 56%, transparent);
 }
 
 [data-markdown-preview-content] .oi-code-block-shell {
@@ -363,20 +420,42 @@ html[data-theme="dark"] body {
 
 html[data-theme="light"] body {
   color-scheme: light;
+  background: var(--surface-window);
 }
 
 html[data-theme="light"] * {
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: color-mix(in oklch, var(--scrollbar-thumb) 58%, transparent) transparent;
 }
 
 html[data-theme="light"] *::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  background: color-mix(in oklch, var(--scrollbar-thumb) 56%, transparent);
   background-clip: content-box;
 }
 
 html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+  background: color-mix(in oklch, var(--scrollbar-thumb-hover) 78%, transparent);
   background-clip: content-box;
+}
+
+html[data-theme="light"] .open-tabs-scrollbar {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+html[data-theme="light"] .open-tabs-scrollbar:hover,
+html[data-theme="light"] .open-tabs-scrollbar:focus-within {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--scrollbar-thumb-hover) 46%, transparent) transparent;
+}
+
+html[data-theme="light"] .open-tabs-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+html[data-theme="light"] .open-tabs-scrollbar:hover::-webkit-scrollbar-thumb,
+html[data-theme="light"] .open-tabs-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--scrollbar-thumb-hover) 46%, transparent);
 }
 
 [data-markdown-preview-content] .oi-code-block-shell > pre > code {
@@ -385,11 +464,15 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell {
-  background: var(--code-bg);
+  background:
+    linear-gradient(180deg, #f6f6f3, var(--code-bg));
   color: var(--code-text);
   border-color: var(--code-border);
-  border-radius: 4px;
-  box-shadow: none;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 78%),
+    inset 0 -1px 0 rgb(0 0 0 / 3%),
+    0 1px 2px rgb(31 31 29 / 5%);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > pre,
@@ -403,6 +486,38 @@ html[data-theme="light"] [data-markdown-preview-content] pre.shiki,
 html[data-theme="light"] [data-markdown-preview-content] pre.shiki code {
   color: var(--code-text) !important;
   background-color: transparent !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#24292E"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#24292e"] {
+  color: #333333 !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#6F42C1"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#6f42c1"] {
+  color: #7a3e9d !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#005CC5"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#005cc5"] {
+  color: #8e44ad !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#032F62"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#032f62"] {
+  color: #2f7d32 !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#D73A49"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#d73a49"] {
+  color: #a23a3a !important;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#22863A"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#22863a"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#6A737D"],
+html[data-theme="light"] [data-markdown-preview-content] pre.shiki code span[style*="color:#6a737d"] {
+  color: #6a737d !important;
 }
 
 html[data-theme="dark"] [data-markdown-preview-content] pre.shiki,
@@ -421,28 +536,46 @@ html[data-theme="light"] [data-markdown-preview-content] pre.oi-code-with-lines 
 
 html[data-theme="light"] [data-markdown-preview-content] pre.shiki .line.oi-code-line-highlight,
 html[data-theme="light"] .markdown-preview-content pre.shiki .line.oi-code-line-highlight {
-  background: rgb(250 204 21 / 18%);
-  border-left-color: rgb(202 138 4 / 62%);
+  background: color-mix(in oklch, #f6d365 12%, transparent);
+  border-left-color: color-mix(in oklch, #9a6700 42%, transparent);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button {
   border-color: var(--code-border);
-  background: rgb(255 255 255 / 88%);
+  background: rgb(252 252 251 / 78%);
   color: var(--text-secondary);
-  box-shadow: none;
+  box-shadow: 0 1px 4px rgb(31 31 29 / 5%);
   backdrop-filter: none;
+  opacity: 0.58 !important;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:hover,
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:focus-visible {
-  border-color: #b6c2cf;
-  background: #ffffff;
+  border-color: #b8b8b2;
+  background: var(--surface-paper);
   color: var(--text-title);
+  opacity: 1 !important;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] {
   background: var(--surface-paper);
-  color: var(--foreground);
+  color: #333330;
+}
+
+html[data-theme="light"] .app-preview-pane > div {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-preview) 86%, #ffffff), var(--surface-preview));
+  padding: 12px;
+}
+
+html[data-theme="light"] .app-preview-pane [data-markdown-preview-content] {
+  min-height: 100%;
+  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-paper) 96%, #ffffff), var(--surface-paper));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 80%),
+    0 1px 2px rgb(35 35 32 / 5%);
 }
 
 [data-markdown-preview-content] {
@@ -454,21 +587,28 @@ html[data-theme="light"] [data-markdown-preview-content] {
 }
 
 html[data-theme="light"] [data-markdown-preview-content] :where(h1, h2, h3, h4) {
-  color: #333333;
+  color: #33302b;
   letter-spacing: 0;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] p,
 html[data-theme="light"] [data-markdown-preview-content] li {
-  color: #444444;
+  color: #3a3a37;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] a {
-  color: #3498db;
+  color: #3498db !important;
+  text-decoration-color: color-mix(in oklch, #3498db 58%, transparent);
+}
+
+html[data-theme="light"] [data-markdown-preview-content] a:hover,
+html[data-theme="light"] [data-markdown-preview-content] a:focus-visible {
+  color: #217dbb !important;
+  text-decoration-color: #217dbb;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] hr {
-  border-color: #eeeeee;
+  border-color: var(--border-subtle);
 }
 
 .app-shell {
@@ -486,17 +626,17 @@ html[data-theme="light"] .bg-background\/70,
 html[data-theme="light"] .bg-background\/80,
 html[data-theme="light"] .bg-background\/90,
 html[data-theme="light"] .bg-background\/95 {
-  background-color: #ffffff;
+  background-color: color-mix(in oklch, var(--surface-editor) 88%, var(--surface-workspace));
 }
 
 html[data-theme="light"] .bg-card\/70 {
-  background-color: #ffffff;
+  background-color: var(--surface-paper);
 }
 
 html[data-theme="light"] .bg-muted\/10,
 html[data-theme="light"] .bg-muted\/15,
 html[data-theme="light"] .bg-muted\/20 {
-  background-color: #fafafa;
+  background-color: color-mix(in oklch, var(--surface-toolbar) 84%, transparent);
 }
 
 html[data-theme="light"] .border-border\/70,
@@ -519,9 +659,10 @@ html[data-theme="light"] .shadow-2xl {
 }
 
 html[data-theme="light"] .app-top-toolbar {
-  background: var(--surface-window);
+  background:
+    linear-gradient(to bottom, color-mix(in oklch, var(--surface-window) 82%, #ffffff), var(--surface-window));
   border-color: var(--separator-strong);
-  box-shadow: none;
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, #ffffff 55%, transparent);
 }
 
 .app-top-toolbar button {
@@ -529,9 +670,9 @@ html[data-theme="light"] .app-top-toolbar {
 }
 
 html[data-theme="light"] .app-top-toolbar button {
-  border-color: var(--border);
-  background-color: #ffffff;
-  color: #555555;
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--text-secondary);
   box-shadow: none;
 }
 
@@ -564,6 +705,34 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 
 .app-editor-workspace {
   background: var(--surface-workspace);
+}
+
+html[data-theme="light"] .app-editor-workspace {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-window) 84%, #ffffff), var(--surface-workspace));
+}
+
+html[data-theme="light"] .app-editor-pane {
+  margin: 8px 0 8px 8px;
+  border: 1px solid color-mix(in oklch, var(--separator-strong) 90%, #9f9f99);
+  background: var(--surface-editor);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    0 1px 2px rgb(35 35 32 / 4%);
+}
+
+html[data-theme="light"] .app-preview-pane {
+  margin: 8px 8px 8px 0;
+  border: 1px solid color-mix(in oklch, var(--separator-strong) 88%, #9f9f99);
+  background: color-mix(in oklch, var(--surface-preview) 86%, var(--surface-workspace));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    0 1px 2px rgb(35 35 32 / 4%);
+}
+
+html[data-theme="light"] .app-editor-pane + .app-column-resizer-editor,
+html[data-theme="light"] .app-column-resizer-editor + .app-preview-pane {
+  margin-left: 0;
 }
 
 .open-tabs-bar {
@@ -653,15 +822,47 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 }
 
 html[data-theme="light"] .open-tabs-bar {
-  background: var(--surface-toolbar);
+  background:
+    linear-gradient(to bottom, color-mix(in oklch, var(--surface-toolbar) 78%, #ffffff), var(--surface-toolbar));
+  border-top-color: var(--border-subtle);
+  border-bottom-color: var(--separator-strong);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, #ffffff 55%, transparent);
+}
+
+html[data-theme="light"] .open-tab {
+  color: var(--text-secondary);
+  border-color: color-mix(in oklch, var(--separator-strong) 82%, transparent);
+}
+
+html[data-theme="light"] .open-tab[data-active="false"] {
+  background: color-mix(in oklch, var(--surface-toolbar) 88%, var(--surface-workspace));
 }
 
 html[data-theme="light"] .open-tab[data-active="true"] {
-  background: #ffffff;
+  background: var(--surface-editor);
+  border-top-color: color-mix(in oklch, var(--foreground) 34%, var(--separator-strong));
+  color: var(--text-title);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #ffffff 70%, transparent),
+    0 -1px 0 color-mix(in oklch, var(--foreground) 24%, transparent);
 }
 
 html[data-theme="light"] .open-tab[data-active="true"]::after {
-  background: #ffffff;
+  background: var(--surface-editor);
+}
+
+html[data-theme="light"] .open-tab[data-active="false"]:hover {
+  background: var(--hover-bg);
+  color: var(--text-title);
+}
+
+html[data-theme="light"] .open-tab[data-kind="review"] {
+  border-top-color: color-mix(in oklch, var(--foreground) 22%, var(--separator-strong));
+}
+
+html[data-theme="light"] .open-tab-close:hover {
+  background: color-mix(in oklch, var(--hover-bg) 78%, var(--selected-bg));
+  color: var(--text-title);
 }
 
 .app-activity-bar {
@@ -674,6 +875,7 @@ html[data-theme="light"] .open-tab[data-active="true"]::after {
 html[data-theme="light"] .app-activity-bar {
   background: var(--surface-activity);
   border-color: var(--separator-strong);
+  box-shadow: inset -1px 0 0 color-mix(in oklch, #ffffff 48%, transparent);
 }
 
 .app-activity-bar button {
@@ -712,30 +914,30 @@ html[data-theme="light"] .app-activity-bar {
 }
 
 html[data-theme="light"] .app-activity-bar button {
-  color: var(--text-secondary);
+  color: color-mix(in oklch, var(--text-secondary) 84%, var(--text-title));
 }
 
 html[data-theme="light"] .app-activity-bar button:hover {
-  background: var(--hover-bg);
-  color: var(--foreground);
+  background: color-mix(in oklch, var(--hover-bg) 86%, #ffffff);
+  color: var(--text-title);
 }
 
 html[data-theme="light"] .app-activity-bar button[aria-pressed="true"] {
-  background: var(--selected-bg);
-  color: var(--foreground);
+  background: color-mix(in oklch, var(--selected-bg) 78%, #ffffff);
+  color: var(--text-title);
   box-shadow:
-    inset 2px 0 0 var(--primary),
-    inset 0 0 0 1px rgb(52 152 219 / 10%);
+    inset 2px 0 0 color-mix(in oklch, var(--foreground) 48%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--border) 86%, transparent);
 }
 
 html[data-theme="light"] .app-notes-sidebar button:hover,
 html[data-theme="light"] .app-notes-sidebar [role="button"]:hover {
-  background-color: var(--hover-bg);
+  background-color: color-mix(in oklch, var(--hover-bg) 84%, #ffffff);
 }
 
 html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
   background-color: var(--selected-bg);
-  box-shadow: inset 2px 0 0 var(--primary);
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--foreground) 42%, transparent);
 }
 
 .app-notes-sidebar {
@@ -946,6 +1148,52 @@ html[data-theme="light"] .app-notes-sidebar {
   box-shadow: none;
 }
 
+html[data-theme="light"] .app-notes-sidebar-header {
+  background: color-mix(in oklch, var(--surface-sidebar) 78%, var(--surface-window));
+  border-color: var(--separator-strong);
+}
+
+html[data-theme="light"] .app-file-group-label {
+  color: color-mix(in oklch, var(--text-secondary) 88%, var(--text-title));
+}
+
+html[data-theme="light"] .app-file-group-chevron,
+html[data-theme="light"] .app-file-group-icon {
+  color: color-mix(in oklch, var(--text-muted) 62%, var(--text-secondary));
+}
+
+html[data-theme="light"] .app-file-group-count {
+  background: color-mix(in oklch, var(--surface-window) 72%, var(--surface-sidebar));
+  color: var(--text-muted);
+}
+
+html[data-theme="light"] .app-file-row {
+  color: var(--text-title);
+}
+
+html[data-theme="light"] .app-file-row:hover {
+  background: color-mix(in oklch, var(--hover-bg) 82%, var(--surface-sidebar));
+}
+
+html[data-theme="light"] .app-file-row[data-active="true"] {
+  background: color-mix(in oklch, var(--selected-bg) 64%, var(--surface-sidebar));
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--foreground) 42%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--border) 90%, transparent);
+}
+
+html[data-theme="light"] .app-file-group-header-active {
+  background: color-mix(in oklch, var(--selected-bg) 58%, transparent);
+}
+
+html[data-theme="light"] .app-file-actions {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--surface-sidebar) 0%, transparent),
+    var(--surface-sidebar) 24%
+  );
+}
+
 html[data-theme="light"] .app-column-resizer::before {
   background: color-mix(in oklch, var(--separator-strong) 88%, transparent);
 }
@@ -953,22 +1201,122 @@ html[data-theme="light"] .app-column-resizer::before {
 html[data-theme="light"] .app-column-resizer:hover::before,
 html[data-theme="light"] .app-column-resizer:focus-visible::before,
 html[data-theme="light"] .app-column-resizer-active::before {
-  background: color-mix(in oklch, var(--primary) 58%, var(--separator-strong));
+  background: color-mix(in oklch, var(--foreground) 30%, var(--separator-strong));
 }
 
-html[data-theme="light"] .markdown-toolbar {
-  background: var(--surface-toolbar);
-  border-color: var(--separator-strong);
-  box-shadow: none;
+html[data-theme="light"] .app-frontmatter-panel {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-toolbar) 70%, var(--surface-paper)), var(--surface-editor));
+  border-color: color-mix(in oklch, var(--separator-strong) 92%, #9f9f99);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    inset 0 -1px 0 rgb(0 0 0 / 3%);
 }
 
-html[data-theme="light"] .markdown-toolbar button {
+html[data-theme="light"] .app-frontmatter-panel summary {
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-toolbar) 78%, #ffffff), var(--surface-toolbar));
+  color: var(--text-title);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 68%);
+}
+
+html[data-theme="light"] .app-frontmatter-panel summary:hover {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--hover-bg) 72%, #ffffff), var(--hover-bg));
+  color: var(--text-title);
+}
+
+html[data-theme="light"] .app-frontmatter-body {
+  background: color-mix(in oklch, var(--surface-editor) 92%, var(--surface-workspace));
+}
+
+html[data-theme="light"] .app-frontmatter-actions {
+  border-bottom: 1px solid color-mix(in oklch, var(--border-subtle) 74%, transparent);
+  padding-bottom: 0.65rem;
+}
+
+html[data-theme="light"] .app-frontmatter-field {
+  border: 1px solid color-mix(in oklch, var(--border-subtle) 80%, transparent);
+  background: color-mix(in oklch, var(--surface-paper) 72%, var(--surface-card-soft));
+  padding: 0.55rem;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 62%);
+}
+
+html[data-theme="light"] .app-frontmatter-summary {
+  background: color-mix(in oklch, var(--surface-paper) 82%, var(--surface-card-soft));
+}
+
+html[data-theme="light"] .app-frontmatter-draft {
+  min-height: 2rem;
+  border: 1px solid color-mix(in oklch, var(--border-subtle) 82%, transparent);
+  background: color-mix(in oklch, var(--surface-paper) 64%, var(--surface-card-soft));
+  padding: 0.35rem 0.6rem;
+}
+
+html[data-theme="light"] .app-frontmatter-panel label,
+html[data-theme="light"] .app-frontmatter-panel .text-muted-foreground {
   color: var(--text-secondary);
 }
 
+html[data-theme="light"] .app-frontmatter-panel :where(input, textarea) {
+  background: color-mix(in oklch, var(--surface-card-soft) 76%, var(--surface-paper));
+  border-color: color-mix(in oklch, var(--input) 76%, transparent);
+  color: #333330;
+  box-shadow:
+    inset 0 1px 1px rgb(0 0 0 / 3%),
+    inset 0 -1px 0 rgb(255 255 255 / 72%);
+}
+
+html[data-theme="light"] .app-frontmatter-panel :where(input, textarea):focus {
+  border-color: color-mix(in oklch, var(--foreground) 30%, var(--input));
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
+}
+
+html[data-theme="light"] .app-frontmatter-panel button {
+  background: color-mix(in oklch, var(--surface-card-soft) 82%, transparent);
+  border-color: color-mix(in oklch, var(--border) 86%, transparent);
+  color: var(--text-secondary);
+}
+
+html[data-theme="light"] .app-frontmatter-panel button:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--hover-bg) 84%, var(--surface-paper));
+  border-color: color-mix(in oklch, var(--foreground) 16%, var(--border));
+  color: var(--text-title);
+}
+
+html[data-theme="light"] .markdown-toolbar {
+  background:
+    linear-gradient(to bottom, color-mix(in oklch, var(--surface-toolbar) 76%, #ffffff), var(--surface-toolbar));
+  border-color: var(--separator-strong);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 68%),
+    inset 0 -1px 0 rgb(0 0 0 / 3%);
+}
+
+html[data-theme="light"] .markdown-toolbar button {
+  color: color-mix(in oklch, var(--text-secondary) 88%, var(--text-title));
+}
+
 html[data-theme="light"] .markdown-toolbar button:hover {
-  background: var(--hover-bg);
-  color: var(--foreground);
+  background: color-mix(in oklch, var(--hover-bg) 82%, #ffffff);
+  color: var(--text-title);
+}
+
+html[data-theme="light"] .markdown-toolbar .bg-border {
+  background: color-mix(in oklch, var(--border) 74%, transparent);
+}
+
+html[data-theme="light"] .markdown-toolbar-button:hover,
+html[data-theme="light"] .editor-view-mode-button:hover {
+  border-color: color-mix(in oklch, var(--foreground) 16%, var(--border));
+}
+
+html[data-theme="light"] .editor-view-mode-button-active {
+  border-color: color-mix(in oklch, var(--foreground) 26%, var(--border));
+  background: color-mix(in oklch, var(--selected-bg) 72%, #ffffff);
+  color: var(--text-title);
 }
 
 .markdown-toolbar,
@@ -1017,7 +1365,7 @@ html[data-theme="light"] .markdown-toolbar button:hover {
 }
 
 .editor-view-mode-button-active {
-  border-color: color-mix(in oklch, var(--primary) 40%, var(--border));
+  border-color: color-mix(in oklch, var(--foreground) 30%, var(--border));
   background: color-mix(in oklch, var(--selected-bg) 70%, var(--background));
 }
 
@@ -1030,6 +1378,15 @@ html[data-theme="light"] .markdown-toolbar button:hover {
   background: color-mix(in oklch, var(--surface-toolbar) 76%, var(--surface-window));
   border-color: var(--separator-strong);
   color: var(--text-muted);
+}
+
+html[data-theme="light"] .app-status-bar {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-toolbar) 72%, #ffffff), var(--surface-toolbar));
+  border-color: var(--separator-strong);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #ffffff 58%, transparent),
+    inset 0 -1px 0 rgb(0 0 0 / 3%);
 }
 
 .app-status-bar button:disabled {
@@ -1058,6 +1415,19 @@ html[data-theme="light"] .markdown-toolbar button:hover {
 .app-status-button:hover:not(:disabled) {
   background: color-mix(in oklch, var(--hover-bg) 78%, transparent);
   color: var(--foreground);
+}
+
+html[data-theme="light"] .app-status-item {
+  color: color-mix(in oklch, var(--text-muted) 82%, var(--text-secondary));
+}
+
+html[data-theme="light"] .app-status-button {
+  color: color-mix(in oklch, var(--text-secondary) 90%, var(--text-title));
+}
+
+html[data-theme="light"] .app-status-button:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--hover-bg) 82%, #ffffff);
+  color: var(--text-title);
 }
 
 .app-status-save-dirty {
@@ -1112,14 +1482,14 @@ html[data-theme="light"] .settings-center :where(section) {
 }
 
 html[data-theme="light"] :where(input, textarea, select) {
-  background-color: #ffffff;
+  background-color: color-mix(in oklch, var(--surface-card-soft) 78%, var(--surface-paper));
   border-color: var(--border);
   color: var(--foreground);
   box-shadow: none;
 }
 
 html[data-theme="light"] :where(input, textarea, select):focus {
-  border-color: var(--primary);
+  border-color: color-mix(in oklch, var(--foreground) 30%, var(--input));
   box-shadow: 0 0 0 2px var(--focus-ring-soft);
 }
 
@@ -1128,51 +1498,71 @@ html[data-theme="light"] :where(button:disabled, input:disabled, textarea:disabl
 }
 
 html[data-theme="light"] [data-markdown-preview-content] :not(pre) > code {
-  background: #f5f5f5;
-  color: #b03060;
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
+  border: 1px solid color-mix(in oklch, var(--code-border) 62%, transparent);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] blockquote {
-  background: var(--surface-card-soft);
-  border-left-color: #dddddd;
-  color: #666666;
+  background: color-mix(in oklch, var(--surface-card-soft) 82%, var(--surface-paper));
+  border-left-color: color-mix(in oklch, var(--foreground) 30%, var(--border));
+  color: var(--text-secondary);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] table th {
-  background: var(--hover-bg);
+  background: color-mix(in oklch, var(--surface-card-soft) 82%, var(--surface-workspace));
   color: var(--text-title);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] table th,
 html[data-theme="light"] [data-markdown-preview-content] table td {
-  border-color: var(--border);
+  border-color: color-mix(in oklch, var(--border) 84%, transparent);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout {
-  background: var(--surface-card-soft);
-  border-color: var(--border);
-  border-radius: 4px;
+  background: color-mix(in oklch, var(--surface-card-soft) 82%, var(--surface-paper));
+  border-color: color-mix(in oklch, var(--border) 86%, transparent);
+  border-radius: 6px;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout-title {
-  background: var(--hover-bg);
-  border-color: var(--border);
+  background: color-mix(in oklch, var(--hover-bg) 70%, var(--surface-paper));
+  border-color: color-mix(in oklch, var(--border) 82%, transparent);
+  color: var(--text-title);
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout-info .oi-callout-title {
-  color: oklch(0.38 0.11 245);
+  background: color-mix(in oklch, var(--surface-card-soft) 72%, var(--surface-paper));
+  border-color: color-mix(in oklch, var(--border) 88%, transparent);
+  color: #55514b;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout-success .oi-callout-title {
-  color: oklch(0.38 0.11 155);
+  color: #53664c;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout-warning .oi-callout-title {
-  color: oklch(0.44 0.12 75);
+  color: #7a5d2e;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-callout-error .oi-callout-title {
-  color: oklch(0.42 0.14 20);
+  color: #87453d;
+}
+
+html[data-theme="light"] [data-markdown-preview-content] .oi-callout-info {
+  border-color: color-mix(in oklch, var(--border) 92%, transparent);
+}
+
+html[data-theme="light"] [data-markdown-preview-content] .oi-callout-success {
+  border-color: color-mix(in oklch, #9faf9a 54%, var(--border));
+}
+
+html[data-theme="light"] [data-markdown-preview-content] .oi-callout-warning {
+  border-color: color-mix(in oklch, #c4ae7f 52%, var(--border));
+}
+
+html[data-theme="light"] [data-markdown-preview-content] .oi-callout-error {
+  border-color: color-mix(in oklch, #c99f99 52%, var(--border));
 }
 
 html[data-theme="light"] .cn-toast {
@@ -1389,16 +1779,18 @@ html[data-theme="light"] .cn-toast {
 
 html[data-theme="light"] [data-ai-markdown-message] .ai-code-copy-button {
   border-color: var(--code-border);
-  background: rgb(255 255 255 / 92%);
+  background: rgb(252 252 251 / 86%);
   color: var(--text-secondary);
-  box-shadow: 0 4px 14px rgb(15 23 42 / 10%);
+  box-shadow: 0 2px 8px rgb(35 35 32 / 8%);
+  opacity: 0.62;
 }
 
 html[data-theme="light"] [data-ai-markdown-message] .ai-code-copy-button:hover,
 html[data-theme="light"] [data-ai-markdown-message] .ai-code-copy-button:focus-visible {
-  border-color: #b6c2cf;
-  background: #ffffff;
+  border-color: #b8b8b2;
+  background: var(--surface-paper);
   color: var(--text-title);
+  opacity: 1;
 }
 
 [data-ai-markdown-message] pre.shiki code {
@@ -1411,6 +1803,117 @@ html[data-theme="dark"] [data-ai-markdown-message] pre.shiki {
 
 html[data-theme="light"] [data-ai-markdown-message] pre.shiki {
   background: var(--code-bg) !important;
+}
+
+html[data-theme="light"] [data-ai-markdown-message] {
+  color: var(--foreground);
+}
+
+html[data-theme="light"] [data-ai-markdown-message].ai-message-preview a {
+  color: #3498db !important;
+}
+
+html[data-theme="light"] [data-ai-markdown-message].ai-message-preview a:hover,
+html[data-theme="light"] [data-ai-markdown-message].ai-message-preview a:focus-visible {
+  color: #217dbb !important;
+}
+
+html[data-theme="light"] [data-ai-markdown-message] :not(pre) > code {
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
+  border: 1px solid color-mix(in oklch, var(--code-border) 70%, transparent);
+}
+
+html[data-theme="light"] [data-ai-markdown-message] pre {
+  background: var(--code-bg);
+  border-color: var(--code-border);
+}
+
+html[data-theme="light"] [data-ai-markdown-message] .ai-code-block-shell {
+  border: 1px solid var(--code-border);
+  background: var(--code-bg);
+}
+
+html[data-theme="light"] [data-ai-markdown-message] table,
+html[data-theme="light"] [data-ai-markdown-message] .katex-display {
+  background: transparent;
+}
+
+html[data-theme="light"] aside[class*="border-l"][class*="bg-background"] {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-sidebar) 78%, #ffffff), var(--surface-sidebar));
+  border-color: color-mix(in oklch, var(--separator-strong) 92%, #9f9f99);
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-chat-user-bubble {
+  background: #f4f4f4 !important;
+  color: #2f2f2f !important;
+  border-color: #dedede !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    0 1px 2px rgb(35 35 32 / 5%);
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-composer {
+  background: #f4f4f4 !important;
+  border-color: color-mix(in oklch, var(--input) 84%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    0 1px 2px rgb(35 35 32 / 4%);
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-composer textarea {
+  background: color-mix(in oklch, #f4f4f4 88%, #fbfbfa);
+  border-color: color-mix(in oklch, var(--input) 82%, transparent);
+  box-shadow:
+    inset 0 1px 1px rgb(0 0 0 / 3%),
+    inset 0 -1px 0 rgb(255 255 255 / 72%);
+}
+
+html[data-theme="light"] .codex-diff-preview {
+  background: var(--surface-paper);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgb(35 35 32 / 5%);
+}
+
+html[data-theme="light"] .codex-diff-header {
+  background: color-mix(in oklch, var(--surface-card-soft) 72%, var(--surface-paper));
+  border-color: var(--border);
+}
+
+html[data-theme="light"] .codex-diff-body {
+  background: var(--surface-paper);
+}
+
+html[data-theme="light"] .codex-diff-hunk {
+  background: color-mix(in oklch, var(--code-bg) 82%, #ffffff);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+html[data-theme="light"] .codex-diff-row {
+  border-color: color-mix(in oklch, var(--border-subtle) 86%, transparent);
+}
+
+html[data-theme="light"] .codex-diff-row[data-type="context"] {
+  background: var(--surface-paper);
+}
+
+html[data-theme="light"] .codex-diff-row[data-type="delete"] {
+  background: #f8eeee;
+}
+
+html[data-theme="light"] .codex-diff-row[data-type="add"] {
+  background: #eef6ee;
+}
+
+html[data-theme="light"] .codex-diff-line-number {
+  border-color: color-mix(in oklch, var(--border-subtle) 90%, transparent);
+  color: color-mix(in oklch, var(--text-muted) 78%, transparent);
+}
+
+html[data-theme="light"] .codex-diff-marker {
+  color: var(--text-secondary);
 }
 
 [data-ai-markdown-message] table,

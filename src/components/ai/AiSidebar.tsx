@@ -983,7 +983,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
       ref={containerRef}
       data-ai-markdown-message="true"
       className={cn(
-        "min-w-0 max-w-full overflow-hidden break-words text-sm leading-6 text-foreground",
+        "ai-message-preview min-w-0 max-w-full overflow-hidden break-words text-sm leading-6 text-foreground",
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         "[&_h1]:mb-2 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:leading-snug",
         "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:leading-snug",
@@ -2979,7 +2979,7 @@ export default function AiSidebar({
 
               if (message.role === "user") {
                 return (
-                  <div key={message.id} className="ml-auto max-w-[92%] rounded-lg bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
+                  <div key={message.id} className="ai-chat-user-bubble ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
                     <div className="whitespace-pre-wrap break-words">{message.text}</div>
                   </div>
                 );
@@ -3087,7 +3087,7 @@ export default function AiSidebar({
           </div>
         )}
 
-        <div className="rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
+        <div className="ai-composer rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
           <textarea
             ref={inputRef}
             value={inputValue}

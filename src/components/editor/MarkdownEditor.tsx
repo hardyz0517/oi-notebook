@@ -881,8 +881,21 @@ export default function MarkdownEditor({
               lineHeight: "var(--content-line-height, 1.7)",
             },
             ".cm-focused": { outline: "none" },
-            "&.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "var(--accent)" },
-            ".cm-selectionBackground": { backgroundColor: "var(--muted)" },
+            "&.cm-focused .cm-selectionBackground, ::selection": {
+              backgroundColor: "var(--editor-selection-bg, var(--accent))",
+            },
+            ".cm-selectionBackground": {
+              backgroundColor: "var(--editor-selection-bg-unfocused, var(--muted))",
+            },
+            ".cm-searchMatch": {
+              backgroundColor: "var(--editor-search-match-bg, color-mix(in oklch, var(--primary) 22%, transparent))",
+            },
+            ".cm-searchMatch.cm-searchMatch-selected": {
+              backgroundColor: "var(--editor-search-match-selected-bg, color-mix(in oklch, var(--primary) 30%, transparent))",
+            },
+            ".cm-selectionMatch": {
+              backgroundColor: "var(--editor-search-match-bg, color-mix(in oklch, var(--primary) 20%, transparent))",
+            },
             ".cm-ai-context-selection": {
               backgroundColor: "color-mix(in oklch, var(--primary) 18%, transparent)",
               borderRadius: "2px",
@@ -891,9 +904,9 @@ export default function MarkdownEditor({
               backgroundColor: "color-mix(in oklch, var(--primary) 13%, transparent)",
             },
             ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
-            ".cm-activeLine": { backgroundColor: "transparent" },
+            ".cm-activeLine": { backgroundColor: "var(--editor-active-line-bg, transparent)" },
             ".cm-activeLineGutter": {
-              backgroundColor: "transparent",
+              backgroundColor: "var(--editor-active-line-gutter-bg, transparent)",
               color: "color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground))",
             },
           }),

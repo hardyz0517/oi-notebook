@@ -307,12 +307,13 @@ export function CodexDiffPreview({
 
   return (
     <div className={cn(
-      "overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80",
+      "codex-diff-preview overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80",
       !showHeader && "rounded-none border-0 shadow-none",
       density === "review" && "flex h-full min-h-0 flex-col",
     )}>
       {showHeader && (
         <div className={cn(
+          "codex-diff-header",
           "flex min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/45 dark:border-white/10 dark:bg-white/[0.04]",
           density === "review" ? "px-4 py-3" : "px-3 py-2",
         )}>
@@ -346,32 +347,33 @@ export function CodexDiffPreview({
       )}
 
       <div className={cn(
-        "bg-background font-mono text-[11px] leading-5 dark:bg-zinc-950",
+        "codex-diff-body bg-background font-mono text-[11px] leading-5 dark:bg-zinc-950",
         density === "review" ? "min-h-0 flex-1 overflow-auto" : "overflow-auto",
         heightClass,
       )}>
-        <div className="min-w-0 border-b border-border/40 bg-muted/35 px-3 py-1 text-muted-foreground dark:border-white/[0.06] dark:bg-white/[0.03]">
+        <div className="codex-diff-hunk min-w-0 border-b border-border/40 bg-muted/35 px-3 py-1 text-muted-foreground dark:border-white/[0.06] dark:bg-white/[0.03]">
           {hunkHeader}
         </div>
         {rows.map((row) => (
           <div
             key={row.id}
+            data-type={row.type}
             className={cn(
-              "grid min-w-0 grid-cols-[3rem_3rem_1.5rem_minmax(0,1fr)] border-b border-border/35 last:border-b-0 dark:border-white/[0.06]",
+              "codex-diff-row grid min-w-0 grid-cols-[3rem_3rem_1.5rem_minmax(0,1fr)] border-b border-border/35 last:border-b-0 dark:border-white/[0.06]",
               row.type === "delete" && "bg-red-500/[0.08] dark:bg-red-400/[0.10]",
               row.type === "add" && "bg-emerald-500/[0.08] dark:bg-emerald-400/[0.10]",
               row.type === "context" && "bg-background dark:bg-zinc-950",
             )}
           >
-            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
+            <div className="codex-diff-line-number select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
               {row.oldLine ?? ""}
             </div>
-            <div className="select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
+            <div className="codex-diff-line-number select-none border-r border-border/40 px-2 text-right text-muted-foreground/65 dark:border-white/[0.06]">
               {row.newLine ?? ""}
             </div>
             <div
               className={cn(
-                "select-none px-1 text-center font-semibold",
+                "codex-diff-marker select-none px-1 text-center font-semibold",
                 row.type === "delete" && "text-red-700 dark:text-red-300",
                 row.type === "add" && "text-emerald-700 dark:text-emerald-300",
                 row.type === "context" && "text-muted-foreground/60",

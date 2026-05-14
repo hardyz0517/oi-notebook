@@ -6899,7 +6899,7 @@ export default function App() {
                 {/* Center: Markdown editor */}
                 <main
                   className={cn(
-                    "flex min-w-0 flex-1 flex-col overflow-hidden",
+                    "app-editor-pane flex min-w-0 flex-1 flex-col overflow-hidden",
                     !showEditorPane && "hidden",
                   )}
                   style={editorPaneStyle}
@@ -6909,7 +6909,7 @@ export default function App() {
                     <details
                       open={isFrontmatterOpen}
                       onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
-                      className="shrink-0 border-b border-border bg-background/95"
+                      className="app-frontmatter-panel shrink-0 border-b border-border bg-background/95"
                     >
                       <summary className="flex h-8 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
                         <span className="inline-flex items-center gap-1.5">
@@ -6928,8 +6928,8 @@ export default function App() {
                           </span>
                         )}
                       </summary>
-                      <div className="grid gap-3 px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
+                      <div className="app-frontmatter-body grid gap-3 px-4 py-3">
+                        <div className="app-frontmatter-actions flex items-center justify-end gap-2">
                           <Button
                             variant="outline"
                             size="sm"
@@ -6956,8 +6956,8 @@ export default function App() {
                             AI 补全元数据
                           </Button>
                         </div>
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                          <div className="grid gap-1.5">
+                        <div className="app-frontmatter-grid grid grid-cols-1 gap-3 lg:grid-cols-2">
+                          <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-title">title</Label>
                             <Input
                               id="frontmatter-title"
@@ -6966,7 +6966,7 @@ export default function App() {
                               onChange={(e) => updateFrontmatter({ title: e.target.value })}
                             />
                           </div>
-                          <div className="grid gap-1.5">
+                          <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-tags">tags</Label>
                             <Input
                               id="frontmatter-tags"
@@ -6976,7 +6976,7 @@ export default function App() {
                               onChange={(e) => updateTagsFromInput(e.target.value)}
                             />
                           </div>
-                          <div className="grid gap-1.5">
+                          <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-difficulty">difficulty</Label>
                             <Input
                               id="frontmatter-difficulty"
@@ -6985,7 +6985,7 @@ export default function App() {
                               onChange={(e) => updateFrontmatter({ difficulty: e.target.value })}
                             />
                           </div>
-                          <div className="grid gap-1.5">
+                          <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-source">source</Label>
                             <Input
                               id="frontmatter-source"
@@ -6995,7 +6995,7 @@ export default function App() {
                             />
                           </div>
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="app-frontmatter-field app-frontmatter-summary grid gap-1.5">
                           <Label htmlFor="frontmatter-summary">summary</Label>
                           <textarea
                             id="frontmatter-summary"
@@ -7006,7 +7006,7 @@ export default function App() {
                             onChange={(e) => updateFrontmatter({ summary: e.target.value })}
                           />
                         </div>
-                        <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                        <label className="app-frontmatter-draft flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={frontmatter.fields.draft}
@@ -7057,7 +7057,7 @@ export default function App() {
                 {/* Right: Live preview */}
                 <aside
                   className={cn(
-                    "min-w-0 overflow-hidden",
+                    "app-preview-pane min-w-0 overflow-hidden",
                     showPreviewPane ? "flex" : "hidden",
                     showEditorPane ? "flex-1" : "flex-[1_1_100%]",
                   )}
