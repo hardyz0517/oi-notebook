@@ -7,7 +7,7 @@ tags:
 difficulty: test
 source: manual-test
 created: 2026-05-03T12:00:00+08:00
-updated: 2026-05-07T15:51:13.532221500+08:00
+updated: 2026-05-14T14:40:14.942690800+08:00
 summary: Tracked draft note for testing save-time Git auto commit and blog rendering.
 draft: true
 ---
@@ -47,7 +47,7 @@ $$
 \sum_{i=1}^{n} i = \frac{n(n+1)}{2}
 $$
 
-### Search Keywords
+### Sea  rch Keywords
 
 Use this note for searching `git`, `auto-commit`, and `blog-test`.
 
