@@ -24,6 +24,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { renderMarkdownForTheme } from "@/lib/markdown";
+import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
@@ -105,6 +106,7 @@ type StreamTarget = {
 
 type SlashCommand = {
   id: string;
+  trigger?: string;
   label: string;
   description: string;
   category: "文档" | "上下文";
@@ -120,6 +122,7 @@ type SlashCommand = {
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     id: "polish-all",
+    trigger: "全文润色",
     label: "全文润色",
     description: "为当前笔记准备润色建议。",
     category: "文档",
@@ -130,7 +133,20 @@ const SLASH_COMMANDS: SlashCommand[] = [
     implemented: true,
   },
   {
+    id: "solution-format",
+    trigger: "题解格式化",
+    label: "题解格式化（仅格式）",
+    description: "按洛谷题解规范整理空格、标点、数学符号和 Markdown 排版，不改原文意思。",
+    category: "文档",
+    icon: Sparkles,
+    requiresNote: true,
+    requiresBody: true,
+    mode: "diff",
+    implemented: true,
+  },
+  {
     id: "polish-selection",
+    trigger: "润色选中",
     label: "润色选中",
     description: "只处理当前选中的文本。",
     category: "文档",
@@ -142,6 +158,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "complete-tags",
+    trigger: "补全标签",
     label: "补全标签",
     description: "根据笔记正文建议标签。",
     category: "文档",
@@ -152,6 +169,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "summarize",
+    trigger: "总结本文",
     label: "总结本文",
     description: "为当前笔记生成摘要。",
     category: "文档",
@@ -163,6 +181,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "explain-paragraph",
+    trigger: "解释当前段落",
     label: "解释当前段落",
     description: "解释光标附近的上下文。",
     category: "上下文",
@@ -174,6 +193,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "compress-context",
+    trigger: "压缩上下文",
     label: "压缩上下文",
     description: "准备更紧凑的对话上下文。",
     category: "上下文",
@@ -182,6 +202,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "retrospective",
+    trigger: "生成复盘",
     label: "生成复盘",
     description: "准备 OI 题解复盘建议。",
     category: "上下文",
@@ -203,6 +224,18 @@ const AI_REQUEST_HISTORY_LIMIT = 8;
 const AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS = 1200;
 const AI_SCROLL_BOTTOM_THRESHOLD = 64;
 const UNTITLED_CONVERSATION_TITLE = "New chat";
+const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
+  "cjk_spacing",
+  "punctuation_normalize",
+  "inline_math_wrap",
+  "math_symbol_latex",
+  "math_spacing",
+  "heading_marker_spacing",
+  "blank_lines_around_headings",
+  "blank_lines_around_code_fences",
+  "blank_lines_around_lists",
+  "normalize_code_fence_lang",
+]);
 
 const readIncludeCurrentNoteContextPreference = (): boolean => {
   try {
@@ -234,22 +267,25 @@ const getCommandByInput = (value: string): SlashCommand | undefined => {
 
   return SLASH_COMMANDS.find((command) => (
     commandText === command.label ||
+    commandText === command.trigger ||
     commandText === command.id ||
-    commandText.startsWith(`${command.label} `)
+    commandText.startsWith(`${command.label} `) ||
+    (!!command.trigger && commandText.startsWith(`${command.trigger} `))
   ));
 };
 
 const getCommandDisplayText = (command: SlashCommand, rawInput?: string): string => {
   const value = rawInput?.trim();
-  return value?.startsWith("/") ? value : `/${command.label}`;
+  return value?.startsWith("/") ? value : `/${command.trigger ?? command.label}`;
 };
 
 const getCommandArgument = (command: SlashCommand, rawInput?: string): string => {
   const value = rawInput?.trim().replace(/^\/+/, "").trim();
   if (!value) return "";
-  if (value === command.label || value === command.id) return "";
+  if (value === command.label || value === command.trigger || value === command.id) return "";
 
-  for (const prefix of [command.label, command.id]) {
+  for (const prefix of [command.label, command.trigger, command.id]) {
+    if (!prefix) continue;
     if (value.startsWith(`${prefix} `)) {
       return value.slice(prefix.length).trim();
     }
@@ -532,6 +568,7 @@ const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | 
 
   return {
     previewId: item.previewId,
+    previewKind: item.previewKind === "solution-format" ? "solution-format" : "ai-polish",
     scope,
     notePath: item.notePath,
     originalText: item.originalText,
@@ -539,10 +576,40 @@ const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | 
     selectionRange: sanitizeTextRangeForStorage(item.selectionRange),
     selectionStartLine: scope === "full-note" ? 1 : selectionStartLine,
     instruction: typeof item.instruction === "string" ? item.instruction : undefined,
+    changes: Array.isArray(item.changes)
+      ? item.changes.flatMap((change) => {
+        if (!change || typeof change !== "object") return [];
+        const candidate = change as Partial<SolutionFormatChange>;
+        if (
+          typeof candidate.ruleId !== "string" ||
+          !SOLUTION_RULE_IDS.has(candidate.ruleId as SolutionFormatChange["ruleId"]) ||
+          typeof candidate.message !== "string" ||
+          typeof candidate.count !== "number" ||
+          !Number.isFinite(candidate.count)
+        ) {
+          return [];
+        }
+        return [{
+          ruleId: candidate.ruleId as SolutionFormatChange["ruleId"],
+          message: candidate.message,
+          count: Math.max(0, Math.floor(candidate.count)),
+        }];
+      })
+      : undefined,
     applied: item.applied === true,
     ignored: item.ignored === true,
     error: typeof item.error === "string" ? item.error : undefined,
   };
+};
+
+const getPreviewTitle = (preview: PolishPreviewResult): string => {
+  if (preview.previewKind === "solution-format") return "题解格式化预览";
+  return preview.scope === "full-note" ? "全文润色预览" : "润色预览";
+};
+
+const getPreviewApplyLabel = (preview: PolishPreviewResult): string => {
+  if (preview.previewKind === "solution-format") return "应用题解格式化";
+  return preview.scope === "full-note" ? "应用全文润色" : "应用到选区";
 };
 
 const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] =>
@@ -1128,10 +1195,11 @@ function PolishPreviewCard({
       : preview.error
         ? "\u5df2\u8fc7\u671f"
         : "\u672a\u5e94\u7528";
-  const title = isFullNotePreview ? "\u5168\u6587\u6da6\u8272\u9884\u89c8" : "\u6da6\u8272\u9884\u89c8";
-  const applyLabel = isFullNotePreview ? "\u5e94\u7528\u5168\u6587\u6da6\u8272" : "\u5e94\u7528\u5230\u9009\u533a";
+  const title = getPreviewTitle(preview);
+  const applyLabel = getPreviewApplyLabel(preview);
   const canApply = !preview.applied && !preview.ignored && !preview.error && preview.polishedText.trim().length > 0;
   const displayStartLine = getPolishPreviewDisplayStartLine(preview);
+  const summaryItems = (preview.changes ?? []).filter((change) => change.count > 0);
 
   const stats = useMemo(
     () => getDiffStats(preview.originalText, preview.polishedText, displayStartLine),
@@ -1173,6 +1241,17 @@ function PolishPreviewCard({
           <span className="shrink-0 text-emerald-700 dark:text-emerald-300">+{stats.addedRows}</span>
           <span className="shrink-0 text-red-700 dark:text-red-300">-{stats.deletedRows}</span>
         </div>
+
+        {summaryItems.length > 0 && (
+          <div className="grid gap-1 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-[11px] leading-4 text-muted-foreground dark:border-white/10">
+            {summaryItems.map((change) => (
+              <div key={change.ruleId} className="flex items-center justify-between gap-3">
+                <span className="truncate">{change.message}</span>
+                <span className="shrink-0">{change.count} 处</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -1990,6 +2069,7 @@ export default function AiSidebar({
         kind: "polish-preview",
         polishPreview: {
           previewId,
+          previewKind: "ai-polish",
           scope: "selection",
           notePath: context.filePath ?? chatContext.notePath,
           originalText,
@@ -2115,6 +2195,7 @@ export default function AiSidebar({
         kind: "polish-preview",
         polishPreview: {
           previewId,
+          previewKind: "ai-polish",
           scope: "full-note",
           notePath: snapshot.notePath,
           originalText: snapshot.markdown,
@@ -2149,6 +2230,64 @@ export default function AiSidebar({
     } finally {
       setIsResponding(false);
     }
+  };
+
+  const submitSolutionFormatCommand = (
+    displayText = "/题解格式化",
+  ) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
+    if (!context.filePath) {
+      appendCommandNotice(conversationId, displayText, "请先打开一篇笔记后再使用题解格式化。");
+      return;
+    }
+
+    if (!context.markdownBody.trim()) {
+      appendCommandNotice(conversationId, displayText, "当前笔记正文为空，无法执行题解格式化。");
+      return;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const previewId = `solution-format-${Date.now().toString(36)}-${requestId}`;
+    const result = formatLuoguSolution(context.markdownBody);
+
+    if (result.formattedBody === context.markdownBody) {
+      appendCommandNotice(conversationId, displayText, "未发现需要格式化的内容。");
+      setInputValue("");
+      setActiveCommandIndex(0);
+      setIsCommandPanelDismissed(false);
+      return;
+    }
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(
+      conversationId,
+      createMessage({ role: "user", text: displayText, state: "done" }),
+      createMessage({
+        role: "assistant",
+        text: "题解格式化预览已生成。",
+        kind: "polish-preview",
+        commandId: "solution-format",
+        polishPreview: {
+          previewId,
+          previewKind: "solution-format",
+          scope: "full-note",
+          notePath: context.filePath,
+          originalText: context.markdownBody,
+          polishedText: result.formattedBody,
+          selectionRange: null,
+          selectionStartLine: 1,
+          changes: result.changes,
+        },
+        state: "done",
+      }),
+    );
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
   };
 
   const executeSlashCommand = (command: SlashCommand, rawInput?: string) => {
@@ -2200,6 +2339,11 @@ export default function AiSidebar({
         markdownTruncated: false,
       };
       void submitPolishFullNoteCommand(chatContext, commandText, commandArgument);
+      return;
+    }
+
+    if (command.id === "solution-format") {
+      submitSolutionFormatCommand(commandText);
       return;
     }
 
@@ -2424,6 +2568,7 @@ export default function AiSidebar({
           notePath: preview.notePath,
           originalBody: preview.originalText,
           polishedBody: preview.polishedText,
+          applyKind: preview.previewKind,
         });
       } else {
         await onApplyPolishedSelection({

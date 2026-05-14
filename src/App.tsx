@@ -150,6 +150,16 @@ function getPolishPreviewDisplayStartLine(preview: AiPolishPreview): number {
     : 1;
 }
 
+function getReviewTitle(preview: AiPolishPreview): string {
+  if (preview.previewKind === "solution-format") return "题解格式化审核";
+  return preview.scope === "full-note" ? "全文润色审核" : "润色选中审核";
+}
+
+function getReviewApplyLabel(preview: AiPolishPreview): string {
+  if (preview.previewKind === "solution-format") return "应用题解格式化";
+  return preview.scope === "full-note" ? "应用全文润色" : "应用到选区";
+}
+
 function PolishReviewPane({
   reviewTab,
   currentFilePath,
@@ -168,9 +178,8 @@ function PolishReviewPane({
   onClose: () => void;
 }) {
   const { preview } = reviewTab;
-  const isFullNotePreview = preview.scope === "full-note";
-  const title = isFullNotePreview ? "全文润色审核" : "润色选中审核";
-  const applyLabel = isFullNotePreview ? "应用全文润色" : "应用到选区";
+  const title = getReviewTitle(preview);
+  const applyLabel = getReviewApplyLabel(preview);
   const statusLabel = getReviewStatusLabel(preview, currentFilePath, currentMarkdown);
   const displayStartLine = getPolishPreviewDisplayStartLine(preview);
   const stats = getDiffStats(preview.originalText, preview.polishedText, displayStartLine);
@@ -3278,6 +3287,7 @@ export default function App() {
     notePath,
     originalBody,
     polishedBody,
+    applyKind,
   }: ApplyPolishedFullNoteInput) => {
     if (!currentFilePath || currentFilePath !== notePath) {
       throw new Error("当前打开的笔记已变化，无法应用这次全文润色。");
@@ -3292,7 +3302,9 @@ export default function App() {
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, polishedBody);
     setMarkdown(polishedBody);
     setIsDirty(nextDirty);
-    toast.success("全文润色已应用到正文，请确认后保存");
+    toast.success(applyKind === "solution-format"
+      ? "题解格式化已应用到正文，请确认后保存"
+      : "全文润色已应用到正文，请确认后保存");
   };
 
   const getPolishReviewTabId = (previewId: string) => `review:${previewId}`;
@@ -3325,6 +3337,7 @@ export default function App() {
           notePath: preview.notePath,
           originalBody: preview.originalText,
           polishedBody: preview.polishedText,
+          applyKind: preview.previewKind,
         });
       } else {
         await handleApplyPolishedSelection({
@@ -6620,8 +6633,8 @@ export default function App() {
                 kind: "review",
                 id: activeReviewTab.id,
                 sourcePath: activeReviewTab.preview.notePath,
-                title: activeReviewTab.preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
-                displayName: activeReviewTab.preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+                title: getReviewTitle(activeReviewTab.preview),
+                displayName: getReviewTitle(activeReviewTab.preview),
                 status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : "pending",
               })}
             />
