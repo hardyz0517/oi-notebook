@@ -95,8 +95,7 @@ const LEFT_SIDEBAR_WIDTH_MIN = 200;
 const LEFT_SIDEBAR_WIDTH_MAX = 420;
 const AI_SIDEBAR_WIDTH_DEFAULT = 390;
 const AI_SIDEBAR_WIDTH_MIN = 320;
-const AI_SIDEBAR_WIDTH_MAX = 640;
-const AI_SIDEBAR_VIEWPORT_MAX_RATIO = 0.5;
+const ACTIVITY_BAR_BASE_WIDTH = 52;
 const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
 const EDITOR_PREVIEW_RATIO_MIN = 0.2;
 const EDITOR_PREVIEW_RATIO_MAX = 0.8;
@@ -758,7 +757,11 @@ function getInitialNumberRange(storageKey: string, fallback: number, min: number
 }
 
 function getAiSidebarWidthMax(): number {
-  return Math.min(AI_SIDEBAR_WIDTH_MAX, Math.floor(window.innerWidth * AI_SIDEBAR_VIEWPORT_MAX_RATIO));
+  const appZoom = Number.parseFloat(
+    window.getComputedStyle(document.documentElement).getPropertyValue("--app-zoom"),
+  );
+  const activityBarWidth = ACTIVITY_BAR_BASE_WIDTH * (Number.isFinite(appZoom) ? appZoom : 1);
+  return Math.floor(window.innerWidth - activityBarWidth);
 }
 
 function clampAiSidebarWidth(value: number): number {
@@ -1134,6 +1137,7 @@ export default function App() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(() =>
     getInitialNumberRange(
       LEFT_SIDEBAR_WIDTH_STORAGE_KEY,
@@ -3665,7 +3669,10 @@ export default function App() {
   };
 
   const handleActivityAi = () => {
-    setIsAiSidebarOpen((open) => !open);
+    setIsAiSidebarOpen((open) => {
+      if (open) setIsAiSidebarMaximized(false);
+      return !open;
+    });
   };
 
   const handleActivityBlog = () => {
@@ -6479,7 +6486,7 @@ export default function App() {
       </header>
 
       {/* Main workspace */}
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <nav
           className="app-activity-bar flex w-13 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2.5"
           aria-label="主活动栏"
@@ -7088,7 +7095,7 @@ export default function App() {
             </>
           )}
         </section>
-        {isAiSidebarOpen && (
+        {isAiSidebarOpen && !isAiSidebarMaximized && (
           <button
             type="button"
             className={cn(
@@ -7105,8 +7112,13 @@ export default function App() {
           context={aiSidebarContext}
           isAiConfigured={aiConfigured}
           isOpen={isAiSidebarOpen}
-          onClose={() => setIsAiSidebarOpen(false)}
+          onClose={() => {
+            setIsAiSidebarMaximized(false);
+            setIsAiSidebarOpen(false);
+          }}
           width={aiSidebarWidth}
+          isMaximized={isAiSidebarMaximized}
+          onMaximizedChange={setIsAiSidebarMaximized}
           aiConfig={aiConfig}
           onOpenAiSettings={() => void openAiSettings()}
           onApplySuggestedTags={handleApplyAiSuggestedTags}

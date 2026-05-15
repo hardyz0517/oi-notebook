@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
+  ArrowLeft,
   ArrowDown,
   ArrowUp,
-  Bot,
   BookOpen,
   ChevronDown,
   ChevronRight,
   CheckCircle2,
-  ClipboardList,
+  Copy,
   FileText,
   History,
   Info,
   Loader2,
+  Maximize2,
+  Minimize2,
   MessageCircle,
   PenLine,
   Plus,
+  RotateCcw,
   Settings,
   Sparkles,
   Tag,
@@ -185,6 +188,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     implemented: true,
   },
   {
+    id: "explain-selection",
+    trigger: "解释选中部分",
+    label: "解释选中部分",
+    description: "解释当前选中的文本。",
+    category: "文档",
+    icon: BookOpen,
+    requiresNote: true,
+    requiresSelection: true,
+    mode: "readonly",
+    implemented: true,
+  },
+  {
     id: "complete-tags",
     trigger: "补全标签",
     label: "补全标签",
@@ -208,18 +223,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
     implemented: true,
   },
   {
-    id: "explain-paragraph",
-    trigger: "解释当前段落",
-    label: "解释当前段落",
-    description: "解释光标附近的上下文。",
-    category: "上下文",
-    icon: BookOpen,
-    requiresNote: true,
-    requiresSelectionOrCursor: true,
-    mode: "readonly",
-    implemented: true,
-  },
-  {
     id: "compress-context",
     trigger: "压缩上下文",
     label: "压缩上下文",
@@ -239,16 +242,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
     mode: "readonly",
     implemented: true,
   },
-  {
-    id: "retrospective",
-    trigger: "生成复盘",
-    label: "生成复盘",
-    description: "准备 OI 题解复盘建议。",
-    category: "上下文",
-    icon: ClipboardList,
-    requiresNote: true,
-    mode: "readonly",
-  },
 ];
 
 const COMMAND_CATEGORIES: SlashCommand["category"][] = ["文档", "上下文"];
@@ -266,7 +259,8 @@ const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 64;
-const UNTITLED_CONVERSATION_TITLE = "New chat";
+const LEGACY_UNTITLED_CONVERSATION_TITLE = "New chat";
+const UNTITLED_CONVERSATION_TITLE = "新对话";
 const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
   "cjk_spacing",
   "punctuation_normalize",
@@ -302,6 +296,13 @@ const getCommandDisabledReason = (command: SlashCommand, context: AiSidebarNoteC
     return "需要先选中文本，或把光标放在段落中";
   }
   return null;
+};
+
+const getCommandDescriptionText = (command: SlashCommand, disabledReason: string | null): string => {
+  if (!disabledReason) return command.description;
+  return command.description.includes(disabledReason)
+    ? command.description
+    : `${command.description}${command.description.endsWith("。") ? "" : "。"}${disabledReason}`;
 };
 
 const getCommandByInput = (value: string): SlashCommand | undefined => {
@@ -556,6 +557,23 @@ const getConversationTitleFromQuestion = (question: string): string => {
   return compact.length <= 28 ? compact : `${compact.slice(0, 28)}...`;
 };
 
+const isUntitledConversationTitle = (title: string): boolean => {
+  const normalized = title.trim();
+  return normalized.length === 0 ||
+    normalized === UNTITLED_CONVERSATION_TITLE ||
+    normalized === LEGACY_UNTITLED_CONVERSATION_TITLE;
+};
+
+const getConversationDisplayTitle = (conversation: AiConversation | undefined): string => {
+  if (!conversation) return UNTITLED_CONVERSATION_TITLE;
+  const title = conversation.title.trim();
+  if (!isUntitledConversationTitle(title)) return title;
+  const latestUserMessage = [...conversation.messages].reverse().find((message) => (
+    message.role === "user" && message.text.trim().length > 0
+  ));
+  return latestUserMessage ? getConversationTitleFromQuestion(latestUserMessage.text) : UNTITLED_CONVERSATION_TITLE;
+};
+
 const isAiChatMessage = (value: unknown): value is AiChatMessage => {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<AiChatMessage>;
@@ -712,7 +730,7 @@ const sanitizeConversation = (value: unknown): AiConversation | null => {
   const updatedAt = typeof item.updatedAt === "number" ? item.updatedAt : createdAt;
   return {
     id: item.id,
-    title: item.title.trim() || UNTITLED_CONVERSATION_TITLE,
+    title: isUntitledConversationTitle(item.title) ? UNTITLED_CONVERSATION_TITLE : item.title.trim(),
     messages: sanitizeMessagesForStorage(item.messages.filter(isAiChatMessage)),
     providerId: typeof item.providerId === "string" ? item.providerId : undefined,
     modelId: typeof item.modelId === "string" ? item.modelId : undefined,
@@ -1015,6 +1033,31 @@ const setAiCodeCopyButtonStatus = (button: HTMLButtonElement, status: "copy" | "
   button.replaceChildren(createAiCodeCopyIcon(status === "copied" ? "check" : "copy"), label);
   button.title = label.textContent;
   button.setAttribute("aria-label", button.title);
+};
+
+const copyPlainText = async (text: string): Promise<void> => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the textarea path for embedded or non-secure WebViews.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("Clipboard copy failed");
+  }
 };
 
 const getAiCodeBlockText = (code: HTMLElement): string => {
@@ -1511,6 +1554,8 @@ export default function AiSidebar({
   isOpen,
   onClose,
   width,
+  isMaximized = false,
+  onMaximizedChange,
   aiConfig,
   onOpenAiSettings,
   onApplySuggestedTags,
@@ -1534,6 +1579,9 @@ export default function AiSidebar({
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"chat" | "conversations">("chat");
+  const [isAllConversationsOpen, setIsAllConversationsOpen] = useState(false);
+  const [conversationSearch, setConversationSearch] = useState("");
   const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
@@ -1548,11 +1596,16 @@ export default function AiSidebar({
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
+  const [messageCopyFeedback, setMessageCopyFeedback] = useState<{
+    messageId: string;
+    status: "copied" | "failed";
+  } | null>(null);
   const messageSeqRef = useRef(0);
   const requestSeqRef = useRef(0);
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const streamTextBufferRef = useRef<Map<string, string>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
+  const messageCopyFeedbackTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1712,6 +1765,12 @@ export default function AiSidebar({
     return () => window.clearInterval(timer);
   }, [isResponding]);
 
+  useEffect(() => () => {
+    if (messageCopyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(messageCopyFeedbackTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isCommandPanelOpen || visibleCommands.length === 0) return;
     const activeCommand = visibleCommands[activeCommandIndex];
@@ -1770,7 +1829,7 @@ export default function AiSidebar({
     updateConversationMessages(conversationId, (conversation) => {
       const firstUserMessage = nextMessages.find((message) => message.role === "user");
       const shouldRetitle =
-        conversation.title === UNTITLED_CONVERSATION_TITLE &&
+        isUntitledConversationTitle(conversation.title) &&
         conversation.messages.every((message) => message.role !== "user");
       return {
         ...conversation,
@@ -1792,9 +1851,17 @@ export default function AiSidebar({
   };
 
   const createNewConversation = () => {
+    if (viewMode === "conversations") {
+      setIsHistoryOpen(false);
+      setIsProviderPickerOpen(false);
+      setIsModelPickerOpen(false);
+      return;
+    }
+
     if (activeConversation && !hasConversationContent(activeConversation)) {
       setActiveConversationId(activeConversation.id);
       setIsHistoryOpen(false);
+      setViewMode("chat");
       setIsProviderPickerOpen(false);
       setIsModelPickerOpen(false);
       setActiveCommandIndex(0);
@@ -1808,6 +1875,7 @@ export default function AiSidebar({
     };
     setConversations((current) => limitConversations(pruneBlankConversations([conversation, ...current], conversation.id)));
     setActiveConversationId(conversation.id);
+    setViewMode("chat");
     shouldAutoScrollRef.current = true;
     setShowScrollToBottom(false);
     cancelRenameConversation();
@@ -1848,6 +1916,9 @@ export default function AiSidebar({
 
   const selectConversation = (conversationId: string) => {
     setActiveConversationId(conversationId);
+    setViewMode("chat");
+    setIsAllConversationsOpen(false);
+    setConversationSearch("");
     setIsHistoryOpen(false);
     setIsProviderPickerOpen(false);
     setIsModelPickerOpen(false);
@@ -2079,13 +2150,13 @@ export default function AiSidebar({
     };
   };
 
-  const buildRequestHistory = (conversationId: string): NoteChatHistoryMessage[] => {
-    const conversation = conversations.find((item) => item.id === conversationId);
-    if (!conversation) return [];
-
+  const buildRequestHistoryFromMessages = (
+    conversation: AiConversation,
+    sourceMessages: AiChatMessage[],
+  ): NoteChatHistoryMessage[] => {
     const compressedSummary = conversation.compressedContextSummary?.trim();
     const historyLimit = compressedSummary ? AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT : AI_REQUEST_HISTORY_LIMIT;
-    const recentHistory = conversation.messages
+    const recentHistory = sourceMessages
       .filter((message) => {
         if (message.role !== "user" && message.role !== "assistant") return false;
         if (message.kind === "compression-result") return false;
@@ -2105,6 +2176,12 @@ export default function AiSidebar({
       buildCompressedHistoryMessage(truncateText(compressedSummary, AI_COMPRESSED_CONTEXT_MAX_CHARS).text),
       ...recentHistory,
     ];
+  };
+
+  const buildRequestHistory = (conversationId: string): NoteChatHistoryMessage[] => {
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (!conversation) return [];
+    return buildRequestHistoryFromMessages(conversation, conversation.messages);
   };
 
   const appendCommandNotice = (conversationId: string, commandText: string, notice: string) => {
@@ -2225,20 +2302,19 @@ export default function AiSidebar({
     "## 可以改进的地方",
   ].join("\n");
 
-  const buildExplainParagraphPrompt = (targetText: string, isCode: boolean, sourceLabel: string): string => [
-    "请执行只读 slash command：/解释当前段落。",
+const buildExplainSelectionPrompt = (targetText: string): string => [
+    "请执行只读 slash command：/解释选中部分。",
     "",
-    `解释对象来源：${sourceLabel}${isCode ? "，当前光标位于代码块中" : ""}。`,
-    "只解释下面这段内容，不要展开成与当前段落无关的大段泛泛内容。",
+    "只解释下面这段当前选中的内容，不要展开成与当前选区无关的大段泛泛内容。",
     "不要修改原文，不要声称已经写入文件。",
     "",
     "回答要求：",
     "1. 先用一句话概括这段在讲什么。",
-    "2. 再分点解释关键概念。",
-    "3. 如果涉及算法、代码或公式，说明含义、复杂度相关信息和可能坑点。",
-    "4. 如果这段表达不清楚，可以给改进建议，但不要直接改写原文。",
+    "2. 分点解释它的含义、上下文和关键点。",
+    "3. 如果涉及算法、代码或公式，说明关键概念、作用，以及需要注意的细节或坑点。",
+    "4. 如果这段表达不清楚，可以补充帮助理解的解释，但不要直接改写原文。",
     "",
-    "当前段落：",
+    "当前选中内容：",
     targetText,
   ].join("\n");
 
@@ -2865,26 +2941,20 @@ export default function AiSidebar({
       return;
     }
 
-    if (command.id === "explain-paragraph") {
+    if (command.id === "explain-selection") {
       if (!context.filePath) {
         appendCommandNotice(conversationId, commandText, "请先打开一篇笔记。");
         return;
       }
-
-      const selectedText = context.selectedText.trim();
-      const paragraphText = context.currentParagraphText.trim();
-      const target = selectedText || paragraphText;
-      if (!target) {
-        appendCommandNotice(conversationId, commandText, "请先选中一段文字，或把光标放在要解释的段落中。");
+      if (context.selectionStatus !== "available" || !context.selectedText.trim()) {
+        appendCommandNotice(conversationId, commandText, "请先在编辑器中选中一段需要解释的文字。");
         return;
       }
 
-      const truncatedTarget = truncateText(target, NOTE_CHAT_MAX_PARAGRAPH_CHARS);
-      const sourceLabel = selectedText ? "当前选中文本" : "当前光标所在段落";
-      const prompt = buildExplainParagraphPrompt(
+      const selectedText = context.selectedText.trim();
+      const truncatedTarget = truncateText(selectedText, NOTE_CHAT_MAX_PARAGRAPH_CHARS);
+      const prompt = buildExplainSelectionPrompt(
         truncatedTarget.truncated ? `${truncatedTarget.text}\n\n（以上内容已截断）` : truncatedTarget.text,
-        !selectedText && context.currentParagraphIsCode,
-        sourceLabel,
       );
       const chatContext = buildChatContext();
       const commandContext = {
@@ -3000,6 +3070,139 @@ export default function AiSidebar({
     });
   };
 
+  const canRetryAssistantMessage = (message: AiChatMessage): boolean => {
+    const displayText = message.retryDisplayText?.trim() ?? "";
+    return (
+      message.role === "assistant" &&
+      (message.kind === undefined || message.kind === "text") &&
+      message.state !== "loading" &&
+      message.state !== "streaming" &&
+      Boolean(message.retryText?.trim()) &&
+      !message.commandId &&
+      !message.retryCommandId &&
+      !displayText.startsWith("/")
+    );
+  };
+
+  const showMessageCopyFeedback = (messageId: string, status: "copied" | "failed") => {
+    if (messageCopyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(messageCopyFeedbackTimerRef.current);
+    }
+    setMessageCopyFeedback({ messageId, status });
+    messageCopyFeedbackTimerRef.current = window.setTimeout(() => {
+      setMessageCopyFeedback(null);
+      messageCopyFeedbackTimerRef.current = null;
+    }, 1600);
+  };
+
+  const copyAssistantMessage = async (message: AiChatMessage) => {
+    const text = message.text.trim();
+    if (!text) return;
+    try {
+      await copyPlainText(text);
+      showMessageCopyFeedback(message.id, "copied");
+    } catch (error) {
+      console.warn("Copy AI message failed:", error);
+      showMessageCopyFeedback(message.id, "failed");
+    }
+  };
+
+  const retryAssistantMessage = (message: AiChatMessage) => {
+    if (isResponding || !canRetryAssistantMessage(message)) return;
+
+    const conversation = conversations.find((item) => item.id === activeConversation?.id);
+    const conversationId = conversation?.id;
+    const question = message.retryText?.trim() ?? "";
+    if (!conversation || !conversationId || !question) return;
+
+    const messageIndex = conversation.messages.findIndex((item) => item.id === message.id);
+    if (messageIndex === -1) return;
+
+    const userMessageIndex = [...conversation.messages.slice(0, messageIndex)]
+      .reverse()
+      .findIndex((item) => item.role === "user" && item.text.trim().length > 0 && !isContextUtilityCommandText(item.text));
+    if (userMessageIndex === -1) return;
+    const previousUserIndex = messageIndex - userMessageIndex - 1;
+
+    if (!isAiConfigured || !selectedProviderId || !selectedModelId) {
+      replaceMessage(conversationId, message.id, (current) => ({
+        ...current,
+        text: !isAiConfigured
+          ? "AI is not configured. Open settings first."
+          : "The selected model is unavailable. Choose another model in NoteX settings.",
+        state: "error",
+        ...finishAssistantTiming(current),
+      }));
+      return;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const startedAt = Date.now();
+    const streamId = `${Date.now()}-${requestId}`;
+    const chatContext = buildChatContext();
+    const chatHistory = buildRequestHistoryFromMessages(
+      conversation,
+      conversation.messages.slice(0, previousUserIndex),
+    );
+    const assistantMessage = createMessage({
+      role: "assistant",
+      text: "",
+      state: "streaming",
+      retryText: question,
+      retryDisplayText: message.retryDisplayText,
+      requestId,
+      streamId,
+      retryContext: chatContext,
+      startedAt,
+    });
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    updateConversationMessages(conversationId, (currentConversation) => ({
+      ...currentConversation,
+      messages: currentConversation.messages.map((item) => (item.id === message.id ? assistantMessage : item)),
+    }));
+
+    streamTextBufferRef.current.set(streamId, "");
+    streamTargetsRef.current.set(streamId, {
+      conversationId,
+      messageId: assistantMessage.id,
+      requestId,
+      mode: "chat",
+    });
+    activeStreamsRef.current.add(streamId);
+    updateRespondingState();
+
+    void startCurrentNoteChatStream({
+      streamId,
+      question,
+      context: chatContext,
+      chatHistory,
+      providerId: selectedProviderId,
+      modelId: selectedModelId,
+    }).catch((error) => {
+      console.warn("AI sidebar retry request failed", {
+        requestId,
+        streamId,
+        notePath: chatContext.notePath,
+        error,
+      });
+      const target = streamTargetsRef.current.get(streamId);
+      if (!target) return;
+      replaceMessage(target.conversationId, target.messageId, (current) => ({
+        ...current,
+        text: current.state === "error" ? current.text : getChatErrorMessage(error),
+        state: "error",
+        ...finishAssistantTiming(current),
+      }));
+      streamTextBufferRef.current.delete(streamId);
+      streamTargetsRef.current.delete(streamId);
+      activeStreamsRef.current.delete(streamId);
+      updateRespondingState();
+    });
+  };
+
   const applyTagSuggestion = async (message: AiChatMessage) => {
     const conversationId = activeConversation?.id;
     const suggestion = message.tagSuggestion;
@@ -3101,9 +3304,11 @@ export default function AiSidebar({
   };
 
   const selectCommand = (command: SlashCommand) => {
+    if (getCommandDisabledReason(command, context)) return;
     setInputValue("");
     setIsCommandPanelDismissed(true);
     setActiveCommandIndex(0);
+    setViewMode("chat");
     executeSlashCommand(command);
   };
 
@@ -3111,6 +3316,9 @@ export default function AiSidebar({
     const conversationId = activeConversation?.id;
     const value = inputValue.trim();
     if (!conversationId || !value || isResponding) return;
+    setViewMode("chat");
+    setIsAllConversationsOpen(false);
+    setConversationSearch("");
 
     if (value.startsWith("/")) {
       const command = getCommandByInput(value);
@@ -3171,6 +3379,24 @@ export default function AiSidebar({
     () => limitConversations(pruneBlankConversations(conversations, activeConversationId)),
     [activeConversationId, conversations],
   );
+  const visibleConversations = useMemo(
+    () => sortedConversations.filter(hasConversationContent),
+    [sortedConversations],
+  );
+  const recentConversations = visibleConversations.slice(0, 3);
+  const filteredConversations = useMemo(() => {
+    const query = conversationSearch.trim().toLocaleLowerCase();
+    if (!query) return visibleConversations;
+    return visibleConversations.filter((conversation) =>
+      getConversationDisplayTitle(conversation).toLocaleLowerCase().includes(query),
+    );
+  }, [conversationSearch, visibleConversations]);
+  const activeConversationTitle = getConversationDisplayTitle(activeConversation);
+  const sidebarStyle = isMaximized
+    ? undefined
+    : width
+      ? { width, flexBasis: width, maxWidth: width }
+      : undefined;
   let commandOrdinal = 0;
 
   return (
@@ -3178,26 +3404,30 @@ export default function AiSidebar({
       className={cn(
         "relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
         isOpen ? "flex" : "hidden",
+        isMaximized && "absolute inset-y-0 right-0 z-40 border-l border-border/80 shadow-2xl",
       )}
-      style={width ? { width, flexBasis: width, maxWidth: width } : undefined}
+      style={isMaximized ? { left: "calc(52px * var(--app-zoom, 1))" } : sidebarStyle}
       aria-hidden={!isOpen}
     >
-      <div className="relative flex h-11 shrink-0 items-center justify-between border-b border-border/70 px-3">
+      <div className="relative shrink-0">
+        <div className="flex h-11 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="truncate text-sm font-semibold">AI Assistant</div>
+          <div className="flex min-w-0 items-center border-b border-primary/70 pb-1 text-sm font-semibold tracking-[0.08em] text-foreground">
+            <div className="truncate">NoteX</div>
+          </div>
         </div>
         <button
           type="button"
           className={cn(
-            "mx-2 inline-flex h-7 min-w-0 flex-1 items-center justify-between gap-1 rounded-md border border-border/70 bg-muted/15 px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "mx-2 inline-flex h-7 min-w-0 max-w-[12rem] flex-1 items-center justify-between gap-1 rounded-sm px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             isProviderPickerOpen && "bg-accent text-accent-foreground",
           )}
-          onClick={() => {
-            setIsProviderPickerOpen((open) => !open);
-            setIsHistoryOpen(false);
-            setIsModelPickerOpen(false);
-          }}
+            onClick={() => {
+              setIsProviderPickerOpen((open) => !open);
+              setIsAllConversationsOpen(false);
+              setIsHistoryOpen(false);
+              setIsModelPickerOpen(false);
+            }}
           title={selectedProviderLabel}
           aria-label="选择 AI 模型"
           aria-expanded={isProviderPickerOpen}
@@ -3209,20 +3439,60 @@ export default function AiSidebar({
           <button
             type="button"
             className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={createNewConversation}
-            title="New chat"
-            aria-label="New chat"
+            onClick={() => onMaximizedChange?.(!isMaximized)}
+            title={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
+            aria-label={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
+            aria-pressed={isMaximized}
           >
-            <Plus className="h-4 w-4" />
+            {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
           <button
             type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={onClose}
+            title="Hide NoteX"
+            aria-label="Hide NoteX"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        </div>
+
+        <div className="flex min-w-0 items-center justify-between gap-2 px-3 py-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => {
+              setViewMode("conversations");
+              setIsAllConversationsOpen(false);
+              setConversationSearch("");
+              setIsHistoryOpen(false);
+                setIsProviderPickerOpen(false);
+                setIsModelPickerOpen(false);
+              }}
+              title="Conversations"
+              aria-label="Conversations"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <span
+              className="min-w-0 truncate text-sm font-medium text-foreground"
+              title={activeConversationTitle}
+            >
+              {activeConversationTitle}
+            </span>
+          </div>
+          <button
+            type="button"
             className={cn(
-              "inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               isHistoryOpen && "bg-accent text-accent-foreground",
             )}
             onClick={() => {
               setIsHistoryOpen((open) => !open);
+              setIsAllConversationsOpen(false);
               setIsProviderPickerOpen(false);
               setIsModelPickerOpen(false);
             }}
@@ -3234,17 +3504,32 @@ export default function AiSidebar({
           </button>
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={onClose}
-            title="Close AI Assistant"
-            aria-label="Close AI Assistant"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={createNewConversation}
+            title="新聊天"
+            aria-label="新聊天"
           >
-            <X className="h-4 w-4" />
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => {
+              setIsHistoryOpen(false);
+              setIsAllConversationsOpen(false);
+              setIsProviderPickerOpen(false);
+              setIsModelPickerOpen(false);
+              onOpenAiSettings();
+            }}
+            title="AI settings"
+            aria-label="AI settings"
+          >
+            <Settings className="h-4 w-4" />
           </button>
         </div>
 
         {isProviderPickerOpen && (
-          <div className="absolute left-3 right-3 top-10 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+          <div className="absolute left-3 right-3 top-[calc(100%-0.15rem)] z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
               <span className="text-xs font-medium text-foreground">选择配置组</span>
               <button
@@ -3374,13 +3659,13 @@ export default function AiSidebar({
         )}
 
         {isHistoryOpen && (
-          <div className="absolute right-3 top-10 z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+          <div className="absolute right-3 top-[4.75rem] z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
               <span className="text-xs font-medium text-foreground">Chat history</span>
               <span className="text-[11px] text-muted-foreground">max {AI_CONVERSATION_LIMIT}</span>
             </div>
             <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
-              {sortedConversations.map((conversation) => (
+              {visibleConversations.map((conversation) => (
                 <div
                   key={conversation.id}
                   className={cn(
@@ -3454,7 +3739,7 @@ export default function AiSidebar({
         )}
       </div>
 
-      <div className="shrink-0 border-b border-border/60 px-3 py-1.5">
+      <div className="hidden shrink-0 border-b border-border/60 px-3 py-1.5">
         <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
           <span className="min-w-0 truncate" title={context.filePath ? `${getCompactPath(context.filePath)} · ${contextMeta}` : undefined}>
             {topContextSummary}
@@ -3471,7 +3756,58 @@ export default function AiSidebar({
           className="h-full overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
           onScroll={handleMessagesScroll}
         >
-          {messages.length === 0 ? (
+          {viewMode === "conversations" ? (
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span>Conversations</span>
+                <span>{visibleConversations.length}</span>
+              </div>
+              {recentConversations.length > 0 ? (
+                <div className="grid gap-1">
+                  {recentConversations.map((conversation) => {
+                    const isActive = conversation.id === activeConversationId;
+                    const title = getConversationDisplayTitle(conversation);
+                    return (
+                      <button
+                        key={conversation.id}
+                        type="button"
+                        className={cn(
+                          "grid min-w-0 gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                          isActive && "bg-accent text-accent-foreground",
+                        )}
+                        onClick={() => selectConversation(conversation.id)}
+                      >
+                        <span className="truncate text-sm font-medium">{title}</span>
+                        <span className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span>{conversation.messages.length} messages</span>
+                          <span className="shrink-0 tabular-nums">{new Date(conversation.updatedAt).toLocaleString()}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed border-border/70 px-3 py-8 text-center text-sm text-muted-foreground">
+                  还没有会话。直接在下方输入第一句话即可开始。
+                </div>
+              )}
+              {visibleConversations.length > 3 && (
+                <button
+                  type="button"
+                  className="mt-1 inline-flex h-8 items-center justify-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => {
+                    setConversationSearch("");
+                    setIsAllConversationsOpen(true);
+                    setIsHistoryOpen(false);
+                    setIsProviderPickerOpen(false);
+                    setIsModelPickerOpen(false);
+                  }}
+                >
+                  查看全部（{visibleConversations.length} 个）
+                </button>
+              )}
+            </div>
+          ) : messages.length === 0 ? (
             <div className="flex h-full min-h-44 items-center justify-center px-5 text-center">
             <div className="grid max-w-72 gap-3">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground">
@@ -3489,6 +3825,10 @@ export default function AiSidebar({
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
                 const timingLabel = getAssistantTimingLabel(message, elapsedMs);
+                const isAssistantBusy = message.state === "loading" || message.state === "streaming";
+                const copyFeedback = messageCopyFeedback?.messageId === message.id ? messageCopyFeedback.status : null;
+                const canCopyAssistantMessage = message.text.trim().length > 0;
+                const canRetryMessage = canRetryAssistantMessage(message);
                 return (
                   <div key={message.id} className="mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
                     {timingLabel && (
@@ -3531,38 +3871,34 @@ export default function AiSidebar({
                       ) : (
                         <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
                       )}
-                      {message.state === "error" && message.retryText && (
-                        <button
-                          type="button"
-                          className="mt-2 inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          onClick={() => {
-                            if (isResponding) return;
-                            if (message.retryCommandId === "complete-tags") {
-                              void submitTagSuggestionCommand(message.retryContext, message.retryDisplayText);
-                              return;
-                            }
-                            if (message.retryCommandId === "polish-all" && message.retryContext) {
-                              void submitPolishFullNoteCommand(
-                                message.retryContext,
-                                message.retryDisplayText,
-                                message.retryInstruction ?? "",
-                              );
-                              return;
-                            }
-                            if (message.retryCommandId === "polish-selection" && message.retryContext) {
-                              void submitPolishSelectionCommand(
-                                message.retryContext.selectedText,
-                                message.retrySelectionRange ?? null,
-                                message.retryDisplayText,
-                                message.retrySelectionStartLine ?? null,
-                              );
-                              return;
-                            }
-                            void submitQuestion(message.retryText ?? "", message.retryContext, message.retryDisplayText);
-                          }}
-                        >
-                          Retry
-                        </button>
+                      {!isAssistantBusy && (canCopyAssistantMessage || canRetryMessage) && (
+                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          {canCopyAssistantMessage && (
+                            <button
+                              type="button"
+                              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                              onClick={() => void copyAssistantMessage(message)}
+                              title="复制这条 AI 回复"
+                              aria-label="复制这条 AI 回复"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              <span>{copyFeedback === "copied" ? "已复制" : copyFeedback === "failed" ? "复制失败" : "复制"}</span>
+                            </button>
+                          )}
+                          {canRetryMessage && (
+                            <button
+                              type="button"
+                              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => retryAssistantMessage(message)}
+                              disabled={isResponding}
+                              title="重新生成这条 AI 回复"
+                              aria-label="重新生成这条 AI 回复"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              <span>重试</span>
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -3591,7 +3927,80 @@ export default function AiSidebar({
             </div>
           )}
         </div>
-        {showScrollToBottom && (
+        {isAllConversationsOpen && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/30 px-4 py-6 backdrop-blur-[2px]">
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              onClick={() => {
+                setIsAllConversationsOpen(false);
+                setConversationSearch("");
+              }}
+              aria-label="关闭会话列表"
+            />
+            <div className="relative z-10 grid max-h-full w-full max-w-3xl grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-2xl border border-border/70 bg-[#2b2d2f]/95 p-4 text-foreground shadow-[0_24px_80px_rgb(0_0_0/0.42)] dark:border-white/10">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="grid min-w-0 gap-1">
+                  <div className="text-base font-semibold text-foreground">会话</div>
+                  <div className="text-xs text-muted-foreground">选择最近会话，或用标题过滤。</div>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => {
+                    setIsAllConversationsOpen(false);
+                    setConversationSearch("");
+                  }}
+                  title="关闭"
+                  aria-label="关闭"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <input
+                value={conversationSearch}
+                onChange={(event) => setConversationSearch(event.target.value)}
+                placeholder="搜索最近会话"
+                className="h-9 min-w-0 rounded-md border border-white/10 bg-black/20 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:thin]">
+                <div className="mb-1 flex items-center justify-between px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <span>所有会话</span>
+                  <span>{filteredConversations.length}</span>
+                </div>
+                {filteredConversations.length > 0 ? (
+                  <div className="grid gap-1">
+                    {filteredConversations.map((conversation) => {
+                      const isActive = conversation.id === activeConversationId;
+                      const title = getConversationDisplayTitle(conversation);
+                      return (
+                        <button
+                          key={conversation.id}
+                          type="button"
+                          className={cn(
+                            "flex min-w-0 items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/10 hover:text-foreground",
+                            isActive && "bg-white/10 text-foreground",
+                          )}
+                          onClick={() => selectConversation(conversation.id)}
+                        >
+                          <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                            {new Date(conversation.updatedAt).toLocaleString()}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-white/10 px-3 py-8 text-center text-sm text-muted-foreground">
+                    没有匹配的会话。
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {viewMode === "chat" && showScrollToBottom && (
           <button
             type="button"
             className="absolute bottom-3 left-1/2 z-20 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 dark:bg-[#2f3134]/95"
@@ -3609,8 +4018,8 @@ export default function AiSidebar({
 
       <div className="relative z-30 shrink-0 px-3 pb-3 pt-2">
         {isCommandPanelOpen && (
-          <div className="ai-command-panel absolute bottom-[calc(100%-0.45rem)] left-3 right-3 z-20 overflow-hidden rounded-2xl border border-[#dcdfe6] bg-white text-popover-foreground shadow-[0_18px_48px_rgb(15_23_42/0.16)] dark:border-white/10 dark:bg-[#2f3134] dark:shadow-[0_18px_52px_rgb(0_0_0/0.42)]">
-            <div className="flex items-center justify-between px-3 py-2 text-[11px] text-muted-foreground">
+          <div className="ai-command-panel absolute bottom-[calc(100%-0.45rem)] left-5 right-5 z-20 overflow-hidden rounded-xl border border-[#dcdfe6] bg-white text-popover-foreground shadow-[0_18px_48px_rgb(15_23_42/0.16)] dark:border-white/10 dark:bg-[#2f3134] dark:shadow-[0_18px_52px_rgb(0_0_0/0.42)]">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground">
               <div className="font-medium">选择命令</div>
               <div>上下键 - 回车</div>
             </div>
@@ -3618,7 +4027,7 @@ export default function AiSidebar({
               <div className="ai-command-list max-h-72 overflow-y-auto overflow-x-hidden px-1.5 pb-1.5 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--muted-foreground)_30%,transparent)_transparent]">
                 {groupedVisibleCommands.map(({ category, commands }) => (
                   <div key={category} className="py-0.5">
-                    <div className="px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/75">
+                    <div className="px-1.5 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/75">
                       {category}
                     </div>
                     <div className="grid gap-0.5">
@@ -3627,6 +4036,7 @@ export default function AiSidebar({
                         commandOrdinal += 1;
                         const Icon = command.icon;
                         const disabledReason = getCommandDisabledReason(command, context);
+                        const isDisabled = !!disabledReason;
                         const isActive = itemIndex === activeCommandIndex;
                         return (
                           <button
@@ -3636,31 +4046,33 @@ export default function AiSidebar({
                             }}
                             type="button"
                             className={cn(
-                              "ai-command-item flex h-11 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left transition-[background-color,color,box-shadow]",
-                              isActive
-                                ? "bg-[#eef3f8] text-foreground shadow-[inset_0_0_0_1px_rgb(15_23_42/0.03)] dark:bg-white/10"
+                              "ai-command-item flex h-10 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left transition-[background-color,color,box-shadow,opacity]",
+                              isDisabled
+                                ? "cursor-not-allowed opacity-50"
                                 : "text-foreground hover:bg-[#f5f7fa] dark:hover:bg-white/[0.07]",
+                              isActive && !isDisabled
+                                ? "bg-[#eef3f8] text-foreground shadow-[inset_0_0_0_1px_rgb(15_23_42/0.03)] dark:bg-white/10"
+                                : isActive
+                                  ? "bg-[#f3f4f6] text-foreground dark:bg-white/[0.05]"
+                                  : undefined,
                             )}
                             onMouseEnter={() => setActiveCommandIndex(itemIndex)}
                             onClick={() => selectCommand(command)}
                             data-active={isActive ? "true" : undefined}
+                            disabled={isDisabled}
+                            aria-disabled={isDisabled}
                           >
-                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
-                              <Icon className="h-4 w-4" />
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
+                              <Icon className="h-3.5 w-3.5" />
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
                                 <span className="max-w-[7.5rem] shrink truncate text-sm font-medium text-foreground">{command.label}</span>
                                 <span className="truncate text-xs text-muted-foreground">
-                                  {disabledReason ? `${command.description} ${disabledReason}` : command.description}
+                                  {getCommandDescriptionText(command, disabledReason)}
                                 </span>
                               </span>
                             </span>
-                            {disabledReason && (
-                              <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground dark:bg-white/[0.08]">
-                                占位
-                              </span>
-                            )}
                             {!disabledReason && !command.implemented && (
                               <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground dark:bg-white/[0.08]">
                                 即将支持

@@ -61,6 +61,8 @@ export interface AiSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   width?: number;
+  isMaximized?: boolean;
+  onMaximizedChange?: (isMaximized: boolean) => void;
   aiConfig: AiConfig | null;
   onOpenAiSettings: () => void;
   onApplySuggestedTags: (notePath: string, suggestedTags: string[]) => Promise<void>;
