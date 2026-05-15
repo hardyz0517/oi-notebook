@@ -11,6 +11,7 @@ import {
   ClipboardList,
   FileText,
   History,
+  Info,
   Loader2,
   MessageCircle,
   PenLine,
@@ -47,7 +48,7 @@ type AiChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
-  kind?: "text" | "tag-suggestion" | "polish-preview";
+  kind?: "text" | "tag-suggestion" | "polish-preview" | "compression-result";
   commandId?: string;
   tagSuggestion?: TagSuggestionResult;
   polishPreview?: PolishPreviewResult;
@@ -64,6 +65,7 @@ type AiChatMessage = {
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
+  compressionResult?: CompressionResult;
 };
 
 type TagSuggestionResult = {
@@ -89,6 +91,11 @@ type AiConversation = {
   messages: AiChatMessage[];
   providerId?: string;
   modelId?: string;
+  compressedContextSummary?: string;
+  compressedContextUpdatedAt?: number;
+  compressedContextSourceChars?: number;
+  compressedContextModel?: string;
+  compressedContextProvider?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -102,6 +109,27 @@ type StreamTarget = {
   conversationId: string;
   messageId: string;
   requestId: number;
+  mode?: "chat" | "compress-context";
+  compressionSourceChars?: number;
+  compressionStartedAt?: number;
+};
+
+type AiStatusSnapshot = {
+  modelLabel: string;
+  notePath: string | null;
+  noteChars: number;
+  totalContextChars: number;
+  includeCurrentNoteContext: boolean;
+};
+
+type CompressionResult = {
+  sourceChars: number;
+  compressedChars: number;
+  ratio: number;
+  modelLabel: string;
+  providerLabel: string;
+  elapsedMs: number | null;
+  summary: string;
 };
 
 type SlashCommand = {
@@ -199,6 +227,17 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "上下文",
     icon: Archive,
     mode: "readonly",
+    implemented: true,
+  },
+  {
+    id: "status",
+    trigger: "状态",
+    label: "状态",
+    description: "查看当前会话、模型和上下文状态。",
+    category: "上下文",
+    icon: Info,
+    mode: "readonly",
+    implemented: true,
   },
   {
     id: "retrospective",
@@ -222,6 +261,10 @@ const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const AI_REQUEST_HISTORY_LIMIT = 8;
 const AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS = 1200;
+const AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT = 4;
+const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
+const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
+const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 64;
 const UNTITLED_CONVERSATION_TITLE = "New chat";
 const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
@@ -292,12 +335,6 @@ const getCommandArgument = (command: SlashCommand, rawInput?: string): string =>
   }
 
   return "";
-};
-
-const getSelectionLabel = (context: AiSidebarNoteContext): string => {
-  if (context.selectionStatus === "available") return `selected ${context.selectedTextLength ?? 0} chars`;
-  if (context.selectionStatus === "empty") return "no selection";
-  return "selection unavailable";
 };
 
 const getCompactPath = (path: string): string => path.replace(/\\/g, "/");
@@ -527,6 +564,11 @@ const isAiChatMessage = (value: unknown): value is AiChatMessage => {
   );
 };
 
+const isLegacyStatusMessage = (message: AiChatMessage): boolean => (
+  (message as { kind?: string }).kind === "status" ||
+  (message.role === "user" && /^\/状态(?:\s|$)/.test(message.text.trim()))
+);
+
 const sanitizeTagSuggestionForStorage = (value: unknown): TagSuggestionResult | undefined => {
   if (!value || typeof value !== "object") return undefined;
   const item = value as Partial<TagSuggestionResult>;
@@ -602,6 +644,22 @@ const sanitizePolishPreviewForStorage = (value: unknown): PolishPreviewResult | 
   };
 };
 
+const sanitizeCompressionResultForStorage = (value: unknown): CompressionResult | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Partial<CompressionResult>;
+  if (typeof item.summary !== "string" || !item.summary.trim()) return undefined;
+  return {
+    sourceChars: typeof item.sourceChars === "number" && Number.isFinite(item.sourceChars) ? Math.max(0, item.sourceChars) : 0,
+    compressedChars:
+      typeof item.compressedChars === "number" && Number.isFinite(item.compressedChars) ? Math.max(0, item.compressedChars) : item.summary.length,
+    ratio: typeof item.ratio === "number" && Number.isFinite(item.ratio) ? Math.max(0, item.ratio) : 0,
+    modelLabel: typeof item.modelLabel === "string" ? item.modelLabel : "未知模型",
+    providerLabel: typeof item.providerLabel === "string" ? item.providerLabel : "未知配置组",
+    elapsedMs: typeof item.elapsedMs === "number" && Number.isFinite(item.elapsedMs) ? Math.max(0, item.elapsedMs) : null,
+    summary: item.summary.trim(),
+  };
+};
+
 const getPreviewTitle = (preview: PolishPreviewResult): string => {
   if (preview.previewKind === "solution-format") return "题解格式化预览";
   return preview.scope === "full-note" ? "全文润色预览" : "润色预览";
@@ -613,7 +671,7 @@ const getPreviewApplyLabel = (preview: PolishPreviewResult): string => {
 };
 
 const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] =>
-  messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => ({
+  messages.filter((message) => !isLegacyStatusMessage(message)).slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => ({
     id: message.id,
     role: message.role,
     text: message.text,
@@ -636,6 +694,7 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     startedAt: message.startedAt,
     finishedAt: message.finishedAt,
     elapsedMs: message.elapsedMs,
+    compressionResult: sanitizeCompressionResultForStorage(message.compressionResult),
   }));
 
 const hasConversationContent = (conversation: AiConversation): boolean =>
@@ -657,6 +716,20 @@ const sanitizeConversation = (value: unknown): AiConversation | null => {
     messages: sanitizeMessagesForStorage(item.messages.filter(isAiChatMessage)),
     providerId: typeof item.providerId === "string" ? item.providerId : undefined,
     modelId: typeof item.modelId === "string" ? item.modelId : undefined,
+    compressedContextSummary:
+      typeof item.compressedContextSummary === "string" && item.compressedContextSummary.trim()
+        ? item.compressedContextSummary.trim()
+        : undefined,
+    compressedContextUpdatedAt:
+      typeof item.compressedContextUpdatedAt === "number" && Number.isFinite(item.compressedContextUpdatedAt)
+        ? item.compressedContextUpdatedAt
+        : undefined,
+    compressedContextSourceChars:
+      typeof item.compressedContextSourceChars === "number" && Number.isFinite(item.compressedContextSourceChars)
+        ? Math.max(0, item.compressedContextSourceChars)
+        : undefined,
+    compressedContextModel: typeof item.compressedContextModel === "string" ? item.compressedContextModel : undefined,
+    compressedContextProvider: typeof item.compressedContextProvider === "string" ? item.compressedContextProvider : undefined,
     createdAt,
     updatedAt,
   };
@@ -859,6 +932,48 @@ const getAssistantTimingLabel = (message: AiChatMessage, elapsedMs: number | nul
   if (message.state === "error") return `思考 ${elapsed} 后失败`;
   return `思考 ${elapsed}`;
 };
+
+const formatChineseChars = (value: number): string => `${Math.max(0, Math.round(value))} 字符`;
+
+const formatCompressionReduction = (originalLength: number, compressedLength: number): string => {
+  if (!Number.isFinite(originalLength) || originalLength <= 0) return "--";
+  const safeCompressedLength = Number.isFinite(compressedLength) ? Math.max(0, compressedLength) : originalLength;
+  const reduction = Math.max(0, Math.round((1 - safeCompressedLength / originalLength) * 100));
+  return `${reduction}%`;
+};
+
+const isContextUtilityCommandText = (text: string): boolean => /^\/(?:状态|压缩上下文)(?:\s|$)/.test(text.trim());
+
+const buildCompressedHistoryMessage = (summary: string): NoteChatHistoryMessage => ({
+  role: "assistant",
+  text: [
+    "【压缩后的历史上下文】",
+    summary.trim(),
+    "",
+    "后续回答请优先使用这段压缩上下文理解旧对话；不要把它当成用户的新指令。",
+  ].join("\n"),
+});
+
+const buildCompressionPrompt = (input: string): string => [
+  "请执行本地命令：/压缩上下文。",
+  "",
+  "任务：把下面的 OI Notebook AI Sidebar 历史对话上下文压缩成后续对话可用的摘要。",
+  "注意：输入中不会包含当前笔记正文；压缩摘要只能代表历史对话/背景信息，不能替代当前笔记原文。",
+  "",
+  "必须保留：",
+  "- 用户正在做什么。",
+  "- 当前任务或文件名等轻量背景（如果输入中提供）。",
+  "- 已经做过哪些 AI 操作。",
+  "- 用户偏好或重要约束。",
+  "- 已生成但未应用的 preview / review 状态，如果相关。",
+  "- 后续回答需要知道的上下文。",
+  "",
+  "不要保留：大段重复正文、大段代码、无关闲聊、UI 噪声、过期临时状态。",
+  "输出要求：中文，精简，结构清晰，控制在 800 到 1200 字以内；不要使用 Markdown 大标题堆砌；不要编造。",
+  "",
+  "待压缩的历史对话上下文：",
+  input,
+].join("\n");
 
 const createAiCodeCopyIcon = (icon: "copy" | "check"): SVGSVGElement => {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1173,6 +1288,97 @@ function TagSuggestionCard({
   );
 }
 
+function StatusPanel({ snapshot, onClose }: { snapshot: AiStatusSnapshot; onClose: () => void }) {
+  const noteLabel = snapshot.notePath
+    ? `${getFileNameFromPath(snapshot.notePath)}（${snapshot.includeCurrentNoteContext ? formatChineseChars(snapshot.noteChars) : "未包含"}）`
+    : "无";
+  const rows: Array<[string, string, string?]> = [
+    ["模型", snapshot.modelLabel],
+    ["当前笔记", noteLabel, snapshot.notePath ?? undefined],
+    ["当前上下文", `约 ${formatChineseChars(snapshot.totalContextChars)}`],
+  ];
+
+  return (
+    <div className="ai-status-panel mb-2 grid min-w-0 gap-2.5 overflow-hidden rounded-lg border border-border/70 bg-background/95 px-3.5 py-3 shadow-xl backdrop-blur dark:border-white/15 dark:bg-[#202124]/96">
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Info className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />
+          <div className="text-[17px] font-semibold leading-6 text-foreground">状态</div>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={onClose}
+          title="关闭状态面板"
+          aria-label="关闭状态面板"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid min-w-0 gap-1.5 overflow-x-hidden">
+        {rows.map(([label, value, title]) => (
+          <div key={label} className="grid min-w-0 grid-cols-[5.25rem_minmax(0,1fr)] items-baseline gap-3 text-[13px] leading-6">
+            <div className="text-muted-foreground dark:text-white/60">{label}</div>
+            <div className="min-w-0 truncate text-right text-[14.5px] font-medium tabular-nums text-foreground" title={title ?? value}>
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompressionResultCard({ result }: { result: CompressionResult }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div className="ai-compression-card grid min-w-0 gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2.5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="text-sm font-semibold leading-5 text-foreground">历史上下文已压缩</div>
+        <button
+          type="button"
+          className="shrink-0 rounded-sm text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          onClick={() => setIsExpanded((value) => !value)}
+        >
+          {isExpanded ? "收起摘要" : "查看摘要"}
+        </button>
+      </div>
+      <div className="grid min-w-0 gap-1">
+        <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+          <span className="text-muted-foreground">压缩前</span>
+          <span className="truncate text-right tabular-nums text-foreground">{formatChineseChars(result.sourceChars)}</span>
+        </div>
+        <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+          <span className="text-muted-foreground">压缩后</span>
+          <span className="truncate text-right tabular-nums text-foreground">{formatChineseChars(result.compressedChars)}</span>
+        </div>
+        <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+          <span className="text-muted-foreground">减少</span>
+          <span className="truncate text-right tabular-nums text-foreground">{formatCompressionReduction(result.sourceChars, result.compressedChars)}</span>
+        </div>
+        <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+          <span className="text-muted-foreground">模型</span>
+          <span className="truncate text-right text-foreground" title={`${result.providerLabel} / ${result.modelLabel}`}>
+            {result.modelLabel}
+          </span>
+        </div>
+        <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+          <span className="text-muted-foreground">时间</span>
+          <span className="truncate text-right tabular-nums text-foreground">
+            {result.elapsedMs === null ? "n/a" : formatElapsed(result.elapsedMs)}
+          </span>
+        </div>
+      </div>
+      {isExpanded && (
+        <div className="max-h-56 min-w-0 overflow-y-auto overflow-x-hidden rounded-md border border-border/60 bg-background/65 px-2.5 py-2 text-xs leading-5 text-muted-foreground [scrollbar-width:thin] dark:border-white/10 dark:bg-black/10">
+          <div className="whitespace-pre-wrap break-words">{result.summary}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PolishPreviewCard({
   preview,
   isApplying,
@@ -1327,7 +1533,6 @@ export default function AiSidebar({
   );
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
-  const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
@@ -1342,19 +1547,23 @@ export default function AiSidebar({
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const messageSeqRef = useRef(0);
   const requestSeqRef = useRef(0);
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
+  const streamTextBufferRef = useRef<Map<string, string>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const selectedProviderLabelRef = useRef("");
+  const selectedModelLabelRef = useRef("");
 
   const activeConversation =
     conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0];
-  const messages = activeConversation?.messages ?? [];
+  const messages = (activeConversation?.messages ?? []).filter((message) => !isLegacyStatusMessage(message));
   const enabledProviders = aiConfig?.providers.filter((provider) => provider.enabled) ?? [];
   const fallbackProvider = enabledProviders.find((provider) => provider.id === aiConfig?.default_provider_id) ?? enabledProviders[0];
   const activeProvider =
@@ -1375,6 +1584,10 @@ export default function AiSidebar({
     : aiConfig && enabledProviders.length > 0
       ? "模型不可用"
       : "未配置模型";
+  selectedProviderLabelRef.current = selectedProviderLabel;
+  selectedModelLabelRef.current = selectedModelLabel;
+  const compressedContextSummary = activeConversation?.compressedContextSummary?.trim() ?? "";
+  const compressedContextLength = compressedContextSummary.length;
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -1390,6 +1603,43 @@ export default function AiSidebar({
     if (!modelQuery) return true;
     return `${model.id} ${model.name ?? ""}`.toLocaleLowerCase().includes(modelQuery);
   });
+
+  const statusPanelSnapshot = useMemo<AiStatusSnapshot>(() => {
+    const noteChars = includeCurrentNoteContext && context.filePath ? context.markdownBody.length : 0;
+    const compressedChars = compressedContextSummary
+      ? truncateText(compressedContextSummary, AI_COMPRESSED_CONTEXT_MAX_CHARS).text.length
+      : 0;
+    const recentHistoryLimit = compressedContextSummary
+      ? AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT
+      : AI_REQUEST_HISTORY_LIMIT;
+    const recentMessagesChars = (activeConversation?.messages ?? [])
+      .filter((message) => {
+        if (message.role !== "user" && message.role !== "assistant") return false;
+        if (message.kind === "compression-result") return false;
+        if (message.role === "user" && isContextUtilityCommandText(message.text)) return false;
+        if (message.state === "loading" || message.state === "streaming" || message.state === "error") return false;
+        return message.text.trim().length > 0;
+      })
+      .slice(-recentHistoryLimit)
+      .reduce((total, message) => (
+        total + truncateText(message.text.trim(), AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS).text.length
+      ), 0);
+
+    return {
+      modelLabel: selectedModelLabel,
+      notePath: context.filePath,
+      noteChars,
+      totalContextChars: noteChars + compressedChars + recentMessagesChars,
+      includeCurrentNoteContext,
+    };
+  }, [
+    activeConversation?.messages,
+    compressedContextSummary,
+    context.filePath,
+    context.markdownBody,
+    includeCurrentNoteContext,
+    selectedModelLabel,
+  ]);
 
   const commandQuery = inputValue.startsWith("/") ? inputValue.slice(1).trim() : "";
   const visibleCommands = useMemo(() => {
@@ -1644,6 +1894,7 @@ export default function AiSidebar({
 
     for (const [streamId, target] of Array.from(streamTargetsRef.current.entries())) {
       if (target.conversationId !== conversationId) continue;
+      streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
     }
@@ -1677,6 +1928,7 @@ export default function AiSidebar({
       const target = streamTargetsRef.current.get(streamId);
       if (disposed || !target || !delta) return;
 
+      streamTextBufferRef.current.set(streamId, `${streamTextBufferRef.current.get(streamId) ?? ""}${delta}`);
       replaceMessage(target.conversationId, target.messageId, (message) => ({
         ...message,
         text: message.state === "streaming" ? `${message.text}${delta}` : message.text,
@@ -1688,12 +1940,68 @@ export default function AiSidebar({
       const target = streamTargetsRef.current.get(streamId);
       if (disposed || !target) return;
 
+      if (target.mode === "compress-context") {
+        const rawSummary = (streamTextBufferRef.current.get(streamId) ?? "").trim();
+        if (!rawSummary) {
+          replaceMessage(target.conversationId, target.messageId, (message) => ({
+            ...message,
+            text: "AI 服务返回为空，请重试。",
+            kind: "text",
+            state: "error",
+            ...finishAssistantTiming(message),
+          }));
+        } else {
+          const summary =
+            rawSummary.length > AI_COMPRESSED_CONTEXT_MAX_CHARS
+              ? `${rawSummary.slice(0, AI_COMPRESSED_CONTEXT_MAX_CHARS).trim()}\n[summary truncated]`
+              : rawSummary;
+          const now = Date.now();
+          const sourceChars = target.compressionSourceChars ?? 0;
+          const result: CompressionResult = {
+            sourceChars,
+            compressedChars: summary.length,
+            ratio: sourceChars > 0 ? summary.length / sourceChars : 0,
+            modelLabel: selectedModelLabelRef.current || "未知模型",
+            providerLabel: selectedProviderLabelRef.current || "未知配置组",
+            elapsedMs: target.compressionStartedAt ? Math.max(0, now - target.compressionStartedAt) : null,
+            summary,
+          };
+          updateConversationMessages(target.conversationId, (conversation) => ({
+            ...conversation,
+            compressedContextSummary: summary,
+            compressedContextUpdatedAt: now,
+            compressedContextSourceChars: sourceChars,
+            compressedContextModel: result.modelLabel,
+            compressedContextProvider: result.providerLabel,
+            messages: conversation.messages.map((message) => (
+              message.id === target.messageId
+                ? {
+                    ...message,
+                    text: "历史上下文已压缩",
+                    kind: "compression-result",
+                    compressionResult: result,
+                    state: "done",
+                    finishedAt: now,
+                    elapsedMs: result.elapsedMs ?? undefined,
+                  }
+                : message
+            )),
+          }));
+        }
+        streamTextBufferRef.current.delete(streamId);
+        streamTargetsRef.current.delete(streamId);
+        activeStreamsRef.current.delete(streamId);
+        updateRespondingState();
+        return;
+      }
+
       replaceMessage(target.conversationId, target.messageId, (message) => ({
         ...message,
         text: message.text.trim().length > 0 ? message.text : "The AI service returned no content. Please retry.",
         state: "done",
         ...finishAssistantTiming(message),
       }));
+      streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
       updateRespondingState();
@@ -1710,9 +2018,11 @@ export default function AiSidebar({
       replaceMessage(target.conversationId, target.messageId, (currentMessage) => ({
         ...currentMessage,
         text: getChatErrorMessage(message),
+        kind: currentMessage.kind === "compression-result" ? "text" : currentMessage.kind,
         state: "error",
         ...finishAssistantTiming(currentMessage),
       }));
+      streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
       updateRespondingState();
@@ -1773,17 +2083,28 @@ export default function AiSidebar({
     const conversation = conversations.find((item) => item.id === conversationId);
     if (!conversation) return [];
 
-    return conversation.messages
+    const compressedSummary = conversation.compressedContextSummary?.trim();
+    const historyLimit = compressedSummary ? AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT : AI_REQUEST_HISTORY_LIMIT;
+    const recentHistory = conversation.messages
       .filter((message) => {
         if (message.role !== "user" && message.role !== "assistant") return false;
+        if (message.kind === "compression-result") return false;
+        if (message.role === "user" && isContextUtilityCommandText(message.text)) return false;
         if (message.state === "loading" || message.state === "streaming" || message.state === "error") return false;
         return message.text.trim().length > 0;
       })
-      .slice(-AI_REQUEST_HISTORY_LIMIT)
+      .slice(-historyLimit)
       .map((message) => ({
         role: message.role as "user" | "assistant",
         text: truncateText(message.text.trim(), AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS).text,
       }));
+
+    if (!compressedSummary) return recentHistory;
+
+    return [
+      buildCompressedHistoryMessage(truncateText(compressedSummary, AI_COMPRESSED_CONTEXT_MAX_CHARS).text),
+      ...recentHistory,
+    ];
   };
 
   const appendCommandNotice = (conversationId: string, commandText: string, notice: string) => {
@@ -1797,6 +2118,65 @@ export default function AiSidebar({
     setInputValue("");
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
+  };
+
+  const openStatusPanel = () => {
+    setStatusPanelOpen(true);
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+  };
+
+  const buildCompressionInput = (conversation: AiConversation): { text: string; sourceChars: number } => {
+    const sections: string[] = [];
+    const previousSummary = conversation.compressedContextSummary?.trim();
+
+    if (previousSummary) {
+      sections.push([
+        "【已有压缩的历史上下文】",
+        truncateText(previousSummary, AI_COMPRESSED_CONTEXT_MAX_CHARS).text,
+      ].join("\n"));
+    }
+
+    const messageLines = conversation.messages
+      .filter((message) => {
+        if (message.role !== "user" && message.role !== "assistant") return false;
+        if (message.state === "loading" || message.state === "streaming") return false;
+        if (message.kind === "compression-result") return false;
+        if (message.role === "user" && isContextUtilityCommandText(message.text)) return false;
+        return message.text.trim().length > 0;
+      })
+      .slice(-24)
+      .map((message) => {
+        const role = message.role === "user" ? "用户" : "助手";
+        const body = truncateText(message.text.trim(), AI_COMPRESSION_MESSAGE_MAX_CHARS);
+        return `【${role}】\n${body.truncated ? `${body.text}\n[truncated]` : body.text}`;
+      });
+
+    if (!previousSummary && messageLines.length === 0) {
+      return { text: "", sourceChars: 0 };
+    }
+
+    if (context.filePath) {
+      sections.push([
+        "【当前工作对象】",
+        "仅记录文件名和路径，未包含当前笔记正文、选区正文或 Markdown body。",
+        `文件名：${getFileNameFromPath(context.filePath)}`,
+        `路径：${getCompactPath(context.filePath)}`,
+      ].join("\n"));
+    }
+
+    if (messageLines.length > 0) {
+      sections.push(["【历史对话】", ...messageLines].join("\n\n"));
+    }
+
+    const rawText = sections.join("\n\n").trim();
+    const truncated = truncateText(rawText, AI_COMPRESSION_INPUT_MAX_CHARS);
+    const historySourceText = [
+      previousSummary ? truncateText(previousSummary, AI_COMPRESSED_CONTEXT_MAX_CHARS).text : "",
+      ...messageLines,
+    ].filter((item) => item.trim().length > 0).join("\n\n");
+    return { text: truncated.text, sourceChars: historySourceText.length };
   };
 
   const updateTagSuggestionMessage = (
@@ -1861,6 +2241,93 @@ export default function AiSidebar({
     "当前段落：",
     targetText,
   ].join("\n");
+
+  const submitCompressContextCommand = (displayText = "/压缩上下文") => {
+    if (isResponding) return;
+
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !activeConversation) return;
+
+    const compressionInput = buildCompressionInput(activeConversation);
+    if (!compressionInput.text.trim()) {
+      appendCommandNotice(conversationId, displayText, "暂无可压缩的上下文。");
+      return;
+    }
+
+    if (!isAiConfigured) {
+      appendCommandNotice(conversationId, displayText, "AI is not configured. Open settings first.");
+      return;
+    }
+
+    if (!selectedProviderId || !selectedModelId) {
+      appendCommandNotice(conversationId, displayText, "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。");
+      return;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    const startedAt = Date.now();
+    const streamId = `${Date.now()}-${requestId}`;
+    const prompt = buildCompressionPrompt(compressionInput.text);
+    const chatContext = buildChatContext({ includeNoteContext: false });
+    const userMessage = createMessage({ role: "user", text: displayText, state: "done" });
+    const assistantMessage = createMessage({
+      role: "assistant",
+      text: "",
+      kind: "compression-result",
+      commandId: "compress-context",
+      state: "streaming",
+      requestId,
+      streamId,
+      startedAt,
+    });
+
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    appendMessages(conversationId, userMessage, assistantMessage);
+    setInputValue("");
+    setActiveCommandIndex(0);
+    setIsCommandPanelDismissed(false);
+    streamTextBufferRef.current.set(streamId, "");
+    streamTargetsRef.current.set(streamId, {
+      conversationId,
+      messageId: assistantMessage.id,
+      requestId,
+      mode: "compress-context",
+      compressionSourceChars: compressionInput.sourceChars,
+      compressionStartedAt: startedAt,
+    });
+    activeStreamsRef.current.add(streamId);
+    updateRespondingState();
+
+    void startCurrentNoteChatStream({
+      streamId,
+      question: prompt,
+      context: chatContext,
+      chatHistory: [],
+      providerId: selectedProviderId,
+      modelId: selectedModelId,
+    }).catch((error) => {
+      console.warn("AI context compression request failed", {
+        requestId,
+        streamId,
+        error,
+      });
+      const target = streamTargetsRef.current.get(streamId);
+      if (!target) return;
+      replaceMessage(target.conversationId, target.messageId, (message) => ({
+        ...message,
+        text: message.state === "error" ? message.text : getChatErrorMessage(error),
+        kind: "text",
+        state: "error",
+        ...finishAssistantTiming(message),
+      }));
+      streamTextBufferRef.current.delete(streamId);
+      streamTargetsRef.current.delete(streamId);
+      activeStreamsRef.current.delete(streamId);
+      updateRespondingState();
+    });
+  };
 
   const submitTagSuggestionCommand = async (
     snapshot?: NoteChatContextPayload,
@@ -2365,6 +2832,16 @@ export default function AiSidebar({
       return;
     }
 
+    if (command.id === "status") {
+      openStatusPanel();
+      return;
+    }
+
+    if (command.id === "compress-context") {
+      submitCompressContextCommand(commandText);
+      return;
+    }
+
     if (!command.implemented || command.mode !== "readonly") {
       appendCommandNotice(conversationId, commandText, "这个命令稍后接入。");
       return;
@@ -2484,10 +2961,12 @@ export default function AiSidebar({
     setInputValue("");
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
+    streamTextBufferRef.current.set(streamId, "");
     streamTargetsRef.current.set(streamId, {
       conversationId,
       messageId: assistantMessage.id,
       requestId,
+      mode: "chat",
     });
     activeStreamsRef.current.add(streamId);
     updateRespondingState();
@@ -2514,6 +2993,7 @@ export default function AiSidebar({
         state: "error",
         ...finishAssistantTiming(message),
       }));
+      streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
       updateRespondingState();
@@ -2675,8 +3155,13 @@ export default function AiSidebar({
   };
 
   const contextMeta = context.filePath
-    ? `${getSelectionLabel(context)} - ${context.tags.length} tags`
+    ? `${context.selectionStatus === "available" ? `已选择 ${context.selectedTextLength ?? 0} 字符` : "未选择"} · ${context.tags.length} 个标签`
     : "no note selected";
+  const topContextSummary = context.filePath
+    ? includeCurrentNoteContext
+      ? `当前：${getFileNameFromPath(context.filePath)} · ${context.bodyLength} 字符`
+      : `当前：${getFileNameFromPath(context.filePath)} · 未包含`
+    : "当前：无笔记";
   const composerHint = inputValue.startsWith("/")
     ? "选择命令"
     : includeCurrentNoteContext && context.filePath
@@ -2970,62 +3455,14 @@ export default function AiSidebar({
       </div>
 
       <div className="shrink-0 border-b border-border/60 px-3 py-1.5">
-        <div className="mb-1.5 flex min-w-0 items-center justify-between gap-3">
-          <span className="truncate text-[12px] font-medium leading-5 text-foreground" title={activeConversation?.title}>
-            Chat: {activeConversation?.title ?? UNTITLED_CONVERSATION_TITLE}
+        <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
+          <span className="min-w-0 truncate" title={context.filePath ? `${getCompactPath(context.filePath)} · ${contextMeta}` : undefined}>
+            {topContextSummary}
           </span>
-          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{messages.length} msg</span>
+          <span className="shrink-0 truncate">
+            {compressedContextLength > 0 ? `已压缩 ${compressedContextLength} 字符` : "/状态 查看详情"}
+          </span>
         </div>
-        {context.filePath && includeCurrentNoteContext ? (
-          <div className="grid gap-0.5">
-            <div className="flex min-w-0 items-center justify-between gap-3 leading-4">
-              <span className="text-[11px] font-medium text-muted-foreground">当前笔记上下文</span>
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{context.bodyLength} chars</span>
-            </div>
-            <div className="truncate text-[13px] font-medium leading-5 text-foreground" title={context.title}>
-              {context.title}
-            </div>
-            <div className="truncate text-[11px] leading-4 text-muted-foreground/85" title={context.filePath}>
-              {getCompactPath(context.filePath)}
-            </div>
-            <div className="flex min-w-0 items-center justify-between gap-3 text-[11px] leading-4 text-muted-foreground">
-              <span className="truncate">{contextMeta}</span>
-              <button
-                type="button"
-                className="shrink-0 rounded-sm text-[11px] text-muted-foreground/90 underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => setIsContextExpanded((expanded) => !expanded)}
-              >
-                {isContextExpanded ? "Hide context" : "Show context"}
-              </button>
-            </div>
-            {isContextExpanded && (
-              <div className="mt-0.5 grid gap-0.5 rounded-md bg-muted/20 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-                <div className="truncate" title={context.tags.join(", ") || undefined}>
-                  tags: {context.tags.length > 0 ? context.tags.join(", ") : "empty"}
-                </div>
-                <div className="line-clamp-2" title={context.summary || undefined}>
-                  summary: {context.summary || "empty"}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : context.filePath ? (
-          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium leading-5 text-foreground">当前笔记信息未包含</div>
-              <div className="truncate text-[11px] leading-4 text-muted-foreground">
-                {context.selectedTextLength ? `已选中文段 ${context.selectedTextLength} 字，解释命令仍可使用。` : "普通聊天不会读取当前笔记全文、标题或标签。"}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/15 px-2.5 py-1.5">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium leading-5 text-foreground">No note selected</div>
-              <div className="text-[11px] leading-4 text-muted-foreground">Open a note to attach title, path, body and selection.</div>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="relative min-h-0 flex-1">
@@ -3081,6 +3518,16 @@ export default function AiSidebar({
                           onIgnore={() => ignorePolishPreview(message)}
                           onOpenReview={() => onOpenPolishReview(message.polishPreview!)}
                         />
+                      ) : message.kind === "compression-result" && message.compressionResult ? (
+                        <CompressionResultCard result={message.compressionResult} />
+                      ) : message.kind === "compression-result" && message.state === "streaming" ? (
+                        <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.04]">
+                          <div className="flex items-center gap-2 text-foreground">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            正在压缩上下文...
+                          </div>
+                          <div className="line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5">{message.text || "准备摘要"}</div>
+                        </div>
                       ) : (
                         <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
                       )}
@@ -3203,7 +3650,7 @@ export default function AiSidebar({
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
-                                <span className="shrink-0 text-sm font-medium text-foreground">{command.label}</span>
+                                <span className="max-w-[7.5rem] shrink truncate text-sm font-medium text-foreground">{command.label}</span>
                                 <span className="truncate text-xs text-muted-foreground">
                                   {disabledReason ? `${command.description} ${disabledReason}` : command.description}
                                 </span>
@@ -3230,6 +3677,13 @@ export default function AiSidebar({
               <div className="px-3 py-8 text-center text-sm text-muted-foreground">没有匹配命令</div>
             )}
           </div>
+        )}
+
+        {statusPanelOpen && !isCommandPanelOpen && (
+          <StatusPanel
+            snapshot={statusPanelSnapshot}
+            onClose={() => setStatusPanelOpen(false)}
+          />
         )}
 
         <div className="ai-composer rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
