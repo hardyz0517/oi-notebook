@@ -691,6 +691,35 @@ const sanitizeCompressionResultForStorage = (value: unknown): CompressionResult 
   };
 };
 
+const sanitizeSearchDecisionForStorage = (value: unknown): SearchDecision | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Partial<SearchDecision>;
+  const intents = new Set<SearchDecision["intent"]>([
+    "no_search",
+    "oi_problem",
+    "oi_discussion",
+    "algorithm_reference",
+    "debug_issue",
+    "general_web",
+  ]);
+  if (!item.intent || !intents.has(item.intent)) return undefined;
+  return {
+    shouldSearch: item.shouldSearch === true,
+    intent: item.intent,
+    problemId: typeof item.problemId === "string" && item.problemId.trim() ? item.problemId.trim() : undefined,
+    algorithmKeywords: Array.isArray(item.algorithmKeywords)
+      ? item.algorithmKeywords.filter((keyword): keyword is string => typeof keyword === "string" && keyword.trim().length > 0).slice(0, 8)
+      : undefined,
+    errorKeywords: Array.isArray(item.errorKeywords)
+      ? item.errorKeywords.filter((keyword): keyword is string => typeof keyword === "string" && keyword.trim().length > 0).slice(0, 8)
+      : undefined,
+    queries: Array.isArray(item.queries)
+      ? item.queries.filter((query): query is string => typeof query === "string" && query.trim().length > 0).slice(0, 8)
+      : [],
+    reason: typeof item.reason === "string" && item.reason.trim() ? item.reason.trim() : undefined,
+  };
+};
+
 const getPreviewTitle = (preview: PolishPreviewResult): string => {
   if (preview.previewKind === "solution-format") return "题解格式化预览";
   return preview.scope === "full-note" ? "全文润色预览" : "润色预览";
@@ -726,6 +755,7 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     finishedAt: message.finishedAt,
     elapsedMs: message.elapsedMs,
     compressionResult: sanitizeCompressionResultForStorage(message.compressionResult),
+    searchDecision: sanitizeSearchDecisionForStorage(message.searchDecision),
   }));
 
 const hasConversationContent = (conversation: AiConversation): boolean =>
@@ -1243,6 +1273,95 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
       )}
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
+  );
+}
+
+const SEARCH_PLAN_QUERY_LIMIT = 6;
+
+const getSearchIntentLabel = (intent: SearchDecision["intent"]): string => {
+  switch (intent) {
+    case "oi_problem":
+      return "题目 / 题解相关";
+    case "oi_discussion":
+      return "讨论 / 常见坑";
+    case "algorithm_reference":
+      return "算法资料";
+    case "debug_issue":
+      return "调试 / 错误排查";
+    case "general_web":
+      return "普通联网搜索";
+    case "no_search":
+    default:
+      return "无需联网";
+  }
+};
+
+const getSearchPlanChips = (decision: SearchDecision): string[] => [
+  decision.problemId ? `题号：${decision.problemId}` : "",
+  ...(decision.algorithmKeywords ?? []).map((keyword) => `算法：${keyword}`),
+  ...(decision.errorKeywords ?? []).map((keyword) => `错误：${keyword}`),
+].filter(Boolean);
+
+function WebSearchPlanCard({ decision }: { decision: SearchDecision }) {
+  if (!decision.shouldSearch) return null;
+
+  const chips = getSearchPlanChips(decision);
+  const visibleQueries = decision.queries.slice(0, SEARCH_PLAN_QUERY_LIMIT);
+  const hiddenQueryCount = Math.max(0, decision.queries.length - visibleQueries.length);
+
+  return (
+    <div className="mb-2 grid gap-2 rounded-xl border border-sky-200/70 bg-sky-50/65 px-3 py-2.5 text-xs leading-5 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-sky-400/20 dark:bg-sky-400/[0.08] dark:text-slate-200">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="font-medium text-foreground">联网搜索计划</span>
+        <span className="rounded-full border border-sky-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-sky-700 dark:border-sky-300/20 dark:bg-white/[0.05] dark:text-sky-200">
+          尚未执行真实搜索
+        </span>
+      </div>
+      <div className="grid gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="shrink-0 text-muted-foreground">意图</span>
+          <span className="rounded-full bg-background/80 px-2 py-0.5 text-[11px] text-foreground dark:bg-white/[0.05]">
+            {getSearchIntentLabel(decision.intent)}
+          </span>
+        </div>
+        {chips.length > 0 && (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="shrink-0 text-muted-foreground">识别信息</span>
+            {chips.map((chip) => (
+              <span
+                key={chip}
+                className="max-w-full rounded-full bg-background/80 px-2 py-0.5 text-[11px] text-foreground dark:bg-white/[0.05]"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+        )}
+        {visibleQueries.length > 0 && (
+          <div className="grid min-w-0 gap-1">
+            <span className="text-muted-foreground">计划搜索</span>
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {visibleQueries.map((query) => (
+                <span
+                  key={query}
+                  className="min-w-0 max-w-full rounded-md border border-border/60 bg-background/80 px-2 py-1 text-[11px] leading-5 text-foreground break-words dark:border-white/10 dark:bg-white/[0.05]"
+                >
+                  {query}
+                </span>
+              ))}
+              {hiddenQueryCount > 0 && (
+                <span className="rounded-md bg-background/60 px-2 py-1 text-[11px] text-muted-foreground dark:bg-white/[0.04]">
+                  还有 {hiddenQueryCount} 条
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="text-[11px] leading-5 text-muted-foreground">
+        当前版本仅生成搜索计划，尚未联网获取来源。
+      </div>
+    </div>
   );
 }
 
@@ -3882,6 +4001,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       "min-w-0",
                       message.state === "error" && "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2",
                     )}>
+                      {message.searchDecision?.shouldSearch && (
+                        <WebSearchPlanCard decision={message.searchDecision} />
+                      )}
                       {message.kind === "tag-suggestion" && message.tagSuggestion ? (
                         <TagSuggestionCard
                           suggestion={message.tagSuggestion}

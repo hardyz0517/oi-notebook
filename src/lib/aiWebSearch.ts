@@ -36,9 +36,9 @@ const PROBLEM_PATTERNS = [
   /\b(?:ABC|ARC|AGC)\d{3}[A-H]?\b/gi,
 ];
 
-const OI_DISCUSSION_KEYWORDS = ["讨论", "警示后人", "hack", "数据"];
+const OI_DISCUSSION_KEYWORDS = ["讨论", "警示后人", "坑", "常见坑", "hack", "数据"];
 const OI_SOLUTION_KEYWORDS = ["题解", "洛谷", "Luogu", "Codeforces", "AtCoder"];
-const DEBUG_KEYWORDS = ["WA", "TLE", "RE", "MLE", "CE", "复杂度", "错误", "调试"];
+const DEBUG_KEYWORDS = ["WA", "TLE", "RE", "MLE", "CE", "超时", "爆内存", "复杂度", "错误", "调试"];
 const ALGORITHM_KEYWORDS = [
   "点分治",
   "点分树",
@@ -68,6 +68,48 @@ const collectKeywords = (text: string, keywords: string[]): string[] =>
 
 const compactQuery = (query: string): string => query.replace(/\s+/g, " ").trim();
 
+const trimQuery = (query: string): string => compactQuery(query).slice(0, 80);
+
+const getProblemTitleCandidate = (
+  input: string,
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "summary">,
+): string => {
+  const candidates = [context?.noteTitle, input, context?.summary].filter((item): item is string => !!item?.trim());
+  for (const candidate of candidates) {
+    const cleaned = candidate
+      .replace(/\bP\d{3,6}\b/gi, " ")
+      .replace(/\bCF\d{3,5}[A-Z]\d?\b/gi, " ")
+      .replace(/\b(?:ABC|ARC|AGC)\d{3}[A-H]?\b/gi, " ")
+      .replace(/[()[\]【】#*_`"'“”‘’:：|/\\-]+/g, " ")
+      .replace(/\b(?:题解|洛谷|Luogu|Codeforces|AtCoder|WA|TLE|RE|MLE|CE)\b/gi, " ");
+    const words = compactQuery(cleaned);
+    if (words.length >= 3 && words.length <= 40) return words;
+  }
+  return "";
+};
+
+const buildProblemQueries = (
+  problemId: string,
+  title: string,
+  discussionKeywords: string[],
+  errorKeywords: string[],
+): string[] => unique([
+  trimQuery(`${problemId} 题解`),
+  trimQuery(`${problemId} 洛谷 讨论`),
+  trimQuery(`${problemId} 警示后人`),
+  errorKeywords.length > 0 ? trimQuery(`${problemId} ${errorKeywords.join(" ")} 常见坑`) : "",
+  title ? trimQuery(`${problemId} ${title} 题解`) : "",
+  title && discussionKeywords.length > 0 ? trimQuery(`${problemId} ${title} 讨论`) : "",
+]);
+
+const buildAlgorithmQueries = (algorithmKeywords: string[], errorKeywords: string[]): string[] =>
+  unique(algorithmKeywords.flatMap((keyword) => [
+    trimQuery(`OI Wiki ${keyword}`),
+    trimQuery(`${keyword} 题解`),
+    trimQuery(`${keyword} 常见错误`),
+    errorKeywords.length > 0 ? trimQuery(`${keyword} ${errorKeywords.join(" ")}`) : "",
+  ]));
+
 export function buildSearchDecision(
   input: string,
   context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
@@ -87,21 +129,21 @@ export function buildSearchDecision(
   const algorithmKeywords = collectKeywords(haystack, ALGORITHM_KEYWORDS);
   const errorKeywords = collectKeywords(haystack, DEBUG_KEYWORDS);
   const generalWebKeywords = collectKeywords(haystack, GENERAL_WEB_KEYWORDS);
+  const problemTitle = getProblemTitleCandidate(question, context);
 
   if (problemIds.length > 0) {
     const problemId = problemIds[0];
-    const intent: ResearchIntent = discussionKeywords.length > 0 ? "oi_discussion" : "oi_problem";
+    const intent: ResearchIntent =
+      errorKeywords.length > 0 ? "debug_issue" :
+      discussionKeywords.length > 0 ? "oi_discussion" :
+      "oi_problem";
     return {
       shouldSearch: true,
       intent,
       problemId,
       algorithmKeywords: algorithmKeywords.length > 0 ? algorithmKeywords : undefined,
       errorKeywords: errorKeywords.length > 0 ? errorKeywords : undefined,
-      queries: unique([
-        compactQuery(`${problemId} ${solutionKeywords.includes("题解") ? "题解" : ""}`),
-        discussionKeywords.length > 0 ? compactQuery(`${problemId} 讨论 警示后人`) : "",
-        errorKeywords.length > 0 ? compactQuery(`${problemId} ${errorKeywords.join(" ")}`) : "",
-      ]),
+      queries: buildProblemQueries(problemId, problemTitle, discussionKeywords, errorKeywords),
       reason: "Detected an OI problem id in the question or current lightweight context.",
     };
   }
@@ -112,10 +154,7 @@ export function buildSearchDecision(
       intent: "algorithm_reference",
       algorithmKeywords,
       errorKeywords: errorKeywords.length > 0 ? errorKeywords : undefined,
-      queries: unique([
-        compactQuery(`${algorithmKeywords.join(" ")} OI`),
-        errorKeywords.length > 0 ? compactQuery(`${algorithmKeywords.join(" ")} ${errorKeywords.join(" ")}`) : "",
-      ]),
+      queries: buildAlgorithmQueries(algorithmKeywords, errorKeywords),
       reason: "Detected algorithm keywords that may benefit from reference material.",
     };
   }
