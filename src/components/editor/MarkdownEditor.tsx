@@ -1,7 +1,7 @@
 ﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
-import { EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { foldGutter } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -375,6 +375,48 @@ const markdownShortcutBindings: MarkdownShortcutBinding[] = [
   { key: "Mod-Shift-8", actionId: "ordered-list" },
   { key: "Mod-Shift-9", actionId: "task-list" },
 ];
+
+const tabInsertText = "    ";
+
+const insertTabSpacesAtSelection = (view: EditorView): boolean => {
+  view.dispatch({
+    ...view.state.changeByRange((range) => ({
+      changes: { from: range.from, to: range.to, insert: tabInsertText },
+      range: EditorSelection.cursor(range.from + tabInsertText.length),
+    })),
+    scrollIntoView: true,
+  });
+  view.focus();
+  return true;
+};
+
+const deleteTabSpacesBeforeCursor = (view: EditorView): boolean => {
+  let deletedAny = false;
+  const transaction = view.state.changeByRange((range) => {
+    if (!range.empty) return { range };
+
+    const line = view.state.doc.lineAt(range.from);
+    const beforeCursor = view.state.sliceDoc(line.from, range.from);
+    const spaces = beforeCursor.match(/ {1,4}$/)?.[0] ?? "";
+    if (!spaces) return { range };
+
+    deletedAny = true;
+    const from = range.from - spaces.length;
+    return {
+      changes: { from, to: range.from, insert: "" },
+      range: EditorSelection.cursor(from),
+    };
+  });
+
+  if (deletedAny) {
+    view.dispatch({
+      ...transaction,
+      scrollIntoView: true,
+    });
+  }
+  view.focus();
+  return true;
+};
 
 const markdownToolbarGroups: MarkdownToolbarGroup[] = [
   {
@@ -770,6 +812,10 @@ export default function MarkdownEditor({
           EditorView.lineWrapping,
 
           history(),
+          Prec.highest(keymap.of([
+            { key: "Tab", run: insertTabSpacesAtSelection },
+            { key: "Shift-Tab", run: deleteTabSpacesBeforeCursor },
+          ])),
           keymap.of([
             ...markdownShortcutBindings.map(({ key, actionId }) => ({
               key,
