@@ -937,8 +937,24 @@ a {
 .prose-content td {
   border: 1px solid var(--line);
   padding: 10px 12px;
-  text-align: left;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.note-page .prose-content table th,
+.note-page .prose-content table td {
+  text-align: center !important;
+  vertical-align: middle;
+}
+
+.note-page .prose-content table th > *,
+.note-page .prose-content table td > * {
+  text-align: inherit;
+}
+
+.note-page .prose-content table th .katex-display,
+.note-page .prose-content table td .katex-display {
+  text-align: center;
 }
 
 .prose-content td[rowspan],
@@ -1117,10 +1133,12 @@ a {
 }
 
 .code-block pre {
+  position: relative;
   margin: 0;
   max-width: 100%;
   overflow-x: auto;
   padding: 32px 18px 17px;
+  line-height: 1.6;
 }
 
 .code-block-highlight {
@@ -1128,11 +1146,28 @@ a {
 }
 
 .code-block-highlight pre.shiki {
+  position: relative;
   margin: 0;
   max-width: 100%;
   overflow-x: auto;
   padding: 32px 18px 17px;
   background: transparent !important;
+  line-height: 1.6;
+}
+
+.code-block-highlight pre.oi-code-with-lines {
+  padding-left: 10px;
+}
+
+.code-block pre.oi-code-with-lines::before {
+  content: "";
+  position: absolute;
+  top: 32px;
+  bottom: 17px;
+  left: calc(10px + 1.65rem);
+  width: 1px;
+  background: rgb(148 163 184 / 24%);
+  pointer-events: none;
 }
 
 .code-block code {
@@ -1144,12 +1179,28 @@ a {
   font-family:
     "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
-  line-height: 1.62;
+  line-height: 1.6;
 }
 
 .code-block .line {
   display: block;
-  min-height: 1.62em;
+  min-height: 1.6em;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.6;
+}
+
+.code-block .line span {
+  line-height: inherit;
+}
+
+.code-block .line.line-empty,
+.code-block .line[data-empty-line="true"],
+.code-block .line:empty,
+.code-block .line:has(> span:empty),
+.code-block .line:has(> span:only-child:empty) {
+  min-height: 1.6em;
+  line-height: 1.6;
 }
 
 .code-block .oi-code-with-lines {
@@ -1158,7 +1209,7 @@ a {
 
 .code-block .oi-code-with-lines .line {
   position: relative;
-  padding-left: 3.8rem;
+  padding-left: 2.2rem;
   counter-increment: oi-code-line;
 }
 
@@ -1166,7 +1217,7 @@ a {
   content: counter(oi-code-line);
   position: absolute;
   left: 0;
-  width: 2.4rem;
+  width: 1.45rem;
   color: #9aa0a6;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1181,11 +1232,46 @@ a {
 }
 
 .code-block .oi-code-with-lines .oi-code-line-highlight {
-  padding: 0 18px 0 calc(18px + 3.8rem);
+  margin-left: -10px;
+  padding: 0 18px 0 calc(10px + 2.2rem);
 }
 
 .code-block .oi-code-with-lines .oi-code-line-highlight::before {
-  left: 18px;
+  left: 10px;
+}
+
+.note-page .prose-content .code-block-highlight code {
+  white-space: normal;
+}
+
+.note-page .prose-content .code-block-highlight .line {
+  white-space: pre;
+}
+
+.note-page .prose-content .code-block .line.line-empty,
+.note-page .prose-content .code-block .line[data-empty-line="true"],
+.note-page .prose-content .code-block .line:empty {
+  display: block;
+  height: auto !important;
+  min-height: 1.6em !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  line-height: 1.6 !important;
+}
+
+.note-page .prose-content .code-block pre.oi-code-with-lines .line.line-empty,
+.note-page .prose-content .code-block pre.oi-code-with-lines .line[data-empty-line="true"],
+.note-page .prose-content .code-block pre.oi-code-with-lines .line:empty {
+  height: auto !important;
+  min-height: 1.6em !important;
+  line-height: 1.6 !important;
+}
+
+.note-page .prose-content .code-block pre.oi-code-with-lines .line::before {
+  height: 100%;
+  line-height: inherit;
 }
 
 .prose-content img {

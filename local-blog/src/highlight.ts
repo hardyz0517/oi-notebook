@@ -5,6 +5,10 @@ type CodeMeta = {
   highlightLines?: Set<number>;
   showLineNumbers?: boolean;
 };
+type HastTextNode = {
+  value?: unknown;
+  children?: HastTextNode[];
+};
 
 const supportedLanguages = new Map<string, HighlightLanguage | null>([
   ["c", "c"],
@@ -43,11 +47,31 @@ const luoguCodeLineTransformer: ShikiTransformer = {
   line(node, lineNumber) {
     const meta = this.options.meta as CodeMeta | undefined;
 
+    if (isEmptyCodeLine(node as HastTextNode)) {
+      this.addClassToHast(node, "line-empty");
+      const lineNode = node as { properties?: Record<string, unknown> };
+      lineNode.properties = {
+        ...lineNode.properties,
+        "data-empty-line": "true",
+      };
+    }
+
     if (meta?.highlightLines?.has(lineNumber)) {
       this.addClassToHast(node, "oi-code-line-highlight");
     }
   },
 };
+
+function isEmptyCodeLine(node: HastTextNode) {
+  return collectHastText(node).replace(/\u00a0/g, " ").trim().length === 0;
+}
+
+function collectHastText(node: HastTextNode): string {
+  const ownText = typeof node.value === "string" ? node.value : "";
+  const childText = node.children?.map(collectHastText).join("") ?? "";
+
+  return `${ownText}${childText}`;
+}
 
 const oiLightTheme = {
   name: "oi-light",

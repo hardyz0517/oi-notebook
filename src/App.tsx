@@ -303,7 +303,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: stri
   { id: "blog", label: "博客", blurb: "本地预览" },
   { id: "git", label: "Git", blurb: "同步入口" },
   { id: "data", label: "数据与存储", blurb: "目录与说明" },
-  { id: "about", label: "关于", blurb: "版本与能力" },
+  { id: "about", label: "关于", blurb: "版本与说明" },
 ];
 const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string; description: string }> = [
   { id: "api", label: "模型与 API", description: "配置 OpenAI-compatible API、模型和默认项" },
@@ -5556,7 +5556,7 @@ export default function App() {
         <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-6 py-4 text-left">
           <DialogTitle className="text-base">设置中心</DialogTitle>
           <div className="text-sm text-muted-foreground">
-            管理 OI Notebook 的常用设置、工具入口和桌面工作流。当前仍是 preview 阶段，这一版先收纳现有能力。
+            管理 OI Notebook 的常用设置、工具入口和桌面工作流。
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
@@ -5601,11 +5601,11 @@ export default function App() {
                       <div className="grid gap-1">
                         <div className="text-base font-semibold text-foreground">常规</div>
                         <div className="text-sm leading-6 text-muted-foreground">
-                          这里集中展示 OI Notebook 当前的常用设置与工具。第一轮先做信息架构和入口收纳，不引入新的持久化设置。
+                          集中查看常用设置、工具入口和桌面工作流，方便从一个位置进入常用操作。
                         </div>
                       </div>
                       <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                        Preview 提示：主题、字体、缩放等真实开关会后续补上，这一刀先把设置入口整理成正式的设置中心骨架。
+                        外观、编辑器、AI、洛谷、博客、Git 和数据目录设置都可以在这里统一管理。
                       </div>
                     </section>
                     <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
@@ -6318,7 +6318,7 @@ export default function App() {
                     <div className="grid gap-1">
                       <div className="text-base font-semibold text-foreground">博客</div>
                       <div className="text-sm leading-6 text-muted-foreground">
-                        管理本地博客预览相关入口。这里只收纳现有能力，不改 Local Blog 服务逻辑。
+                        设置本地博客预览入口，管理阅读视图和服务状态。
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -6376,16 +6376,13 @@ export default function App() {
                       <div className="text-sm leading-6 text-muted-foreground">
                         OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
                       </div>
-                      <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                        当前不显示固定版本号，避免把尚未稳定的阶段信息伪装成正式发布版本。
-                      </div>
                     </section>
 
                     <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
                       <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">Markdown 渲染能力</div>
+                        <div className="text-base font-semibold text-foreground">Markdown 支持</div>
                         <div className="text-sm leading-6 text-muted-foreground">
-                          当前编辑预览支持以下渲染能力；这里仅作能力说明，不改变 Markdown 渲染管线。
+                          Markdown 预览支持常用题解写作格式和本地博客展示效果。
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">

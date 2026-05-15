@@ -409,9 +409,26 @@ html[data-theme="light"] .cm-editor .cm-scroller:focus-within::-webkit-scrollbar
 }
 
 [data-markdown-preview-content] .oi-code-block-shell > pre {
+  position: relative;
   margin: 0;
   padding: 0.95rem 3.75rem 1rem 1.1rem;
   scrollbar-gutter: stable both-edges;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > pre.oi-code-with-lines {
+  padding-left: 0.45rem;
+  scrollbar-gutter: stable;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > pre.oi-code-with-lines::before {
+  content: "";
+  position: absolute;
+  top: 0.95rem;
+  bottom: 1rem;
+  left: 2.15rem;
+  width: 1px;
+  background: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
+  pointer-events: none;
 }
 
 html[data-theme="dark"] body {
@@ -698,8 +715,8 @@ html[data-theme="light"] .app-top-toolbar button:hover {
 
 .app-brand-mark img {
   display: block;
-  height: calc(28px * var(--app-zoom, 1));
-  width: calc(28px * var(--app-zoom, 1));
+  height: calc(26px * var(--app-zoom, 1));
+  width: calc(26px * var(--app-zoom, 1));
   object-fit: contain;
 }
 
@@ -807,18 +824,29 @@ html[data-theme="light"] .app-column-resizer-editor + .app-preview-pane {
 
 .open-tab-icon {
   stroke-width: 2.05;
+  opacity: 0.72;
 }
 
 .open-tab-status-dot {
+  height: 0.3125rem;
+  width: 0.3125rem;
+  opacity: 0.82;
   box-shadow: 0 0 0 2px var(--surface-toolbar);
 }
 
 .open-tab[data-active="true"] .open-tab-status-dot {
+  opacity: 0.9;
   box-shadow: 0 0 0 2px var(--surface-editor);
 }
 
 .open-tab-close {
   border-radius: 5px;
+  color: color-mix(in oklch, var(--text-muted) 86%, transparent);
+}
+
+.open-tab-close svg {
+  height: 0.7rem;
+  width: 0.7rem;
 }
 
 html[data-theme="light"] .open-tabs-bar {
@@ -857,7 +885,12 @@ html[data-theme="light"] .open-tab[data-active="false"]:hover {
 }
 
 html[data-theme="light"] .open-tab[data-kind="review"] {
+  background: color-mix(in oklch, var(--surface-toolbar) 78%, #eef3f8);
   border-top-color: color-mix(in oklch, var(--foreground) 22%, var(--separator-strong));
+}
+
+html[data-theme="light"] .open-tab[data-kind="review"][data-active="true"] {
+  background: color-mix(in oklch, var(--surface-editor) 88%, #eef3f8);
 }
 
 html[data-theme="light"] .open-tab-close:hover {
@@ -885,11 +918,11 @@ html[data-theme="light"] .app-activity-bar {
 }
 
 .app-activity-bar button svg {
-  height: calc(24px * var(--app-zoom, 1)) !important;
-  width: calc(24px * var(--app-zoom, 1)) !important;
-  min-height: calc(24px * var(--app-zoom, 1));
-  min-width: calc(24px * var(--app-zoom, 1));
-  stroke-width: 2.18;
+  height: calc(22px * var(--app-zoom, 1)) !important;
+  width: calc(22px * var(--app-zoom, 1)) !important;
+  min-height: calc(22px * var(--app-zoom, 1));
+  min-width: calc(22px * var(--app-zoom, 1));
+  stroke-width: 2.12;
 }
 
 .app-activity-button {
@@ -1028,6 +1061,8 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-group-chevron {
+  width: calc(13px * var(--app-zoom, 1));
+  min-width: calc(13px * var(--app-zoom, 1));
   color: color-mix(in oklch, var(--muted-foreground) 78%, transparent);
 }
 
@@ -1039,6 +1074,7 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 .app-file-group-count {
   min-width: 1.15rem;
   border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
   background: color-mix(in oklch, var(--surface-card-soft) 82%, transparent);
   padding: 0 0.35rem;
   text-align: center;
@@ -1344,6 +1380,8 @@ html[data-theme="light"] .editor-view-mode-button-active {
 }
 
 .markdown-toolbar-button svg {
+  height: calc(15px * var(--chrome-zoom, 1));
+  width: calc(15px * var(--chrome-zoom, 1));
   stroke-width: 2.05;
 }
 
@@ -1370,6 +1408,8 @@ html[data-theme="light"] .editor-view-mode-button-active {
 }
 
 .editor-view-mode-button svg {
+  height: calc(15px * var(--chrome-zoom, 1));
+  width: calc(15px * var(--chrome-zoom, 1));
   stroke-width: 2.05;
 }
 
@@ -1403,9 +1443,9 @@ html[data-theme="light"] .app-status-bar {
 }
 
 .app-status-item + .app-status-item {
-  margin-left: 0.55rem;
-  padding-left: 0.55rem;
-  border-left: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+  margin-left: 0.42rem;
+  padding-left: 0.42rem;
+  border-left: 1px solid color-mix(in oklch, var(--border) 46%, transparent);
 }
 
 .app-status-button {
@@ -1627,8 +1667,8 @@ html[data-theme="light"] .cn-toast {
 [data-markdown-preview-content] pre.oi-code-with-lines .line::before {
   content: counter(oi-code-line);
   display: inline-block;
-  width: 2.75rem;
-  margin-right: 1rem;
+  width: 1.55rem;
+  margin-right: 0.62rem;
   color: color-mix(in oklch, var(--muted-foreground) 76%, transparent);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1731,8 +1771,33 @@ html[data-theme="light"] .cn-toast {
   scrollbar-gutter: stable;
 }
 
+[data-ai-markdown-message] pre.shiki::-webkit-scrollbar,
+[data-ai-markdown-message] .ai-code-block-shell > pre::-webkit-scrollbar,
+.codex-diff-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
 [data-ai-markdown-message] pre[data-ai-code-block="true"] {
   padding-right: 4.5rem;
+}
+
+.ai-command-panel,
+.ai-command-list,
+.ai-command-item {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ai-command-panel,
+.ai-command-list {
+  overflow-x: hidden;
+}
+
+.ai-command-item > span,
+.ai-command-item span {
+  max-width: 100%;
+  min-width: 0;
 }
 
 [data-ai-markdown-message] .ai-code-copy-button {
@@ -1856,7 +1921,7 @@ html[data-theme="light"] aside[class*="border-l"] .ai-chat-user-bubble {
 
 html[data-theme="light"] aside[class*="border-l"] .ai-composer {
   background: #f4f4f4 !important;
-  border-color: color-mix(in oklch, var(--input) 84%, transparent);
+  border-color: color-mix(in oklch, var(--input) 76%, transparent);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 72%),
     0 1px 2px rgb(35 35 32 / 4%);
@@ -1868,6 +1933,23 @@ html[data-theme="light"] aside[class*="border-l"] .ai-composer textarea {
   box-shadow:
     inset 0 1px 1px rgb(0 0 0 / 3%),
     inset 0 -1px 0 rgb(255 255 255 / 72%);
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-composer:focus-within {
+  border-color: color-mix(in oklch, var(--foreground) 22%, var(--input));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 76%),
+    0 0 0 2px color-mix(in oklch, var(--focus-ring-soft) 78%, transparent),
+    0 2px 8px rgb(35 35 32 / 7%);
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-composer button {
+  border-color: color-mix(in oklch, var(--border) 76%, transparent);
+  background-color: color-mix(in oklch, #f4f4f4 80%, var(--surface-paper));
+}
+
+html[data-theme="light"] aside[class*="border-l"] .ai-composer button:hover:not(:disabled) {
+  background-color: color-mix(in oklch, var(--hover-bg) 84%, #ffffff);
 }
 
 html[data-theme="light"] .codex-diff-preview {
@@ -1900,16 +1982,17 @@ html[data-theme="light"] .codex-diff-row[data-type="context"] {
 }
 
 html[data-theme="light"] .codex-diff-row[data-type="delete"] {
-  background: #f8eeee;
+  background: color-mix(in oklch, #f8eeee 76%, var(--surface-paper));
 }
 
 html[data-theme="light"] .codex-diff-row[data-type="add"] {
-  background: #eef6ee;
+  background: color-mix(in oklch, #eef6ee 76%, var(--surface-paper));
 }
 
 html[data-theme="light"] .codex-diff-line-number {
-  border-color: color-mix(in oklch, var(--border-subtle) 90%, transparent);
-  color: color-mix(in oklch, var(--text-muted) 78%, transparent);
+  background: color-mix(in oklch, var(--surface-card-soft) 42%, transparent);
+  border-color: color-mix(in oklch, var(--border-subtle) 82%, transparent);
+  color: color-mix(in oklch, var(--text-muted) 70%, transparent);
 }
 
 html[data-theme="light"] .codex-diff-marker {
