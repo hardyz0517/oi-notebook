@@ -4,7 +4,7 @@ tags: []
 difficulty: 牛逼
 source: ''
 created: 2026-05-08T15:01:44.529837800+08:00
-updated: 2026-05-10T16:17:35.677447700+08:00
+updated: 2026-05-15T17:07:17.428067400+08:00
 summary: ''
 draft: false
 ---
@@ -17,11 +17,11 @@ if (x >= 0 && y <= 10 || z >> 2) return 0;
 ## 1. 无语言代码块：应默认按 C++ 高亮
 
 下面这个**代码**块没有写语言*名，但应*该按 C++ 高亮。
-
+    
 ```
 #include <bits/stdc++.h>
 using namespace std;
-
+    
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
