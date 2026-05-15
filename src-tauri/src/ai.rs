@@ -138,6 +138,12 @@ pub struct NoteChatStreamInput {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
+    #[serde(default)]
+    pub web_search_mode: Option<String>,
+    #[serde(default)]
+    pub web_search_enabled: bool,
+    #[serde(default)]
+    pub search_decision: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize)]

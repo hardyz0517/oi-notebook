@@ -19,6 +19,7 @@ import {
   PenLine,
   Plus,
   RotateCcw,
+  Search,
   Settings,
   Sparkles,
   Tag,
@@ -28,6 +29,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { renderMarkdownForTheme } from "@/lib/markdown";
+import { buildSearchDecision, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -65,6 +67,8 @@ type AiChatMessage = {
   retrySelectionRange?: TextRange | null;
   retrySelectionStartLine?: number | null;
   retryInstruction?: string;
+  sources?: WebSource[];
+  searchDecision?: SearchDecision;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
@@ -250,6 +254,7 @@ const NOTE_CHAT_MAX_SELECTION_CHARS = 4000;
 const NOTE_CHAT_MAX_PARAGRAPH_CHARS = 4000;
 const AI_CONVERSATIONS_STORAGE_KEY = "oi-notebook.aiConversations";
 const AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY = "oi-notebook.ai.includeCurrentNoteContext";
+const AI_WEB_SEARCH_MODE_STORAGE_KEY = "oi-notebook.ai.webSearchMode";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const AI_REQUEST_HISTORY_LIMIT = 8;
@@ -279,6 +284,14 @@ const readIncludeCurrentNoteContextPreference = (): boolean => {
     return window.localStorage.getItem(AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY) !== "false";
   } catch {
     return true;
+  }
+};
+
+const readWebSearchModePreference = (): WebSearchMode => {
+  try {
+    return window.localStorage.getItem(AI_WEB_SEARCH_MODE_STORAGE_KEY) === "auto" ? "auto" : "off";
+  } catch {
+    return "off";
   }
 };
 
@@ -1588,6 +1601,7 @@ export default function AiSidebar({
   const [includeCurrentNoteContext, setIncludeCurrentNoteContext] = useState(
     readIncludeCurrentNoteContextPreference,
   );
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(readWebSearchModePreference);
   const [isResponding, setIsResponding] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   const [applyingTagMessageId, setApplyingTagMessageId] = useState<string | null>(null);
@@ -1641,6 +1655,7 @@ export default function AiSidebar({
   selectedModelLabelRef.current = selectedModelLabel;
   const compressedContextSummary = activeConversation?.compressedContextSummary?.trim() ?? "";
   const compressedContextLength = compressedContextSummary.length;
+  const webSearchEnabled = webSearchMode === "auto";
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -1729,6 +1744,14 @@ export default function AiSidebar({
       // Ignore localStorage failures; the toggle still works for this session.
     }
   }, [includeCurrentNoteContext]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AI_WEB_SEARCH_MODE_STORAGE_KEY, webSearchMode);
+    } catch {
+      // Ignore localStorage failures; the toggle still works for this session.
+    }
+  }, [webSearchMode]);
 
   useEffect(() => {
     const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
@@ -3005,6 +3028,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     }
 
     const chatContext = snapshot ?? buildChatContext();
+    const requestWebSearchEnabled = webSearchEnabled && !userFacingText.startsWith("/");
+    const searchDecision = requestWebSearchEnabled
+      ? buildSearchDecision(question, chatContext)
+      : buildSearchDecision("");
 
     const requestId = requestSeqRef.current + 1;
     requestSeqRef.current = requestId;
@@ -3021,6 +3048,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       requestId,
       streamId,
       retryContext: chatContext,
+      searchDecision,
       startedAt,
     });
 
@@ -3048,6 +3076,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       chatHistory,
       providerId: selectedProviderId,
       modelId: selectedModelId,
+      webSearchMode: requestWebSearchEnabled ? "auto" : "off",
+      webSearchEnabled: requestWebSearchEnabled,
+      searchDecision,
     }).catch((error) => {
       console.warn("AI sidebar chat request failed", {
         requestId,
@@ -3141,6 +3172,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const startedAt = Date.now();
     const streamId = `${Date.now()}-${requestId}`;
     const chatContext = buildChatContext();
+    const requestWebSearchEnabled = webSearchEnabled && !(message.retryDisplayText?.trim() ?? "").startsWith("/");
+    const searchDecision = requestWebSearchEnabled
+      ? buildSearchDecision(question, chatContext)
+      : buildSearchDecision("");
     const chatHistory = buildRequestHistoryFromMessages(
       conversation,
       conversation.messages.slice(0, previousUserIndex),
@@ -3154,6 +3189,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       requestId,
       streamId,
       retryContext: chatContext,
+      searchDecision,
       startedAt,
     });
 
@@ -3181,6 +3217,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       chatHistory,
       providerId: selectedProviderId,
       modelId: selectedModelId,
+      webSearchMode: requestWebSearchEnabled ? "auto" : "off",
+      webSearchEnabled: requestWebSearchEnabled,
+      searchDecision,
     }).catch((error) => {
       console.warn("AI sidebar retry request failed", {
         requestId,
@@ -4165,6 +4204,20 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   />
                 </span>
                 <span className="truncate">包含当前笔记信息</span>
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={webSearchEnabled}
+                className={cn(
+                  "inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-2 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
+                  webSearchEnabled && "border-primary/40 bg-primary/10 text-foreground",
+                )}
+                onClick={() => setWebSearchMode((mode) => (mode === "auto" ? "off" : "auto"))}
+                title={webSearchEnabled ? "允许 NoteX 按需进行联网搜索（当前阶段不会真实联网）" : "关闭联网搜索，只使用笔记、历史上下文和模型自身能力"}
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">联网搜索</span>
               </button>
 
               {isModelPickerOpen && (

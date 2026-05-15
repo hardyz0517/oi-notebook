@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import type { SearchDecision, WebSearchMode } from "@/lib/aiWebSearch";
 import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
@@ -232,6 +233,9 @@ export interface NoteChatStreamInput {
   chatHistory?: NoteChatHistoryMessage[];
   providerId?: string;
   modelId?: string;
+  webSearchMode?: WebSearchMode;
+  webSearchEnabled?: boolean;
+  searchDecision?: SearchDecision;
 }
 
 export interface NoteChatStreamChunkEvent {
