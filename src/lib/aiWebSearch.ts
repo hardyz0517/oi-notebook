@@ -2,7 +2,7 @@ import type { NoteChatContextPayload } from "@/lib/api";
 
 export type WebSearchMode = "off" | "auto";
 
-export type WebSearchProvider = "brave" | "bocha";
+export type WebSearchProvider = "brave" | "bocha" | "searxng";
 
 export type WebSourceReliability =
   | "official"
@@ -63,6 +63,7 @@ export type WebSearchConfig = {
   braveApiKey: string;
   bochaApiKey: string;
   bochaEndpoint: string;
+  searxngEndpoint: string;
   publicSearchConsent: boolean;
 };
 
@@ -147,7 +148,9 @@ const ALGORITHM_KEYWORDS = [
   "强连通分量",
   "费用流",
 ];
-const GENERAL_WEB_KEYWORDS = ["最新", "官网", "文档", "版本", "资料", "网页", "链接"];
+const GENERAL_WEB_KEYWORDS = ["最新", "官网", "文档", "版本", "资料", "网页", "链接", "新闻", "消息", "更新", "近期", "最近", "动态"];
+const RECENT_INFO_TIME_KEYWORDS = ["最近", "近期", "最新", "今天", "昨天", "今年", "本周", "本月", "刚刚"];
+const RECENT_INFO_CONTENT_KEYWORDS = ["新闻", "消息", "更新", "动态", "进展", "发布"];
 const EXPLICIT_WEB_SEARCH_KEYWORDS = [
   "搜一下",
   "查一下",
@@ -170,21 +173,25 @@ const unique = (items: string[]): string[] => [...new Set(items.filter(Boolean))
 
 export const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
   enabled: false,
-  provider: "brave",
+  provider: "searxng",
   braveApiKey: "",
   bochaApiKey: "",
   bochaEndpoint: "https://api.bochaai.com/v1/web-search",
+  searxngEndpoint: "",
   publicSearchConsent: false,
 };
 
 const normalizeWebSearchProvider = (config: Partial<WebSearchConfig> | null | undefined): WebSearchProvider => {
-  if (config?.provider === "bocha" || config?.provider === "brave") {
+  if (config?.provider === "bocha" || config?.provider === "brave" || config?.provider === "searxng") {
     return config.provider;
   }
   if (typeof config?.braveApiKey === "string" && config.braveApiKey.trim()) {
     return "brave";
   }
-  return "bocha";
+  if (typeof config?.bochaApiKey === "string" && config.bochaApiKey.trim()) {
+    return "bocha";
+  }
+  return "searxng";
 };
 
 export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null | undefined): WebSearchConfig => ({
@@ -195,6 +202,7 @@ export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null
   bochaEndpoint: typeof config?.bochaEndpoint === "string"
     ? config.bochaEndpoint.trim()
     : DEFAULT_WEB_SEARCH_CONFIG.bochaEndpoint,
+  searxngEndpoint: typeof config?.searxngEndpoint === "string" ? config.searxngEndpoint.trim() : "",
   publicSearchConsent: config?.publicSearchConsent === true,
 });
 
@@ -268,15 +276,20 @@ const getExperienceQueryKeywords = (text: string, errorKeywords: string[]): stri
   return unique(keywords);
 };
 
+const stripSearchRequestPhrases = (text: string): string => text
+  .replace(/(?:联网|网上)?(?:搜一下|查一下|查查|搜搜|帮我查|找资料|看资料)/g, " ")
+  .replace(/(?:有什么|有没有)?(?:常见坑|常见错误|注意事项|题解|讨论|新闻|消息|更新)/g, " ");
+
 const getProblemTitleCandidate = (
   input: string,
   context?: Pick<NoteChatContextPayload, "noteTitle" | "summary">,
 ): string => {
   const candidates = [context?.noteTitle, input, context?.summary].filter((item): item is string => !!item?.trim());
   for (const candidate of candidates) {
-    const englishTitle = extractEnglishProblemTitle(candidate);
+    const searchCleanedCandidate = stripSearchRequestPhrases(candidate);
+    const englishTitle = extractEnglishProblemTitle(searchCleanedCandidate);
     if (englishTitle) return englishTitle;
-    const cleaned = candidate
+    const cleaned = searchCleanedCandidate
       .replace(/\bP\d{3,6}\b/gi, " ")
       .replace(/\bCF\d{3,5}[A-Z]\d?\b/gi, " ")
       .replace(/\b(?:ABC|ARC|AGC)\d{3}[A-H]?\b/gi, " ")
@@ -321,6 +334,30 @@ const buildAlgorithmQueries = (algorithmKeywords: string[], errorKeywords: strin
     trimQuery(`${keyword} 常见错误`),
     errorKeywords.length > 0 ? trimQuery(`${keyword} ${errorKeywords.join(" ")}`) : "",
   ]));
+
+const isRecentInfoRequest = (text: string): boolean =>
+  hasKeyword(text, RECENT_INFO_TIME_KEYWORDS) && hasKeyword(text, RECENT_INFO_CONTENT_KEYWORDS);
+
+const buildGeneralWebQueries = (question: string, recentInfoRequested: boolean): string[] => {
+  const cleaned = compactQuery(question
+    .replace(/(?:联网|网上)?(?:搜一下|查一下|查查|搜搜|帮我查|找资料|看资料)/g, " ")
+    .replace(/(?:有没有|有什么|请问|一下|吗|呢)/g, " ")
+    .replace(/[？?。！!,，、:：；;]/g, " "));
+
+  if (!recentInfoRequested) {
+    return cleaned ? [trimQuery(cleaned)] : [trimQuery(question)];
+  }
+
+  const normalized = normalizeSearchText(cleaned);
+  const queries = [
+    cleaned,
+    /(?:NOIP|CSP)/i.test(cleaned) ? "CSP NOIP 最新消息" : "",
+    normalized.includes("信息学竞赛") ? "信息学竞赛 最新消息" : "",
+    normalized.includes("ai") ? "最近 AI 新闻" : "",
+    normalized.includes("gpt") ? "GPT 最近更新" : "",
+  ];
+  return unique(queries.map(trimQuery)).slice(0, 4);
+};
 
 export type WebSourceRelevanceResult = {
   sources: WebSource[];
@@ -514,6 +551,7 @@ export function buildSearchDecision(
   const errorKeywords = collectKeywords(haystack, DEBUG_KEYWORDS);
   const generalWebKeywords = collectKeywords(haystack, GENERAL_WEB_KEYWORDS);
   const explicitWebSearchRequested = hasKeyword(haystack, EXPLICIT_WEB_SEARCH_KEYWORDS);
+  const recentInfoRequested = isRecentInfoRequest(question);
   const explanationOnlyRequested = hasKeyword(question, EXPLANATION_ONLY_KEYWORDS);
   const problemTitle = getProblemTitleCandidate(question, context);
   const reasons: string[] = [];
@@ -538,6 +576,10 @@ export function buildSearchDecision(
   if (generalWebKeywords.length > 0) {
     confidence += 0.24;
     reasons.push("问题依赖外部或时效性资料");
+  }
+  if (recentInfoRequested) {
+    confidence += 0.36;
+    reasons.push("问题在询问最近新闻 / 消息 / 更新");
   }
   if (algorithmKeywords.length > 0) {
     if (explicitWebSearchRequested || generalWebKeywords.length > 0) {
@@ -613,11 +655,11 @@ export function buildSearchDecision(
     };
   }
 
-  if (generalWebKeywords.length > 0 || explicitWebSearchRequested) {
+  if (generalWebKeywords.length > 0 || explicitWebSearchRequested || recentInfoRequested) {
     return {
       shouldSearch,
       intent: "general_web",
-      queries: shouldSearch ? [compactQuery(question)] : [],
+      queries: shouldSearch ? buildGeneralWebQueries(question, recentInfoRequested) : [],
       confidence,
       reason: reasons.join("，") || "用户在请求外部网页资料。",
     };

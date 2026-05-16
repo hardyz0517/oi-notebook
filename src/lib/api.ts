@@ -246,7 +246,7 @@ export interface SearchWebSourcesInput extends WebSearchRequest {
 
 export interface TestWebSearchConnectionInput {
   provider: WebSearchConfig["provider"];
-  apiKey: string;
+  apiKey?: string;
   endpoint?: string;
 }
 

@@ -1592,10 +1592,22 @@ const shouldFetchWebSourceExcerpt = (source: WebSource, strongCount: number): bo
   return source.reliability === "wiki" || source.reliability === "official";
 };
 
-const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): string =>
-  provider === "bocha"
+const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha" | "searxng"): string => {
+  if (provider === "searxng") {
+    return "需要在 AI 设置中启用公开搜索服务";
+  }
+  return provider === "bocha"
     ? "需要在 AI 设置中配置博查 API Key"
     : "需要在 AI 设置中配置 Brave Search API Key";
+};
+
+const getWebSearchProviderFallbackNotice = (
+  activeProvider: "brave" | "bocha" | "searxng",
+  effectiveProvider: "brave" | "bocha" | "searxng",
+): string | undefined =>
+  activeProvider !== effectiveProvider && effectiveProvider === "searxng"
+    ? "当前 Provider 未配置 API Key，已尝试使用公开搜索兜底。"
+    : undefined;
 
 function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
@@ -2110,14 +2122,14 @@ export default function AiSidebar({
   const webSearchConfig = normalizeWebSearchConfig(aiConfig?.web_search);
   const activeWebSearchProvider = webSearchConfig.provider;
   const hasPublicWebSearchConsent = webSearchConfig.publicSearchConsent;
+  const effectiveWebSearchProvider =
+    activeWebSearchProvider === "brave" && webSearchConfig.braveApiKey.trim().length > 0 ? "brave" :
+    activeWebSearchProvider === "bocha" && webSearchConfig.bochaApiKey.trim().length > 0 ? "bocha" :
+    "searxng";
   const webSearchEnabled = webSearchMode === "auto" && hasPublicWebSearchConsent;
   const canUseWebSearchProvider =
     hasPublicWebSearchConsent &&
-    webSearchConfig.enabled === true &&
-    (
-      (activeWebSearchProvider === "brave" && webSearchConfig.braveApiKey.trim().length > 0) ||
-      (activeWebSearchProvider === "bocha" && webSearchConfig.bochaApiKey.trim().length > 0)
-    );
+    webSearchConfig.enabled === true;
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -2353,7 +2365,7 @@ export default function AiSidebar({
     try {
       setStatus("searching", "正在搜索公开网页...");
       const sources = await searchWebSources({
-        provider: activeWebSearchProvider,
+        provider: effectiveWebSearchProvider,
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
@@ -2392,17 +2404,21 @@ export default function AiSidebar({
           fetchedAt: result.fetchedAt,
         };
       });
+      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const filterNote = decision.problemId && prepared.filteredCount > 0
         ? `已过滤 ${prepared.filteredCount} 条明显无关结果`
         : undefined;
+      const searchNote = [fallbackNote, filterNote].filter(Boolean).join(" ");
       return sourcesWithExcerpts.length > 0
-        ? { sources: sourcesWithExcerpts, error: filterNote }
-        : { error: filterNote ?? "联网搜索没有返回可展示的来源" };
+        ? { sources: sourcesWithExcerpts, error: searchNote || undefined }
+        : { error: searchNote || "联网搜索没有返回可展示的来源" };
     } catch (error) {
       const prepared = prepareWebSourcesForDecision([], decision);
+      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
+      const errorMessage = getWebSearchErrorMessage(error);
       return {
         sources: prepared.sources.length > 0 ? prepared.sources : undefined,
-        error: getWebSearchErrorMessage(error),
+        error: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
       };
     }
   };
@@ -2426,7 +2442,7 @@ export default function AiSidebar({
 
     try {
       const sources = await searchWebSources({
-        provider: activeWebSearchProvider,
+        provider: effectiveWebSearchProvider,
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
@@ -2435,13 +2451,17 @@ export default function AiSidebar({
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
         sources: sources.length > 0 ? sources : undefined,
-        searchError: sources.length > 0 ? undefined : "联网搜索没有返回可展示的来源",
+        searchError: sources.length > 0
+          ? getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider)
+          : "联网搜索没有返回可展示的来源",
       }));
     } catch (error) {
+      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
+      const errorMessage = getWebSearchErrorMessage(error);
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
         sources: undefined,
-        searchError: getWebSearchErrorMessage(error),
+        searchError: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
       }));
     }
   };

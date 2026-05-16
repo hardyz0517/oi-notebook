@@ -2440,11 +2440,11 @@ export default function App() {
 
   const handleTestWebSearchConnection = async () => {
     const webSearchConfig = normalizeWebSearchConfig(aiConfigDraft?.web_search);
-    if (webSearchConfig.provider !== "bocha") {
-      setWebSearchConnectionMessage("当前测试连接仅支持博查 Bocha。");
+    if (webSearchConfig.provider === "brave") {
+      setWebSearchConnectionMessage("当前测试连接支持博查 Bocha 或公开搜索。Brave Search 可通过保存后在聊天中验证。");
       return;
     }
-    if (!webSearchConfig.bochaApiKey.trim()) {
+    if (webSearchConfig.provider === "bocha" && !webSearchConfig.bochaApiKey.trim()) {
       setWebSearchConnectionMessage("需要先填写博查 API Key。");
       return;
     }
@@ -2453,9 +2453,11 @@ export default function App() {
     setWebSearchConnectionMessage(null);
     try {
       await testWebSearchConnection({
-        provider: "bocha",
-        apiKey: webSearchConfig.bochaApiKey,
-        endpoint: webSearchConfig.bochaEndpoint,
+        provider: webSearchConfig.provider,
+        apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : undefined,
+        endpoint: webSearchConfig.provider === "bocha"
+          ? webSearchConfig.bochaEndpoint
+          : webSearchConfig.searxngEndpoint,
       });
       setWebSearchConnectionMessage("连接成功");
     } catch (e) {
@@ -6252,7 +6254,7 @@ export default function App() {
                         <div className="grid gap-1">
                           <div className="text-base font-semibold text-foreground">联网搜索 Provider</div>
                           <div className="text-sm leading-6 text-muted-foreground">
-                            仅用于 NoteX 的联网搜索来源卡片。当前阶段只读取搜索结果标题、摘要和 URL，不抓取网页正文。
+                            用于 NoteX 的联网搜索来源卡片和少量强相关公开网页摘录。不会读取浏览器信息或登录态。
                           </div>
                         </div>
 
@@ -6300,6 +6302,7 @@ export default function App() {
                                 className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-2"
                               >
                                 {([
+                                  { value: "searxng", label: "公开搜索（无需 Key）", description: "无需 API Key，适合开箱即用；公共搜索实例可能不稳定。" },
                                   { value: "bocha", label: "博查 Bocha", description: "适合中文搜索和 AI 应用联网搜索。" },
                                   { value: "brave", label: "Brave Search", description: "保留现有 Brave 配置，适合继续兼容旧设置。" },
                                 ] as const).map((option) => {
@@ -6386,7 +6389,7 @@ export default function App() {
                                     )}
                                   </div>
                                 </>
-                              ) : (
+                              ) : normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "brave" ? (
                                 <>
                                   <Label htmlFor="web-search-brave-api-key">Brave Search API Key</Label>
                                   <Input
@@ -6405,12 +6408,49 @@ export default function App() {
                                     disabled={!aiConfigDraft || isSavingAiConfig}
                                   />
                                 </>
+                              ) : (
+                                <>
+                                  <Label htmlFor="web-search-searxng-endpoint">SearXNG 实例地址</Label>
+                                  <Input
+                                    id="web-search-searxng-endpoint"
+                                    value={aiConfigDraft?.web_search.searxngEndpoint ?? ""}
+                                    placeholder="留空则使用内置候选实例"
+                                    onChange={(event) => updateAiConfigDraft((config) => ({
+                                      ...config,
+                                      web_search: {
+                                        ...normalizeWebSearchConfig(config.web_search),
+                                        provider: "searxng",
+                                        searxngEndpoint: event.target.value,
+                                      },
+                                    }))}
+                                    disabled={!aiConfigDraft || isSavingAiConfig}
+                                  />
+                                  <div className="text-xs leading-5 text-muted-foreground">
+                                    无需 API Key，适合开箱即用。公共搜索实例可能不稳定，失败时可更换实例或改用博查。
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => void handleTestWebSearchConnection()}
+                                      disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}
+                                    >
+                                      {isTestingWebSearchConnection ? "测试中..." : "测试公开搜索"}
+                                    </Button>
+                                    {webSearchConnectionMessage && (
+                                      <span className="text-xs leading-5 text-muted-foreground">
+                                        {webSearchConnectionMessage}
+                                      </span>
+                                    )}
+                                  </div>
+                                </>
                               )}
                             </div>
                           </div>
 
                           <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                            API Key 随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。未配置时，NoteX 只展示搜索计划并提示需要配置搜索服务。
+                            API Key 和自定义 SearXNG 实例地址随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。公开搜索无需 Key，但公共实例失败时会自动降级。
                           </div>
                           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
                             <div className="grid gap-1">
