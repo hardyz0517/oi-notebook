@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    error::Error,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -24,9 +25,12 @@ const AI_FULL_NOTE_POLISH_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
 const WEB_SEARCH_DEFAULT_PROVIDER: &str = "brave";
+const WEB_SEARCH_COMPAT_PROVIDER: &str = "bocha";
 const WEB_SEARCH_MAX_QUERIES: usize = 6;
 const WEB_SEARCH_MAX_RESULTS: usize = 10;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
+const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
+const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +205,53 @@ struct BraveWebResult {
 #[derive(Debug, Clone, Deserialize)]
 struct BraveResultProfile {
     name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BochaSearchResponse {
+    #[serde(rename = "webPages")]
+    web_pages: Option<BochaWebPages>,
+    data: Option<BochaSearchData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BochaSearchData {
+    #[serde(rename = "webPages")]
+    web_pages: Option<BochaWebPages>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BochaWebPages {
+    value: Vec<BochaWebResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BochaWebResult {
+    id: Option<String>,
+    name: Option<String>,
+    url: Option<String>,
+    snippet: Option<String>,
+    summary: Option<String>,
+    #[serde(rename = "siteName")]
+    site_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestWebSearchConnectionInput {
+    pub provider: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TestWebSearchConnectionResult {
+    pub ok: bool,
+    pub provider: String,
+    pub endpoint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -493,14 +544,22 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
 }
 
 fn normalize_web_search_config(config: &crate::luogu::WebSearchConfigFields) -> crate::luogu::WebSearchConfigFields {
+    let provider = match config.provider.trim() {
+        WEB_SEARCH_DEFAULT_PROVIDER => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
+        WEB_SEARCH_COMPAT_PROVIDER => WEB_SEARCH_COMPAT_PROVIDER.to_string(),
+        _ if !config.brave_api_key.trim().is_empty() => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
+        _ => WEB_SEARCH_COMPAT_PROVIDER.to_string(),
+    };
     crate::luogu::WebSearchConfigFields {
         enabled: config.enabled,
-        provider: if config.provider.trim() == WEB_SEARCH_DEFAULT_PROVIDER {
-            WEB_SEARCH_DEFAULT_PROVIDER.to_string()
-        } else {
-            WEB_SEARCH_DEFAULT_PROVIDER.to_string()
-        },
+        provider,
         brave_api_key: config.brave_api_key.trim().to_string(),
+        bocha_api_key: config.bocha_api_key.trim().to_string(),
+        bocha_endpoint: if config.bocha_endpoint.trim().is_empty() {
+            BOCHA_SEARCH_ENDPOINT.to_string()
+        } else {
+            config.bocha_endpoint.trim().to_string()
+        },
         public_search_consent: config.public_search_consent,
     }
 }
@@ -2648,6 +2707,84 @@ fn brave_search_status_error(status: reqwest::StatusCode, body: &str) -> String 
     }
 }
 
+fn bocha_candidate_endpoints(endpoint: Option<&str>) -> Vec<String> {
+    let normalized = endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(BOCHA_SEARCH_ENDPOINT);
+    let mut candidates = vec![normalized.to_string()];
+    if normalized == BOCHA_SEARCH_ENDPOINT {
+        candidates.push(BOCHA_SEARCH_FALLBACK_ENDPOINT.to_string());
+    } else if normalized == BOCHA_SEARCH_FALLBACK_ENDPOINT {
+        candidates.push(BOCHA_SEARCH_ENDPOINT.to_string());
+    }
+    candidates
+}
+
+fn bocha_error_chain(error: &reqwest::Error) -> String {
+    let mut chain = error.to_string();
+    let mut source = error.source();
+    while let Some(item) = source {
+        chain.push_str(": ");
+        chain.push_str(&item.to_string());
+        source = item.source();
+    }
+    chain.to_ascii_lowercase()
+}
+
+fn is_bocha_endpoint_retryable(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::NOT_FOUND
+}
+
+fn is_bocha_connectivity_retryable(error: &reqwest::Error) -> bool {
+    if error.is_timeout() {
+        return false;
+    }
+    let detail = bocha_error_chain(error);
+    error.is_connect()
+        && (detail.contains("dns")
+            || detail.contains("failed to lookup address")
+            || detail.contains("name or service not known")
+            || detail.contains("temporary failure in name resolution")
+            || detail.contains("no such host")
+            || detail.contains("connection refused")
+            || detail.contains("connection reset")
+            || detail.contains("invalid url"))
+}
+
+fn bocha_request_error(error: &reqwest::Error) -> String {
+    let detail = bocha_error_chain(error);
+    if error.is_timeout() {
+        return "连接博查搜索服务超时，请检查网络或稍后重试".to_string();
+    }
+    if detail.contains("certificate") || detail.contains("tls") || detail.contains("ssl") {
+        return "连接博查搜索服务时出现安全连接错误".to_string();
+    }
+    if detail.contains("dns")
+        || detail.contains("failed to lookup address")
+        || detail.contains("name or service not known")
+        || detail.contains("temporary failure in name resolution")
+        || detail.contains("no such host")
+    {
+        return "无法解析博查搜索服务域名，请检查网络或 API Endpoint".to_string();
+    }
+    "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()
+}
+
+fn bocha_search_status_error(status: reqwest::StatusCode, body: &str) -> String {
+    let status_code = status.as_u16();
+    match status_code {
+        401 | 403 => "联网搜索失败：博查 API Key 无效或没有权限".to_string(),
+        429 => "联网搜索失败：博查搜索额度不足或请求过快".to_string(),
+        404 => "博查搜索接口地址可能不正确，请检查 API Endpoint".to_string(),
+        500..=599 => "博查搜索服务暂时不可用".to_string(),
+        _ => format!(
+            "联网搜索失败：博查搜索服务返回 HTTP {status_code}; debug=body_preview={}",
+            sanitize_ai_detail(body)
+        ),
+    }
+}
+
 fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult> {
     let url = result.url?.trim().to_string();
     if url.is_empty() {
@@ -2677,6 +2814,57 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         reliability_label: Some(reliability_label),
         reliability_reason: Some(reliability_reason),
     })
+}
+
+fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult> {
+    let url = result.url?.trim().to_string();
+    if url.is_empty() {
+        return None;
+    }
+    let title = sanitize_search_text(result.name.as_deref().unwrap_or(&url), 120);
+    let snippet_source = result
+        .summary
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .or(result.snippet.as_deref())
+        .unwrap_or("");
+    let snippet_text = sanitize_search_text(snippet_source, 220);
+    let site = result
+        .site_name
+        .as_deref()
+        .map(|name| sanitize_search_text(name, 80))
+        .filter(|name| !name.is_empty())
+        .or_else(|| site_from_url(&url));
+    let source_type = infer_web_source_type(&title, &url, &snippet_text);
+    let (reliability, reliability_label, reliability_reason) =
+        infer_web_reliability(&title, &url, &snippet_text);
+    let id = result
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("web-{}", &stable_hash_hex(&url)[..12]));
+
+    Some(WebSearchResult {
+        id,
+        title: if title.is_empty() { url.clone() } else { title },
+        url,
+        site,
+        snippet: if snippet_text.is_empty() { None } else { Some(snippet_text) },
+        source_type: Some(source_type),
+        reliability: Some(reliability),
+        reliability_label: Some(reliability_label),
+        reliability_reason: Some(reliability_reason),
+    })
+}
+
+fn bocha_response_items(response: BochaSearchResponse) -> Vec<BochaWebResult> {
+    response
+        .web_pages
+        .or_else(|| response.data.and_then(|data| data.web_pages))
+        .map(|web_pages| web_pages.value)
+        .unwrap_or_default()
 }
 
 fn search_brave_sources(
@@ -2752,6 +2940,177 @@ fn search_brave_sources(
     Ok(results)
 }
 
+#[allow(dead_code)]
+fn search_bocha_sources(
+    request: &WebSearchRequestInput,
+    api_key: &str,
+    endpoint: Option<&str>,
+    max_results: usize,
+) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+    let mut seen_urls = HashSet::new();
+    let mut results = Vec::new();
+    let per_query_count = max_results.clamp(1, 10);
+    let _ = endpoint;
+
+    for query in request
+        .queries
+        .iter()
+        .map(|query| query.trim())
+        .filter(|query| !query.is_empty())
+        .take(WEB_SEARCH_MAX_QUERIES)
+    {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let response = client
+            .post(BOCHA_SEARCH_ENDPOINT)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .bearer_auth(api_key)
+            .json(&json!({
+                "query": query,
+                "freshness": "noLimit",
+                "summary": true,
+                "count": per_query_count,
+            }))
+            .send()
+            .map_err(|e| {
+                if e.is_timeout() {
+                    "联网搜索失败：博查搜索请求超时".to_string()
+                } else {
+                    "联网搜索失败：无法连接博查搜索服务".to_string()
+                }
+            })?;
+
+        let status = response.status();
+        let body = response
+            .bytes()
+            .map(|bytes| decode_response_body(&bytes))
+            .map_err(|_| "联网搜索失败：博查搜索响应读取失败".to_string())?;
+        let body_trimmed = body.trim();
+        if !status.is_success() {
+            return Err(bocha_search_status_error(status, body_trimmed));
+        }
+
+        let parsed = serde_json::from_str::<BochaSearchResponse>(body_trimmed)
+            .map_err(|_| "联网搜索失败：博查搜索返回格式异常".to_string())?;
+        let items = parsed.web_pages.map(|web_pages| web_pages.value).unwrap_or_default();
+        for item in items {
+            if results.len() >= max_results {
+                break;
+            }
+            let Some(source) = bocha_result_to_web_source(item) else {
+                continue;
+            };
+            if seen_urls.insert(source.url.clone()) {
+                results.push(source);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+fn search_bocha_sources_with_fallback(
+    request: &WebSearchRequestInput,
+    api_key: &str,
+    endpoint: Option<&str>,
+    max_results: usize,
+) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+    let mut seen_urls = HashSet::new();
+    let mut results = Vec::new();
+    let per_query_count = max_results.clamp(1, 10);
+    let endpoints = bocha_candidate_endpoints(endpoint);
+
+    for query in request
+        .queries
+        .iter()
+        .map(|query| query.trim())
+        .filter(|query| !query.is_empty())
+        .take(WEB_SEARCH_MAX_QUERIES)
+    {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let mut last_error: Option<String> = None;
+
+        for (index, candidate_endpoint) in endpoints.iter().enumerate() {
+            let response = client
+                .post(candidate_endpoint)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .bearer_auth(api_key)
+                .json(&json!({
+                    "query": query,
+                    "freshness": "noLimit",
+                    "summary": true,
+                    "count": per_query_count,
+                }))
+                .send();
+
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    last_error = Some(bocha_request_error(&error));
+                    if is_bocha_connectivity_retryable(&error) && index + 1 < endpoints.len() {
+                        continue;
+                    }
+                    return Err(last_error.unwrap_or_else(|| "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()));
+                }
+            };
+
+            let status = response.status();
+            let body = response
+                .bytes()
+                .map(|bytes| decode_response_body(&bytes))
+                .map_err(|_| "博查搜索响应读取失败".to_string())?;
+            let body_trimmed = body.trim();
+            if !status.is_success() {
+                last_error = Some(bocha_search_status_error(status, body_trimmed));
+                if is_bocha_endpoint_retryable(status) && index + 1 < endpoints.len() {
+                    continue;
+                }
+                return Err(last_error.unwrap_or_else(|| "博查搜索服务暂时不可用".to_string()));
+            }
+
+            let parsed = serde_json::from_str::<BochaSearchResponse>(body_trimmed)
+                .map_err(|_| "博查搜索返回格式异常，可能是接口版本变化".to_string())?;
+            let items = bocha_response_items(parsed);
+            for item in items {
+                if results.len() >= max_results {
+                    break;
+                }
+                let Some(source) = bocha_result_to_web_source(item) else {
+                    continue;
+                };
+                if seen_urls.insert(source.url.clone()) {
+                    results.push(source);
+                }
+            }
+            last_error = None;
+            break;
+        }
+
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+    }
+
+    Ok(results)
+}
+
 #[tauri::command]
 pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
     let provider = request
@@ -2760,9 +3119,6 @@ pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearc
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(WEB_SEARCH_DEFAULT_PROVIDER);
-    if provider != WEB_SEARCH_DEFAULT_PROVIDER {
-        return Err("联网搜索失败：当前只支持 Brave Search Provider".to_string());
-    }
     let queries = request
         .queries
         .iter()
@@ -2779,18 +3135,75 @@ pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearc
     if !search_config.public_search_consent {
         return Err("需要先授权公开网页搜索".to_string());
     }
-    if !search_config.enabled || search_config.brave_api_key.trim().is_empty() {
+    if !search_config.enabled {
         return Err("需要在 AI 设置中配置搜索服务".to_string());
-    }
-    if search_config.brave_api_key.contains(['\r', '\n']) {
-        return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
     }
 
     let max_results = request
         .max_results
         .unwrap_or(WEB_SEARCH_MAX_RESULTS)
         .clamp(1, WEB_SEARCH_MAX_RESULTS);
-    search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
+    match provider {
+        WEB_SEARCH_DEFAULT_PROVIDER => {
+            if search_config.brave_api_key.trim().is_empty() {
+                return Err("需要在 AI 设置中配置 Brave Search API Key".to_string());
+            }
+            if search_config.brave_api_key.contains(['\r', '\n']) {
+                return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
+            }
+            search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
+        }
+        WEB_SEARCH_COMPAT_PROVIDER => {
+            if search_config.bocha_api_key.trim().is_empty() {
+                return Err("需要在 AI 设置中配置博查 API Key".to_string());
+            }
+            if search_config.bocha_api_key.contains(['\r', '\n']) {
+                return Err("联网搜索失败：博查 API Key 包含非法字符".to_string());
+            }
+            search_bocha_sources_with_fallback(
+                &request,
+                search_config.bocha_api_key.trim(),
+                Some(search_config.bocha_endpoint.as_str()),
+                max_results,
+            )
+        }
+        _ => Err("联网搜索失败：当前 Provider 不受支持".to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn test_web_search_connection(input: TestWebSearchConnectionInput) -> Result<TestWebSearchConnectionResult, String> {
+    let provider = input.provider.trim();
+    if provider != WEB_SEARCH_COMPAT_PROVIDER {
+        return Err("当前测试连接只支持博查 Bocha".to_string());
+    }
+    let api_key = input.api_key.trim();
+    if api_key.is_empty() {
+        return Err("需要先填写博查 API Key".to_string());
+    }
+    if api_key.contains(['\r', '\n']) {
+        return Err("博查 API Key 包含非法字符".to_string());
+    }
+    let endpoint = input
+        .endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(BOCHA_SEARCH_ENDPOINT)
+        .to_string();
+    let request = WebSearchRequestInput {
+        queries: vec!["P1000 洛谷".to_string()],
+        intent: "general_web".to_string(),
+        problem_id: None,
+        max_results: Some(3),
+        provider: Some(WEB_SEARCH_COMPAT_PROVIDER.to_string()),
+    };
+    let _ = search_bocha_sources_with_fallback(&request, api_key, Some(endpoint.as_str()), 3)?;
+    Ok(TestWebSearchConnectionResult {
+        ok: true,
+        provider: WEB_SEARCH_COMPAT_PROVIDER.to_string(),
+        endpoint,
+    })
 }
 
 #[tauri::command]

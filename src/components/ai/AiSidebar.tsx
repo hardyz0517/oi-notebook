@@ -1482,6 +1482,11 @@ const getReliabilityLabel = (source: WebSource): string => source.reliabilityLab
   "未知"
 );
 
+const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): string =>
+  provider === "bocha"
+    ? "需要在 AI 设置中配置博查 API Key"
+    : "需要在 AI 设置中配置 Brave Search API Key";
+
 function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
@@ -1964,13 +1969,16 @@ export default function AiSidebar({
   const compressedContextSummary = activeConversation?.compressedContextSummary?.trim() ?? "";
   const compressedContextLength = compressedContextSummary.length;
   const webSearchConfig = normalizeWebSearchConfig(aiConfig?.web_search);
+  const activeWebSearchProvider = webSearchConfig.provider;
   const hasPublicWebSearchConsent = webSearchConfig.publicSearchConsent;
   const webSearchEnabled = webSearchMode === "auto" && hasPublicWebSearchConsent;
   const canUseWebSearchProvider =
     hasPublicWebSearchConsent &&
     webSearchConfig.enabled === true &&
-    webSearchConfig.provider === "brave" &&
-    webSearchConfig.braveApiKey.trim().length > 0;
+    (
+      (activeWebSearchProvider === "brave" && webSearchConfig.braveApiKey.trim().length > 0) ||
+      (activeWebSearchProvider === "bocha" && webSearchConfig.bochaApiKey.trim().length > 0)
+    );
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -2184,14 +2192,16 @@ export default function AiSidebar({
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
         sources: undefined,
-        searchError: hasPublicWebSearchConsent ? "需要在 AI 设置中配置搜索服务" : "需要先授权公开网页搜索",
+        searchError: hasPublicWebSearchConsent
+          ? getWebSearchProviderMissingKeyMessage(activeWebSearchProvider)
+          : "需要先授权公开网页搜索",
       }));
       return;
     }
 
     try {
       const sources = await searchWebSources({
-        provider: "brave",
+        provider: activeWebSearchProvider,
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,

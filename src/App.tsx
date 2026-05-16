@@ -18,7 +18,7 @@ import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes, testWebSearchConnection } from "@/lib/api";
 import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
@@ -1346,6 +1346,8 @@ export default function App() {
   const [isUpdatingLuoguLastSubmissionId, setIsUpdatingLuoguLastSubmissionId] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
+  const [isTestingWebSearchConnection, setIsTestingWebSearchConnection] = useState(false);
+  const [webSearchConnectionMessage, setWebSearchConnectionMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
@@ -2433,6 +2435,33 @@ export default function App() {
       toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
     } finally {
       setIsSavingAiConfig(false);
+    }
+  };
+
+  const handleTestWebSearchConnection = async () => {
+    const webSearchConfig = normalizeWebSearchConfig(aiConfigDraft?.web_search);
+    if (webSearchConfig.provider !== "bocha") {
+      setWebSearchConnectionMessage("当前测试连接仅支持博查 Bocha。");
+      return;
+    }
+    if (!webSearchConfig.bochaApiKey.trim()) {
+      setWebSearchConnectionMessage("需要先填写博查 API Key。");
+      return;
+    }
+
+    setIsTestingWebSearchConnection(true);
+    setWebSearchConnectionMessage(null);
+    try {
+      await testWebSearchConnection({
+        provider: "bocha",
+        apiKey: webSearchConfig.bochaApiKey,
+        endpoint: webSearchConfig.bochaEndpoint,
+      });
+      setWebSearchConnectionMessage("连接成功");
+    } catch (e) {
+      setWebSearchConnectionMessage(getErrorMessage(e));
+    } finally {
+      setIsTestingWebSearchConnection(false);
     }
   };
 
@@ -6266,30 +6295,117 @@ export default function App() {
                           <div className="grid gap-3 md:grid-cols-2">
                             <div className="grid gap-2">
                               <Label htmlFor="web-search-provider">Provider</Label>
-                              <Input
+                              <div
                                 id="web-search-provider"
-                                value="Brave Search"
-                                readOnly
-                                className="bg-muted/30"
-                              />
+                                className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-2"
+                              >
+                                {([
+                                  { value: "bocha", label: "博查 Bocha", description: "适合中文搜索和 AI 应用联网搜索。" },
+                                  { value: "brave", label: "Brave Search", description: "保留现有 Brave 配置，适合继续兼容旧设置。" },
+                                ] as const).map((option) => {
+                                  const currentProvider = normalizeWebSearchConfig(aiConfigDraft?.web_search).provider;
+                                  const isSelected = currentProvider === option.value;
+                                  return (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={cn(
+                                        "grid gap-1 rounded-md border px-3 py-2 text-left transition-colors",
+                                        isSelected
+                                          ? "border-primary/60 bg-primary/10 text-foreground"
+                                          : "border-border/70 bg-background/70 text-muted-foreground hover:text-foreground",
+                                      )}
+                                      onClick={() => updateAiConfigDraft((config) => ({
+                                        ...config,
+                                        web_search: {
+                                          ...normalizeWebSearchConfig(config.web_search),
+                                          provider: option.value,
+                                        },
+                                      }))}
+                                      disabled={!aiConfigDraft || isSavingAiConfig}
+                                      aria-pressed={isSelected}
+                                    >
+                                      <span className="text-sm font-medium">{option.label}</span>
+                                      <span className="text-xs leading-5">{option.description}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                             <div className="grid gap-2">
-                              <Label htmlFor="web-search-api-key">Brave Search API Key</Label>
-                              <Input
-                                id="web-search-api-key"
-                                type="password"
-                                value={aiConfigDraft?.web_search.braveApiKey ?? ""}
-                                placeholder="BSA..."
-                                onChange={(event) => updateAiConfigDraft((config) => ({
-                                  ...config,
-                                  web_search: {
-                                    ...normalizeWebSearchConfig(config.web_search),
-                                    provider: "brave",
-                                    braveApiKey: event.target.value,
-                                  },
-                                }))}
-                                disabled={!aiConfigDraft || isSavingAiConfig}
-                              />
+                              {normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "bocha" ? (
+                                <>
+                                  <Label htmlFor="web-search-bocha-api-key">Bocha API Key</Label>
+                                  <Input
+                                    id="web-search-bocha-api-key"
+                                    type="password"
+                                    value={aiConfigDraft?.web_search.bochaApiKey ?? ""}
+                                    placeholder="sk-..."
+                                    onChange={(event) => updateAiConfigDraft((config) => ({
+                                      ...config,
+                                      web_search: {
+                                        ...normalizeWebSearchConfig(config.web_search),
+                                        provider: "bocha",
+                                        bochaApiKey: event.target.value,
+                                      },
+                                    }))}
+                                    disabled={!aiConfigDraft || isSavingAiConfig}
+                                  />
+                                  <Label htmlFor="web-search-bocha-endpoint">Bocha API Endpoint</Label>
+                                  <Input
+                                    id="web-search-bocha-endpoint"
+                                    value={aiConfigDraft?.web_search.bochaEndpoint ?? ""}
+                                    placeholder="https://api.bochaai.com/v1/web-search"
+                                    onChange={(event) => updateAiConfigDraft((config) => ({
+                                      ...config,
+                                      web_search: {
+                                        ...normalizeWebSearchConfig(config.web_search),
+                                        provider: "bocha",
+                                        bochaEndpoint: event.target.value,
+                                      },
+                                    }))}
+                                    disabled={!aiConfigDraft || isSavingAiConfig}
+                                  />
+                                  <div className="text-xs leading-5 text-muted-foreground">
+                                    适合中文搜索和 AI 应用联网搜索。留空时使用默认地址；若默认地址不可达，可改成控制台或文档实际提供的接口地址。
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => void handleTestWebSearchConnection()}
+                                      disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}
+                                    >
+                                      {isTestingWebSearchConnection ? "测试中..." : "测试连接"}
+                                    </Button>
+                                    {webSearchConnectionMessage && (
+                                      <span className="text-xs leading-5 text-muted-foreground">
+                                        {webSearchConnectionMessage}
+                                      </span>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <Label htmlFor="web-search-brave-api-key">Brave Search API Key</Label>
+                                  <Input
+                                    id="web-search-brave-api-key"
+                                    type="password"
+                                    value={aiConfigDraft?.web_search.braveApiKey ?? ""}
+                                    placeholder="BSA..."
+                                    onChange={(event) => updateAiConfigDraft((config) => ({
+                                      ...config,
+                                      web_search: {
+                                        ...normalizeWebSearchConfig(config.web_search),
+                                        provider: "brave",
+                                        braveApiKey: event.target.value,
+                                      },
+                                    }))}
+                                    disabled={!aiConfigDraft || isSavingAiConfig}
+                                  />
+                                </>
+                              )}
                             </div>
                           </div>
 

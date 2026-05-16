@@ -243,6 +243,18 @@ export interface SearchWebSourcesInput extends WebSearchRequest {
   provider?: WebSearchConfig["provider"];
 }
 
+export interface TestWebSearchConnectionInput {
+  provider: WebSearchConfig["provider"];
+  apiKey: string;
+  endpoint?: string;
+}
+
+export interface TestWebSearchConnectionResult {
+  ok: boolean;
+  provider: WebSearchConfig["provider"];
+  endpoint: string;
+}
+
 export interface NoteChatStreamChunkEvent {
   streamId: string;
   delta: string;
@@ -659,6 +671,16 @@ export async function deleteAiProviderModel(providerId: string, modelId: string)
 export async function searchWebSources(input: SearchWebSourcesInput): Promise<WebSearchResult[]> {
   try {
     return await invoke<WebSearchResult[]>("search_web_sources", { request: input });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function testWebSearchConnection(
+  input: TestWebSearchConnectionInput,
+): Promise<TestWebSearchConnectionResult> {
+  try {
+    return await invoke<TestWebSearchConnectionResult>("test_web_search_connection", { input });
   } catch (e) {
     throw toError(e);
   }
