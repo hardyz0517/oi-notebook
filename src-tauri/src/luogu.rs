@@ -67,6 +67,8 @@ pub struct WebSearchConfigFields {
     pub provider: String,
     #[serde(default)]
     pub brave_api_key: String,
+    #[serde(default)]
+    pub public_search_consent: bool,
 }
 
 impl Default for WebSearchConfigFields {
@@ -75,6 +77,7 @@ impl Default for WebSearchConfigFields {
             enabled: false,
             provider: default_web_search_provider(),
             brave_api_key: String::new(),
+            public_search_consent: false,
         }
     }
 }

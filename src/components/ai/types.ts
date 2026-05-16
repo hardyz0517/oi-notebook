@@ -64,6 +64,7 @@ export interface AiSidebarProps {
   isMaximized?: boolean;
   onMaximizedChange?: (isMaximized: boolean) => void;
   aiConfig: AiConfig | null;
+  onAiConfigChange: (config: AiConfig) => void;
   onOpenAiSettings: () => void;
   onApplySuggestedTags: (notePath: string, suggestedTags: string[]) => Promise<void>;
   onApplyPolishedSelection: (input: ApplyPolishedSelectionInput) => Promise<void>;

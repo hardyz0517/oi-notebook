@@ -2291,6 +2291,15 @@ export default function App() {
     }
   };
 
+  const handleAiConfigChangeFromSidebar = (config: AiConfig) => {
+    const nextConfig = cloneAiConfig(config);
+    setAiConfig(nextConfig);
+    setAiConfigDraft((current) => current ? {
+      ...cloneAiConfig(current),
+      web_search: normalizeWebSearchConfig(nextConfig.web_search),
+    } : cloneAiConfig(nextConfig));
+  };
+
   const selectAiProviderForEdit = (provider: AiProvider) => {
     setSelectedAiProviderId(provider.id);
     setAiManualModelId("");
@@ -6287,6 +6296,31 @@ export default function App() {
                           <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
                             API Key 随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。未配置时，NoteX 只展示搜索计划并提示需要配置搜索服务。
                           </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
+                            <div className="grid gap-1">
+                              <div className="text-sm font-medium text-foreground">
+                                公开网页搜索授权：{aiConfigDraft?.web_search.publicSearchConsent ? "已启用" : "未启用"}
+                              </div>
+                              <div className="text-xs leading-5 text-muted-foreground">
+                                首次打开 NoteX 的“联网搜索”开关时会要求确认：只访问公开网页，不读取 Cookie、历史记录、密码、登录状态或本地隐私数据。
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => updateAiConfigDraft((config) => ({
+                                ...config,
+                                web_search: {
+                                  ...normalizeWebSearchConfig(config.web_search),
+                                  publicSearchConsent: false,
+                                },
+                              }))}
+                              disabled={!aiConfigDraft || isSavingAiConfig}
+                            >
+                              重新查看授权说明
+                            </Button>
+                          </div>
                         </div>
                       </section>
                     )}
@@ -7210,6 +7244,7 @@ export default function App() {
           isMaximized={isAiSidebarMaximized}
           onMaximizedChange={setIsAiSidebarMaximized}
           aiConfig={aiConfig}
+          onAiConfigChange={handleAiConfigChangeFromSidebar}
           onOpenAiSettings={() => void openAiSettings()}
           onApplySuggestedTags={handleApplyAiSuggestedTags}
           onApplyPolishedSelection={handleApplyPolishedSelection}

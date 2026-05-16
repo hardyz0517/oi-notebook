@@ -28,8 +28,10 @@ import {
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { buildSearchDecision, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
+import { buildSearchDecision, normalizeWebSearchConfig, PUBLIC_WEB_REQUEST_POLICY, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -37,6 +39,7 @@ import {
   openExternalUrl,
   polishFullNote,
   polishSelectedText,
+  saveAiConfig,
   searchWebSources,
   suggestNoteTags,
   startCurrentNoteChatStream,
@@ -725,6 +728,9 @@ const sanitizeSearchDecisionForStorage = (value: unknown): SearchDecision | unde
     queries: Array.isArray(item.queries)
       ? item.queries.filter((query): query is string => typeof query === "string" && query.trim().length > 0).slice(0, 8)
       : [],
+    confidence: typeof item.confidence === "number" && Number.isFinite(item.confidence)
+      ? Math.max(0, Math.min(1, item.confidence))
+      : undefined,
     reason: typeof item.reason === "string" && item.reason.trim() ? item.reason.trim() : undefined,
   };
 };
@@ -754,6 +760,21 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       site: typeof source.site === "string" && source.site.trim() ? source.site.trim() : undefined,
       snippet: typeof source.snippet === "string" && source.snippet.trim() ? source.snippet.trim() : undefined,
       sourceType: source.sourceType && sourceTypes.has(source.sourceType) ? source.sourceType : "unknown",
+      reliability:
+        source.reliability === "official" ||
+        source.reliability === "wiki" ||
+        source.reliability === "community_solution" ||
+        source.reliability === "discussion" ||
+        source.reliability === "blog" ||
+        source.reliability === "unknown"
+          ? source.reliability
+          : "unknown",
+      reliabilityLabel: typeof source.reliabilityLabel === "string" && source.reliabilityLabel.trim()
+        ? source.reliabilityLabel.trim()
+        : undefined,
+      reliabilityReason: typeof source.reliabilityReason === "string" && source.reliabilityReason.trim()
+        ? source.reliabilityReason.trim()
+        : undefined,
       selected: source.selected === true,
     }];
   });
@@ -1323,6 +1344,14 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
 const SEARCH_PLAN_QUERY_LIMIT = 6;
 const SEARCH_SOURCE_PREVIEW_LIMIT = 5;
 
+const getSearchConfidenceLabel = (confidence: number | undefined): string => {
+  if (typeof confidence !== "number") return "按需判断";
+  if (confidence >= 0.85) return "高";
+  if (confidence >= 0.65) return "较高";
+  if (confidence >= 0.45) return "一般";
+  return "较低";
+};
+
 const getSearchIntentLabel = (intent: SearchDecision["intent"]): string => {
   switch (intent) {
     case "oi_problem":
@@ -1359,7 +1388,7 @@ function WebSearchPlanCard({ decision }: { decision: SearchDecision }) {
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="font-medium text-foreground">联网搜索计划</span>
         <span className="rounded-full border border-sky-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-sky-700 dark:border-sky-300/20 dark:bg-white/[0.05] dark:text-sky-200">
-          尚未执行真实搜索
+          按需公开搜索
         </span>
       </div>
       <div className="grid gap-1.5">
@@ -1369,6 +1398,20 @@ function WebSearchPlanCard({ decision }: { decision: SearchDecision }) {
             {getSearchIntentLabel(decision.intent)}
           </span>
         </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="shrink-0 text-muted-foreground">搜索必要性</span>
+          <span className="rounded-full bg-background/80 px-2 py-0.5 text-[11px] text-foreground dark:bg-white/[0.05]">
+            {getSearchConfidenceLabel(decision.confidence)}
+          </span>
+        </div>
+        {decision.reason && (
+          <div className="grid min-w-0 gap-1">
+            <span className="text-muted-foreground">判断原因</span>
+            <div className="min-w-0 break-words rounded-md bg-background/70 px-2 py-1 text-[11px] leading-5 text-foreground dark:bg-white/[0.05]">
+              {decision.reason}
+            </div>
+          </div>
+        )}
         {chips.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="shrink-0 text-muted-foreground">识别信息</span>
@@ -1404,7 +1447,7 @@ function WebSearchPlanCard({ decision }: { decision: SearchDecision }) {
         )}
       </div>
       <div className="text-[11px] leading-5 text-muted-foreground">
-        当前版本仅生成搜索计划，尚未联网获取来源。
+        当前阶段会先生成搜索计划，再按授权和配置决定是否执行公开搜索。
       </div>
     </div>
   );
@@ -1430,6 +1473,15 @@ const getSourceTypeLabel = (sourceType: WebSource["sourceType"]): string => {
   }
 };
 
+const getReliabilityLabel = (source: WebSource): string => source.reliabilityLabel || (
+  source.reliability === "official" ? "官方" :
+  source.reliability === "wiki" ? "知识库" :
+  source.reliability === "community_solution" ? "社区题解" :
+  source.reliability === "discussion" ? "讨论" :
+  source.reliability === "blog" ? "博客" :
+  "未知"
+);
+
 function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
@@ -1452,6 +1504,12 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200">
                     {getSourceTypeLabel(source.sourceType)}
+                  </span>
+                  <span
+                    className="rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] text-foreground dark:bg-white/[0.05]"
+                    title={source.reliabilityReason}
+                  >
+                    {getReliabilityLabel(source)}
                   </span>
                   <span className="truncate text-[11px] text-muted-foreground">
                     {source.site ?? source.url}
@@ -1817,6 +1875,7 @@ export default function AiSidebar({
   isMaximized = false,
   onMaximizedChange,
   aiConfig,
+  onAiConfigChange,
   onOpenAiSettings,
   onApplySuggestedTags,
   onApplyPolishedSelection,
@@ -1849,6 +1908,8 @@ export default function AiSidebar({
     readIncludeCurrentNoteContextPreference,
   );
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(readWebSearchModePreference);
+  const [isWebSearchConsentDialogOpen, setIsWebSearchConsentDialogOpen] = useState(false);
+  const [isSavingWebSearchConsent, setIsSavingWebSearchConsent] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   const [applyingTagMessageId, setApplyingTagMessageId] = useState<string | null>(null);
@@ -1902,10 +1963,12 @@ export default function AiSidebar({
   selectedModelLabelRef.current = selectedModelLabel;
   const compressedContextSummary = activeConversation?.compressedContextSummary?.trim() ?? "";
   const compressedContextLength = compressedContextSummary.length;
-  const webSearchEnabled = webSearchMode === "auto";
-  const webSearchConfig = aiConfig?.web_search;
+  const webSearchConfig = normalizeWebSearchConfig(aiConfig?.web_search);
+  const hasPublicWebSearchConsent = webSearchConfig.publicSearchConsent;
+  const webSearchEnabled = webSearchMode === "auto" && hasPublicWebSearchConsent;
   const canUseWebSearchProvider =
-    webSearchConfig?.enabled === true &&
+    hasPublicWebSearchConsent &&
+    webSearchConfig.enabled === true &&
     webSearchConfig.provider === "brave" &&
     webSearchConfig.braveApiKey.trim().length > 0;
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
@@ -2081,6 +2144,36 @@ export default function AiSidebar({
     return { ...message, id: createMessageId(messageSeqRef.current) };
   };
 
+  const persistWebSearchConsent = async (consent: boolean): Promise<void> => {
+    if (!aiConfig) return;
+    const nextConfig = {
+      ...aiConfig,
+      web_search: {
+        ...normalizeWebSearchConfig(aiConfig.web_search),
+        publicSearchConsent: consent,
+      },
+    };
+    setIsSavingWebSearchConsent(true);
+    try {
+      await saveAiConfig(nextConfig);
+      onAiConfigChange(nextConfig);
+    } finally {
+      setIsSavingWebSearchConsent(false);
+    }
+  };
+
+  const handleWebSearchToggle = () => {
+    if (webSearchEnabled) {
+      setWebSearchMode("off");
+      return;
+    }
+    if (!hasPublicWebSearchConsent) {
+      setIsWebSearchConsentDialogOpen(true);
+      return;
+    }
+    setWebSearchMode("auto");
+  };
+
   const resolveWebSourcesForMessage = async (
     conversationId: string,
     messageId: string,
@@ -2091,7 +2184,7 @@ export default function AiSidebar({
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
         sources: undefined,
-        searchError: "需要在 AI 设置中配置搜索服务",
+        searchError: hasPublicWebSearchConsent ? "需要在 AI 设置中配置搜索服务" : "需要先授权公开网页搜索",
       }));
       return;
     }
@@ -4509,8 +4602,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   "inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-2 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
                   webSearchEnabled && "border-primary/40 bg-primary/10 text-foreground",
                 )}
-                onClick={() => setWebSearchMode((mode) => (mode === "auto" ? "off" : "auto"))}
-                title={webSearchEnabled ? "允许 NoteX 按需进行联网搜索（当前阶段不会真实联网）" : "关闭联网搜索，只使用笔记、历史上下文和模型自身能力"}
+                onClick={handleWebSearchToggle}
+                title={webSearchEnabled ? "允许 NoteX 按需进行联网搜索" : "关闭联网搜索，只使用笔记、历史上下文和模型自身能力"}
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">联网搜索</span>
@@ -4600,6 +4693,49 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         </div>
       </div>
+      <Dialog open={isWebSearchConsentDialogOpen} onOpenChange={(open) => !isSavingWebSearchConsent && setIsWebSearchConsentDialogOpen(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>启用公开网页搜索</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 text-sm leading-6 text-muted-foreground">
+            <p>NoteX 可以使用公开网页搜索来辅助回答，例如查找题解、讨论、算法资料和常见错误。</p>
+            <p>本功能不会读取你的浏览器 Cookie、历史记录、密码、登录状态或本地隐私数据。</p>
+            <p>搜索只会发送题号、算法名、错误关键词等必要查询词。</p>
+            <p>NoteX 只访问公开网页；如果网站拒绝访问，将自动降级，不会尝试绕过登录、验证码或反爬限制。</p>
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5">
+              公开搜索边界：Cookie `{String(PUBLIC_WEB_REQUEST_POLICY.useCookies)}`，历史记录 `{String(PUBLIC_WEB_REQUEST_POLICY.useBrowserHistory)}`，登录态 `{String(PUBLIC_WEB_REQUEST_POLICY.useLoginState)}`，最小查询词 `{String(PUBLIC_WEB_REQUEST_POLICY.sendMinimalQueryOnly)}`。
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsWebSearchConsentDialogOpen(false);
+                setWebSearchMode("off");
+              }}
+              disabled={isSavingWebSearchConsent}
+            >
+              暂不启用
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                void persistWebSearchConsent(true).then(() => {
+                  setWebSearchMode("auto");
+                  setIsWebSearchConsentDialogOpen(false);
+                }).catch(() => {
+                  // keep dialog open if save fails
+                });
+              }}
+              disabled={isSavingWebSearchConsent}
+            >
+              {isSavingWebSearchConsent ? "保存中..." : "启用公开搜索"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

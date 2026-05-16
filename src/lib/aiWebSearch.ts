@@ -4,6 +4,14 @@ export type WebSearchMode = "off" | "auto";
 
 export type WebSearchProvider = "brave";
 
+export type WebSourceReliability =
+  | "official"
+  | "wiki"
+  | "community_solution"
+  | "discussion"
+  | "blog"
+  | "unknown";
+
 export type ResearchIntent =
   | "no_search"
   | "oi_problem"
@@ -19,13 +27,26 @@ export type WebSource = {
   site?: string;
   snippet?: string;
   sourceType?: "problem" | "solution" | "discussion" | "wiki" | "blog" | "official" | "unknown";
+  reliability?: WebSourceReliability;
+  reliabilityLabel?: string;
+  reliabilityReason?: string;
   selected?: boolean;
+};
+
+export type PublicWebRequestPolicy = {
+  useCookies: false;
+  useBrowserHistory: false;
+  useLoginState: false;
+  useLocalPrivateData: false;
+  bypassAntiBot: false;
+  sendMinimalQueryOnly: true;
 };
 
 export type WebSearchConfig = {
   enabled: boolean;
   provider: WebSearchProvider;
   braveApiKey: string;
+  publicSearchConsent: boolean;
 };
 
 export type WebSearchRequest = {
@@ -42,6 +63,9 @@ export type WebSearchResult = {
   site?: string;
   snippet?: string;
   sourceType?: WebSource["sourceType"];
+  reliability?: WebSourceReliability;
+  reliabilityLabel?: string;
+  reliabilityReason?: string;
 };
 
 export type SearchDecision = {
@@ -51,6 +75,7 @@ export type SearchDecision = {
   algorithmKeywords?: string[];
   errorKeywords?: string[];
   queries: string[];
+  confidence?: number;
   reason?: string;
 };
 
@@ -81,6 +106,23 @@ const ALGORITHM_KEYWORDS = [
   "费用流",
 ];
 const GENERAL_WEB_KEYWORDS = ["最新", "官网", "文档", "版本", "资料", "网页", "链接"];
+const EXPLICIT_WEB_SEARCH_KEYWORDS = [
+  "搜一下",
+  "查一下",
+  "查查",
+  "搜搜",
+  "联网",
+  "网上",
+  "公开网页",
+  "有没有资料",
+  "帮我查",
+  "找资料",
+  "看资料",
+  "看 oi wiki",
+  "看oi wiki",
+];
+const EXPLANATION_ONLY_KEYWORDS = ["是什么", "什么意思", "怎么理解", "解释一下", "原理", "概念"];
+const SEARCH_CONFIDENCE_THRESHOLD = 0.65;
 
 const unique = (items: string[]): string[] => [...new Set(items.filter(Boolean))];
 
@@ -88,13 +130,24 @@ export const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
   enabled: false,
   provider: "brave",
   braveApiKey: "",
+  publicSearchConsent: false,
 };
 
 export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null | undefined): WebSearchConfig => ({
   enabled: config?.enabled === true,
   provider: config?.provider === "brave" ? "brave" : "brave",
   braveApiKey: typeof config?.braveApiKey === "string" ? config.braveApiKey.trim() : "",
+  publicSearchConsent: config?.publicSearchConsent === true,
 });
+
+export const PUBLIC_WEB_REQUEST_POLICY: PublicWebRequestPolicy = {
+  useCookies: false,
+  useBrowserHistory: false,
+  useLoginState: false,
+  useLocalPrivateData: false,
+  bypassAntiBot: false,
+  sendMinimalQueryOnly: true,
+};
 
 const collectMatches = (text: string, patterns: RegExp[]): string[] =>
   unique(patterns.flatMap((pattern) => text.match(pattern) ?? []).map((item) => item.toUpperCase()));
@@ -146,6 +199,11 @@ const buildAlgorithmQueries = (algorithmKeywords: string[], errorKeywords: strin
     errorKeywords.length > 0 ? trimQuery(`${keyword} ${errorKeywords.join(" ")}`) : "",
   ]));
 
+const hasKeyword = (text: string, keywords: string[]): boolean =>
+  keywords.some((keyword) => text.toLocaleLowerCase().includes(keyword.toLocaleLowerCase()));
+
+const clampConfidence = (value: number): number => Math.max(0, Math.min(1, Number(value.toFixed(2))));
+
 export function buildSearchDecision(
   input: string,
   context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
@@ -165,7 +223,57 @@ export function buildSearchDecision(
   const algorithmKeywords = collectKeywords(haystack, ALGORITHM_KEYWORDS);
   const errorKeywords = collectKeywords(haystack, DEBUG_KEYWORDS);
   const generalWebKeywords = collectKeywords(haystack, GENERAL_WEB_KEYWORDS);
+  const explicitWebSearchRequested = hasKeyword(haystack, EXPLICIT_WEB_SEARCH_KEYWORDS);
+  const explanationOnlyRequested = hasKeyword(question, EXPLANATION_ONLY_KEYWORDS);
   const problemTitle = getProblemTitleCandidate(question, context);
+  const reasons: string[] = [];
+  let confidence = 0.08;
+
+  if (explicitWebSearchRequested) {
+    confidence += 0.48;
+    reasons.push("用户明确要求联网查资料");
+  }
+  if (problemIds.length > 0) {
+    confidence += 0.46;
+    reasons.push(`识别到题号 ${problemIds[0]}`);
+  }
+  if (discussionKeywords.length > 0) {
+    confidence += problemIds.length > 0 || explicitWebSearchRequested ? 0.2 : 0.12;
+    reasons.push("问题涉及讨论 / 常见坑 / 警示后人");
+  }
+  if (errorKeywords.length > 0) {
+    confidence += problemIds.length > 0 || explicitWebSearchRequested || solutionKeywords.length > 0 ? 0.24 : 0.12;
+    reasons.push("问题涉及 WA / TLE / RE 等调试线索");
+  }
+  if (generalWebKeywords.length > 0) {
+    confidence += 0.24;
+    reasons.push("问题依赖外部或时效性资料");
+  }
+  if (algorithmKeywords.length > 0) {
+    if (explicitWebSearchRequested || generalWebKeywords.length > 0) {
+      confidence += 0.22;
+      reasons.push(`识别到算法关键词：${algorithmKeywords[0]}`);
+    } else if (!problemIds.length && !errorKeywords.length && !discussionKeywords.length) {
+      confidence += 0.12;
+    }
+  }
+  if (
+    explanationOnlyRequested &&
+    algorithmKeywords.length > 0 &&
+    !explicitWebSearchRequested &&
+    !generalWebKeywords.length &&
+    !problemIds.length &&
+    !errorKeywords.length &&
+    !discussionKeywords.length
+  ) {
+    confidence -= 0.18;
+  }
+  if (!question) {
+    confidence = 0;
+  }
+  confidence = clampConfidence(confidence);
+
+  const shouldSearch = confidence >= SEARCH_CONFIDENCE_THRESHOLD;
 
   if (problemIds.length > 0) {
     const problemId = problemIds[0];
@@ -174,43 +282,47 @@ export function buildSearchDecision(
       discussionKeywords.length > 0 ? "oi_discussion" :
       "oi_problem";
     return {
-      shouldSearch: true,
+      shouldSearch,
       intent,
       problemId,
       algorithmKeywords: algorithmKeywords.length > 0 ? algorithmKeywords : undefined,
       errorKeywords: errorKeywords.length > 0 ? errorKeywords : undefined,
-      queries: buildProblemQueries(problemId, problemTitle, discussionKeywords, errorKeywords),
-      reason: "Detected an OI problem id in the question or current lightweight context.",
+      queries: shouldSearch ? buildProblemQueries(problemId, problemTitle, discussionKeywords, errorKeywords) : [],
+      confidence,
+      reason: reasons.join("，") || "识别到题号，并且联网可能有帮助。",
     };
   }
 
-  if (algorithmKeywords.length > 0) {
+  if (algorithmKeywords.length > 0 && (explicitWebSearchRequested || generalWebKeywords.length > 0)) {
     return {
-      shouldSearch: true,
+      shouldSearch,
       intent: "algorithm_reference",
       algorithmKeywords,
       errorKeywords: errorKeywords.length > 0 ? errorKeywords : undefined,
-      queries: buildAlgorithmQueries(algorithmKeywords, errorKeywords),
-      reason: "Detected algorithm keywords that may benefit from reference material.",
+      queries: shouldSearch ? buildAlgorithmQueries(algorithmKeywords, errorKeywords) : [],
+      confidence,
+      reason: reasons.join("，") || "用户在查算法外部资料。",
     };
   }
 
   if (errorKeywords.length > 0 && (solutionKeywords.length > 0 || discussionKeywords.length > 0)) {
     return {
-      shouldSearch: true,
+      shouldSearch,
       intent: "debug_issue",
       errorKeywords,
-      queries: [compactQuery(`${question} ${errorKeywords.join(" ")}`)],
-      reason: "Detected OI debugging terms and source-seeking wording.",
+      queries: shouldSearch ? [compactQuery(`${question} ${errorKeywords.join(" ")}`)] : [],
+      confidence,
+      reason: reasons.join("，") || "问题偏向调试排查，联网可能补充经验来源。",
     };
   }
 
-  if (generalWebKeywords.length > 0) {
+  if (generalWebKeywords.length > 0 || explicitWebSearchRequested) {
     return {
-      shouldSearch: true,
+      shouldSearch,
       intent: "general_web",
-      queries: [compactQuery(question)],
-      reason: "Detected wording that asks for current or external web information.",
+      queries: shouldSearch ? [compactQuery(question)] : [],
+      confidence,
+      reason: reasons.join("，") || "用户在请求外部网页资料。",
     };
   }
 
@@ -218,6 +330,9 @@ export function buildSearchDecision(
     shouldSearch: false,
     intent: "no_search",
     queries: [],
-    reason: "No local rule indicated that web research is needed.",
+    confidence,
+    reason: algorithmKeywords.length > 0 && explanationOnlyRequested
+      ? "当前更像算法概念解释，本地回答通常已足够。"
+      : "当前问题主要可由笔记上下文和模型自身能力回答，无需联网。",
   };
 }

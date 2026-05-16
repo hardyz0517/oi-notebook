@@ -175,6 +175,9 @@ pub struct WebSearchResult {
     pub site: Option<String>,
     pub snippet: Option<String>,
     pub source_type: Option<String>,
+    pub reliability: Option<String>,
+    pub reliability_label: Option<String>,
+    pub reliability_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -498,6 +501,7 @@ fn normalize_web_search_config(config: &crate::luogu::WebSearchConfigFields) -> 
             WEB_SEARCH_DEFAULT_PROVIDER.to_string()
         },
         brave_api_key: config.brave_api_key.trim().to_string(),
+        public_search_consent: config.public_search_consent,
     }
 }
 
@@ -2576,6 +2580,62 @@ fn infer_web_source_type(title: &str, url: &str, snippet: &str) -> String {
     "unknown".to_string()
 }
 
+fn infer_web_reliability(title: &str, url: &str, snippet: &str) -> (String, String, String) {
+    let haystack = format!("{title}\n{url}\n{snippet}").to_ascii_lowercase();
+    let combined = format!("{title}\n{snippet}");
+    if haystack.contains("oi-wiki.org") {
+        return (
+            "wiki".to_string(),
+            "知识库".to_string(),
+            "来自 OI Wiki 这类公开算法知识库".to_string(),
+        );
+    }
+    if haystack.contains("codeforces.com/problemset/problem")
+        || haystack.contains("atcoder.jp/contests/")
+        || haystack.contains("luogu.com.cn/problem/")
+    {
+        return (
+            "official".to_string(),
+            "官方".to_string(),
+            "看起来是题面或官方站点页面".to_string(),
+        );
+    }
+    if haystack.contains("luogu.com.cn/discuss")
+        || combined.contains("讨论")
+        || combined.contains("警示后人")
+        || combined.contains("常见坑")
+    {
+        return (
+            "discussion".to_string(),
+            "讨论".to_string(),
+            "更像讨论区或经验反馈内容".to_string(),
+        );
+    }
+    if combined.contains("题解") {
+        return (
+            "community_solution".to_string(),
+            "社区题解".to_string(),
+            "更像社区整理的题解内容".to_string(),
+        );
+    }
+    if haystack.contains("blog")
+        || haystack.contains("cnblogs.com")
+        || haystack.contains("blog.csdn.net")
+        || haystack.contains("luogu.com.cn/article")
+    {
+        return (
+            "blog".to_string(),
+            "博客".to_string(),
+            "来自个人或社区博客页面".to_string(),
+        );
+    }
+    (
+        "unknown".to_string(),
+        "未知".to_string(),
+        "仅能判断为公开搜索结果，暂时无法可靠归类".to_string(),
+    )
+}
+
 fn brave_search_status_error(status: reqwest::StatusCode, body: &str) -> String {
     let status_code = status.as_u16();
     match status_code {
@@ -2602,6 +2662,8 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         .filter(|name| !name.is_empty())
         .or_else(|| site_from_url(&url));
     let source_type = infer_web_source_type(&title, &url, &snippet_text);
+    let (reliability, reliability_label, reliability_reason) =
+        infer_web_reliability(&title, &url, &snippet_text);
     let id = format!("web-{}", &stable_hash_hex(&url)[..12]);
 
     Some(WebSearchResult {
@@ -2611,6 +2673,9 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         site,
         snippet: if snippet_text.is_empty() { None } else { Some(snippet_text) },
         source_type: Some(source_type),
+        reliability: Some(reliability),
+        reliability_label: Some(reliability_label),
+        reliability_reason: Some(reliability_reason),
     })
 }
 
@@ -2711,6 +2776,9 @@ pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearc
 
     let app_config = read_config()?;
     let search_config = normalize_web_search_config(&app_config.ai.web_search);
+    if !search_config.public_search_consent {
+        return Err("需要先授权公开网页搜索".to_string());
+    }
     if !search_config.enabled || search_config.brave_api_key.trim().is_empty() {
         return Err("需要在 AI 设置中配置搜索服务".to_string());
     }
