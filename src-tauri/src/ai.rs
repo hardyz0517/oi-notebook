@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -22,6 +23,10 @@ const AI_DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 20;
 const AI_FULL_NOTE_POLISH_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
+const WEB_SEARCH_DEFAULT_PROVIDER: &str = "brave";
+const WEB_SEARCH_MAX_QUERIES: usize = 6;
+const WEB_SEARCH_MAX_RESULTS: usize = 10;
+const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -126,6 +131,7 @@ pub struct NoteChatHistoryMessageInput {
     pub text: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteChatStreamInput {
@@ -144,6 +150,54 @@ pub struct NoteChatStreamInput {
     pub web_search_enabled: bool,
     #[serde(default)]
     pub search_decision: Option<JsonValue>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchRequestInput {
+    pub queries: Vec<String>,
+    pub intent: String,
+    #[serde(default)]
+    pub problem_id: Option<String>,
+    #[serde(default)]
+    pub max_results: Option<usize>,
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchResult {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub site: Option<String>,
+    pub snippet: Option<String>,
+    pub source_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BraveSearchResponse {
+    web: Option<BraveWebResults>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BraveWebResults {
+    results: Vec<BraveWebResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BraveWebResult {
+    title: Option<String>,
+    url: Option<String>,
+    description: Option<String>,
+    profile: Option<BraveResultProfile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BraveResultProfile {
+    name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -431,6 +485,19 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
         providers,
         default_provider_id,
         default_model_id,
+        web_search: normalize_web_search_config(&config.web_search),
+    }
+}
+
+fn normalize_web_search_config(config: &crate::luogu::WebSearchConfigFields) -> crate::luogu::WebSearchConfigFields {
+    crate::luogu::WebSearchConfigFields {
+        enabled: config.enabled,
+        provider: if config.provider.trim() == WEB_SEARCH_DEFAULT_PROVIDER {
+            WEB_SEARCH_DEFAULT_PROVIDER.to_string()
+        } else {
+            WEB_SEARCH_DEFAULT_PROVIDER.to_string()
+        },
+        brave_api_key: config.brave_api_key.trim().to_string(),
     }
 }
 
@@ -533,6 +600,7 @@ fn config_from_resolved(resolved: ResolvedAiConfig) -> AiConfigFields {
         providers: Vec::new(),
         default_provider_id: resolved.provider_id,
         default_model_id: None,
+        web_search: crate::luogu::WebSearchConfigFields::default(),
     }
 }
 
@@ -2441,6 +2509,220 @@ where
     app_config.ai = normalize_ai_config(&app_config.ai);
     write_config(&app_config)?;
     Ok(app_config.ai)
+}
+
+fn sanitize_search_text(text: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    let mut in_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    output
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
+fn site_from_url(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(ToOwned::to_owned))
+}
+
+fn infer_web_source_type(title: &str, url: &str, snippet: &str) -> String {
+    let haystack = format!("{title}\n{url}\n{snippet}").to_ascii_lowercase();
+    let text = format!("{title}\n{snippet}");
+    if haystack.contains("oi-wiki.org") {
+        return "wiki".to_string();
+    }
+    if haystack.contains("codeforces.com/problemset/problem")
+        || haystack.contains("atcoder.jp/contests/")
+    {
+        return "official".to_string();
+    }
+    if haystack.contains("luogu.com.cn/problem/") {
+        return "problem".to_string();
+    }
+    if haystack.contains("luogu.com.cn/discuss")
+        || text.contains("讨论")
+        || text.contains("警示后人")
+        || text.contains("常见坑")
+    {
+        return "discussion".to_string();
+    }
+    if text.contains("题解") || haystack.contains("solution") {
+        return "solution".to_string();
+    }
+    if haystack.contains("blog")
+        || haystack.contains("cnblogs.com")
+        || haystack.contains("blog.csdn.net")
+        || haystack.contains("luogu.com.cn/article")
+    {
+        return "blog".to_string();
+    }
+    "unknown".to_string()
+}
+
+fn brave_search_status_error(status: reqwest::StatusCode, body: &str) -> String {
+    let status_code = status.as_u16();
+    match status_code {
+        401 | 403 => "联网搜索失败：Brave Search API Key 无效或没有权限".to_string(),
+        429 => "联网搜索失败：搜索服务配额不足或请求过快".to_string(),
+        _ => format!(
+            "联网搜索失败：搜索服务返回 HTTP {status_code}; debug=body_preview={}",
+            sanitize_ai_detail(body)
+        ),
+    }
+}
+
+fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult> {
+    let url = result.url?.trim().to_string();
+    if url.is_empty() {
+        return None;
+    }
+    let title = sanitize_search_text(result.title.as_deref().unwrap_or(&url), 120);
+    let snippet_text = sanitize_search_text(result.description.as_deref().unwrap_or(""), 220);
+    let site = result
+        .profile
+        .and_then(|profile| profile.name)
+        .map(|name| sanitize_search_text(&name, 80))
+        .filter(|name| !name.is_empty())
+        .or_else(|| site_from_url(&url));
+    let source_type = infer_web_source_type(&title, &url, &snippet_text);
+    let id = format!("web-{}", &stable_hash_hex(&url)[..12]);
+
+    Some(WebSearchResult {
+        id,
+        title: if title.is_empty() { url.clone() } else { title },
+        url,
+        site,
+        snippet: if snippet_text.is_empty() { None } else { Some(snippet_text) },
+        source_type: Some(source_type),
+    })
+}
+
+fn search_brave_sources(
+    request: &WebSearchRequestInput,
+    api_key: &str,
+    max_results: usize,
+) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("oi-notebook/0.1")
+        .build()
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+    let mut seen_urls = HashSet::new();
+    let mut results = Vec::new();
+    let per_query_count = max_results.clamp(1, 10).to_string();
+
+    for query in request
+        .queries
+        .iter()
+        .map(|query| query.trim())
+        .filter(|query| !query.is_empty())
+        .take(WEB_SEARCH_MAX_QUERIES)
+    {
+        if results.len() >= max_results {
+            break;
+        }
+        let mut url = reqwest::Url::parse(BRAVE_SEARCH_ENDPOINT)
+            .map_err(|e| format!("联网搜索失败：搜索服务 URL 无效: {e}"))?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("count", per_query_count.as_str())
+            .append_pair("country", "cn")
+            .append_pair("search_lang", "zh-hans");
+        let response = client
+            .get(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header("X-Subscription-Token", api_key)
+            .send()
+            .map_err(|e| {
+                if e.is_timeout() {
+                    "联网搜索失败：搜索服务请求超时".to_string()
+                } else {
+                    "联网搜索失败：网络请求失败".to_string()
+                }
+            })?;
+
+        let status = response.status();
+        let body = response
+            .bytes()
+            .map(|bytes| decode_response_body(&bytes))
+            .map_err(|_| "联网搜索失败：搜索服务响应读取失败".to_string())?;
+        let body_trimmed = body.trim();
+        if !status.is_success() {
+            return Err(brave_search_status_error(status, body_trimmed));
+        }
+
+        let parsed = serde_json::from_str::<BraveSearchResponse>(body_trimmed)
+            .map_err(|_| "联网搜索失败：搜索服务返回格式异常".to_string())?;
+        let items = parsed.web.map(|web| web.results).unwrap_or_default();
+        for item in items {
+            if results.len() >= max_results {
+                break;
+            }
+            let Some(source) = brave_result_to_web_source(item) else {
+                continue;
+            };
+            if seen_urls.insert(source.url.clone()) {
+                results.push(source);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
+    let provider = request
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(WEB_SEARCH_DEFAULT_PROVIDER);
+    if provider != WEB_SEARCH_DEFAULT_PROVIDER {
+        return Err("联网搜索失败：当前只支持 Brave Search Provider".to_string());
+    }
+    let queries = request
+        .queries
+        .iter()
+        .map(|query| query.trim())
+        .filter(|query| !query.is_empty())
+        .take(WEB_SEARCH_MAX_QUERIES)
+        .collect::<Vec<_>>();
+    if queries.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let app_config = read_config()?;
+    let search_config = normalize_web_search_config(&app_config.ai.web_search);
+    if !search_config.enabled || search_config.brave_api_key.trim().is_empty() {
+        return Err("需要在 AI 设置中配置搜索服务".to_string());
+    }
+    if search_config.brave_api_key.contains(['\r', '\n']) {
+        return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
+    }
+
+    let max_results = request
+        .max_results
+        .unwrap_or(WEB_SEARCH_MAX_RESULTS)
+        .clamp(1, WEB_SEARCH_MAX_RESULTS);
+    search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
 }
 
 #[tauri::command]

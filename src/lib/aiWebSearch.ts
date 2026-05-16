@@ -2,6 +2,8 @@ import type { NoteChatContextPayload } from "@/lib/api";
 
 export type WebSearchMode = "off" | "auto";
 
+export type WebSearchProvider = "brave";
+
 export type ResearchIntent =
   | "no_search"
   | "oi_problem"
@@ -18,6 +20,28 @@ export type WebSource = {
   snippet?: string;
   sourceType?: "problem" | "solution" | "discussion" | "wiki" | "blog" | "official" | "unknown";
   selected?: boolean;
+};
+
+export type WebSearchConfig = {
+  enabled: boolean;
+  provider: WebSearchProvider;
+  braveApiKey: string;
+};
+
+export type WebSearchRequest = {
+  queries: string[];
+  intent: ResearchIntent;
+  problemId?: string;
+  maxResults?: number;
+};
+
+export type WebSearchResult = {
+  id: string;
+  title: string;
+  url: string;
+  site?: string;
+  snippet?: string;
+  sourceType?: WebSource["sourceType"];
 };
 
 export type SearchDecision = {
@@ -59,6 +83,18 @@ const ALGORITHM_KEYWORDS = [
 const GENERAL_WEB_KEYWORDS = ["最新", "官网", "文档", "版本", "资料", "网页", "链接"];
 
 const unique = (items: string[]): string[] => [...new Set(items.filter(Boolean))];
+
+export const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
+  enabled: false,
+  provider: "brave",
+  braveApiKey: "",
+};
+
+export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null | undefined): WebSearchConfig => ({
+  enabled: config?.enabled === true,
+  provider: config?.provider === "brave" ? "brave" : "brave",
+  braveApiKey: typeof config?.braveApiKey === "string" ? config.braveApiKey.trim() : "",
+});
 
 const collectMatches = (text: string, patterns: RegExp[]): string[] =>
   unique(patterns.flatMap((pattern) => text.match(pattern) ?? []).map((item) => item.toUpperCase()));

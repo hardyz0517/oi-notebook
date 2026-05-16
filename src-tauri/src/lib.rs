@@ -234,6 +234,7 @@ pub fn run() {
             ai::test_ai_provider_draft,
             ai::add_ai_provider_model,
             ai::delete_ai_provider_model,
+            ai::search_web_sources,
             ai::generate_note_metadata,
             ai::polish_note_body,
             ai::suggest_note_tags,

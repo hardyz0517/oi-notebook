@@ -37,6 +37,7 @@ import {
   openExternalUrl,
   polishFullNote,
   polishSelectedText,
+  searchWebSources,
   suggestNoteTags,
   startCurrentNoteChatStream,
   type AiConfig,
@@ -68,6 +69,7 @@ type AiChatMessage = {
   retrySelectionStartLine?: number | null;
   retryInstruction?: string;
   sources?: WebSource[];
+  searchError?: string;
   searchDecision?: SearchDecision;
   startedAt?: number;
   finishedAt?: number;
@@ -439,6 +441,13 @@ const getChatErrorMessage = (error: unknown): string => {
   return "AI chat failed. Please retry.";
 };
 
+const getWebSearchErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detailStart = message.indexOf("; debug=");
+  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
+  return scopedMessage.trim() || "联网搜索失败，请稍后重试。";
+};
+
 const getTagSuggestionErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const detailStart = message.indexOf("; debug=");
@@ -720,6 +729,37 @@ const sanitizeSearchDecisionForStorage = (value: unknown): SearchDecision | unde
   };
 };
 
+const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const sourceTypes = new Set<NonNullable<WebSource["sourceType"]>>([
+    "problem",
+    "solution",
+    "discussion",
+    "wiki",
+    "blog",
+    "official",
+    "unknown",
+  ]);
+  const sources = value.flatMap((item): WebSource[] => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Partial<WebSource>;
+    if (typeof source.id !== "string" || typeof source.title !== "string" || typeof source.url !== "string") return [];
+    const title = source.title.trim();
+    const url = source.url.trim();
+    if (!title || !url) return [];
+    return [{
+      id: source.id.trim() || url,
+      title,
+      url,
+      site: typeof source.site === "string" && source.site.trim() ? source.site.trim() : undefined,
+      snippet: typeof source.snippet === "string" && source.snippet.trim() ? source.snippet.trim() : undefined,
+      sourceType: source.sourceType && sourceTypes.has(source.sourceType) ? source.sourceType : "unknown",
+      selected: source.selected === true,
+    }];
+  });
+  return sources.length > 0 ? sources.slice(0, 10) : undefined;
+};
+
 const getPreviewTitle = (preview: PolishPreviewResult): string => {
   if (preview.previewKind === "solution-format") return "题解格式化预览";
   return preview.scope === "full-note" ? "全文润色预览" : "润色预览";
@@ -756,6 +796,10 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     elapsedMs: message.elapsedMs,
     compressionResult: sanitizeCompressionResultForStorage(message.compressionResult),
     searchDecision: sanitizeSearchDecisionForStorage(message.searchDecision),
+    sources: sanitizeSourcesForStorage(message.sources),
+    searchError: typeof message.searchError === "string" && message.searchError.trim()
+      ? message.searchError.trim()
+      : undefined,
   }));
 
 const hasConversationContent = (conversation: AiConversation): boolean =>
@@ -1277,6 +1321,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
 }
 
 const SEARCH_PLAN_QUERY_LIMIT = 6;
+const SEARCH_SOURCE_PREVIEW_LIMIT = 5;
 
 const getSearchIntentLabel = (intent: SearchDecision["intent"]): string => {
   switch (intent) {
@@ -1361,6 +1406,89 @@ function WebSearchPlanCard({ decision }: { decision: SearchDecision }) {
       <div className="text-[11px] leading-5 text-muted-foreground">
         当前版本仅生成搜索计划，尚未联网获取来源。
       </div>
+    </div>
+  );
+}
+
+const getSourceTypeLabel = (sourceType: WebSource["sourceType"]): string => {
+  switch (sourceType) {
+    case "problem":
+      return "题面";
+    case "solution":
+      return "题解";
+    case "discussion":
+      return "讨论";
+    case "wiki":
+      return "Wiki";
+    case "blog":
+      return "博客";
+    case "official":
+      return "官方";
+    case "unknown":
+    default:
+      return "来源";
+  }
+};
+
+function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
+  const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
+  const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
+
+  if (visibleSources.length === 0 && !error) return null;
+
+  return (
+    <div className="mb-2 grid gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-3 py-2.5 text-xs leading-5 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-emerald-400/20 dark:bg-emerald-400/[0.07] dark:text-slate-200">
+      {visibleSources.length > 0 ? (
+        <>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-medium text-foreground">找到 {sources?.length ?? visibleSources.length} 个来源</span>
+            <span className="rounded-full border border-emerald-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-emerald-700 dark:border-emerald-300/20 dark:bg-white/[0.05] dark:text-emerald-200">
+              仅搜索结果
+            </span>
+          </div>
+          <div className="grid gap-2">
+            {visibleSources.map((source) => (
+              <div key={source.id || source.url} className="grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200">
+                    {getSourceTypeLabel(source.sourceType)}
+                  </span>
+                  <span className="truncate text-[11px] text-muted-foreground">
+                    {source.site ?? source.url}
+                  </span>
+                </div>
+                <a
+                  href={source.url}
+                  className="min-w-0 break-words text-sm font-medium leading-5 text-foreground underline decoration-transparent underline-offset-4 transition-colors hover:text-primary hover:decoration-current"
+                  title={source.url}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openExternalUrl(source.url);
+                  }}
+                >
+                  {source.title}
+                </a>
+                {source.snippet && (
+                  <div className="line-clamp-2 min-w-0 break-words text-[11px] leading-5 text-muted-foreground">
+                    {source.snippet}
+                  </div>
+                )}
+                <div className="min-w-0 break-all text-[10px] leading-4 text-muted-foreground/80">
+                  {source.url}
+                </div>
+              </div>
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <div className="text-[11px] text-muted-foreground">还有 {hiddenCount} 个来源未展开。</div>
+          )}
+          <div className="text-[11px] leading-5 text-muted-foreground">
+            当前阶段仅展示搜索结果，尚未读取网页正文。
+          </div>
+        </>
+      ) : (
+        <div className="text-[11px] leading-5 text-muted-foreground">{error}</div>
+      )}
     </div>
   );
 }
@@ -1775,6 +1903,11 @@ export default function AiSidebar({
   const compressedContextSummary = activeConversation?.compressedContextSummary?.trim() ?? "";
   const compressedContextLength = compressedContextSummary.length;
   const webSearchEnabled = webSearchMode === "auto";
+  const webSearchConfig = aiConfig?.web_search;
+  const canUseWebSearchProvider =
+    webSearchConfig?.enabled === true &&
+    webSearchConfig.provider === "brave" &&
+    webSearchConfig.braveApiKey.trim().length > 0;
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -1946,6 +2079,43 @@ export default function AiSidebar({
   const createMessage = (message: Omit<AiChatMessage, "id">): AiChatMessage => {
     messageSeqRef.current += 1;
     return { ...message, id: createMessageId(messageSeqRef.current) };
+  };
+
+  const resolveWebSourcesForMessage = async (
+    conversationId: string,
+    messageId: string,
+    decision: SearchDecision,
+  ): Promise<void> => {
+    if (!decision.shouldSearch) return;
+    if (!canUseWebSearchProvider) {
+      replaceMessage(conversationId, messageId, (message) => ({
+        ...message,
+        sources: undefined,
+        searchError: "需要在 AI 设置中配置搜索服务",
+      }));
+      return;
+    }
+
+    try {
+      const sources = await searchWebSources({
+        provider: "brave",
+        queries: decision.queries,
+        intent: decision.intent,
+        problemId: decision.problemId,
+        maxResults: 10,
+      });
+      replaceMessage(conversationId, messageId, (message) => ({
+        ...message,
+        sources: sources.length > 0 ? sources : undefined,
+        searchError: sources.length > 0 ? undefined : "联网搜索没有返回可展示的来源",
+      }));
+    } catch (error) {
+      replaceMessage(conversationId, messageId, (message) => ({
+        ...message,
+        sources: undefined,
+        searchError: getWebSearchErrorMessage(error),
+      }));
+    }
   };
 
   const updateConversationMessages = (
@@ -3187,6 +3357,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     });
     activeStreamsRef.current.add(streamId);
     updateRespondingState();
+    void resolveWebSourcesForMessage(conversationId, assistantMessage.id, searchDecision);
 
     void startCurrentNoteChatStream({
       streamId,
@@ -4003,6 +4174,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     )}>
                       {message.searchDecision?.shouldSearch && (
                         <WebSearchPlanCard decision={message.searchDecision} />
+                      )}
+                      {message.searchDecision?.shouldSearch && (
+                        <WebSearchSourcesCard sources={message.sources} error={message.searchError} />
                       )}
                       {message.kind === "tag-suggestion" && message.tagSuggestion ? (
                         <TagSuggestionCard

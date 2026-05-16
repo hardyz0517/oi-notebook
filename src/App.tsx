@@ -21,6 +21,7 @@ import { formatRelativeTime } from "@/lib/datetime";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes } from "@/lib/api";
 import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
+import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import type { NoteFileInfo } from "@/types/note";
@@ -115,7 +116,7 @@ type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
 type SettingsSection = "general" | "appearance" | "editor" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
-type AiSettingsTab = "api" | "prompts";
+type AiSettingsTab = "api" | "web-search" | "prompts";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
@@ -306,6 +307,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: stri
 ];
 const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string; description: string }> = [
   { id: "api", label: "模型与 API", description: "配置 OpenAI-compatible API、模型和默认项" },
+  { id: "web-search", label: "联网搜索", description: "配置真实搜索 Provider" },
   { id: "prompts", label: "Prompt 模板", description: "编辑本地 AI Prompt 模板" },
 ];
 const MARKDOWN_CAPABILITIES = [
@@ -358,6 +360,7 @@ function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTempla
 function cloneAiConfig(config: AiConfig): AiConfig {
   return {
     ...config,
+    web_search: normalizeWebSearchConfig(config.web_search),
     providers: config.providers.map((provider) => ({
       ...provider,
       models: provider.models.map((model) => ({ ...model })),
@@ -411,6 +414,7 @@ function normalizeAiConfigDraft(config: AiConfig): AiConfig {
     providers,
     default_provider_id: defaultProvider?.id ?? null,
     default_model_id: defaultModel,
+    web_search: normalizeWebSearchConfig(config.web_search),
   };
 }
 
@@ -1585,6 +1589,7 @@ export default function App() {
       providers: [provider],
       default_provider_id: provider.id,
       default_model_id: provider.default_model,
+      web_search: DEFAULT_WEB_SEARCH_CONFIG,
     })])),
     [aiConfig],
   );
@@ -2302,6 +2307,7 @@ export default function App() {
         providers: [],
         default_provider_id: null,
         default_model_id: null,
+        web_search: DEFAULT_WEB_SEARCH_CONFIG,
       };
       return {
         ...cloneAiConfig(base),
@@ -2351,6 +2357,7 @@ export default function App() {
           providers: [],
           default_provider_id: null,
           default_model_id: null,
+          web_search: DEFAULT_WEB_SEARCH_CONFIG,
         };
         return {
           ...cloneAiConfig(base),
@@ -5986,6 +5993,7 @@ export default function App() {
                                 providers: [provider],
                                 default_provider_id: provider.id,
                                 default_model_id: provider.default_model,
+                                web_search: DEFAULT_WEB_SEARCH_CONFIG,
                               });
                               const isProviderDirty = savedAiProviderById.get(provider.id) !== providerComparable;
                               return (
@@ -6199,6 +6207,88 @@ export default function App() {
                           )}
                         </main>
                       </div>
+                    )}
+
+                    {aiSettingsTab === "web-search" && (
+                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                        <div className="grid gap-1">
+                          <div className="text-base font-semibold text-foreground">联网搜索 Provider</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            仅用于 NoteX 的联网搜索来源卡片。当前阶段只读取搜索结果标题、摘要和 URL，不抓取网页正文。
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 rounded-md border border-border/70 bg-background/50 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="grid gap-1">
+                              <div className="text-sm font-semibold text-foreground">启用真实搜索服务</div>
+                              <div className="text-xs leading-5 text-muted-foreground">
+                                composer 里的“联网搜索”仍然只是允许按需搜索；这里决定是否真的调用 Provider。
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex h-8 items-center rounded-full border px-1 text-xs font-medium transition-colors",
+                                aiConfigDraft?.web_search.enabled
+                                  ? "border-primary/60 bg-primary/15 text-primary"
+                                  : "border-border bg-muted/30 text-muted-foreground hover:text-foreground",
+                              )}
+                              onClick={() => updateAiConfigDraft((config) => ({
+                                ...config,
+                                web_search: {
+                                  ...normalizeWebSearchConfig(config.web_search),
+                                  enabled: !normalizeWebSearchConfig(config.web_search).enabled,
+                                },
+                              }))}
+                              disabled={!aiConfigDraft || isSavingAiConfig}
+                              aria-pressed={aiConfigDraft?.web_search.enabled === true}
+                            >
+                              <span className={cn(
+                                "mr-2 h-5 w-5 rounded-full bg-current opacity-80 transition-transform",
+                                aiConfigDraft?.web_search.enabled && "translate-x-5",
+                              )} />
+                              <span className="min-w-[3.5rem]">
+                                {aiConfigDraft?.web_search.enabled ? "已启用" : "未启用"}
+                              </span>
+                            </button>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="grid gap-2">
+                              <Label htmlFor="web-search-provider">Provider</Label>
+                              <Input
+                                id="web-search-provider"
+                                value="Brave Search"
+                                readOnly
+                                className="bg-muted/30"
+                              />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="web-search-api-key">Brave Search API Key</Label>
+                              <Input
+                                id="web-search-api-key"
+                                type="password"
+                                value={aiConfigDraft?.web_search.braveApiKey ?? ""}
+                                placeholder="BSA..."
+                                onChange={(event) => updateAiConfigDraft((config) => ({
+                                  ...config,
+                                  web_search: {
+                                    ...normalizeWebSearchConfig(config.web_search),
+                                    provider: "brave",
+                                    braveApiKey: event.target.value,
+                                  },
+                                }))}
+                                disabled={!aiConfigDraft || isSavingAiConfig}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                            API Key 随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。未配置时，NoteX 只展示搜索计划并提示需要配置搜索服务。
+                          </div>
+                        </div>
+                      </section>
                     )}
 
                     {aiSettingsTab === "prompts" && (

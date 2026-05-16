@@ -54,6 +54,33 @@ pub struct AiConfigFields {
     pub default_provider_id: Option<String>,
     #[serde(default)]
     pub default_model_id: Option<String>,
+    #[serde(default)]
+    pub web_search: WebSearchConfigFields,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchConfigFields {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_web_search_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub brave_api_key: String,
+}
+
+impl Default for WebSearchConfigFields {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: default_web_search_provider(),
+            brave_api_key: String::new(),
+        }
+    }
+}
+
+fn default_web_search_provider() -> String {
+    "brave".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
