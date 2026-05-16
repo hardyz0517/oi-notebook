@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
   openExternalUrl,
+  fetchWebSourceExcerpts,
   polishFullNote,
   polishSelectedText,
   saveAiConfig,
@@ -74,6 +75,8 @@ type AiChatMessage = {
   sources?: WebSource[];
   searchError?: string;
   searchDecision?: SearchDecision;
+  webSearchStatus?: "planning" | "searching" | "filtering" | "fetching_excerpts" | "answering" | "failed" | "done";
+  webSearchStatusText?: string;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
@@ -262,6 +265,24 @@ const AI_INCLUDE_NOTE_CONTEXT_STORAGE_KEY = "oi-notebook.ai.includeCurrentNoteCo
 const AI_WEB_SEARCH_MODE_STORAGE_KEY = "oi-notebook.ai.webSearchMode";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
+const WEB_SEARCH_PREP_TIMEOUT_MS = 20000;
+
+const waitForNextFrame = (): Promise<void> =>
+  new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  }
+};
 const AI_REQUEST_HISTORY_LIMIT = 8;
 const AI_REQUEST_HISTORY_MESSAGE_MAX_CHARS = 1200;
 const AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT = 4;
@@ -804,6 +825,22 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       relevanceReason: typeof source.relevanceReason === "string" && source.relevanceReason.trim()
         ? source.relevanceReason.trim()
         : undefined,
+      excerptStatus:
+        source.excerptStatus === "fetched" ||
+        source.excerptStatus === "unavailable" ||
+        source.excerptStatus === "failed" ||
+        source.excerptStatus === "not_requested"
+          ? source.excerptStatus
+          : undefined,
+      excerpt: typeof source.excerpt === "string" && source.excerpt.trim()
+        ? source.excerpt.trim().slice(0, 5000)
+        : undefined,
+      excerptError: typeof source.excerptError === "string" && source.excerptError.trim()
+        ? source.excerptError.trim()
+        : undefined,
+      fetchedAt: typeof source.fetchedAt === "number" && Number.isFinite(source.fetchedAt)
+        ? source.fetchedAt
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 10) : undefined;
@@ -848,6 +885,12 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     sources: sanitizeSourcesForStorage(message.sources),
     searchError: typeof message.searchError === "string" && message.searchError.trim()
       ? message.searchError.trim()
+      : undefined,
+    webSearchStatus: message.webSearchStatus === "done" || message.webSearchStatus === "failed"
+      ? message.webSearchStatus
+      : undefined,
+    webSearchStatusText: typeof message.webSearchStatusText === "string" && message.webSearchStatusText.trim()
+      ? message.webSearchStatusText.trim()
       : undefined,
   }));
 
@@ -1513,6 +1556,42 @@ const getReliabilityLabel = (source: WebSource): string => source.reliabilityLab
 const getSourceRelevanceLabel = (source: WebSource): string =>
   source.relevanceLabel || (source.relevance === "candidate" ? "相关资料" : "强相关");
 
+const getSourceExcerptStatusLabel = (source: WebSource): string => {
+  if (source.excerptStatus === "fetched") return "已读取摘要";
+  if (source.excerptStatus === "unavailable") return "正文不可用";
+  if (source.excerptStatus === "failed") return "读取失败";
+  return "仅搜索摘要";
+};
+
+const getWebSearchStageText = (status?: AiChatMessage["webSearchStatus"], fallback?: string): string => {
+  if (fallback?.trim()) return fallback.trim();
+  if (status === "planning") return "正在准备搜索计划...";
+  if (status === "searching") return "正在搜索公开网页...";
+  if (status === "filtering") return "正在筛选相关来源...";
+  if (status === "fetching_excerpts") return "正在读取网页摘录...";
+  if (status === "answering") return "正在生成回答...";
+  if (status === "failed") return "联网搜索失败，正在降级回答";
+  return "";
+};
+
+function WebSearchProgressCard({ status, text }: { status?: AiChatMessage["webSearchStatus"]; text?: string }) {
+  const stageText = getWebSearchStageText(status, text);
+  if (!stageText || status === "done") return null;
+  return (
+    <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50/70 px-2.5 py-1 text-[11px] leading-5 text-emerald-800 dark:border-emerald-300/20 dark:bg-emerald-400/[0.08] dark:text-emerald-100">
+      {status === "failed" ? <Info className="h-3.5 w-3.5 shrink-0" /> : <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+      <span className="min-w-0 truncate">{stageText}</span>
+    </div>
+  );
+}
+
+const shouldFetchWebSourceExcerpt = (source: WebSource, strongCount: number): boolean => {
+  if (source.relevance === "unrelated") return false;
+  if (source.relevance === "strong") return true;
+  if (strongCount >= 2) return false;
+  return source.reliability === "wiki" || source.reliability === "official";
+};
+
 const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): string =>
   provider === "bocha"
     ? "需要在 AI 设置中配置博查 API Key"
@@ -1560,6 +1639,12 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                   >
                     {getReliabilityLabel(source)}
                   </span>
+                  <span
+                    className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-200"
+                    title={source.excerptError}
+                  >
+                    {getSourceExcerptStatusLabel(source)}
+                  </span>
                   <span className="truncate text-[11px] text-muted-foreground">
                     {source.site ?? source.url}
                   </span>
@@ -1598,7 +1683,7 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
             </div>
           )}
           <div className="text-[11px] leading-5 text-muted-foreground">
-            当前阶段仅展示搜索结果，尚未读取网页正文。
+            仅少量强相关公开网页会尝试提取正文摘录；不会读取登录态、Cookie 或浏览器数据。
           </div>
         </>
       ) : (
@@ -1985,6 +2070,7 @@ export default function AiSidebar({
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const streamTextBufferRef = useRef<Map<string, string>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
+  const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
   const messageCopyFeedbackTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2237,8 +2323,23 @@ export default function AiSidebar({
 
   const fetchWebSourcesForDecision = async (
     decision: SearchDecision,
+    options?: {
+      conversationId?: string;
+      messageId?: string;
+      streamId?: string;
+      token?: number;
+      onStatus?: (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => void;
+    },
   ): Promise<{ sources?: WebSource[]; error?: string }> => {
     if (!decision.shouldSearch) return {};
+    const isCurrent = () => !options?.streamId || (
+      streamTargetsRef.current.get(options.streamId)?.messageId === options.messageId &&
+      (options.token === undefined || webSearchPrepTokensRef.current.get(options.streamId) === options.token)
+    );
+    const setStatus = (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => {
+      if (!isCurrent()) return;
+      options?.onStatus?.(status, text);
+    };
     if (!canUseWebSearchProvider) {
       const prepared = prepareWebSourcesForDecision([], decision);
       return {
@@ -2250,6 +2351,7 @@ export default function AiSidebar({
     }
 
     try {
+      setStatus("searching", "正在搜索公开网页...");
       const sources = await searchWebSources({
         provider: activeWebSearchProvider,
         queries: decision.queries,
@@ -2257,12 +2359,44 @@ export default function AiSidebar({
         problemId: decision.problemId,
         maxResults: 32,
       });
+      if (!isCurrent()) return {};
+      setStatus("filtering", "正在筛选相关来源...");
       const prepared = prepareWebSourcesForDecision(sources, decision);
+      const strongCount = prepared.sources.filter((source) => source.relevance === "strong").length;
+      const excerptTargets = prepared.sources
+        .filter((source) => shouldFetchWebSourceExcerpt(source, strongCount))
+        .slice(0, 3);
+      setStatus(
+        excerptTargets.length > 0 ? "fetching_excerpts" : "answering",
+        excerptTargets.length > 0 ? `正在读取 ${excerptTargets.length} 个网页摘录...` : "正在生成回答...",
+      );
+      const excerptResults = excerptTargets.length > 0
+        ? await fetchWebSourceExcerpts({
+          sources: excerptTargets,
+          maxSources: 3,
+          maxCharsPerSource: 5000,
+        })
+        : [];
+      if (!isCurrent()) return {};
+      const excerptByUrl = new Map(excerptResults.map((result) => [result.url, result]));
+      const sourcesWithExcerpts = prepared.sources.map((source) => {
+        const result = excerptByUrl.get(source.url);
+        if (!result) return { ...source, excerptStatus: source.excerptStatus ?? "not_requested" as const };
+        return {
+          ...source,
+          excerptStatus: result.fetched ? "fetched" as const : (
+            result.error?.includes("不可用") || result.error?.includes("登录") ? "unavailable" as const : "failed" as const
+          ),
+          excerpt: result.excerpt,
+          excerptError: result.error,
+          fetchedAt: result.fetchedAt,
+        };
+      });
       const filterNote = decision.problemId && prepared.filteredCount > 0
         ? `已过滤 ${prepared.filteredCount} 条明显无关结果`
         : undefined;
-      return prepared.sources.length > 0
-        ? { sources: prepared.sources, error: filterNote }
+      return sourcesWithExcerpts.length > 0
+        ? { sources: sourcesWithExcerpts, error: filterNote }
         : { error: filterNote ?? "联网搜索没有返回可展示的来源" };
     } catch (error) {
       const prepared = prepareWebSourcesForDecision([], decision);
@@ -2486,6 +2620,7 @@ export default function AiSidebar({
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
     }
     updateRespondingState();
 
@@ -2588,6 +2723,7 @@ export default function AiSidebar({
         streamTextBufferRef.current.delete(streamId);
         streamTargetsRef.current.delete(streamId);
         activeStreamsRef.current.delete(streamId);
+        webSearchPrepTokensRef.current.delete(streamId);
         updateRespondingState();
         return;
       }
@@ -2596,11 +2732,14 @@ export default function AiSidebar({
         ...message,
         text: message.text.trim().length > 0 ? message.text : "The AI service returned no content. Please retry.",
         state: "done",
+        webSearchStatus: message.webSearchStatus ? "done" : undefined,
+        webSearchStatusText: undefined,
         ...finishAssistantTiming(message),
       }));
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
       updateRespondingState();
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -2617,11 +2756,14 @@ export default function AiSidebar({
         text: getChatErrorMessage(message),
         kind: currentMessage.kind === "compression-result" ? "text" : currentMessage.kind,
         state: "error",
+        webSearchStatus: currentMessage.webSearchStatus ? "failed" : undefined,
+        webSearchStatusText: currentMessage.webSearchStatus ? "生成回答失败" : undefined,
         ...finishAssistantTiming(currentMessage),
       }));
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
       updateRespondingState();
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -2927,6 +3069,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
       updateRespondingState();
     });
   };
@@ -3556,6 +3699,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       streamId,
       retryContext: chatContext,
       searchDecision,
+      webSearchStatus: searchDecision.shouldSearch ? "planning" : undefined,
+      webSearchStatusText: searchDecision.shouldSearch ? "正在准备搜索计划..." : undefined,
       startedAt,
     });
 
@@ -3574,16 +3719,46 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       mode: "chat",
     });
     activeStreamsRef.current.add(streamId);
+    const webSearchPrepToken = requestId;
+    webSearchPrepTokensRef.current.set(streamId, webSearchPrepToken);
     updateRespondingState();
 
-    const searchResult = requestWebSearchEnabled && searchDecision.shouldSearch
-      ? await fetchWebSourcesForDecision(searchDecision)
+    await waitForNextFrame();
+    const updateWebSearchStatus = (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => {
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        webSearchStatus: status,
+        webSearchStatusText: text ?? getWebSearchStageText(status),
+      }));
+    };
+    const searchResult: { sources?: WebSource[]; error?: string } = requestWebSearchEnabled && searchDecision.shouldSearch
+      ? await withTimeout(
+        fetchWebSourcesForDecision(searchDecision, {
+          conversationId,
+          messageId: assistantMessage.id,
+          streamId,
+          token: webSearchPrepToken,
+          onStatus: updateWebSearchStatus,
+        }),
+        WEB_SEARCH_PREP_TIMEOUT_MS,
+        "联网搜索准备超时，已降级为普通回答",
+      ).catch((error) => {
+        updateWebSearchStatus("failed", getWebSearchErrorMessage(error));
+        return { error: getWebSearchErrorMessage(error) };
+      })
       : {};
+    if (
+      streamTargetsRef.current.get(streamId)?.messageId !== assistantMessage.id ||
+      webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
+    ) return;
+    webSearchPrepTokensRef.current.delete(streamId);
     replaceMessage(conversationId, assistantMessage.id, (message) => ({
       ...message,
       state: "streaming",
       sources: searchResult.sources,
       searchError: searchResult.error,
+      webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
+      webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
     }));
 
     void startCurrentNoteChatStream({
@@ -3615,6 +3790,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
       updateRespondingState();
     });
   };
@@ -3708,6 +3884,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       streamId,
       retryContext: chatContext,
       searchDecision,
+      webSearchStatus: searchDecision.shouldSearch ? "planning" : undefined,
+      webSearchStatusText: searchDecision.shouldSearch ? "正在准备搜索计划..." : undefined,
       startedAt,
     });
 
@@ -3726,17 +3904,47 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       mode: "chat",
     });
     activeStreamsRef.current.add(streamId);
+    const webSearchPrepToken = requestId;
+    webSearchPrepTokensRef.current.set(streamId, webSearchPrepToken);
     updateRespondingState();
 
     void (async () => {
-      const searchResult = requestWebSearchEnabled && searchDecision.shouldSearch
-        ? await fetchWebSourcesForDecision(searchDecision)
+      await waitForNextFrame();
+      const updateWebSearchStatus = (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => {
+        replaceMessage(conversationId, assistantMessage.id, (current) => ({
+          ...current,
+          webSearchStatus: status,
+          webSearchStatusText: text ?? getWebSearchStageText(status),
+        }));
+      };
+      const searchResult: { sources?: WebSource[]; error?: string } = requestWebSearchEnabled && searchDecision.shouldSearch
+        ? await withTimeout(
+          fetchWebSourcesForDecision(searchDecision, {
+            conversationId,
+            messageId: assistantMessage.id,
+            streamId,
+            token: webSearchPrepToken,
+            onStatus: updateWebSearchStatus,
+          }),
+          WEB_SEARCH_PREP_TIMEOUT_MS,
+          "联网搜索准备超时，已降级为普通回答",
+        ).catch((error) => {
+          updateWebSearchStatus("failed", getWebSearchErrorMessage(error));
+          return { error: getWebSearchErrorMessage(error) };
+        })
         : {};
+      if (
+        streamTargetsRef.current.get(streamId)?.messageId !== assistantMessage.id ||
+        webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
+      ) return;
+      webSearchPrepTokensRef.current.delete(streamId);
       replaceMessage(conversationId, assistantMessage.id, (current) => ({
         ...current,
         state: "streaming",
         sources: searchResult.sources,
         searchError: searchResult.error,
+        webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
+        webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
       }));
 
       await startCurrentNoteChatStream({
@@ -3769,6 +3977,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       streamTextBufferRef.current.delete(streamId);
       streamTargetsRef.current.delete(streamId);
       activeStreamsRef.current.delete(streamId);
+      webSearchPrepTokensRef.current.delete(streamId);
       updateRespondingState();
     });
   };
@@ -4509,6 +4718,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     )}>
                       {message.searchDecision?.shouldSearch && (
                         <WebSearchPlanCard decision={message.searchDecision} />
+                      )}
+                      {message.searchDecision?.shouldSearch && (
+                        <WebSearchProgressCard status={message.webSearchStatus} text={message.webSearchStatusText} />
                       )}
                       {message.searchDecision?.shouldSearch && (
                         <WebSearchSourcesCard sources={message.sources} error={message.searchError} />

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult } from "@/lib/aiWebSearch";
+import type { SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
 import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
@@ -672,6 +672,14 @@ export async function deleteAiProviderModel(providerId: string, modelId: string)
 export async function searchWebSources(input: SearchWebSourcesInput): Promise<WebSearchResult[]> {
   try {
     return await invoke<WebSearchResult[]>("search_web_sources", { request: input });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest): Promise<WebSourceExcerptResult[]> {
+  try {
+    return await invoke<WebSourceExcerptResult[]>("fetch_web_source_excerpts", { input });
   } catch (e) {
     throw toError(e);
   }

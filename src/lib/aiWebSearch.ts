@@ -14,6 +14,12 @@ export type WebSourceReliability =
 
 export type WebSourceRelevance = "strong" | "candidate" | "unrelated";
 
+export type WebSourceExcerptStatus =
+  | "not_requested"
+  | "fetched"
+  | "unavailable"
+  | "failed";
+
 export type ResearchIntent =
   | "no_search"
   | "oi_problem"
@@ -35,6 +41,10 @@ export type WebSource = {
   relevance?: WebSourceRelevance;
   relevanceLabel?: string;
   relevanceReason?: string;
+  excerptStatus?: WebSourceExcerptStatus;
+  excerpt?: string;
+  excerptError?: string;
+  fetchedAt?: number;
   selected?: boolean;
 };
 
@@ -76,6 +86,27 @@ export type WebSearchResult = {
   relevance?: WebSourceRelevance;
   relevanceLabel?: string;
   relevanceReason?: string;
+  excerptStatus?: WebSourceExcerptStatus;
+  excerpt?: string;
+  excerptError?: string;
+  fetchedAt?: number;
+  selected?: boolean;
+};
+
+export type WebSourceExcerptRequest = {
+  sources: WebSearchResult[];
+  maxSources?: number;
+  maxCharsPerSource?: number;
+};
+
+export type WebSourceExcerptResult = {
+  id: string;
+  url: string;
+  title: string;
+  fetched: boolean;
+  excerpt?: string;
+  error?: string;
+  fetchedAt: number;
 };
 
 export type SearchDecision = {

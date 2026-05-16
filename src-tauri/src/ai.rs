@@ -2,6 +2,8 @@ use std::{
     collections::HashSet,
     error::Error,
     fs,
+    io::Read,
+    net::{IpAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -28,6 +30,10 @@ const WEB_SEARCH_DEFAULT_PROVIDER: &str = "brave";
 const WEB_SEARCH_COMPAT_PROVIDER: &str = "bocha";
 const WEB_SEARCH_MAX_QUERIES: usize = 8;
 const WEB_SEARCH_MAX_RESULTS: usize = 40;
+const WEB_EXTRACT_MAX_SOURCES: usize = 3;
+const WEB_EXTRACT_MAX_CHARS_PER_SOURCE: usize = 5000;
+const WEB_EXTRACT_TOTAL_CONTEXT_CHARS: usize = 15000;
+const WEB_EXTRACT_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
 const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
@@ -187,7 +193,33 @@ pub struct WebSearchResult {
     pub relevance: Option<String>,
     pub relevance_label: Option<String>,
     pub relevance_reason: Option<String>,
+    pub excerpt_status: Option<String>,
+    pub excerpt: Option<String>,
+    pub excerpt_error: Option<String>,
+    pub fetched_at: Option<i64>,
     pub selected: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchWebSourceExcerptsInput {
+    pub sources: Vec<WebSearchResult>,
+    #[serde(default)]
+    pub max_sources: Option<usize>,
+    #[serde(default)]
+    pub max_chars_per_source: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSourceExcerptResult {
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub fetched: bool,
+    pub excerpt: Option<String>,
+    pub error: Option<String>,
+    pub fetched_at: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1295,6 +1327,22 @@ fn truncate_search_context_text(text: &str) -> String {
     truncated
 }
 
+fn truncate_web_excerpt_text(text: &str) -> String {
+    const MAX_WEB_EXCERPT_CONTEXT_CHARS: usize = 5000;
+
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= MAX_WEB_EXCERPT_CONTEXT_CHARS {
+        return trimmed.to_string();
+    }
+
+    let mut truncated = trimmed
+        .chars()
+        .take(MAX_WEB_EXCERPT_CONTEXT_CHARS)
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
 fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
     let mut entries = Vec::new();
     let selected_sources = sources
@@ -1367,9 +1415,27 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_search_context_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "kept by relevance filter".to_string());
+        let excerpt_status = source
+            .excerpt_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("not_requested");
+        let excerpt_error = source
+            .excerpt_error
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let excerpt = source
+            .excerpt
+            .as_deref()
+            .map(truncate_web_excerpt_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "no webpage excerpt available".to_string());
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}",
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             index + 1,
             title,
             site,
@@ -1382,6 +1448,9 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             relevance,
             relevance_label,
             relevance_reason,
+            excerpt_status,
+            excerpt_error,
+            excerpt,
         ));
     }
 
@@ -1390,11 +1459,13 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
     }
 
     Some(format!(
-        "The following is web search result summary context. These are only search result titles, sites, URLs, snippets, source types, and reliability labels. They are not full webpage contents.\n\
+        "The following context has two layers: web search result summaries, and optional extracted webpage excerpts for sources whose Web excerpt status is fetched. Search result summaries are only titles, sites, URLs, snippets, source types, and reliability labels. Web excerpts are extracted text snippets, not full pages.\n\
 You may use these summaries to answer, but follow these rules strictly:\n\
 - Call them search result summaries or source summaries, not webpages you have read in full.\n\
-- Do not say you read the full pages.\n\
+- Only sources marked with Web excerpt status: fetched may be described as webpage excerpts. Do not use failed or unavailable sources as webpage content.\n\
+- Even for fetched excerpts, do not say you read the full page. Say \"based on the extracted webpage excerpt\" or equivalent.\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
+- Do not say a webpage excerpt states something unless that excerpt contains it.\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
@@ -2969,6 +3040,10 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         relevance: None,
         relevance_label: None,
         relevance_reason: None,
+        excerpt_status: None,
+        excerpt: None,
+        excerpt_error: None,
+        fetched_at: None,
         selected: None,
     })
 }
@@ -3016,6 +3091,10 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         relevance: None,
         relevance_label: None,
         relevance_reason: None,
+        excerpt_status: None,
+        excerpt: None,
+        excerpt_error: None,
+        fetched_at: None,
         selected: None,
     })
 }
@@ -3272,8 +3351,437 @@ fn search_bocha_sources_with_fallback(
     Ok(results)
 }
 
+fn is_private_or_local_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(value) => {
+            value.is_private()
+                || value.is_loopback()
+                || value.is_link_local()
+                || value.is_broadcast()
+                || value.is_documentation()
+                || value.octets()[0] == 0
+        }
+        IpAddr::V6(value) => {
+            value.is_loopback()
+                || value.is_unspecified()
+                || value.is_unique_local()
+                || value.is_unicast_link_local()
+        }
+    }
+}
+
+fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url.trim())
+        .map_err(|_| "网页地址无效，无法读取正文".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("只允许读取公开 http / https 网页".to_string()),
+    }
+    if parsed.username() != "" || parsed.password().is_some() {
+        return Err("网页地址包含认证信息，已跳过读取".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "网页地址缺少域名，无法读取正文".to_string())?
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with(".lan")
+    {
+        return Err("不会访问 localhost、内网或本地域名".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_or_local_ip(ip) {
+            return Err("不会访问 localhost、内网或本地地址".to_string());
+        }
+    } else {
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let addrs = (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|_| "无法解析网页域名，已跳过正文读取".to_string())?;
+        let mut resolved_any = false;
+        for addr in addrs {
+            resolved_any = true;
+            if is_private_or_local_ip(addr.ip()) {
+                return Err("网页域名解析到内网或本地地址，已跳过读取".to_string());
+            }
+        }
+        if !resolved_any {
+            return Err("无法解析网页域名，已跳过正文读取".to_string());
+        }
+    }
+    Ok(parsed)
+}
+
+fn strip_html_tag_blocks(mut html: String, tag: &str) -> String {
+    let start_tag = format!("<{tag}");
+    let end_tag = format!("</{tag}>");
+    loop {
+        let lower = html.to_ascii_lowercase();
+        let Some(start) = lower.find(&start_tag) else {
+            break;
+        };
+        let Some(relative_end) = lower[start..].find(&end_tag) else {
+            html.replace_range(start..html.len(), " ");
+            break;
+        };
+        let end = start + relative_end + end_tag.len();
+        html.replace_range(start..end, " ");
+    }
+    html
+}
+
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+}
+
+fn strip_html_tags_to_text(html: &str) -> String {
+    let mut cleaned = html.to_string();
+    for tag in [
+        "script", "style", "nav", "footer", "header", "aside", "iframe", "noscript", "svg",
+        "canvas", "form",
+    ] {
+        cleaned = strip_html_tag_blocks(cleaned, tag);
+    }
+    let mut text = String::with_capacity(cleaned.len());
+    let mut in_tag = false;
+    let mut tag_name = String::new();
+    for ch in cleaned.chars() {
+        if ch == '<' {
+            in_tag = true;
+            tag_name.clear();
+            continue;
+        }
+        if in_tag {
+            if ch == '>' {
+                let name = tag_name
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if matches!(
+                    name.as_str(),
+                    "p" | "br" | "div" | "section" | "article" | "li" | "ul" | "ol" | "pre"
+                        | "code" | "h1" | "h2" | "h3" | "h4" | "h5" | "tr"
+                ) {
+                    text.push('\n');
+                }
+                in_tag = false;
+            } else if tag_name.len() < 32 {
+                tag_name.push(ch);
+            }
+            continue;
+        }
+        text.push(ch);
+    }
+    decode_html_entities(&text)
+}
+
+fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let normalized = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        let trimmed = normalized.trim();
+        if trimmed.len() < 2 {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.contains("广告") || lower.contains("copyright") || lower.contains("版权所有") {
+            continue;
+        }
+        lines.push(trimmed.to_string());
+    }
+    let mut result = lines.join("\n");
+    if result.chars().count() > max_chars {
+        result = result.chars().take(max_chars).collect::<String>();
+        result.push_str("...");
+    }
+    result
+}
+
+fn fetch_single_web_source_excerpt(
+    client: &reqwest::blocking::Client,
+    source: &WebSearchResult,
+    max_chars: usize,
+) -> WebSourceExcerptResult {
+    let fetched_at = Utc::now().timestamp_millis();
+    let id = source.id.clone();
+    let url = source.url.clone();
+    let title = source.title.clone();
+    let parsed_url = match validate_public_web_url(&url) {
+        Ok(url) => url,
+        Err(error) => {
+            return WebSourceExcerptResult {
+                id,
+                url,
+                title,
+                fetched: false,
+                excerpt: None,
+                error: Some(error),
+                fetched_at,
+            };
+        }
+    };
+
+    let mut response = match client
+        .get(parsed_url)
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.1",
+        )
+        .send()
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let message = if error.is_timeout() {
+                "读取网页正文超时".to_string()
+            } else {
+                "读取网页正文失败".to_string()
+            };
+            return WebSourceExcerptResult {
+                id,
+                url,
+                title,
+                fetched: false,
+                excerpt: None,
+                error: Some(message),
+                fetched_at,
+            };
+        }
+    };
+
+    let status = response.status();
+    if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::UNAUTHORIZED {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("网页正文不可用或需要登录".to_string()),
+            fetched_at,
+        };
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("网页不存在或地址不可用".to_string()),
+            fetched_at,
+        };
+    }
+    if !status.is_success() {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("网页暂时不可读取".to_string()),
+            fetched_at,
+        };
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if content_type.contains("application/pdf")
+        || content_type.starts_with("image/")
+        || content_type.starts_with("video/")
+        || content_type.starts_with("audio/")
+        || content_type.contains("application/octet-stream")
+    {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("当前来源不是可直接提取的网页正文".to_string()),
+            fetched_at,
+        };
+    }
+    if response
+        .content_length()
+        .map(|length| length > WEB_EXTRACT_MAX_RESPONSE_BYTES as u64)
+        .unwrap_or(false)
+    {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("网页正文过大，已跳过读取".to_string()),
+            fetched_at,
+        };
+    }
+
+    let mut body_bytes = Vec::new();
+    let read_result = response
+        .by_ref()
+        .take((WEB_EXTRACT_MAX_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut body_bytes);
+    let body = match read_result {
+        Ok(_) => {
+            if body_bytes.len() > WEB_EXTRACT_MAX_RESPONSE_BYTES {
+                return WebSourceExcerptResult {
+                    id,
+                    url,
+                    title,
+                    fetched: false,
+                    excerpt: None,
+                    error: Some("网页正文过大，已跳过读取".to_string()),
+                    fetched_at,
+                };
+            }
+            decode_response_body(&body_bytes)
+        }
+        Err(_) => {
+            return WebSourceExcerptResult {
+                id,
+                url,
+                title,
+                fetched: false,
+                excerpt: None,
+                error: Some("网页正文读取失败".to_string()),
+                fetched_at,
+            };
+        }
+    };
+    let extracted = if content_type.contains("text/plain") {
+        normalize_extracted_text(&body, max_chars)
+    } else {
+        normalize_extracted_text(&strip_html_tags_to_text(&body), max_chars)
+    };
+
+    if extracted.chars().count() < 120 {
+        return WebSourceExcerptResult {
+            id,
+            url,
+            title,
+            fetched: false,
+            excerpt: None,
+            error: Some("网页正文不可用或需要登录".to_string()),
+            fetched_at,
+        };
+    }
+
+    WebSourceExcerptResult {
+        id,
+        url,
+        title,
+        fetched: true,
+        excerpt: Some(extracted),
+        error: None,
+        fetched_at,
+    }
+}
+
+fn fetch_web_source_excerpts_blocking(
+    input: FetchWebSourceExcerptsInput,
+) -> Result<Vec<WebSourceExcerptResult>, String> {
+    let config = normalize_web_search_config(&read_config()?.ai.web_search);
+    if !config.public_search_consent {
+        return Err("需要先授权公开网页搜索".to_string());
+    }
+
+    let max_sources = input
+        .max_sources
+        .unwrap_or(WEB_EXTRACT_MAX_SOURCES)
+        .clamp(1, WEB_EXTRACT_MAX_SOURCES);
+    let max_chars = input
+        .max_chars_per_source
+        .unwrap_or(WEB_EXTRACT_MAX_CHARS_PER_SOURCE)
+        .clamp(500, WEB_EXTRACT_MAX_CHARS_PER_SOURCE);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("oi-notebook-public-web-excerpt/0.1")
+        .build()
+        .map_err(|e| format!("无法创建网页读取 client: {e}"))?;
+
+    let handles = input
+        .sources
+        .into_iter()
+        .take(max_sources)
+        .enumerate()
+        .map(|(index, source)| {
+            let client = client.clone();
+            std::thread::spawn(move || (index, fetch_single_web_source_excerpt(&client, &source, max_chars)))
+        })
+        .collect::<Vec<_>>();
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.join() {
+            Ok(result) => results.push(result),
+            Err(_) => {
+                results.push((
+                    usize::MAX,
+                    WebSourceExcerptResult {
+                        id: "unknown".to_string(),
+                        url: "".to_string(),
+                        title: "未知来源".to_string(),
+                        fetched: false,
+                        excerpt: None,
+                        error: Some("网页摘录任务失败".to_string()),
+                        fetched_at: Utc::now().timestamp_millis(),
+                    },
+                ));
+            }
+        }
+    }
+    results.sort_by_key(|(index, _)| *index);
+
+    let mut total_chars = 0usize;
+    let mut limited_results = Vec::new();
+    for (_, mut result) in results {
+        if let Some(excerpt) = result.excerpt.as_mut() {
+            let remaining = WEB_EXTRACT_TOTAL_CONTEXT_CHARS.saturating_sub(total_chars);
+            if remaining == 0 {
+                result.fetched = false;
+                result.excerpt = None;
+                result.error = Some("网页摘录总长度已达上限".to_string());
+            } else if excerpt.chars().count() > remaining {
+                *excerpt = excerpt.chars().take(remaining).collect::<String>();
+                excerpt.push_str("...");
+                total_chars = WEB_EXTRACT_TOTAL_CONTEXT_CHARS;
+            } else {
+                total_chars += excerpt.chars().count();
+            }
+        }
+        limited_results.push(result);
+    }
+    Ok(limited_results)
+}
+
 #[tauri::command]
-pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
+pub async fn fetch_web_source_excerpts(
+    input: FetchWebSourceExcerptsInput,
+) -> Result<Vec<WebSourceExcerptResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || fetch_web_source_excerpts_blocking(input))
+        .await
+        .map_err(|e| format!("网页摘录任务失败: {e}"))?
+}
+
+fn search_web_sources_blocking(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
     let provider = request
         .provider
         .as_deref()
@@ -3330,6 +3838,13 @@ pub fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearc
         }
         _ => Err("联网搜索失败：当前 Provider 不受支持".to_string()),
     }
+}
+
+#[tauri::command]
+pub async fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || search_web_sources_blocking(request))
+        .await
+        .map_err(|e| format!("联网搜索任务失败: {e}"))?
 }
 
 #[tauri::command]
