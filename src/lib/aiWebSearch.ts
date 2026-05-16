@@ -45,6 +45,8 @@ export type WebSource = {
   excerpt?: string;
   excerptError?: string;
   fetchedAt?: number;
+  isConstructed?: boolean;
+  constructedReason?: string;
   selected?: boolean;
 };
 
@@ -91,6 +93,8 @@ export type WebSearchResult = {
   excerpt?: string;
   excerptError?: string;
   fetchedAt?: number;
+  isConstructed?: boolean;
+  constructedReason?: string;
   selected?: boolean;
 };
 
@@ -147,6 +151,13 @@ const ALGORITHM_KEYWORDS = [
   "拓扑排序",
   "强连通分量",
   "费用流",
+  "LCA",
+  "Dijkstra",
+  "并查集",
+  "DSU",
+  "BIT",
+  "KMP",
+  "SCC",
 ];
 const GENERAL_WEB_KEYWORDS = ["最新", "官网", "文档", "版本", "资料", "网页", "链接", "新闻", "消息", "更新", "近期", "最近", "动态"];
 const RECENT_INFO_TIME_KEYWORDS = ["最近", "近期", "最新", "今天", "昨天", "今年", "本周", "本月", "刚刚"];
@@ -264,6 +275,230 @@ const getProblemSynonyms = (text: string): string[] => {
   return unique(pairs.flatMap(([keyword, synonyms]) => normalized.includes(normalizeSearchText(keyword)) ? synonyms : []));
 };
 
+type PublicAlgorithmSourceMapping = {
+  aliases: string[];
+  source: Omit<WebSource, "id" | "snippet" | "relevance" | "relevanceLabel" | "relevanceReason" | "selected" | "isConstructed" | "constructedReason">;
+};
+
+const PUBLIC_ALGORITHM_SOURCE_MAPPINGS: PublicAlgorithmSourceMapping[] = [
+  {
+    aliases: ["最近公共祖先", "lca", "倍增 lca"],
+    source: {
+      title: "OI Wiki 最近公共祖先",
+      url: "https://oi-wiki.org/graph/lca/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["最近公共祖先", "lca"],
+    source: {
+      title: "cp-algorithms Lowest Common Ancestor",
+      url: "https://cp-algorithms.com/graph/lca.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["单源最短路径", "dijkstra", "最短路"],
+    source: {
+      title: "OI Wiki 最短路",
+      url: "https://oi-wiki.org/graph/shortest-path/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["dijkstra", "单源最短路径"],
+    source: {
+      title: "cp-algorithms Dijkstra",
+      url: "https://cp-algorithms.com/graph/dijkstra.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["并查集", "dsu"],
+    source: {
+      title: "OI Wiki 并查集",
+      url: "https://oi-wiki.org/ds/dsu/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["并查集", "dsu"],
+    source: {
+      title: "cp-algorithms Disjoint Set Union",
+      url: "https://cp-algorithms.com/data_structures/disjoint_set_union.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["树状数组", "bit", "fenwick"],
+    source: {
+      title: "OI Wiki 树状数组",
+      url: "https://oi-wiki.org/ds/fenwick/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["树状数组", "bit", "fenwick"],
+    source: {
+      title: "cp-algorithms Fenwick Tree",
+      url: "https://cp-algorithms.com/data_structures/fenwick.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["线段树", "segment tree"],
+    source: {
+      title: "OI Wiki 线段树",
+      url: "https://oi-wiki.org/ds/seg/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["线段树", "segment tree"],
+    source: {
+      title: "cp-algorithms Segment Tree",
+      url: "https://cp-algorithms.com/data_structures/segment_tree.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["kmp", "字符串匹配"],
+    source: {
+      title: "OI Wiki KMP",
+      url: "https://oi-wiki.org/string/kmp/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["kmp", "prefix function"],
+    source: {
+      title: "cp-algorithms Prefix Function",
+      url: "https://cp-algorithms.com/string/prefix-function.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["强连通分量", "scc"],
+    source: {
+      title: "OI Wiki 强连通分量",
+      url: "https://oi-wiki.org/graph/scc/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["强连通分量", "scc"],
+    source: {
+      title: "cp-algorithms Strongly Connected Components",
+      url: "https://cp-algorithms.com/graph/strongly-connected-components.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["拓扑排序", "topological sort"],
+    source: {
+      title: "OI Wiki 拓扑排序",
+      url: "https://oi-wiki.org/graph/topo/",
+      site: "OI Wiki",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "OI Wiki 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["拓扑排序", "topological sort"],
+    source: {
+      title: "cp-algorithms Topological Sorting",
+      url: "https://cp-algorithms.com/graph/topological-sort.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["网络流", "最大流", "dinic"],
+    source: {
+      title: "cp-algorithms Dinic's Algorithm",
+      url: "https://cp-algorithms.com/graph/dinic.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+  {
+    aliases: ["点分治", "点分树", "动态点分治", "centroid decomposition"],
+    source: {
+      title: "cp-algorithms Centroid Decomposition",
+      url: "https://cp-algorithms.com/graph/centroid_decomposition.html",
+      site: "cp-algorithms",
+      sourceType: "wiki",
+      reliability: "wiki",
+      reliabilityLabel: "知识库",
+      reliabilityReason: "cp-algorithms 公开算法资料入口，未抓取网页正文。",
+    },
+  },
+];
+
 const getExperienceQueryKeywords = (text: string, errorKeywords: string[]): string[] => {
   const normalized = normalizeSearchText(text);
   const keywords = [
@@ -278,6 +513,7 @@ const getExperienceQueryKeywords = (text: string, errorKeywords: string[]): stri
 
 const stripSearchRequestPhrases = (text: string): string => text
   .replace(/(?:联网|网上)?(?:搜一下|查一下|查查|搜搜|帮我查|找资料|看资料)/g, " ")
+  .replace(/(?:并)?结合(?:搜索结果)?摘要回答/g, " ")
   .replace(/(?:有什么|有没有)?(?:常见坑|常见错误|注意事项|题解|讨论|新闻|消息|更新)/g, " ");
 
 const getProblemTitleCandidate = (
@@ -293,7 +529,7 @@ const getProblemTitleCandidate = (
       .replace(/\bP\d{3,6}\b/gi, " ")
       .replace(/\bCF\d{3,5}[A-Z]\d?\b/gi, " ")
       .replace(/\b(?:ABC|ARC|AGC)\d{3}[A-H]?\b/gi, " ")
-      .replace(/[()[\]【】#*_`"'“”‘’:：|/\\-]+/g, " ")
+      .replace(/[()[\]【】#*_`"'“”‘’:：|/\\，,。！？?；;-]+/g, " ")
       .replace(/\b(?:题解|洛谷|Luogu|Codeforces|AtCoder|WA|TLE|RE|MLE|CE)\b/gi, " ");
     const words = compactQuery(cleaned);
     if (words.length >= 3 && words.length <= 40) return words;
@@ -328,12 +564,15 @@ const buildProblemQueries = (
 ]).slice(0, 10);
 
 const buildAlgorithmQueries = (algorithmKeywords: string[], errorKeywords: string[]): string[] =>
-  unique(algorithmKeywords.flatMap((keyword) => [
-    trimQuery(`OI Wiki ${keyword}`),
-    trimQuery(`${keyword} 题解`),
-    trimQuery(`${keyword} 常见错误`),
-    errorKeywords.length > 0 ? trimQuery(`${keyword} ${errorKeywords.join(" ")}`) : "",
-  ]));
+  unique(algorithmKeywords.flatMap((keyword) => {
+    const relatedKeywords = unique([keyword, ...getProblemSynonyms(keyword)]).slice(0, 3);
+    return relatedKeywords.flatMap((item) => [
+      trimQuery(`OI Wiki ${item}`),
+      trimQuery(`${item} 题解`),
+      trimQuery(`${item} 常见错误`),
+      errorKeywords.length > 0 ? trimQuery(`${item} ${errorKeywords.join(" ")}`) : "",
+    ]);
+  })).slice(0, 10);
 
 const isRecentInfoRequest = (text: string): boolean =>
   hasKeyword(text, RECENT_INFO_TIME_KEYWORDS) && hasKeyword(text, RECENT_INFO_CONTENT_KEYWORDS);
@@ -383,6 +622,8 @@ export const buildLuoguDeterministicSources = (problemId: string): WebSource[] =
       relevance: "strong",
       relevanceLabel: "强相关",
       relevanceReason: "由目标题号构造的官方题目页入口。",
+      isConstructed: true,
+      constructedReason: "根据洛谷题号构造的公开资料入口，当前阶段尚未读取网页正文。",
       selected: true,
     },
     {
@@ -398,8 +639,62 @@ export const buildLuoguDeterministicSources = (problemId: string): WebSource[] =
       relevance: "strong",
       relevanceLabel: "强相关",
       relevanceReason: "由目标题号构造的题解页入口。",
+      isConstructed: true,
+      constructedReason: "根据洛谷题号构造的公开资料入口，当前阶段尚未读取网页正文。",
       selected: true,
     },
+  ];
+};
+
+const isOiResearchIntent = (decision: SearchDecision): boolean =>
+  decision.intent === "oi_problem" ||
+  decision.intent === "oi_discussion" ||
+  decision.intent === "algorithm_reference" ||
+  decision.intent === "debug_issue";
+
+const buildAlgorithmSourceCandidates = (
+  decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
+): WebSource[] => {
+  const searchText = normalizeSearchText([
+    userInput,
+    decision.problemTitle,
+    decision.algorithmKeywords?.join(" "),
+    context?.noteTitle,
+    context?.tags?.join(" "),
+    context?.summary,
+  ].filter(Boolean).join(" "));
+
+  return PUBLIC_ALGORITHM_SOURCE_MAPPINGS
+    .filter((mapping) => mapping.aliases.some((alias) => searchText.includes(normalizeSearchText(alias))))
+    .map((mapping): WebSource => {
+      const id = `public-oi-${mapping.source.site?.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}-${mapping.source.url.split("/").filter(Boolean).pop()?.replace(/[^a-z0-9]+/gi, "-") ?? "source"}`;
+      return {
+        ...mapping.source,
+        id,
+        snippet: "公开算法资料入口，当前阶段尚未读取网页正文。",
+        relevance: decision.problemId ? "candidate" : "strong",
+        relevanceLabel: decision.problemId ? "相关资料" : "强相关",
+        relevanceReason: decision.problemId
+          ? "由题名或算法关键词匹配的公开算法资料入口，不一定是目标题目的直接讨论。"
+          : "由算法关键词匹配的公开算法资料入口。",
+        isConstructed: true,
+        constructedReason: "根据算法关键词构造的公开资料入口，当前阶段尚未读取网页正文。",
+        selected: !decision.problemId,
+      };
+    });
+};
+
+export const buildPublicOiSourceCandidates = (
+  decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
+): WebSource[] => {
+  if (!decision.shouldSearch || !isOiResearchIntent(decision)) return [];
+  return [
+    ...(decision.problemId ? buildLuoguDeterministicSources(decision.problemId) : []),
+    ...buildAlgorithmSourceCandidates(decision, userInput, context),
   ];
 };
 
@@ -441,6 +736,9 @@ const classifyProblemSourceRelevance = (
   if (source.id === `luogu-problem-${normalizedProblemId}` || source.id === `luogu-solution-${normalizedProblemId}`) {
     return { relevance: "strong", score: 100, reason: "由目标题号构造的确定性洛谷入口。" };
   }
+  if (source.isConstructed && source.relevance === "candidate") {
+    return { relevance: "candidate", score: 52, reason: "由算法关键词构造的公开资料入口，作为相关算法背景，不直接代表目标题目的题解或讨论。" };
+  }
   if (hasExactProblemId && (hasEnoughTitleMatch || hasAlgorithmSynonym)) {
     return { relevance: "strong", score: 92, reason: "来源同时命中目标题号和题名 / 算法关键词。" };
   }
@@ -462,9 +760,11 @@ const classifyProblemSourceRelevance = (
 export const prepareWebSourcesForDecision = (
   rawSources: WebSource[],
   decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
 ): WebSourceRelevanceResult => {
-  const deterministicSources = decision.problemId ? buildLuoguDeterministicSources(decision.problemId) : [];
-  const candidates = [...deterministicSources, ...rawSources];
+  const publicOiSources = buildPublicOiSourceCandidates(decision, userInput, context);
+  const candidates = [...publicOiSources, ...rawSources];
 
   if (!decision.problemId) {
     const seen = new Set<string>();
@@ -483,8 +783,8 @@ export const prepareWebSourcesForDecision = (
     return {
       sources,
       filteredCount: 0,
-      strongCount: sources.length,
-      candidateCount: 0,
+      strongCount: sources.filter((source) => source.relevance === "strong").length,
+      candidateCount: sources.filter((source) => source.relevance === "candidate").length,
     };
   }
 

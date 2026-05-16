@@ -841,6 +841,10 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       fetchedAt: typeof source.fetchedAt === "number" && Number.isFinite(source.fetchedAt)
         ? source.fetchedAt
         : undefined,
+      isConstructed: source.isConstructed === true,
+      constructedReason: typeof source.constructedReason === "string" && source.constructedReason.trim()
+        ? source.constructedReason.trim()
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 10) : undefined;
@@ -1560,8 +1564,12 @@ const getSourceExcerptStatusLabel = (source: WebSource): string => {
   if (source.excerptStatus === "fetched") return "已读取摘要";
   if (source.excerptStatus === "unavailable") return "正文不可用";
   if (source.excerptStatus === "failed") return "读取失败";
+  if (source.isConstructed) return "未读取正文";
   return "仅搜索摘要";
 };
+
+const getSourceOriginLabel = (source: WebSource): string =>
+  source.isConstructed ? "公开资料入口" : "搜索结果";
 
 const getWebSearchStageText = (status?: AiChatMessage["webSearchStatus"], fallback?: string): string => {
   if (fallback?.trim()) return fallback.trim();
@@ -1656,6 +1664,12 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                     title={source.excerptError}
                   >
                     {getSourceExcerptStatusLabel(source)}
+                  </span>
+                  <span
+                    className="rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-700 dark:text-violet-200"
+                    title={source.constructedReason}
+                  >
+                    {getSourceOriginLabel(source)}
                   </span>
                   <span className="truncate text-[11px] text-muted-foreground">
                     {source.site ?? source.url}
@@ -2340,6 +2354,8 @@ export default function AiSidebar({
       messageId?: string;
       streamId?: string;
       token?: number;
+      userInput?: string;
+      context?: NoteChatContextPayload;
       onStatus?: (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => void;
     },
   ): Promise<{ sources?: WebSource[]; error?: string }> => {
@@ -2352,8 +2368,44 @@ export default function AiSidebar({
       if (!isCurrent()) return;
       options?.onStatus?.(status, text);
     };
+    const prepareSourcesWithExcerpts = async (rawSources: WebSource[]) => {
+      if (!isCurrent()) return { prepared: prepareWebSourcesForDecision([], decision, options?.userInput, options?.context), sources: [] as WebSource[] };
+      setStatus("filtering", "正在筛选相关来源...");
+      const prepared = prepareWebSourcesForDecision(rawSources, decision, options?.userInput, options?.context);
+      const strongCount = prepared.sources.filter((source) => source.relevance === "strong").length;
+      const excerptTargets = prepared.sources
+        .filter((source) => shouldFetchWebSourceExcerpt(source, strongCount))
+        .slice(0, 3);
+      setStatus(
+        excerptTargets.length > 0 ? "fetching_excerpts" : "answering",
+        excerptTargets.length > 0 ? `正在读取 ${excerptTargets.length} 个网页摘录...` : "正在生成回答...",
+      );
+      const excerptResults = excerptTargets.length > 0
+        ? await fetchWebSourceExcerpts({
+          sources: excerptTargets,
+          maxSources: 3,
+          maxCharsPerSource: 5000,
+        })
+        : [];
+      if (!isCurrent()) return { prepared, sources: [] as WebSource[] };
+      const excerptByUrl = new Map(excerptResults.map((result) => [result.url, result]));
+      const sourcesWithExcerpts = prepared.sources.map((source) => {
+        const result = excerptByUrl.get(source.url);
+        if (!result) return { ...source, excerptStatus: source.excerptStatus ?? "not_requested" as const };
+        return {
+          ...source,
+          excerptStatus: result.fetched ? "fetched" as const : (
+            result.error?.includes("不可用") || result.error?.includes("登录") ? "unavailable" as const : "failed" as const
+          ),
+          excerpt: result.excerpt,
+          excerptError: result.error,
+          fetchedAt: result.fetchedAt,
+        };
+      });
+      return { prepared, sources: sourcesWithExcerpts };
+    };
     if (!canUseWebSearchProvider) {
-      const prepared = prepareWebSourcesForDecision([], decision);
+      const prepared = prepareWebSourcesForDecision([], decision, options?.userInput, options?.context);
       return {
         sources: prepared.sources.length > 0 ? prepared.sources : undefined,
         error: hasPublicWebSearchConsent
@@ -2372,38 +2424,7 @@ export default function AiSidebar({
         maxResults: 32,
       });
       if (!isCurrent()) return {};
-      setStatus("filtering", "正在筛选相关来源...");
-      const prepared = prepareWebSourcesForDecision(sources, decision);
-      const strongCount = prepared.sources.filter((source) => source.relevance === "strong").length;
-      const excerptTargets = prepared.sources
-        .filter((source) => shouldFetchWebSourceExcerpt(source, strongCount))
-        .slice(0, 3);
-      setStatus(
-        excerptTargets.length > 0 ? "fetching_excerpts" : "answering",
-        excerptTargets.length > 0 ? `正在读取 ${excerptTargets.length} 个网页摘录...` : "正在生成回答...",
-      );
-      const excerptResults = excerptTargets.length > 0
-        ? await fetchWebSourceExcerpts({
-          sources: excerptTargets,
-          maxSources: 3,
-          maxCharsPerSource: 5000,
-        })
-        : [];
-      if (!isCurrent()) return {};
-      const excerptByUrl = new Map(excerptResults.map((result) => [result.url, result]));
-      const sourcesWithExcerpts = prepared.sources.map((source) => {
-        const result = excerptByUrl.get(source.url);
-        if (!result) return { ...source, excerptStatus: source.excerptStatus ?? "not_requested" as const };
-        return {
-          ...source,
-          excerptStatus: result.fetched ? "fetched" as const : (
-            result.error?.includes("不可用") || result.error?.includes("登录") ? "unavailable" as const : "failed" as const
-          ),
-          excerpt: result.excerpt,
-          excerptError: result.error,
-          fetchedAt: result.fetchedAt,
-        };
-      });
+      const { prepared, sources: sourcesWithExcerpts } = await prepareSourcesWithExcerpts(sources);
       const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const filterNote = decision.problemId && prepared.filteredCount > 0
         ? `已过滤 ${prepared.filteredCount} 条明显无关结果`
@@ -2413,11 +2434,11 @@ export default function AiSidebar({
         ? { sources: sourcesWithExcerpts, error: searchNote || undefined }
         : { error: searchNote || "联网搜索没有返回可展示的来源" };
     } catch (error) {
-      const prepared = prepareWebSourcesForDecision([], decision);
       const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const errorMessage = getWebSearchErrorMessage(error);
+      const { prepared, sources } = await prepareSourcesWithExcerpts([]);
       return {
-        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
+        sources: sources.length > 0 ? sources : prepared.sources.length > 0 ? prepared.sources : undefined,
         error: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
       };
     }
@@ -2448,19 +2469,21 @@ export default function AiSidebar({
         problemId: decision.problemId,
         maxResults: 32,
       });
+      const prepared = prepareWebSourcesForDecision(sources, decision);
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
-        sources: sources.length > 0 ? sources : undefined,
-        searchError: sources.length > 0
+        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
+        searchError: prepared.sources.length > 0
           ? getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider)
           : "联网搜索没有返回可展示的来源",
       }));
     } catch (error) {
       const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const errorMessage = getWebSearchErrorMessage(error);
+      const prepared = prepareWebSourcesForDecision([], decision);
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
-        sources: undefined,
+        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
         searchError: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
       }));
     }
@@ -3758,6 +3781,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           messageId: assistantMessage.id,
           streamId,
           token: webSearchPrepToken,
+          userInput: question,
+          context: chatContext,
           onStatus: updateWebSearchStatus,
         }),
         WEB_SEARCH_PREP_TIMEOUT_MS,
@@ -3944,6 +3969,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             messageId: assistantMessage.id,
             streamId,
             token: webSearchPrepToken,
+            userInput: question,
+            context: chatContext,
             onStatus: updateWebSearchStatus,
           }),
           WEB_SEARCH_PREP_TIMEOUT_MS,

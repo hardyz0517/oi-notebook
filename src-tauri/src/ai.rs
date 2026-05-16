@@ -203,6 +203,8 @@ pub struct WebSearchResult {
     pub excerpt: Option<String>,
     pub excerpt_error: Option<String>,
     pub fetched_at: Option<i64>,
+    pub is_constructed: Option<bool>,
+    pub constructed_reason: Option<String>,
     pub selected: Option<bool>,
 }
 
@@ -1457,14 +1459,27 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_web_excerpt_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "no webpage excerpt available".to_string());
+        let source_origin = if source.is_constructed == Some(true) {
+            "constructed public OI source"
+        } else {
+            "search provider result"
+        };
+        let constructed_reason = source
+            .constructed_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             index + 1,
             title,
             site,
             url,
             snippet,
+            source_origin,
+            constructed_reason,
             source_type,
             reliability,
             reliability_label,
@@ -1490,6 +1505,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Even for fetched excerpts, do not say you read the full page. Say \"based on the extracted webpage excerpt\" or equivalent.\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
 - Do not say a webpage excerpt states something unless that excerpt contains it.\n\
+- Sources marked as constructed public OI sources are public entry points only. If their Web excerpt status is not fetched, do not infer their page content; say they are available to open but current summaries are insufficient.\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
@@ -3076,6 +3092,8 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        is_constructed: None,
+        constructed_reason: None,
         selected: None,
     })
 }
@@ -3127,6 +3145,8 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        is_constructed: None,
+        constructed_reason: None,
         selected: None,
     })
 }
@@ -3259,6 +3279,8 @@ fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchRes
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        is_constructed: None,
+        constructed_reason: None,
         selected: None,
     })
 }
