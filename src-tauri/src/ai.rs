@@ -26,8 +26,8 @@ const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
 const WEB_SEARCH_DEFAULT_PROVIDER: &str = "brave";
 const WEB_SEARCH_COMPAT_PROVIDER: &str = "bocha";
-const WEB_SEARCH_MAX_QUERIES: usize = 6;
-const WEB_SEARCH_MAX_RESULTS: usize = 10;
+const WEB_SEARCH_MAX_QUERIES: usize = 8;
+const WEB_SEARCH_MAX_RESULTS: usize = 40;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
 const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
@@ -154,6 +154,8 @@ pub struct NoteChatStreamInput {
     pub web_search_enabled: bool,
     #[serde(default)]
     pub search_decision: Option<JsonValue>,
+    #[serde(default)]
+    pub search_sources: Vec<WebSearchResult>,
 }
 
 #[allow(dead_code)]
@@ -170,7 +172,7 @@ pub struct WebSearchRequestInput {
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchResult {
     pub id: String,
@@ -182,6 +184,10 @@ pub struct WebSearchResult {
     pub reliability: Option<String>,
     pub reliability_label: Option<String>,
     pub reliability_reason: Option<String>,
+    pub relevance: Option<String>,
+    pub relevance_label: Option<String>,
+    pub relevance_reason: Option<String>,
+    pub selected: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1273,11 +1279,140 @@ fn truncate_chat_history_text(text: &str) -> String {
     truncated
 }
 
+fn truncate_search_context_text(text: &str) -> String {
+    const MAX_SEARCH_CONTEXT_CHARS: usize = 420;
+
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= MAX_SEARCH_CONTEXT_CHARS {
+        return trimmed.to_string();
+    }
+
+    let mut truncated = trimmed
+        .chars()
+        .take(MAX_SEARCH_CONTEXT_CHARS)
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
+    let mut entries = Vec::new();
+    let selected_sources = sources
+        .iter()
+        .filter(|source| source.selected.unwrap_or(false))
+        .collect::<Vec<_>>();
+    let context_sources = if selected_sources.is_empty() {
+        sources.iter().collect::<Vec<_>>()
+    } else {
+        selected_sources
+    };
+
+    for (index, source) in context_sources.into_iter().take(8).enumerate() {
+        let title = truncate_search_context_text(&source.title);
+        let url = truncate_search_context_text(&source.url);
+        if title.is_empty() || url.is_empty() {
+            continue;
+        }
+        let site = source
+            .site
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unknown site".to_string());
+        let snippet = source
+            .snippet
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "no snippet provided".to_string());
+        let source_type = source
+            .source_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let reliability = source
+            .reliability
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let reliability_label = source
+            .reliability_label
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        let reliability_reason = source
+            .reliability_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "not enough metadata to judge".to_string());
+        let relevance = source
+            .relevance
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("strong");
+        let relevance_label = source
+            .relevance_label
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "strongly related".to_string());
+        let relevance_reason = source
+            .relevance_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "kept by relevance filter".to_string());
+
+        entries.push(format!(
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}",
+            index + 1,
+            title,
+            site,
+            url,
+            snippet,
+            source_type,
+            reliability,
+            reliability_label,
+            reliability_reason,
+            relevance,
+            relevance_label,
+            relevance_reason,
+        ));
+    }
+
+    if entries.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "The following is web search result summary context. These are only search result titles, sites, URLs, snippets, source types, and reliability labels. They are not full webpage contents.\n\
+You may use these summaries to answer, but follow these rules strictly:\n\
+- Call them search result summaries or source summaries, not webpages you have read in full.\n\
+- Do not say you read the full pages.\n\
+- Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
+- When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
+- If the summaries are insufficient, say that the details require opening and reading the full page.\n\
+- If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
+- Strongly related sources may be used cautiously for the target problem. Candidate or related-algorithm sources are only background algorithm material and must not be presented as target-problem-specific evidence.\n\
+- If there are not enough strongly related editorial, discussion, or pitfall summaries, explicitly say the search result summaries are insufficient to directly summarize this problem's common pitfalls. You may add general OI troubleshooting advice, but label it as general experience rather than search-result evidence.\n\
+- Let reliability guide your tone: official can be more certain, wiki is algorithm reference, community_solution is community solution material, discussion is discussion or experience, blog is a personal blog view, unknown needs extra caution.\n\
+- Do not create formal citation numbers or pretend there are verified citations.\n\
+- You may briefly mention that the source cards above can be opened for confirmation.\n\n{}",
+        entries.join("\n\n")
+    ))
+}
+
 fn build_stream_note_chat_messages(
     question: &str,
     context: &NoteChatContextInput,
     chat_history: &[NoteChatHistoryMessageInput],
     resolved: &ResolvedAiConfig,
+    search_sources: &[WebSearchResult],
 ) -> JsonValue {
     let tags_text = if context.tags.is_empty() {
         "not provided".to_string()
@@ -1364,6 +1499,13 @@ The following conversation may contain previous user goals."
         messages.push(json!({
             "role": role,
             "content": content,
+        }));
+    }
+
+    if let Some(search_context) = build_search_sources_context(search_sources) {
+        messages.push(json!({
+            "role": "user",
+            "content": search_context,
         }));
     }
 
@@ -2472,7 +2614,18 @@ pub async fn chat_with_current_note_stream(
             return Err(error);
         }
     };
-    let messages = build_stream_note_chat_messages(&question, &input.context, &input.chat_history, &resolved);
+    let search_sources = if input.web_search_enabled {
+        input.search_sources.as_slice()
+    } else {
+        &[]
+    };
+    let messages = build_stream_note_chat_messages(
+        &question,
+        &input.context,
+        &input.chat_history,
+        &resolved,
+        search_sources,
+    );
     let selected_config = config_from_resolved(resolved);
     let result =
         request_chat_completion_stream(&selected_config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
@@ -2813,6 +2966,10 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
         reliability_reason: Some(reliability_reason),
+        relevance: None,
+        relevance_label: None,
+        relevance_reason: None,
+        selected: None,
     })
 }
 
@@ -2856,6 +3013,10 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
         reliability_reason: Some(reliability_reason),
+        relevance: None,
+        relevance_label: None,
+        relevance_reason: None,
+        selected: None,
     })
 }
 

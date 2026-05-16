@@ -237,6 +237,7 @@ export interface NoteChatStreamInput {
   webSearchMode?: WebSearchMode;
   webSearchEnabled?: boolean;
   searchDecision?: SearchDecision;
+  searchSources?: WebSearchResult[];
 }
 
 export interface SearchWebSourcesInput extends WebSearchRequest {

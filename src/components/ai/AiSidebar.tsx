@@ -31,7 +31,7 @@ import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { buildSearchDecision, normalizeWebSearchConfig, PUBLIC_WEB_REQUEST_POLICY, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
+import { buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -599,6 +599,23 @@ const getConversationDisplayTitle = (conversation: AiConversation | undefined): 
   return latestUserMessage ? getConversationTitleFromQuestion(latestUserMessage.text) : UNTITLED_CONVERSATION_TITLE;
 };
 
+const formatConversationRelativeTime = (updatedAt: number): string => {
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return "刚刚";
+  const diffMs = Date.now() - updatedAt;
+  if (diffMs < 60_000) return "刚刚";
+
+  const diffMinutes = Math.max(1, Math.floor(diffMs / 60_000));
+  if (diffMinutes < 60) return `${diffMinutes}分`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}小时`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 365) return `${diffDays}天`;
+
+  return `${Math.floor(diffDays / 365)}年`;
+};
+
 const isAiChatMessage = (value: unknown): value is AiChatMessage => {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<AiChatMessage>;
@@ -719,6 +736,7 @@ const sanitizeSearchDecisionForStorage = (value: unknown): SearchDecision | unde
     shouldSearch: item.shouldSearch === true,
     intent: item.intent,
     problemId: typeof item.problemId === "string" && item.problemId.trim() ? item.problemId.trim() : undefined,
+    problemTitle: typeof item.problemTitle === "string" && item.problemTitle.trim() ? item.problemTitle.trim() : undefined,
     algorithmKeywords: Array.isArray(item.algorithmKeywords)
       ? item.algorithmKeywords.filter((keyword): keyword is string => typeof keyword === "string" && keyword.trim().length > 0).slice(0, 8)
       : undefined,
@@ -776,6 +794,16 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         ? source.reliabilityReason.trim()
         : undefined,
       selected: source.selected === true,
+      relevance:
+        source.relevance === "strong" || source.relevance === "candidate" || source.relevance === "unrelated"
+          ? source.relevance
+          : undefined,
+      relevanceLabel: typeof source.relevanceLabel === "string" && source.relevanceLabel.trim()
+        ? source.relevanceLabel.trim()
+        : undefined,
+      relevanceReason: typeof source.relevanceReason === "string" && source.relevanceReason.trim()
+        ? source.relevanceReason.trim()
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 10) : undefined;
@@ -1342,7 +1370,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
 }
 
 const SEARCH_PLAN_QUERY_LIMIT = 6;
-const SEARCH_SOURCE_PREVIEW_LIMIT = 5;
+const SEARCH_SOURCE_PREVIEW_LIMIT = 8;
 
 const getSearchConfidenceLabel = (confidence: number | undefined): string => {
   if (typeof confidence !== "number") return "按需判断";
@@ -1482,6 +1510,9 @@ const getReliabilityLabel = (source: WebSource): string => source.reliabilityLab
   "未知"
 );
 
+const getSourceRelevanceLabel = (source: WebSource): string =>
+  source.relevanceLabel || (source.relevance === "candidate" ? "相关资料" : "强相关");
+
 const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): string =>
   provider === "bocha"
     ? "需要在 AI 设置中配置博查 API Key"
@@ -1490,6 +1521,8 @@ const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): str
 function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
+  const strongCount = (sources ?? []).filter((source) => source.relevance !== "candidate").length;
+  const candidateCount = (sources ?? []).filter((source) => source.relevance === "candidate").length;
 
   if (visibleSources.length === 0 && !error) return null;
 
@@ -1502,6 +1535,11 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
             <span className="rounded-full border border-emerald-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-emerald-700 dark:border-emerald-300/20 dark:bg-white/[0.05] dark:text-emerald-200">
               仅搜索结果
             </span>
+            {visibleSources.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                强相关 {strongCount} 个 · 相关资料 {candidateCount} 个
+              </span>
+            )}
           </div>
           <div className="grid gap-2">
             {visibleSources.map((source) => (
@@ -1509,6 +1547,12 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200">
                     {getSourceTypeLabel(source.sourceType)}
+                  </span>
+                  <span
+                    className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-200"
+                    title={source.relevanceReason}
+                  >
+                    {getSourceRelevanceLabel(source)}
                   </span>
                   <span
                     className="rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] text-foreground dark:bg-white/[0.05]"
@@ -1544,6 +1588,14 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
           </div>
           {hiddenCount > 0 && (
             <div className="text-[11px] text-muted-foreground">还有 {hiddenCount} 个来源未展开。</div>
+          )}
+          {error && (
+            <div className="text-[11px] leading-5 text-muted-foreground">{error}</div>
+          )}
+          {candidateCount > 0 && (
+            <div className="text-[11px] leading-5 text-muted-foreground">
+              部分相关资料仅作为算法背景，回答时不会当作目标题目的直接依据。
+            </div>
           )}
           <div className="text-[11px] leading-5 text-muted-foreground">
             当前阶段仅展示搜索结果，尚未读取网页正文。
@@ -1921,6 +1973,7 @@ export default function AiSidebar({
   const [applyingPolishMessageId, setApplyingPolishMessageId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
+  const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const [messageCopyFeedback, setMessageCopyFeedback] = useState<{
@@ -2182,6 +2235,44 @@ export default function AiSidebar({
     setWebSearchMode("auto");
   };
 
+  const fetchWebSourcesForDecision = async (
+    decision: SearchDecision,
+  ): Promise<{ sources?: WebSource[]; error?: string }> => {
+    if (!decision.shouldSearch) return {};
+    if (!canUseWebSearchProvider) {
+      const prepared = prepareWebSourcesForDecision([], decision);
+      return {
+        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
+        error: hasPublicWebSearchConsent
+          ? getWebSearchProviderMissingKeyMessage(activeWebSearchProvider)
+          : "需要先授权公开网页搜索",
+      };
+    }
+
+    try {
+      const sources = await searchWebSources({
+        provider: activeWebSearchProvider,
+        queries: decision.queries,
+        intent: decision.intent,
+        problemId: decision.problemId,
+        maxResults: 32,
+      });
+      const prepared = prepareWebSourcesForDecision(sources, decision);
+      const filterNote = decision.problemId && prepared.filteredCount > 0
+        ? `已过滤 ${prepared.filteredCount} 条明显无关结果`
+        : undefined;
+      return prepared.sources.length > 0
+        ? { sources: prepared.sources, error: filterNote }
+        : { error: filterNote ?? "联网搜索没有返回可展示的来源" };
+    } catch (error) {
+      const prepared = prepareWebSourcesForDecision([], decision);
+      return {
+        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
+        error: getWebSearchErrorMessage(error),
+      };
+    }
+  };
+
   const resolveWebSourcesForMessage = async (
     conversationId: string,
     messageId: string,
@@ -2205,7 +2296,7 @@ export default function AiSidebar({
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
-        maxResults: 10,
+        maxResults: 32,
       });
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
@@ -2220,6 +2311,7 @@ export default function AiSidebar({
       }));
     }
   };
+  void resolveWebSourcesForMessage;
 
   const updateConversationMessages = (
     conversationId: string,
@@ -2371,12 +2463,23 @@ export default function AiSidebar({
     cancelRenameConversation();
   };
 
-  const deleteConversation = (conversationId: string) => {
+  const requestDeleteConversation = (conversationId: string) => {
     const conversation = conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
 
-    const confirmed = window.confirm(`Delete chat "${conversation.title}"?`);
-    if (!confirmed) return;
+    setPendingDeleteConversationId(conversation.id);
+  };
+
+  const cancelDeleteConversation = () => {
+    setPendingDeleteConversationId(null);
+  };
+
+  const deleteConversation = (conversationId: string) => {
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      setPendingDeleteConversationId(null);
+      return;
+    }
 
     for (const [streamId, target] of Array.from(streamTargetsRef.current.entries())) {
       if (target.conversationId !== conversationId) continue;
@@ -2391,6 +2494,7 @@ export default function AiSidebar({
       const fallback = createEmptyConversation();
       setConversations([fallback]);
       setActiveConversationId(fallback.id);
+      setViewMode("conversations");
     } else {
       setConversations(remaining);
       if (conversationId === activeConversationId) {
@@ -2398,12 +2502,19 @@ export default function AiSidebar({
       }
     }
 
+    setPendingDeleteConversationId(null);
     cancelRenameConversation();
     shouldAutoScrollRef.current = true;
     setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
+
+  useEffect(() => {
+    if (!pendingDeleteConversationId) return;
+    if (conversations.some((conversation) => conversation.id === pendingDeleteConversationId)) return;
+    setPendingDeleteConversationId(null);
+  }, [conversations, pendingDeleteConversationId]);
 
   useEffect(() => {
     let disposed = false;
@@ -3384,10 +3495,12 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     questionText: string,
     snapshot?: NoteChatContextPayload,
     displayText = questionText,
+    targetConversation?: AiConversation,
   ) => {
     if (isResponding) return;
 
-    const conversationId = activeConversation?.id;
+    const requestConversation = targetConversation ?? activeConversation;
+    const conversationId = requestConversation?.id;
     const question = questionText.trim();
     if (!conversationId || !question) return;
     const userFacingText = displayText.trim() || question;
@@ -3429,12 +3542,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     requestSeqRef.current = requestId;
     const startedAt = Date.now();
     const streamId = `${Date.now()}-${requestId}`;
-    const chatHistory = buildRequestHistory(conversationId);
+    const chatHistory = targetConversation
+      ? buildRequestHistoryFromMessages(targetConversation, targetConversation.messages)
+      : buildRequestHistory(conversationId);
     const userMessage = createMessage({ role: "user", text: userFacingText, state: "done" });
     const assistantMessage = createMessage({
       role: "assistant",
       text: "",
-      state: "streaming",
+      state: "loading",
       retryText: question,
       retryDisplayText: userFacingText,
       requestId,
@@ -3460,7 +3575,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     });
     activeStreamsRef.current.add(streamId);
     updateRespondingState();
-    void resolveWebSourcesForMessage(conversationId, assistantMessage.id, searchDecision);
+
+    const searchResult = requestWebSearchEnabled && searchDecision.shouldSearch
+      ? await fetchWebSourcesForDecision(searchDecision)
+      : {};
+    replaceMessage(conversationId, assistantMessage.id, (message) => ({
+      ...message,
+      state: "streaming",
+      sources: searchResult.sources,
+      searchError: searchResult.error,
+    }));
 
     void startCurrentNoteChatStream({
       streamId,
@@ -3472,6 +3596,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       webSearchMode: requestWebSearchEnabled ? "auto" : "off",
       webSearchEnabled: requestWebSearchEnabled,
       searchDecision,
+      searchSources: searchResult.sources,
     }).catch((error) => {
       console.warn("AI sidebar chat request failed", {
         requestId,
@@ -3576,7 +3701,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const assistantMessage = createMessage({
       role: "assistant",
       text: "",
-      state: "streaming",
+      state: "loading",
       retryText: question,
       retryDisplayText: message.retryDisplayText,
       requestId,
@@ -3603,17 +3728,30 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     activeStreamsRef.current.add(streamId);
     updateRespondingState();
 
-    void startCurrentNoteChatStream({
-      streamId,
-      question,
-      context: chatContext,
-      chatHistory,
-      providerId: selectedProviderId,
-      modelId: selectedModelId,
-      webSearchMode: requestWebSearchEnabled ? "auto" : "off",
-      webSearchEnabled: requestWebSearchEnabled,
-      searchDecision,
-    }).catch((error) => {
+    void (async () => {
+      const searchResult = requestWebSearchEnabled && searchDecision.shouldSearch
+        ? await fetchWebSourcesForDecision(searchDecision)
+        : {};
+      replaceMessage(conversationId, assistantMessage.id, (current) => ({
+        ...current,
+        state: "streaming",
+        sources: searchResult.sources,
+        searchError: searchResult.error,
+      }));
+
+      await startCurrentNoteChatStream({
+        streamId,
+        question,
+        context: chatContext,
+        chatHistory,
+        providerId: selectedProviderId,
+        modelId: selectedModelId,
+        webSearchMode: requestWebSearchEnabled ? "auto" : "off",
+        webSearchEnabled: requestWebSearchEnabled,
+        searchDecision,
+        searchSources: searchResult.sources,
+      });
+    })().catch((error) => {
       console.warn("AI sidebar retry request failed", {
         requestId,
         streamId,
@@ -3748,6 +3886,18 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const conversationId = activeConversation?.id;
     const value = inputValue.trim();
     if (!conversationId || !value || isResponding) return;
+    const shouldCreateConversationFromList = viewMode === "conversations" && !value.startsWith("/");
+    const listConversation = shouldCreateConversationFromList
+      ? {
+          ...createEmptyConversation(),
+          ...getDefaultConversationModel(aiConfig),
+        }
+      : undefined;
+
+    if (listConversation) {
+      setConversations((current) => limitConversations(pruneBlankConversations([listConversation, ...current], listConversation.id)));
+      setActiveConversationId(listConversation.id);
+    }
     setViewMode("chat");
     setIsAllConversationsOpen(false);
     setConversationSearch("");
@@ -3762,7 +3912,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
 
-    void submitQuestion(value);
+    void submitQuestion(value, undefined, value, listConversation);
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3824,11 +3974,105 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     );
   }, [conversationSearch, visibleConversations]);
   const activeConversationTitle = getConversationDisplayTitle(activeConversation);
+  const pendingDeleteConversation =
+    conversations.find((conversation) => conversation.id === pendingDeleteConversationId) ?? null;
+  const pendingDeleteConversationTitle = pendingDeleteConversation
+    ? getConversationDisplayTitle(pendingDeleteConversation)
+    : "";
   const sidebarStyle = isMaximized
     ? undefined
     : width
-      ? { width, flexBasis: width, maxWidth: width }
+      ? { width, flexBasis: width, maxWidth: "100%" }
       : undefined;
+  const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
+    const title = getConversationDisplayTitle(conversation);
+    const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
+    const hoverClass = variant === "overlay" ? "hover:bg-white/10" : "hover:bg-accent/70";
+    const actionHoverClass = variant === "overlay" ? "hover:bg-white/10" : "hover:bg-accent";
+
+    if (editingConversationId === conversation.id) {
+      return (
+        <div
+          key={conversation.id}
+          className={cn(
+            "grid min-w-0 gap-1 rounded-md px-2.5 py-1.5",
+            variant === "overlay" ? "bg-white/5" : "bg-muted/30",
+          )}
+        >
+          <input
+            autoFocus
+            className="h-7 min-w-0 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+            value={editingConversationTitle}
+            onChange={(event) => setEditingConversationTitle(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onBlur={() => saveRenameConversation(conversation.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                saveRenameConversation(conversation.id);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelRenameConversation();
+              }
+            }}
+          />
+          <span className="truncate text-[11px] text-muted-foreground">Enter 保存，Esc 取消</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={conversation.id}
+        className={cn(
+          "group flex h-9 w-full min-w-0 items-center gap-1 rounded-md px-1 transition-colors",
+          hoverClass,
+        )}
+      >
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate px-1.5 text-left text-sm font-medium text-foreground"
+          onClick={() => selectConversation(conversation.id)}
+          title={title}
+        >
+          {title}
+        </button>
+        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:hidden">
+          {timeLabel}
+        </span>
+        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              actionHoverClass,
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              startRenameConversation(conversation);
+            }}
+            title="重命名会话"
+            aria-label="重命名会话"
+          >
+            <PenLine className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={(event) => {
+              event.stopPropagation();
+              requestDeleteConversation(conversation.id);
+            }}
+            title="删除会话"
+            aria-label="删除会话"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    );
+  };
   let commandOrdinal = 0;
 
   return (
@@ -3836,9 +4080,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       className={cn(
         "relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
         isOpen ? "flex" : "hidden",
-        isMaximized && "absolute inset-y-0 right-0 z-40 border-l border-border/80 shadow-2xl",
+        isMaximized && "absolute inset-0 z-40 border-l border-border/80 shadow-2xl",
       )}
-      style={isMaximized ? { left: "calc(52px * var(--app-zoom, 1))" } : sidebarStyle}
+      style={isMaximized ? undefined : sidebarStyle}
       aria-hidden={!isOpen}
     >
       <div className="relative shrink-0">
@@ -3892,30 +4136,38 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         </div>
 
         <div className="flex min-w-0 items-center justify-between gap-2 px-3 py-1">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={() => {
-              setViewMode("conversations");
-              setIsAllConversationsOpen(false);
-              setConversationSearch("");
-              setIsHistoryOpen(false);
-                setIsProviderPickerOpen(false);
-                setIsModelPickerOpen(false);
-              }}
-              title="Conversations"
-              aria-label="Conversations"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-            <span
-              className="min-w-0 truncate text-sm font-medium text-foreground"
-              title={activeConversationTitle}
-            >
-              {activeConversationTitle}
-            </span>
-          </div>
+          {viewMode === "conversations" ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="min-w-0 truncate text-sm font-medium text-foreground" title="会话">
+                会话
+              </span>
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => {
+                  setViewMode("conversations");
+                  setIsAllConversationsOpen(false);
+                  setConversationSearch("");
+                  setIsHistoryOpen(false);
+                  setIsProviderPickerOpen(false);
+                  setIsModelPickerOpen(false);
+                }}
+                title="会话"
+                aria-label="会话"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <span
+                className="min-w-0 truncate text-sm font-medium text-foreground"
+                title={activeConversationTitle}
+              >
+                {activeConversationTitle}
+              </span>
+            </div>
+          )}
           <button
             type="button"
             className={cn(
@@ -4093,17 +4345,17 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         {isHistoryOpen && (
           <div className="absolute right-3 top-[4.75rem] z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
-              <span className="text-xs font-medium text-foreground">Chat history</span>
-              <span className="text-[11px] text-muted-foreground">max {AI_CONVERSATION_LIMIT}</span>
+              <span className="text-xs font-medium text-foreground">会话</span>
+              <span className="text-[11px] text-muted-foreground">{visibleConversations.length} 个</span>
             </div>
             <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
-              {visibleConversations.map((conversation) => (
+              <div className="grid gap-1">
+                {visibleConversations.map((conversation) => renderConversationItem(conversation))}
+              </div>
+              {false && visibleConversations.map((conversation) => (
                 <div
                   key={conversation.id}
-                  className={cn(
-                    "group flex w-full min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground",
-                    conversation.id === activeConversationId && "bg-accent text-accent-foreground",
-                  )}
+                  className="group flex w-full min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground"
                 >
                   {editingConversationId === conversation.id ? (
                     <div className="grid min-w-0 flex-1 gap-1 px-2.5 py-1.5">
@@ -4157,7 +4409,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-75 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
-                      deleteConversation(conversation.id);
+                      requestDeleteConversation(conversation.id);
                     }}
                     title="Delete chat"
                     aria-label={`Delete chat ${conversation.title}`}
@@ -4190,33 +4442,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         >
           {viewMode === "conversations" ? (
             <div className="grid gap-2">
-              <div className="flex items-center justify-between px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                <span>Conversations</span>
+              <div className="hidden">
+                <span />
                 <span>{visibleConversations.length}</span>
               </div>
               {recentConversations.length > 0 ? (
                 <div className="grid gap-1">
-                  {recentConversations.map((conversation) => {
-                    const isActive = conversation.id === activeConversationId;
-                    const title = getConversationDisplayTitle(conversation);
-                    return (
-                      <button
-                        key={conversation.id}
-                        type="button"
-                        className={cn(
-                          "grid min-w-0 gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                          isActive && "bg-accent text-accent-foreground",
-                        )}
-                        onClick={() => selectConversation(conversation.id)}
-                      >
-                        <span className="truncate text-sm font-medium">{title}</span>
-                        <span className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span>{conversation.messages.length} messages</span>
-                          <span className="shrink-0 tabular-nums">{new Date(conversation.updatedAt).toLocaleString()}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {recentConversations.map((conversation) => renderConversationItem(conversation))}
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed border-border/70 px-3 py-8 text-center text-sm text-muted-foreground">
@@ -4402,32 +4634,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 className="h-9 min-w-0 rounded-md border border-white/10 bg-black/20 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
               />
               <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:thin]">
-                <div className="mb-1 flex items-center justify-between px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <div className="hidden">
                   <span>所有会话</span>
                   <span>{filteredConversations.length}</span>
                 </div>
                 {filteredConversations.length > 0 ? (
                   <div className="grid gap-1">
-                    {filteredConversations.map((conversation) => {
-                      const isActive = conversation.id === activeConversationId;
-                      const title = getConversationDisplayTitle(conversation);
-                      return (
-                        <button
-                          key={conversation.id}
-                          type="button"
-                          className={cn(
-                            "flex min-w-0 items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/10 hover:text-foreground",
-                            isActive && "bg-white/10 text-foreground",
-                          )}
-                          onClick={() => selectConversation(conversation.id)}
-                        >
-                          <span className="min-w-0 truncate text-sm font-medium">{title}</span>
-                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                            {new Date(conversation.updatedAt).toLocaleString()}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {filteredConversations.map((conversation) => renderConversationItem(conversation, "overlay"))}
                   </div>
                 ) : (
                   <div className="rounded-md border border-dashed border-white/10 px-3 py-8 text-center text-sm text-muted-foreground">
@@ -4703,6 +4916,43 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         </div>
       </div>
+      <Dialog
+        open={!!pendingDeleteConversation}
+        onOpenChange={(open) => {
+          if (!open) cancelDeleteConversation();
+        }}
+      >
+        <DialogContent className="max-w-[calc(100vw-2rem)] border-border/70 bg-background/95 text-foreground shadow-[0_24px_80px_rgb(0_0_0/0.35)] backdrop-blur sm:max-w-sm dark:border-white/10 dark:bg-[#2b2d2f]/95">
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm leading-6 text-muted-foreground">
+            确定要删除“{pendingDeleteConversationTitle}”吗？此操作无法撤销。
+          </p>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={cancelDeleteConversation}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (!pendingDeleteConversation) {
+                  cancelDeleteConversation();
+                  return;
+                }
+                deleteConversation(pendingDeleteConversation.id);
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isWebSearchConsentDialogOpen} onOpenChange={(open) => !isSavingWebSearchConsent && setIsWebSearchConsentDialogOpen(open)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
