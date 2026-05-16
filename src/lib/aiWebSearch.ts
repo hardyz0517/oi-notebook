@@ -543,6 +543,9 @@ export function buildSearchDecision(
     if (explicitWebSearchRequested || generalWebKeywords.length > 0) {
       confidence += 0.22;
       reasons.push(`识别到算法关键词：${algorithmKeywords[0]}`);
+    } else if (discussionKeywords.length > 0 || errorKeywords.length > 0) {
+      confidence += 0.48;
+      reasons.push(`用户在询问 ${algorithmKeywords[0]} 的实现坑 / 错误经验`);
     } else if (!problemIds.length && !errorKeywords.length && !discussionKeywords.length) {
       confidence += 0.12;
     }
@@ -584,7 +587,10 @@ export function buildSearchDecision(
     };
   }
 
-  if (algorithmKeywords.length > 0 && (explicitWebSearchRequested || generalWebKeywords.length > 0)) {
+  if (
+    algorithmKeywords.length > 0 &&
+    (explicitWebSearchRequested || generalWebKeywords.length > 0 || discussionKeywords.length > 0 || errorKeywords.length > 0)
+  ) {
     return {
       shouldSearch,
       intent: "algorithm_reference",
