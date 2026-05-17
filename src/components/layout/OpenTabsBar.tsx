@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import { FileText, GitCompare, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -37,13 +37,52 @@ export default function OpenTabsBar({
 }: OpenTabsBarProps) {
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollIndicator, setScrollIndicator] = useState({
+    left: 0,
+    visible: false,
+    width: 100,
+  });
+
+  const updateScrollIndicator = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      setScrollIndicator({ left: 0, visible: false, width: 100 });
+      return;
+    }
+
+    const { clientWidth, scrollLeft, scrollWidth } = container;
+    const maxScrollLeft = scrollWidth - clientWidth;
+    if (clientWidth <= 0 || maxScrollLeft <= 1) {
+      setScrollIndicator({ left: 0, visible: false, width: 100 });
+      return;
+    }
+
+    const width = Math.max(12, (clientWidth / scrollWidth) * 100);
+    const left = (scrollLeft / maxScrollLeft) * (100 - width);
+    setScrollIndicator({ left, visible: true, width });
+  }, []);
 
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({
       block: "nearest",
       inline: "nearest",
     });
-  }, [activeTabId, tabs.length]);
+    updateScrollIndicator();
+  }, [activeTabId, tabs.length, updateScrollIndicator]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    updateScrollIndicator();
+    const resizeObserver = new ResizeObserver(updateScrollIndicator);
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [updateScrollIndicator]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     const container = scrollContainerRef.current;
@@ -60,18 +99,20 @@ export default function OpenTabsBar({
     event.preventDefault();
     event.stopPropagation();
     container.scrollLeft += delta;
-  }, []);
+    updateScrollIndicator();
+  }, [updateScrollIndicator]);
 
   if (tabs.length === 0) {
     return null;
   }
 
   return (
-    <div className="open-tabs-bar flex w-full min-w-0 shrink-0 items-stretch overflow-hidden border-y border-border/80 bg-muted/20">
+    <div className="open-tabs-bar relative flex w-full min-w-0 shrink-0 items-stretch overflow-hidden border-y border-border/80 bg-muted/20">
       <div
         ref={scrollContainerRef}
         className="open-tabs-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
         onWheel={handleWheel}
+        onScroll={updateScrollIndicator}
       >
         <div className="open-tabs-list flex w-max min-w-max">
           {tabs.map((tab) => {
@@ -144,6 +185,17 @@ export default function OpenTabsBar({
           })}
         </div>
       </div>
+      {scrollIndicator.visible && (
+        <div className="open-tabs-scroll-indicator" aria-hidden="true">
+          <div
+            className="open-tabs-scroll-indicator-thumb"
+            style={{
+              left: `${scrollIndicator.left}%`,
+              width: `${scrollIndicator.width}%`,
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

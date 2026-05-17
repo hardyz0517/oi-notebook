@@ -4208,11 +4208,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       ? `当前：${getFileNameFromPath(context.filePath)} · ${context.bodyLength} 字符`
       : `当前：${getFileNameFromPath(context.filePath)} · 未包含`
     : "当前：无笔记";
-  const composerHint = inputValue.startsWith("/")
-    ? "选择命令"
-    : includeCurrentNoteContext && context.filePath
-      ? "已包含当前笔记信息"
-      : "未包含当前笔记信息";
   const sortedConversations = useMemo(
     () => limitConversations(pruneBlankConversations(conversations, activeConversationId)),
     [activeConversationId, conversations],
@@ -4240,6 +4235,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     : width
       ? { width, flexBasis: width, maxWidth: "100%" }
       : undefined;
+  const contentColumnClass = isMaximized ? "w-full max-w-none" : "mx-auto w-full max-w-3xl";
   const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
     const title = getConversationDisplayTitle(conversation);
     const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
@@ -4697,7 +4693,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           onScroll={handleMessagesScroll}
         >
           {viewMode === "conversations" ? (
-            <div className="grid gap-2">
+            <div className={cn(contentColumnClass, "grid gap-2")}>
               <div className="hidden">
                 <span />
                 <span>{visibleConversations.length}</span>
@@ -4728,7 +4724,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               )}
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex h-full min-h-44 items-center justify-center px-5 text-center">
+            <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center")}>
             <div className="grid max-w-72 gap-3">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground">
                 <MessageCircle className="h-5 w-5" />
@@ -4740,7 +4736,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             </div>
           ) : (
-            <div className="grid gap-3">
+            <div className={cn(contentColumnClass, "grid gap-3")}>
             {messages.map((message) => {
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
@@ -4911,22 +4907,27 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         )}
         {viewMode === "chat" && showScrollToBottom && (
-          <button
-            type="button"
-            className="absolute bottom-3 left-1/2 z-20 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 dark:bg-[#2f3134]/95"
-            onClick={() => {
-              shouldAutoScrollRef.current = true;
-              scrollMessagesToBottom("smooth");
-            }}
-            title="回到底部"
-            aria-label="回到底部"
-          >
-            <ArrowDown className="h-4 w-4" />
-          </button>
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20">
+            <div className={cn(contentColumnClass, "relative h-9")}>
+            <button
+              type="button"
+              className="pointer-events-auto absolute left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 dark:bg-[#2f3134]/95"
+              onClick={() => {
+                shouldAutoScrollRef.current = true;
+                scrollMessagesToBottom("smooth");
+              }}
+              title="回到底部"
+              aria-label="回到底部"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
+            </div>
+          </div>
         )}
       </div>
 
       <div className="relative z-30 shrink-0 px-3 pb-3 pt-2">
+        <div className={cn(contentColumnClass, "relative")}>
         {isCommandPanelOpen && (
           <div className="ai-command-panel absolute bottom-[calc(100%-0.45rem)] left-5 right-5 z-20 overflow-hidden rounded-xl border border-[#dcdfe6] bg-white text-popover-foreground shadow-[0_18px_48px_rgb(15_23_42/0.16)] dark:border-white/10 dark:bg-[#2f3134] dark:shadow-[0_18px_52px_rgb(0_0_0/0.42)]">
             <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -5008,7 +5009,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           />
         )}
 
-        <div className="ai-composer rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
+        <div className="ai-composer relative rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
           <textarea
             ref={inputRef}
             value={inputValue}
@@ -5030,12 +5031,12 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             placeholder="Ask a question, or type /"
             className="max-h-36 min-h-20 w-full resize-none border-0 !bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/75 focus:!shadow-none"
           />
-          <div className="flex items-center justify-between gap-2 px-1.5 pt-2 text-[11px] text-muted-foreground">
-            <div className="relative flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden px-1.5 pt-2 text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <button
                 type="button"
                 className={cn(
-                  "inline-flex h-7 max-w-[55%] items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
+                  "inline-flex h-7 min-w-[3.75rem] max-w-[10rem] flex-[1_1_7rem] items-center gap-1 overflow-hidden rounded-full border border-border/70 bg-background/70 px-1.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:px-2 dark:bg-white/[0.04]",
                   isModelPickerOpen && "bg-accent text-accent-foreground",
                 )}
                 onClick={() => {
@@ -5043,11 +5044,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   setIsProviderPickerOpen(false);
                   setIsHistoryOpen(false);
                 }}
-                title={selectedModelLabel}
-                aria-label="选择当前模型"
+                title={`选择模型：${selectedModelLabel}`}
+                aria-label={`选择模型：${selectedModelLabel}`}
                 aria-expanded={isModelPickerOpen}
               >
-                <span className="truncate">模型：{selectedModelLabel}</span>
+                <span className="min-w-0 truncate">{selectedModelLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               </button>
               <button
@@ -5055,15 +5056,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={includeCurrentNoteContext}
                 className={cn(
-                  "inline-flex h-7 min-w-0 shrink items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-2 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
-                  includeCurrentNoteContext && "border-primary/40 bg-primary/10 text-foreground",
+                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/70 px-1 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1.5 min-[420px]:px-2 dark:bg-white/[0.04]",
+                  includeCurrentNoteContext && "border-primary/45 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_rgb(59_130_246/0.08)]",
                 )}
                 onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
-                title={includeCurrentNoteContext ? "普通聊天会包含当前笔记信息" : "普通聊天不会包含当前笔记信息"}
+                title={includeCurrentNoteContext ? "包含当前笔记信息" : "不包含当前笔记信息"}
+                aria-label={includeCurrentNoteContext ? "包含当前笔记信息" : "不包含当前笔记信息"}
               >
                 <span
                   className={cn(
-                    "relative h-3.5 w-6 shrink-0 rounded-full bg-muted-foreground/30 transition-colors",
+                    "relative h-3.5 w-6 shrink-0 rounded-full bg-muted-foreground/25 transition-colors",
                     includeCurrentNoteContext && "bg-primary/70",
                   )}
                 >
@@ -5074,25 +5076,26 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     )}
                   />
                 </span>
-                <span className="truncate">包含当前笔记信息</span>
+                <span className="hidden truncate min-[420px]:inline">笔记</span>
               </button>
               <button
                 type="button"
                 role="switch"
                 aria-checked={webSearchEnabled}
                 className={cn(
-                  "inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-2 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-white/[0.04]",
-                  webSearchEnabled && "border-primary/40 bg-primary/10 text-foreground",
+                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/70 px-1.5 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1.5 min-[420px]:px-2 dark:bg-white/[0.04]",
+                  webSearchEnabled && "border-primary/45 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_rgb(59_130_246/0.08)]",
                 )}
                 onClick={handleWebSearchToggle}
-                title={webSearchEnabled ? "允许 NoteX 按需进行联网搜索" : "关闭联网搜索，只使用笔记、历史上下文和模型自身能力"}
+                title={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
+                aria-label={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">联网搜索</span>
+                <span className="hidden truncate min-[420px]:inline">联网</span>
               </button>
 
-              {isModelPickerOpen && (
-                <div className="absolute bottom-9 left-0 z-40 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+              {false && isModelPickerOpen && (
+                <div className="absolute bottom-9 left-0 z-50 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
                   <div className="grid gap-2 border-b border-border/70 p-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-xs font-medium text-foreground">
@@ -5161,7 +5164,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 </div>
               )}
             </div>
-            <span className="truncate">{inputValue.startsWith("/") ? "选择命令" : composerHint}</span>
             <button
               type="button"
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#202124] text-white shadow-sm transition-[background-color,color,opacity,transform,box-shadow] hover:bg-[#111827] hover:shadow disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-55 dark:bg-[#f3f4f6] dark:text-[#202124] dark:hover:bg-white dark:disabled:bg-white/12 dark:disabled:text-muted-foreground"
@@ -5173,6 +5175,76 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
             </button>
           </div>
+          {isModelPickerOpen && (
+            <div className="absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+              <div className="grid gap-2 border-b border-border/70 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-foreground">
+                    {activeProvider ? activeProvider.name || activeProvider.id : "未选择配置组"}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={() => {
+                      setIsModelPickerOpen(false);
+                      onOpenAiSettings();
+                    }}
+                  >
+                    <Settings className="h-3 w-3" />
+                    API 管理
+                  </button>
+                </div>
+                {activeProviderModels.length > 6 && (
+                  <input
+                    value={modelSearch}
+                    onChange={(event) => setModelSearch(event.target.value)}
+                    placeholder="搜索模型"
+                    className="h-7 rounded-md border border-input bg-background/80 px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                )}
+              </div>
+              <div className="max-h-64 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+                {selectableModels.length > 0 ? (
+                  <div className="grid gap-0.5">
+                    {selectableModels.map((model) => {
+                      const isSelected = model.id === selectedModelId;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          className={cn(
+                            "grid min-w-0 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                            isSelected && "bg-accent text-accent-foreground",
+                          )}
+                          onClick={() => selectConversationModel(model)}
+                        >
+                          <span className="truncate text-sm font-medium">{model.name || model.id}</span>
+                          <span className="truncate text-[11px] text-muted-foreground">
+                            {model.id} · {model.source === "manual" ? "手动" : "同步"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid gap-2 px-3 py-7 text-center text-sm text-muted-foreground">
+                    <div>{activeProvider ? "当前配置组没有可用模型" : "未选择配置组"}</div>
+                    <button
+                      type="button"
+                      className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                      onClick={() => {
+                        setIsModelPickerOpen(false);
+                        onOpenAiSettings();
+                      }}
+                    >
+                      去设置中心同步或手动添加
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         </div>
       </div>
       <Dialog
