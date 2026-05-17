@@ -214,6 +214,8 @@ pub struct WebSearchResult {
     pub cache_status: Option<String>,
     pub cached_at: Option<String>,
     pub cache_ttl_seconds: Option<i64>,
+    pub rank_score: Option<i64>,
+    pub rank_reason: Option<String>,
     pub is_constructed: Option<bool>,
     pub constructed_reason: Option<String>,
     pub selected: Option<bool>,
@@ -1661,6 +1663,16 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("none");
+        let rank_score = source
+            .rank_score
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not ranked".to_string());
+        let rank_reason = source
+            .rank_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "not ranked".to_string());
         let source_origin = if source.is_constructed == Some(true) {
             "constructed public OI source"
         } else {
@@ -1674,7 +1686,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .unwrap_or_else(|| "none".to_string());
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             index + 1,
             title,
             site,
@@ -1689,6 +1701,8 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             relevance,
             relevance_label,
             relevance_reason,
+            rank_score,
+            rank_reason,
             cache_status,
             cached_at,
             excerpt_status,
@@ -1713,6 +1727,8 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
 - If Cache status is stale, treat that source as potentially outdated and state time-sensitive claims cautiously.\n\
+- Sources are already ordered by relevance, reliability, freshness, quality, and excerpt availability. Prefer higher-ranked sources when deciding what to use, and avoid relying on weak candidate sources unless they contain concrete evidence.\n\
+- For time-sensitive or news-like questions, the search results may be incomplete. Pay attention to explicit publication dates or date hints in titles/snippets/excerpts; if a source lacks dates, do not present its claims as definitely latest.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
 - Strongly related sources may be used cautiously for the target problem. Candidate or related-algorithm sources are only background algorithm material and must not be presented as target-problem-specific evidence.\n\
 - If there are not enough strongly related editorial, discussion, or pitfall summaries, explicitly say the search result summaries are insufficient to directly summarize this problem's common pitfalls. You may add general OI troubleshooting advice, but label it as general experience rather than search-result evidence.\n\
@@ -3319,6 +3335,8 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        rank_score: None,
+        rank_reason: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -3379,6 +3397,8 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        rank_score: None,
+        rank_reason: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -3516,6 +3536,8 @@ fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchRes
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        rank_score: None,
+        rank_reason: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -4359,6 +4381,8 @@ fn finish_web_excerpt_result(
             cache_status: None,
             cached_at: None,
             cache_ttl_seconds: None,
+            rank_score: None,
+            rank_reason: None,
             is_constructed: None,
             constructed_reason: None,
             selected: None,

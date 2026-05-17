@@ -31,7 +31,7 @@ import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
+import { buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -856,6 +856,12 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       cacheTtlSeconds: typeof source.cacheTtlSeconds === "number" && Number.isFinite(source.cacheTtlSeconds)
         ? source.cacheTtlSeconds
         : undefined,
+      rankScore: typeof source.rankScore === "number" && Number.isFinite(source.rankScore)
+        ? source.rankScore
+        : undefined,
+      rankReason: typeof source.rankReason === "string" && source.rankReason.trim()
+        ? source.rankReason.trim()
+        : undefined,
       isConstructed: source.isConstructed === true,
       constructedReason: typeof source.constructedReason === "string" && source.constructedReason.trim()
         ? source.constructedReason.trim()
@@ -1666,7 +1672,7 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                   </span>
                   <span
                     className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-200"
-                    title={source.relevanceReason}
+                    title={[source.relevanceReason, source.rankReason].filter(Boolean).join(" · ") || undefined}
                   >
                     {getSourceRelevanceLabel(source)}
                   </span>
@@ -2438,7 +2444,10 @@ export default function AiSidebar({
           cacheTtlSeconds: result.cacheTtlSeconds,
         };
       });
-      return { prepared, sources: sourcesWithExcerpts };
+      return {
+        prepared,
+        sources: rankPreparedWebSources(sourcesWithExcerpts, decision, options?.userInput, options?.context),
+      };
     };
     if (!canUseWebSearchProvider) {
       const prepared = prepareWebSourcesForDecision([], decision, options?.userInput, options?.context);

@@ -50,6 +50,8 @@ export type WebSource = {
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
+  rankScore?: number;
+  rankReason?: string;
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
@@ -102,6 +104,8 @@ export type WebSearchResult = {
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
+  rankScore?: number;
+  rankReason?: string;
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
@@ -600,8 +604,14 @@ const buildGeneralWebQueries = (question: string, recentInfoRequested: boolean):
   }
 
   const normalized = normalizeSearchText(cleaned);
+  const recentQueryHints = [
+    normalized.includes("ai") ? "最近 AI 新闻" : "",
+    normalized.includes("ai") ? "AI 最新进展" : "",
+    normalized.includes("信息学竞赛") ? "信息学竞赛 最新消息" : "",
+  ];
   const queries = [
     cleaned,
+    ...recentQueryHints,
     /(?:NOIP|CSP)/i.test(cleaned) ? "CSP NOIP 最新消息" : "",
     normalized.includes("信息学竞赛") ? "信息学竞赛 最新消息" : "",
     normalized.includes("ai") ? "最近 AI 新闻" : "",
@@ -615,6 +625,244 @@ export type WebSourceRelevanceResult = {
   filteredCount: number;
   strongCount: number;
   candidateCount: number;
+};
+
+const NEWS_TIME_KEYWORDS = ["最近", "最新", "新闻", "消息", "更新", "今年", "今天", "这周", "近期"];
+const NEWS_AUTHORITY_HINTS = [
+  "openai.com",
+  "anthropic.com",
+  "deepmind.google",
+  "blog.google",
+  "microsoft.com",
+  "nvidia.com",
+  "meta.com",
+  "reuters.com",
+  "apnews.com",
+  "theverge.com",
+  "technologyreview.com",
+  "wired.com",
+  "36kr.com",
+  "jiqizhixin.com",
+  "qbitai.com",
+];
+const SEO_TITLE_PATTERNS = [
+  /\b\d{4}\s*(?:latest|new|complete|guide)\b/i,
+  /(?:最新|最全|一文看懂|保姆级|全网最|值得收藏|吐血整理|万字长文)/,
+];
+const CORE_INTENT_KEYWORDS = [
+  "WA",
+  "TLE",
+  "RE",
+  "MLE",
+  "CE",
+  "hack",
+  "坑",
+  "常见坑",
+  "常见错误",
+  "注意事项",
+  "新闻",
+  "消息",
+  "更新",
+  "最新",
+  "最近",
+  "近期",
+];
+
+const getReliabilityRankScore = (source: WebSource): number => {
+  switch (source.reliability) {
+    case "official":
+      return 24;
+    case "wiki":
+      return 20;
+    case "community_solution":
+      return 14;
+    case "discussion":
+      return 12;
+    case "blog":
+      return 4;
+    default:
+      return 0;
+  }
+};
+
+const getSourceTypeRankScore = (source: WebSource, decision: SearchDecision, recentInfoRequested: boolean): number => {
+  const text = getSourceSearchText(source);
+  if (recentInfoRequested) {
+    if (NEWS_AUTHORITY_HINTS.some((hint) => text.includes(hint))) return 18;
+    if (source.sourceType === "official") return 14;
+    if (source.sourceType === "blog" || source.reliability === "blog") return -8;
+    if (isKnownOiSource(source)) return -16;
+    return 0;
+  }
+  if (decision.intent === "algorithm_reference") {
+    if (text.includes("oi-wiki") || text.includes("cp-algorithms")) return 22;
+    if (source.reliability === "wiki") return 16;
+    if (source.reliability === "blog") return -3;
+  }
+  if (decision.problemId || decision.intent === "oi_problem" || decision.intent === "oi_discussion" || decision.intent === "debug_issue") {
+    if (text.includes("luogu.com.cn/problem/")) return source.isConstructed && source.excerptStatus !== "fetched" ? 8 : 24;
+    if (text.includes("luogu.com.cn/problem/solution/")) return source.isConstructed && source.excerptStatus !== "fetched" ? 8 : 20;
+    if (text.includes("oi-wiki") || text.includes("cp-algorithms")) return 12;
+    if (source.reliability === "blog") return -4;
+  }
+  return 0;
+};
+
+const getCoreKeywordMatches = (source: WebSource, decision: SearchDecision, userInput: string): string[] => {
+  const searchText = getSourceSearchText(source);
+  const intentKeywords = unique([
+    ...CORE_INTENT_KEYWORDS.filter((keyword) => normalizeSearchText(userInput).includes(normalizeSearchText(keyword))),
+    ...(decision.algorithmKeywords ?? []),
+    ...(decision.errorKeywords ?? []),
+  ]);
+  return intentKeywords.filter((keyword) => searchText.includes(normalizeSearchText(keyword)));
+};
+
+const getDateRankScore = (source: WebSource, recentInfoRequested: boolean): number => {
+  if (!recentInfoRequested) return 0;
+  const text = [source.title, source.snippet, source.url].filter(Boolean).join(" ");
+  const currentYear = new Date().getFullYear();
+  const years = unique((text.match(/\b20\d{2}\b/g) ?? [])).map((item) => Number(item)).filter(Number.isFinite);
+  if (years.length > 0) {
+    const newestYear = Math.max(...years);
+    if (newestYear >= currentYear) return 18;
+    if (newestYear === currentYear - 1) return 8;
+    if (newestYear < currentYear - 2) return -12;
+  }
+  if (/\b(?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])\b/.test(text) || /(?:\d{1,2})月(?:\d{1,2})日/.test(text)) {
+    return 5;
+  }
+  return -2;
+};
+
+const getLowQualityPenalty = (source: WebSource, decision: SearchDecision, userInput: string, recentInfoRequested: boolean): number => {
+  const title = source.title.trim();
+  const snippet = source.snippet?.trim() ?? "";
+  const text = getSourceSearchText(source);
+  let penalty = 0;
+  if (SEO_TITLE_PATTERNS.some((pattern) => pattern.test(title))) penalty -= 10;
+  if ((source.reliability ?? "unknown") === "unknown" && snippet.length > 0 && snippet.length < 36) penalty -= 8;
+  if ((source.reliability ?? "unknown") === "unknown" && snippet.length === 0) penalty -= 10;
+  if (recentInfoRequested && (text.includes("csdn.net") || text.includes("blog.csdn") || text.includes("cnblogs.com"))) penalty -= 12;
+  if (recentInfoRequested && isKnownOiSource(source)) penalty -= 10;
+  if (!recentInfoRequested && text.includes("csdn.net")) penalty -= 4;
+  const coreMatches = getCoreKeywordMatches(source, decision, userInput);
+  if (coreMatches.length === 0 && (decision.algorithmKeywords?.length || decision.errorKeywords?.length || recentInfoRequested)) {
+    penalty -= 8;
+  }
+  const tokens = snippet.split(/\s+/).filter((item) => item.length >= 2);
+  const uniqueTokenCount = new Set(tokens.map((item) => normalizeSearchText(item))).size;
+  if (tokens.length >= 16 && uniqueTokenCount <= Math.ceil(tokens.length * 0.45)) penalty -= 8;
+  return penalty;
+};
+
+const isRecentGeneralWebDecision = (decision: SearchDecision, userInput: string): boolean =>
+  decision.intent === "general_web" && (
+    isRecentInfoRequest(userInput) ||
+    hasKeyword(userInput, NEWS_TIME_KEYWORDS) ||
+    decision.queries.some((query) => hasKeyword(query, NEWS_TIME_KEYWORDS))
+  );
+
+const scoreWebSourceRank = (
+  source: WebSource,
+  decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
+  relevanceScore = 0,
+): { rankScore: number; rankReason: string } => {
+  const recentInfoRequested = isRecentGeneralWebDecision(decision, userInput);
+  const text = getSourceSearchText(source);
+  const problemId = decision.problemId?.trim().toUpperCase();
+  let score = relevanceScore;
+  const reasons: string[] = [];
+
+  if (problemId && text.includes(normalizeSearchText(problemId))) {
+    score += 34;
+    reasons.push("matches target problem id");
+  }
+  const titleTokens = tokenizeProblemTitle([decision.problemTitle, context?.noteTitle].filter(Boolean).join(" "));
+  const titleMatches = titleTokens.filter((token) => text.includes(normalizeSearchText(token)));
+  if (titleMatches.length > 0) {
+    score += Math.min(18, titleMatches.length * 6);
+    reasons.push("matches problem title");
+  }
+  const algorithmMatches = (decision.algorithmKeywords ?? []).filter((keyword) => text.includes(normalizeSearchText(keyword)));
+  if (algorithmMatches.length > 0) {
+    score += Math.min(24, algorithmMatches.length * 8);
+    reasons.push("matches algorithm keyword");
+  }
+  const coreMatches = getCoreKeywordMatches(source, decision, userInput);
+  if (coreMatches.length > 0) {
+    score += Math.min(18, coreMatches.length * 6);
+    reasons.push("matches question focus");
+  }
+
+  const reliabilityScore = getReliabilityRankScore(source);
+  if (reliabilityScore > 0) reasons.push(`reliability +${reliabilityScore}`);
+  score += reliabilityScore;
+
+  const typeScore = getSourceTypeRankScore(source, decision, recentInfoRequested);
+  if (typeScore !== 0) reasons.push(typeScore > 0 ? "preferred source type" : "less suitable source type");
+  score += typeScore;
+
+  const dateScore = getDateRankScore(source, recentInfoRequested);
+  if (dateScore !== 0) reasons.push(dateScore > 0 ? "has recent date hint" : "weak or old date hint");
+  score += dateScore;
+
+  if (source.excerptStatus === "fetched") {
+    score += source.cacheStatus === "stale" ? 4 : 12;
+    reasons.push(source.cacheStatus === "stale" ? "has stale excerpt" : "has fetched excerpt");
+  } else if (source.excerptStatus === "failed" || source.excerptStatus === "unavailable") {
+    score -= 4;
+    reasons.push("excerpt unavailable");
+  }
+
+  if (source.isConstructed) {
+    score += source.excerptStatus === "fetched" ? 6 : -18;
+    reasons.push(source.excerptStatus === "fetched" ? "constructed source verified by excerpt" : "constructed source not yet read");
+  }
+
+  const lowQualityPenalty = getLowQualityPenalty(source, decision, userInput, recentInfoRequested);
+  if (lowQualityPenalty < 0) reasons.push("low-quality signals");
+  score += lowQualityPenalty;
+
+  return {
+    rankScore: Math.round(score),
+    rankReason: reasons.slice(0, 4).join("; ") || "kept by provider order",
+  };
+};
+
+export const rankPreparedWebSources = (
+  sources: WebSource[],
+  decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
+): WebSource[] => {
+  const recentInfoRequested = isRecentGeneralWebDecision(decision, userInput);
+  let selectedCandidateCount = 0;
+  let selectedStrongCount = 0;
+  return sources
+    .map((source, index) => {
+      const rank = scoreWebSourceRank(source, decision, userInput, context, 0);
+      const relevance: WebSourceRelevance = source.relevance ?? (
+        rank.rankScore >= (recentInfoRequested ? 34 : 28) ? "strong" : "candidate"
+      );
+      return { ...source, ...rank, relevance, index };
+    })
+    .sort((left, right) => (right.rankScore ?? 0) - (left.rankScore ?? 0) || left.index - right.index)
+    .map(({ index: _index, ...source }) => {
+      const relevance = source.relevance ?? "strong";
+      const candidateThreshold = recentInfoRequested ? 36 : 30;
+      const shouldSelect = relevance === "strong"
+        ? selectedStrongCount < 6
+        : selectedCandidateCount < 2 && (source.rankScore ?? 0) >= candidateThreshold;
+      if (shouldSelect && relevance === "strong") selectedStrongCount += 1;
+      if (shouldSelect && relevance === "candidate") selectedCandidateCount += 1;
+      return {
+        ...source,
+        selected: shouldSelect,
+      };
+    });
 };
 
 export const buildLuoguDeterministicSources = (problemId: string): WebSource[] => {
@@ -769,7 +1017,7 @@ const classifyProblemSourceRelevance = (
   return { relevance: "unrelated", score: -20, reason: "未命中题号、题名或算法关键词。" };
 };
 
-export const prepareWebSourcesForDecision = (
+const prepareWebSourcesForDecisionBase = (
   rawSources: WebSource[],
   decision: SearchDecision,
   userInput = "",
@@ -833,6 +1081,22 @@ export const prepareWebSourcesForDecision = (
   return {
     sources,
     filteredCount,
+    strongCount: sources.filter((source) => source.relevance === "strong").length,
+    candidateCount: sources.filter((source) => source.relevance === "candidate").length,
+  };
+};
+
+export const prepareWebSourcesForDecision = (
+  rawSources: WebSource[],
+  decision: SearchDecision,
+  userInput = "",
+  context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
+): WebSourceRelevanceResult => {
+  const base = prepareWebSourcesForDecisionBase(rawSources, decision, userInput, context);
+  const sources = rankPreparedWebSources(base.sources, decision, userInput, context).slice(0, 10);
+  return {
+    ...base,
+    sources,
     strongCount: sources.filter((source) => source.relevance === "strong").length,
     candidateCount: sources.filter((source) => source.relevance === "candidate").length,
   };
