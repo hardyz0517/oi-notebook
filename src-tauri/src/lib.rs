@@ -2,6 +2,7 @@ mod ai;
 mod blog_server;
 mod frontmatter;
 mod git;
+mod local_search;
 mod luogu;
 mod notes;
 mod paths;
@@ -240,6 +241,7 @@ pub fn run() {
             ai::fetch_web_source_excerpts,
             ai::clear_web_cache,
             ai::test_web_search_connection,
+            local_search::search_local_notes,
             ai::generate_note_metadata,
             ai::polish_note_body,
             ai::suggest_note_tags,

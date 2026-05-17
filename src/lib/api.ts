@@ -238,10 +238,34 @@ export interface NoteChatStreamInput {
   webSearchEnabled?: boolean;
   searchDecision?: SearchDecision;
   searchSources?: WebSearchResult[];
+  localNoteSources?: LocalNoteSearchResult[];
 }
 
 export interface SearchWebSourcesInput extends WebSearchRequest {
   provider?: WebSearchConfig["provider"];
+}
+
+export interface SearchLocalNotesInput {
+  query: string;
+  problemId?: string;
+  problemTitle?: string;
+  algorithmKeywords?: string[];
+  currentNotePath?: string;
+  maxResults?: number;
+  maxCharsPerResult?: number;
+}
+
+export interface LocalNoteSearchResult {
+  id: string;
+  title: string;
+  path: string;
+  relativePath: string;
+  snippet: string;
+  score: number;
+  reason: string;
+  lineStart?: number;
+  lineEnd?: number;
+  isCurrentNote?: boolean;
 }
 
 export interface TestWebSearchConnectionInput {
@@ -680,6 +704,14 @@ export async function searchWebSources(input: SearchWebSourcesInput): Promise<We
 export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest): Promise<WebSourceExcerptResult[]> {
   try {
     return await invoke<WebSourceExcerptResult[]>("fetch_web_source_excerpts", { input });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function searchLocalNotes(input: SearchLocalNotesInput): Promise<LocalNoteSearchResult[]> {
+  try {
+    return await invoke<LocalNoteSearchResult[]>("search_local_notes", { input });
   } catch (e) {
     throw toError(e);
   }

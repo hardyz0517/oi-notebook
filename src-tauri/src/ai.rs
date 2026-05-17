@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tauri::Emitter;
 
+use crate::local_search::LocalNoteSearchResult;
 use crate::luogu::{read_config, write_config, AiConfigFields, AiModel, AiProvider};
 use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
@@ -175,6 +176,8 @@ pub struct NoteChatStreamInput {
     pub search_decision: Option<JsonValue>,
     #[serde(default)]
     pub search_sources: Vec<WebSearchResult>,
+    #[serde(default)]
+    pub local_note_sources: Vec<LocalNoteSearchResult>,
 }
 
 #[allow(dead_code)]
@@ -1843,12 +1846,69 @@ You may use these summaries to answer, but follow these rules strictly:\n\
     ))
 }
 
+fn truncate_local_note_context_text(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+
+    let mut truncated = trimmed.chars().take(max_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+fn build_local_note_sources_context(sources: &[LocalNoteSearchResult]) -> Option<String> {
+    let mut entries = Vec::new();
+    for (index, source) in sources.iter().take(5).enumerate() {
+        let title = truncate_local_note_context_text(&source.title, 180);
+        let relative_path = truncate_local_note_context_text(&source.relative_path, 220);
+        let snippet = truncate_local_note_context_text(&source.snippet, 1200);
+        if title.is_empty() || relative_path.is_empty() || snippet.is_empty() {
+            continue;
+        }
+        let reason = truncate_local_note_context_text(&source.reason, 220);
+        let line_range = match (source.line_start, source.line_end) {
+            (Some(start), Some(end)) if end >= start => format!("{start}-{end}"),
+            (Some(start), _) => start.to_string(),
+            _ => "unknown".to_string(),
+        };
+        entries.push(format!(
+            "[L{}]\nTitle: {}\nRelative path: {}\nIs current note: {}\nScore: {}\nReason: {}\nLines: {}\nSnippet:\n{}",
+            index + 1,
+            title,
+            relative_path,
+            source.is_current_note,
+            source.score,
+            if reason.is_empty() { "matched local note content" } else { &reason },
+            line_range,
+            snippet,
+        ));
+    }
+
+    if entries.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "The following context comes from local Markdown notes in the user's OI Notebook. It is private local note context, not web search, not official material, and not a source for web citation markers.\n\
+Use it only when relevant to the user's question, and follow these rules:\n\
+- Do not call local notes official sources unless the note text itself clearly quotes an official source.\n\
+- Do not generate web citation markers such as [[S1]] for local notes. Web citation markers are only for web sources listed separately.\n\
+- Do not expose absolute local paths. If you mention a note, use its title or relative path only.\n\
+- Local notes may be incomplete, outdated, or personal draft material. If they conflict with web sources, state the difference cautiously.\n\
+- Do not repeat long note passages. Summarize the useful point and only mention the note when it helps the user understand why.\n\
+- If the current note is also included, avoid duplicating it; use the retrieved snippet as a pointer to the relevant part.\n\n{}",
+        entries.join("\n\n")
+    ))
+}
+
 fn build_stream_note_chat_messages(
     question: &str,
     context: &NoteChatContextInput,
     chat_history: &[NoteChatHistoryMessageInput],
     resolved: &ResolvedAiConfig,
     search_sources: &[WebSearchResult],
+    local_note_sources: &[LocalNoteSearchResult],
 ) -> JsonValue {
     let tags_text = if context.tags.is_empty() {
         "not provided".to_string()
@@ -1943,6 +2003,13 @@ The following conversation may contain previous user goals."
         messages.push(json!({
             "role": "user",
             "content": search_context,
+        }));
+    }
+
+    if let Some(local_note_context) = build_local_note_sources_context(local_note_sources) {
+        messages.push(json!({
+            "role": "user",
+            "content": local_note_context,
         }));
     }
 
@@ -3063,6 +3130,7 @@ pub async fn chat_with_current_note_stream(
         &input.chat_history,
         &resolved,
         search_sources,
+        &input.local_note_sources,
     );
     let selected_config = config_from_resolved(resolved);
     let result = request_chat_completion_stream(

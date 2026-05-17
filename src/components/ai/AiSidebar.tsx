@@ -41,12 +41,14 @@ import {
   polishFullNote,
   polishSelectedText,
   saveAiConfig,
+  searchLocalNotes,
   searchWebSources,
   suggestNoteTags,
   startCurrentNoteChatStream,
   type AiConfig,
   type AiModel,
   type AiProvider,
+  type LocalNoteSearchResult,
   type NoteChatContextPayload,
   type NoteChatHistoryMessage,
   type NoteChatStreamChunkEvent,
@@ -77,6 +79,9 @@ type AiChatMessage = {
   searchDecision?: SearchDecision;
   webSearchStatus?: "planning" | "searching" | "filtering" | "fetching_excerpts" | "answering" | "failed" | "done";
   webSearchStatusText?: string;
+  localNoteSources?: LocalNoteSearchResult[];
+  localNoteSearchStatus?: "searching" | "failed" | "done";
+  localNoteSearchError?: string;
   startedAt?: number;
   finishedAt?: number;
   elapsedMs?: number;
@@ -266,6 +271,7 @@ const AI_WEB_SEARCH_MODE_STORAGE_KEY = "oi-notebook.ai.webSearchMode";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const WEB_SEARCH_PREP_TIMEOUT_MS = 20000;
+const LOCAL_NOTE_SEARCH_TIMEOUT_MS = 5000;
 const COMPOSER_TEXTAREA_MIN_HEIGHT = 56;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 180;
 
@@ -894,6 +900,39 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
   return sources.length > 0 ? sources.slice(0, 10) : undefined;
 };
 
+const sanitizeLocalNoteSourcesForStorage = (value: unknown): LocalNoteSearchResult[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const sources = value.flatMap((item): LocalNoteSearchResult[] => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Partial<LocalNoteSearchResult>;
+    if (
+      typeof source.id !== "string" ||
+      typeof source.title !== "string" ||
+      typeof source.relativePath !== "string" ||
+      typeof source.snippet !== "string"
+    ) {
+      return [];
+    }
+    const title = source.title.trim();
+    const relativePath = source.relativePath.trim();
+    const snippet = source.snippet.trim();
+    if (!title || !relativePath || !snippet) return [];
+    return [{
+      id: source.id.trim() || relativePath,
+      title,
+      path: typeof source.path === "string" && source.path.trim() ? source.path.trim() : relativePath,
+      relativePath,
+      snippet: snippet.slice(0, 1200),
+      score: typeof source.score === "number" && Number.isFinite(source.score) ? source.score : 0,
+      reason: typeof source.reason === "string" && source.reason.trim() ? source.reason.trim() : "matched local note content",
+      lineStart: typeof source.lineStart === "number" && Number.isFinite(source.lineStart) ? Math.max(1, Math.floor(source.lineStart)) : undefined,
+      lineEnd: typeof source.lineEnd === "number" && Number.isFinite(source.lineEnd) ? Math.max(1, Math.floor(source.lineEnd)) : undefined,
+      isCurrentNote: source.isCurrentNote === true,
+    }];
+  });
+  return sources.length > 0 ? sources.slice(0, 5) : undefined;
+};
+
 const getPreviewTitle = (preview: PolishPreviewResult): string => {
   if (preview.previewKind === "solution-format") return "题解格式化预览";
   return preview.scope === "full-note" ? "全文润色预览" : "润色预览";
@@ -933,6 +972,13 @@ const sanitizeMessagesForStorage = (messages: AiChatMessage[]): AiChatMessage[] 
     sources: sanitizeSourcesForStorage(message.sources),
     searchError: typeof message.searchError === "string" && message.searchError.trim()
       ? message.searchError.trim()
+      : undefined,
+    localNoteSources: sanitizeLocalNoteSourcesForStorage(message.localNoteSources),
+    localNoteSearchStatus: message.localNoteSearchStatus === "done" || message.localNoteSearchStatus === "failed"
+      ? message.localNoteSearchStatus
+      : undefined,
+    localNoteSearchError: typeof message.localNoteSearchError === "string" && message.localNoteSearchError.trim()
+      ? message.localNoteSearchError.trim()
       : undefined,
     webSearchStatus: message.webSearchStatus === "done" || message.webSearchStatus === "failed"
       ? message.webSearchStatus
@@ -1864,6 +1910,113 @@ function WebSearchProgressCard({ status, text }: { status?: AiChatMessage["webSe
   );
 }
 
+function LocalNoteSearchProgressCard({
+  status,
+  error,
+}: {
+  status?: AiChatMessage["localNoteSearchStatus"];
+  error?: string;
+}) {
+  if (!status || status === "done") return null;
+  const text = status === "failed"
+    ? error || "本地笔记检索失败，已继续生成回答"
+    : "正在检索本地笔记...";
+  return (
+    <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50/70 px-2.5 py-1 text-[11px] leading-5 text-sky-800 dark:border-sky-300/20 dark:bg-sky-400/[0.08] dark:text-sky-100">
+      {status === "failed" ? <Info className="h-3.5 w-3.5 shrink-0" /> : <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+      <span className="min-w-0 truncate">{text}</span>
+    </div>
+  );
+}
+
+function AssistantCollapsibleHeader({
+  label,
+  count,
+  isExpanded,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11px] leading-5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      onClick={onToggle}
+      aria-expanded={isExpanded}
+    >
+      <ChevronDown className={cn("h-3 w-3 shrink-0 transition-transform", !isExpanded && "-rotate-90")} />
+      <span className="font-medium">{label}</span>
+      <span className="text-muted-foreground/80">· {count}</span>
+    </button>
+  );
+}
+
+function LocalNoteSourcesCard({
+  sources,
+  messageId,
+  isExpanded,
+  onToggle,
+}: {
+  sources?: LocalNoteSearchResult[];
+  messageId: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const visibleSources = (sources ?? []).slice(0, 5);
+  if (visibleSources.length === 0) return null;
+
+  return (
+    <div className="mt-2 border-t border-border/60 pt-1.5 text-[11px] leading-5 text-muted-foreground dark:border-white/10">
+      <AssistantCollapsibleHeader
+        label="本地笔记"
+        count={visibleSources.length}
+        isExpanded={isExpanded}
+        onToggle={onToggle}
+      />
+      {isExpanded && (
+        <div className="mt-1.5 grid gap-1.5">
+          {visibleSources.map((source, index) => {
+            const lineLabel = source.lineStart
+              ? source.lineEnd && source.lineEnd !== source.lineStart
+                ? `L${source.lineStart}-${source.lineEnd}`
+                : `L${source.lineStart}`
+              : null;
+            return (
+              <div
+                key={source.id || source.relativePath}
+                data-local-note-message-id={messageId}
+                data-local-note-id={source.id}
+                className="grid gap-0.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.03]"
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-[10px] text-muted-foreground/80">{index + 1}.</span>
+                  <span className="min-w-0 truncate font-medium text-foreground">{source.title}</span>
+                  {source.isCurrentNote && (
+                    <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-200">
+                      当前笔记
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
+                  <span className="min-w-0 truncate">{source.relativePath}</span>
+                  {lineLabel && <span>{lineLabel}</span>}
+                  {source.reason && <span className="truncate" title={source.reason}>{source.reason}</span>}
+                </div>
+                <div className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-muted-foreground">
+                  {source.snippet}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const shouldFetchWebSourceExcerpt = (source: WebSource, strongCount: number): boolean => {
   if (source.relevance === "unrelated") return false;
   if (source.relevance === "strong") return true;
@@ -2040,16 +2193,12 @@ function AssistantCitationList({
 
   return (
     <div className="mt-2 border-t border-border/60 pt-1.5 text-[11px] leading-5 text-muted-foreground">
-      <button
-        type="button"
-        className="inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        onClick={onToggle}
-        aria-expanded={isExpanded}
-      >
-        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span className="font-medium">{title}</span>
-        <span className="text-muted-foreground/80">· {citations.length}</span>
-      </button>
+      <AssistantCollapsibleHeader
+        label={title}
+        count={citations.length}
+        isExpanded={isExpanded}
+        onToggle={onToggle}
+      />
       {isExpanded && (
       <div className="mt-1 grid gap-1">
         {citations.map((citation) => {
@@ -2459,6 +2608,7 @@ export default function AiSidebar({
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const [highlightedCitationId, setHighlightedCitationId] = useState<string | null>(null);
   const [expandedCitationMessageIds, setExpandedCitationMessageIds] = useState<Record<string, boolean>>({});
+  const [expandedLocalNoteMessageIds, setExpandedLocalNoteMessageIds] = useState<Record<string, boolean>>({});
   const [messageCopyFeedback, setMessageCopyFeedback] = useState<{
     messageId: string;
     status: "copied" | "failed";
@@ -2707,6 +2857,13 @@ export default function AiSidebar({
     }));
   }, []);
 
+  const toggleLocalNoteList = useCallback((messageId: string) => {
+    setExpandedLocalNoteMessageIds((current) => ({
+      ...current,
+      [messageId]: !current[messageId],
+    }));
+  }, []);
+
   const handleSourceCitationClick = useCallback((messageId: string, citationId: string) => {
     const container = messagesScrollRef.current;
     if (!container || !isValidCitationId(citationId)) return;
@@ -2884,6 +3041,42 @@ export default function AiSidebar({
         sources: sources.length > 0 ? sources : prepared.sources.length > 0 ? prepared.sources : undefined,
         error: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
       };
+    }
+  };
+
+  const fetchLocalNotesForMessage = async (
+    question: string,
+    decision: SearchDecision,
+    chatContext: NoteChatContextPayload,
+    options: {
+      conversationId: string;
+      messageId: string;
+      onStatus?: (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => void;
+    },
+  ): Promise<{ localNoteSources?: LocalNoteSearchResult[]; error?: string }> => {
+    options.onStatus?.("searching");
+    try {
+      const results = await searchLocalNotes({
+        query: question,
+        problemId: decision.problemId,
+        problemTitle: decision.problemTitle,
+        algorithmKeywords: decision.algorithmKeywords,
+        currentNotePath: chatContext.notePath,
+        maxResults: 5,
+        maxCharsPerResult: 1000,
+      });
+      options.onStatus?.("done");
+      return results.length > 0 ? { localNoteSources: results } : {};
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("Local note search failed", {
+        conversationId: options.conversationId,
+        messageId: options.messageId,
+        notePath: chatContext.notePath,
+        error,
+      });
+      options.onStatus?.("failed", message);
+      return { error: message };
     }
   };
 
@@ -4164,6 +4357,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
     const chatContext = snapshot ?? buildChatContext();
     const requestWebSearchEnabled = webSearchEnabled && !userFacingText.startsWith("/");
+    const requestLocalNoteSearchEnabled = includeCurrentNoteContext && !userFacingText.startsWith("/");
     const searchDecision = requestWebSearchEnabled
       ? buildSearchDecision(question, chatContext)
       : buildSearchDecision("");
@@ -4188,6 +4382,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       searchDecision,
       webSearchStatus: searchDecision.shouldSearch ? "planning" : undefined,
       webSearchStatusText: searchDecision.shouldSearch ? "正在准备搜索计划..." : undefined,
+      localNoteSearchStatus: requestLocalNoteSearchEnabled ? "searching" : undefined,
       startedAt,
     });
 
@@ -4218,8 +4413,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchStatusText: text ?? getWebSearchStageText(status),
       }));
     };
-    const searchResult: { sources?: WebSource[]; error?: string } = requestWebSearchEnabled && searchDecision.shouldSearch
-      ? await withTimeout(
+    const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        localNoteSearchStatus: status,
+        localNoteSearchError: error,
+      }));
+    };
+    const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = requestWebSearchEnabled && searchDecision.shouldSearch
+      ? withTimeout(
         fetchWebSourcesForDecision(searchDecision, {
           conversationId,
           messageId: assistantMessage.id,
@@ -4235,7 +4437,23 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         updateWebSearchStatus("failed", getWebSearchErrorMessage(error));
         return { error: getWebSearchErrorMessage(error) };
       })
-      : {};
+      : Promise.resolve({});
+    const localNoteSearchPromise: Promise<{ localNoteSources?: LocalNoteSearchResult[]; error?: string }> = requestLocalNoteSearchEnabled
+      ? withTimeout(
+        fetchLocalNotesForMessage(question, searchDecision, chatContext, {
+          conversationId,
+          messageId: assistantMessage.id,
+          onStatus: updateLocalNoteSearchStatus,
+        }),
+        LOCAL_NOTE_SEARCH_TIMEOUT_MS,
+        "本地笔记检索超时，已继续生成回答",
+      ).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        updateLocalNoteSearchStatus("failed", message);
+        return { error: message };
+      })
+      : Promise.resolve({});
+    const [searchResult, localNoteSearchResult] = await Promise.all([webSearchPromise, localNoteSearchPromise]);
     if (
       streamTargetsRef.current.get(streamId)?.messageId !== assistantMessage.id ||
       webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
@@ -4247,6 +4465,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       state: "streaming",
       sources: sourcesWithCitations,
       searchError: searchResult.error,
+      localNoteSources: localNoteSearchResult.localNoteSources,
+      localNoteSearchStatus: requestLocalNoteSearchEnabled
+        ? localNoteSearchResult.error ? "failed" : "done"
+        : undefined,
+      localNoteSearchError: localNoteSearchResult.error,
       webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
       webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
     }));
@@ -4262,6 +4485,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       webSearchEnabled: requestWebSearchEnabled,
       searchDecision,
       searchSources: sourcesWithCitations,
+      localNoteSources: localNoteSearchResult.localNoteSources,
     }).catch((error) => {
       console.warn("AI sidebar chat request failed", {
         requestId,
@@ -4357,6 +4581,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const streamId = `${Date.now()}-${requestId}`;
     const chatContext = buildChatContext();
     const requestWebSearchEnabled = webSearchEnabled && !(message.retryDisplayText?.trim() ?? "").startsWith("/");
+    const requestLocalNoteSearchEnabled = includeCurrentNoteContext && !(message.retryDisplayText?.trim() ?? "").startsWith("/");
     const searchDecision = requestWebSearchEnabled
       ? buildSearchDecision(question, chatContext)
       : buildSearchDecision("");
@@ -4376,6 +4601,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       searchDecision,
       webSearchStatus: searchDecision.shouldSearch ? "planning" : undefined,
       webSearchStatusText: searchDecision.shouldSearch ? "正在准备搜索计划..." : undefined,
+      localNoteSearchStatus: requestLocalNoteSearchEnabled ? "searching" : undefined,
       startedAt,
     });
 
@@ -4407,8 +4633,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           webSearchStatusText: text ?? getWebSearchStageText(status),
         }));
       };
-      const searchResult: { sources?: WebSource[]; error?: string } = requestWebSearchEnabled && searchDecision.shouldSearch
-        ? await withTimeout(
+      const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
+        replaceMessage(conversationId, assistantMessage.id, (current) => ({
+          ...current,
+          localNoteSearchStatus: status,
+          localNoteSearchError: error,
+        }));
+      };
+      const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = requestWebSearchEnabled && searchDecision.shouldSearch
+        ? withTimeout(
           fetchWebSourcesForDecision(searchDecision, {
             conversationId,
             messageId: assistantMessage.id,
@@ -4424,7 +4657,23 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           updateWebSearchStatus("failed", getWebSearchErrorMessage(error));
           return { error: getWebSearchErrorMessage(error) };
         })
-        : {};
+        : Promise.resolve({});
+      const localNoteSearchPromise: Promise<{ localNoteSources?: LocalNoteSearchResult[]; error?: string }> = requestLocalNoteSearchEnabled
+        ? withTimeout(
+          fetchLocalNotesForMessage(question, searchDecision, chatContext, {
+            conversationId,
+            messageId: assistantMessage.id,
+            onStatus: updateLocalNoteSearchStatus,
+          }),
+          LOCAL_NOTE_SEARCH_TIMEOUT_MS,
+          "本地笔记检索超时，已继续生成回答",
+        ).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          updateLocalNoteSearchStatus("failed", message);
+          return { error: message };
+        })
+        : Promise.resolve({});
+      const [searchResult, localNoteSearchResult] = await Promise.all([webSearchPromise, localNoteSearchPromise]);
       if (
         streamTargetsRef.current.get(streamId)?.messageId !== assistantMessage.id ||
         webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
@@ -4436,6 +4685,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         state: "streaming",
         sources: sourcesWithCitations,
         searchError: searchResult.error,
+        localNoteSources: localNoteSearchResult.localNoteSources,
+        localNoteSearchStatus: requestLocalNoteSearchEnabled
+          ? localNoteSearchResult.error ? "failed" : "done"
+          : undefined,
+        localNoteSearchError: localNoteSearchResult.error,
         webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
         webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
       }));
@@ -4451,6 +4705,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchEnabled: requestWebSearchEnabled,
         searchDecision,
         searchSources: sourcesWithCitations,
+        localNoteSources: localNoteSearchResult.localNoteSources,
       });
     })().catch((error) => {
       console.warn("AI sidebar retry request failed", {
@@ -5195,6 +5450,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 const displayedSourceCitations = getDisplayedSourceCitations(message.text, sourceCitations);
                 const hasUsedSourceCitations = getUsedCitationIds(message.text, sourceCitations).size > 0;
                 const isCitationListExpanded = expandedCitationMessageIds[message.id] === true;
+                const isLocalNoteListExpanded = expandedLocalNoteMessageIds[message.id] === true;
                 const activeHighlightedCitationId = highlightedCitationId?.startsWith(`${message.id}:`)
                   ? highlightedCitationId.slice(message.id.length + 1)
                   : null;
@@ -5218,6 +5474,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       {message.searchDecision?.shouldSearch && (
                         <WebSearchProgressCard status={message.webSearchStatus} text={message.webSearchStatusText} />
                       )}
+                      <LocalNoteSearchProgressCard
+                        status={message.localNoteSearchStatus}
+                        error={message.localNoteSearchError}
+                      />
                       {message.searchDecision?.shouldSearch && (
                         <WebSearchSourcesCard
                           sources={message.sources}
@@ -5265,6 +5525,12 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             hasUsedCitations={hasUsedSourceCitations}
                             highlightedCitationId={activeHighlightedCitationId}
                             onToggle={() => toggleCitationList(message.id)}
+                          />
+                          <LocalNoteSourcesCard
+                            sources={message.localNoteSources}
+                            messageId={message.id}
+                            isExpanded={isLocalNoteListExpanded}
+                            onToggle={() => toggleLocalNoteList(message.id)}
                           />
                         </>
                       )}
