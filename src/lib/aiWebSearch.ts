@@ -50,6 +50,10 @@ export type WebSource = {
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
+  excerptQuality?: "good" | "partial" | "empty" | "blocked" | "failed";
+  extractor?: "oi_wiki" | "cp_algorithms" | "luogu" | "generic" | "none";
+  excerptReason?: string;
+  codeBlocksTruncated?: boolean;
   rankScore?: number;
   rankReason?: string;
   isConstructed?: boolean;
@@ -104,6 +108,10 @@ export type WebSearchResult = {
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
+  excerptQuality?: WebSource["excerptQuality"];
+  extractor?: WebSource["extractor"];
+  excerptReason?: string;
+  codeBlocksTruncated?: boolean;
   rankScore?: number;
   rankReason?: string;
   isConstructed?: boolean;
@@ -115,6 +123,13 @@ export type WebSourceExcerptRequest = {
   sources: WebSearchResult[];
   maxSources?: number;
   maxCharsPerSource?: number;
+  userInput?: string;
+  intent?: ResearchIntent;
+  problemId?: string;
+  problemTitle?: string;
+  algorithmKeywords?: string[];
+  errorKeywords?: string[];
+  queries?: string[];
 };
 
 export type WebSourceExcerptResult = {
@@ -128,6 +143,10 @@ export type WebSourceExcerptResult = {
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
+  excerptQuality?: WebSource["excerptQuality"];
+  extractor?: WebSource["extractor"];
+  excerptReason?: string;
+  codeBlocksTruncated?: boolean;
 };
 
 export type SearchDecision = {

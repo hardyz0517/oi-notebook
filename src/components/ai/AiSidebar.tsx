@@ -856,6 +856,26 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       cacheTtlSeconds: typeof source.cacheTtlSeconds === "number" && Number.isFinite(source.cacheTtlSeconds)
         ? source.cacheTtlSeconds
         : undefined,
+      excerptQuality:
+        source.excerptQuality === "good" ||
+        source.excerptQuality === "partial" ||
+        source.excerptQuality === "empty" ||
+        source.excerptQuality === "blocked" ||
+        source.excerptQuality === "failed"
+          ? source.excerptQuality
+          : undefined,
+      extractor:
+        source.extractor === "oi_wiki" ||
+        source.extractor === "cp_algorithms" ||
+        source.extractor === "luogu" ||
+        source.extractor === "generic" ||
+        source.extractor === "none"
+          ? source.extractor
+          : undefined,
+      excerptReason: typeof source.excerptReason === "string" && source.excerptReason.trim()
+        ? source.excerptReason.trim()
+        : undefined,
+      codeBlocksTruncated: source.codeBlocksTruncated === true,
       rankScore: typeof source.rankScore === "number" && Number.isFinite(source.rankScore)
         ? source.rankScore
         : undefined,
@@ -1582,9 +1602,12 @@ const getSourceRelevanceLabel = (source: WebSource): string =>
   source.relevanceLabel || (source.relevance === "candidate" ? "相关资料" : "强相关");
 
 const getSourceExcerptStatusLabel = (source: WebSource): string => {
+  const rawExcerptStatus = source.excerptStatus as string | undefined;
+  if (source.excerptStatus === "fetched" && source.excerptQuality === "partial") return "部分摘要";
   if (source.excerptStatus === "fetched" && source.cacheStatus === "hit") return "已读取缓存摘要";
   if (source.excerptStatus === "fetched" && source.cacheStatus === "stale") return "已读取过期摘要";
   if (source.excerptStatus === "fetched") return "已读取摘要";
+  if (rawExcerptStatus === "blocked" || source.excerptQuality === "blocked") return "需要页面渲染";
   if (source.excerptStatus === "unavailable") return "正文不可用";
   if (source.excerptStatus === "failed") return "读取失败";
   if (source.isConstructed) return "未读取正文";
@@ -1593,6 +1616,28 @@ const getSourceExcerptStatusLabel = (source: WebSource): string => {
 
 const getSourceOriginLabel = (source: WebSource): string =>
   source.isConstructed ? "公开资料入口" : "搜索结果";
+
+const getSourceCardDescription = (source: WebSource): string | undefined => {
+  const rawExcerptStatus = source.excerptStatus as string | undefined;
+  if (source.excerptStatus === "fetched") {
+    const excerptPreview = source.excerpt?.replace(/\s+/g, " ").trim();
+    if (excerptPreview) {
+      const preview = excerptPreview.length > 120 ? `${excerptPreview.slice(0, 120)}...` : excerptPreview;
+      return `${source.excerptQuality === "partial" ? "已提取部分相关片段" : "已提取相关片段"}：${preview}`;
+    }
+    return source.excerptQuality === "partial" ? "已从公开页面提取部分网页摘录。" : "已从公开页面提取网页摘录。";
+  }
+  if (rawExcerptStatus === "blocked" || source.excerptQuality === "blocked" || source.excerptStatus === "unavailable") {
+    return "正文不可用或需要页面渲染。";
+  }
+  if (source.excerptStatus === "failed") {
+    return "读取失败。";
+  }
+  if (source.isConstructed) {
+    return "公开资料入口，尚未读取网页正文。";
+  }
+  return source.snippet;
+};
 
 const getWebSearchStageText = (status?: AiChatMessage["webSearchStatus"], fallback?: string): string => {
   if (fallback?.trim()) return fallback.trim();
@@ -1664,7 +1709,9 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
             )}
           </div>
           <div className="grid gap-2">
-            {visibleSources.map((source) => (
+            {visibleSources.map((source) => {
+              const description = getSourceCardDescription(source);
+              return (
               <div key={source.id || source.url} className="grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.04]">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200">
@@ -1713,16 +1760,17 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                 >
                   {source.title}
                 </a>
-                {source.snippet && (
+                {description && (
                   <div className="line-clamp-2 min-w-0 break-words text-[11px] leading-5 text-muted-foreground">
-                    {source.snippet}
+                    {description}
                   </div>
                 )}
                 <div className="min-w-0 break-all text-[10px] leading-4 text-muted-foreground/80">
                   {source.url}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
           {hiddenCount > 0 && (
             <div className="text-[11px] text-muted-foreground">还有 {hiddenCount} 个来源未展开。</div>
@@ -2424,6 +2472,13 @@ export default function AiSidebar({
           sources: excerptTargets,
           maxSources: 3,
           maxCharsPerSource: 5000,
+          userInput: options?.userInput,
+          intent: decision.intent,
+          problemId: decision.problemId,
+          problemTitle: decision.problemTitle,
+          algorithmKeywords: decision.algorithmKeywords,
+          errorKeywords: decision.errorKeywords,
+          queries: decision.queries,
         })
         : [];
       if (!isCurrent()) return { prepared, sources: [] as WebSource[] };
@@ -2442,6 +2497,10 @@ export default function AiSidebar({
           cacheStatus: result.cacheStatus,
           cachedAt: result.cachedAt,
           cacheTtlSeconds: result.cacheTtlSeconds,
+          excerptQuality: result.excerptQuality,
+          extractor: result.extractor,
+          excerptReason: result.excerptReason,
+          codeBlocksTruncated: result.codeBlocksTruncated,
         };
       });
       return {

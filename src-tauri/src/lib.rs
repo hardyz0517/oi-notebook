@@ -7,6 +7,7 @@ mod notes;
 mod paths;
 mod prompts;
 mod web_cache;
+mod web_extract;
 
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;

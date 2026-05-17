@@ -17,6 +17,7 @@ use crate::luogu::{read_config, write_config, AiConfigFields, AiModel, AiProvide
 use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
 use crate::web_cache;
+use crate::web_extract::{self, WebExtractContext};
 
 const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
 const NOTE_METADATA_TASK: &str = "note-metadata";
@@ -214,6 +215,10 @@ pub struct WebSearchResult {
     pub cache_status: Option<String>,
     pub cached_at: Option<String>,
     pub cache_ttl_seconds: Option<i64>,
+    pub excerpt_quality: Option<String>,
+    pub extractor: Option<String>,
+    pub excerpt_reason: Option<String>,
+    pub code_blocks_truncated: Option<bool>,
     pub rank_score: Option<i64>,
     pub rank_reason: Option<String>,
     pub is_constructed: Option<bool>,
@@ -229,6 +234,20 @@ pub struct FetchWebSourceExcerptsInput {
     pub max_sources: Option<usize>,
     #[serde(default)]
     pub max_chars_per_source: Option<usize>,
+    #[serde(default)]
+    pub user_input: Option<String>,
+    #[serde(default)]
+    pub intent: Option<String>,
+    #[serde(default)]
+    pub problem_id: Option<String>,
+    #[serde(default)]
+    pub problem_title: Option<String>,
+    #[serde(default)]
+    pub algorithm_keywords: Vec<String>,
+    #[serde(default)]
+    pub error_keywords: Vec<String>,
+    #[serde(default)]
+    pub queries: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -244,6 +263,10 @@ pub struct WebSourceExcerptResult {
     pub cache_status: Option<String>,
     pub cached_at: Option<String>,
     pub cache_ttl_seconds: Option<i64>,
+    pub excerpt_quality: Option<String>,
+    pub extractor: Option<String>,
+    pub excerpt_reason: Option<String>,
+    pub code_blocks_truncated: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -946,7 +969,7 @@ fn build_web_search_cache_key(
 fn build_web_excerpt_cache_key(url: &str, max_chars: usize) -> String {
     let key_json = json!({
         "version": web_cache::cache_version(),
-        "extractor": "public-html-text-v1",
+        "extractor": web_extract::EXTRACTOR_VERSION,
         "urlHash": stable_hash_hex(url.trim()),
         "maxChars": max_chars,
     });
@@ -1651,6 +1674,25 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_web_excerpt_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "no webpage excerpt available".to_string());
+        let excerpt_quality = source
+            .excerpt_quality
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let extractor = source
+            .extractor
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let excerpt_reason = source
+            .excerpt_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let code_blocks_truncated = source.code_blocks_truncated.unwrap_or(false);
         let cache_status = source
             .cache_status
             .as_deref()
@@ -1686,7 +1728,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .unwrap_or_else(|| "none".to_string());
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             index + 1,
             title,
             site,
@@ -1706,6 +1748,10 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             cache_status,
             cached_at,
             excerpt_status,
+            excerpt_quality,
+            extractor,
+            excerpt_reason,
+            code_blocks_truncated,
             excerpt_error,
             excerpt,
         ));
@@ -1721,6 +1767,9 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Call them search result summaries or source summaries, not webpages you have read in full.\n\
 - Only sources marked with Web excerpt status: fetched may be described as webpage excerpts. Do not use failed or unavailable sources as webpage content.\n\
 - Even for fetched excerpts, do not say you read the full page. Say \"based on the extracted webpage excerpt\" or equivalent.\n\
+- Web excerpts are cleaned, selected, and truncated snippets, not complete webpages; if Web excerpt quality is partial, blocked, or empty, answer cautiously and avoid over-inference.\n\
+- A generic extractor is weaker evidence than a site-specific extractor such as oi_wiki, cp_algorithms, or luogu. If Luogu extraction is blocked or unavailable, do not guess problem statements or solution content from the Luogu page.\n\
+- If Code blocks truncated is true, do not make certain conclusions from incomplete code; use surrounding explanation and treat the code as partial evidence.\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
 - Do not say a webpage excerpt states something unless that excerpt contains it.\n\
 - Sources marked as constructed public OI sources are public entry points only. If their Web excerpt status is not fetched, do not infer their page content; say they are available to open but current summaries are insufficient.\n\
@@ -1734,6 +1783,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - If there are not enough strongly related editorial, discussion, or pitfall summaries, explicitly say the search result summaries are insufficient to directly summarize this problem's common pitfalls. You may add general OI troubleshooting advice, but label it as general experience rather than search-result evidence.\n\
 - Do not mechanically restate every search summary. First filter for contest value: prefer points that can actually cause WA, TLE, RE, MLE, wrong complexity, wrong boundaries, or implementation mistakes.\n\
 - For common pitfalls, easy mistakes, WA/TLE/RE causes, implementation notes, or editorial advice, only promote high-value items such as array sizes, indexing, initialization, root handling, special cases, recursion depth, IO performance, binary lifting levels, jump order, DFS preprocessing, graph direction, and complexity details.\n\
+- For OI pitfall questions, prefer implementation, complexity, boundary-condition, and code-adjacent evidence from excerpts; ignore navigation, catalog, SEO, comment, and recommendation text.\n\
 - Down-rank or ignore low-value material unless the user explicitly asks for concept explanation: terminology translation, name-similarity trivia, vague statements that an algorithm is important, SEO-like blog filler, and sentences that appear in snippets but do not help solve or debug the problem.\n\
 - Be especially cautious with CSDN, ordinary blogs, and unknown reliability sources. Do not turn their summaries into firm conclusions unless the excerpt or snippet contains concrete implementation evidence.\n\
 - If the available source summaries are low quality, give fewer high-value points instead of padding the answer. Do not invent extra pitfalls just to make a longer list.\n\
@@ -3335,6 +3385,10 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        excerpt_quality: None,
+        extractor: None,
+        excerpt_reason: None,
+        code_blocks_truncated: None,
         rank_score: None,
         rank_reason: None,
         is_constructed: None,
@@ -3397,6 +3451,10 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        excerpt_quality: None,
+        extractor: None,
+        excerpt_reason: None,
+        code_blocks_truncated: None,
         rank_score: None,
         rank_reason: None,
         is_constructed: None,
@@ -3536,6 +3594,10 @@ fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchRes
         cache_status: None,
         cached_at: None,
         cache_ttl_seconds: None,
+        excerpt_quality: None,
+        extractor: None,
+        excerpt_reason: None,
+        code_blocks_truncated: None,
         rank_score: None,
         rank_reason: None,
         is_constructed: None,
@@ -3981,6 +4043,7 @@ fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
     Ok(parsed)
 }
 
+#[allow(dead_code)]
 fn strip_html_tag_blocks(mut html: String, tag: &str) -> String {
     let start_tag = format!("<{tag}");
     let end_tag = format!("</{tag}>");
@@ -3999,6 +4062,7 @@ fn strip_html_tag_blocks(mut html: String, tag: &str) -> String {
     html
 }
 
+#[allow(dead_code)]
 fn decode_html_entities(text: &str) -> String {
     text.replace("&nbsp;", " ")
         .replace("&amp;", "&")
@@ -4009,6 +4073,7 @@ fn decode_html_entities(text: &str) -> String {
         .replace("&apos;", "'")
 }
 
+#[allow(dead_code)]
 fn strip_html_tags_to_text(html: &str) -> String {
     let mut cleaned = html.to_string();
     for tag in [
@@ -4065,6 +4130,7 @@ fn strip_html_tags_to_text(html: &str) -> String {
     decode_html_entities(&text)
 }
 
+#[allow(dead_code)]
 fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
     let mut lines = Vec::new();
     for line in text.lines() {
@@ -4091,6 +4157,7 @@ fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
 fn fetch_single_web_source_excerpt(
     client: &reqwest::blocking::Client,
     source: &WebSearchResult,
+    context: &FetchWebSourceExcerptsInput,
     max_chars: usize,
 ) -> WebSourceExcerptResult {
     let fetched_at = Utc::now().timestamp_millis();
@@ -4111,6 +4178,10 @@ fn fetch_single_web_source_excerpt(
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
                 cache_ttl_seconds: None,
+                excerpt_quality: Some("blocked".to_string()),
+                extractor: Some("none".to_string()),
+                excerpt_reason: Some("URL failed public web safety validation".to_string()),
+                code_blocks_truncated: Some(false),
             };
         }
     };
@@ -4159,6 +4230,10 @@ fn fetch_single_web_source_excerpt(
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
                 cache_ttl_seconds: None,
+                excerpt_quality: Some("failed".to_string()),
+                extractor: Some("none".to_string()),
+                excerpt_reason: Some("HTTP request failed".to_string()),
+                code_blocks_truncated: Some(false),
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
@@ -4177,6 +4252,10 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some("blocked".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("HTTP status requires authorization".to_string()),
+            code_blocks_truncated: Some(false),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4192,6 +4271,10 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some("empty".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("HTTP status was not found".to_string()),
+            code_blocks_truncated: Some(false),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4207,6 +4290,10 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some("failed".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("HTTP status was not successful".to_string()),
+            code_blocks_truncated: Some(false),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4234,6 +4321,10 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some("blocked".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("Content type is not extractable text or HTML".to_string()),
+            code_blocks_truncated: Some(false),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4253,6 +4344,10 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some("blocked".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("Response body is too large".to_string()),
+            code_blocks_truncated: Some(false),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4276,6 +4371,10 @@ fn fetch_single_web_source_excerpt(
                     cache_status: Some("miss".to_string()),
                     cached_at: None,
                     cache_ttl_seconds: None,
+                    excerpt_quality: Some("blocked".to_string()),
+                    extractor: Some("none".to_string()),
+                    excerpt_reason: Some("Response body exceeded size limit".to_string()),
+                    code_blocks_truncated: Some(false),
                 };
                 return finish_web_excerpt_result(result, &cache_key, cached);
             }
@@ -4293,17 +4392,37 @@ fn fetch_single_web_source_excerpt(
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
                 cache_ttl_seconds: None,
+                excerpt_quality: Some("failed".to_string()),
+                extractor: Some("none".to_string()),
+                excerpt_reason: Some("Response body read failed".to_string()),
+                code_blocks_truncated: Some(false),
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
     };
-    let extracted = if content_type.contains("text/plain") {
-        normalize_extracted_text(&body, max_chars)
-    } else {
-        normalize_extracted_text(&strip_html_tags_to_text(&body), max_chars)
+    let extract_context = WebExtractContext {
+        url: url.clone(),
+        title: title.clone(),
+        snippet: source.snippet.clone(),
+        source_type: source.source_type.clone(),
+        reliability: source.reliability.clone(),
+        user_input: context.user_input.clone(),
+        intent: context.intent.clone(),
+        problem_id: context.problem_id.clone(),
+        problem_title: context.problem_title.clone(),
+        algorithm_keywords: context.algorithm_keywords.clone(),
+        error_keywords: context.error_keywords.clone(),
+        queries: context.queries.clone(),
     };
+    let extracted = web_extract::extract_web_excerpt(
+        &url,
+        &content_type,
+        &body,
+        &extract_context,
+        max_chars,
+    );
 
-    if extracted.chars().count() < 120 {
+    let Some(excerpt_text) = extracted.text.clone() else {
         let result = WebSourceExcerptResult {
             id,
             url,
@@ -4315,21 +4434,29 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: Some(extracted.quality.to_string()),
+            extractor: Some(extracted.extractor.to_string()),
+            excerpt_reason: Some(extracted.reason),
+            code_blocks_truncated: Some(extracted.code_blocks_truncated),
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
-    }
+    };
 
     let result = WebSourceExcerptResult {
         id,
         url,
         title,
         fetched: true,
-        excerpt: Some(extracted),
+        excerpt: Some(excerpt_text),
         error: None,
         fetched_at,
         cache_status: Some("miss".to_string()),
         cached_at: None,
         cache_ttl_seconds: None,
+        excerpt_quality: Some(extracted.quality.to_string()),
+        extractor: Some(extracted.extractor.to_string()),
+        excerpt_reason: Some(extracted.reason),
+        code_blocks_truncated: Some(extracted.code_blocks_truncated),
     };
     finish_web_excerpt_result(result, &cache_key, cached)
 }
@@ -4381,6 +4508,10 @@ fn finish_web_excerpt_result(
             cache_status: None,
             cached_at: None,
             cache_ttl_seconds: None,
+            excerpt_quality: None,
+            extractor: None,
+            excerpt_reason: None,
+            code_blocks_truncated: None,
             rank_score: None,
             rank_reason: None,
             is_constructed: None,
@@ -4423,6 +4554,7 @@ fn fetch_web_source_excerpts_blocking(
         .build()
         .map_err(|e| format!("无法创建网页读取 client: {e}"))?;
 
+    let request_context = input.clone();
     let handles = input
         .sources
         .into_iter()
@@ -4430,10 +4562,11 @@ fn fetch_web_source_excerpts_blocking(
         .enumerate()
         .map(|(index, source)| {
             let client = client.clone();
+            let context = request_context.clone();
             std::thread::spawn(move || {
                 (
                     index,
-                    fetch_single_web_source_excerpt(&client, &source, max_chars),
+                    fetch_single_web_source_excerpt(&client, &source, &context, max_chars),
                 )
             })
         })
@@ -4456,6 +4589,10 @@ fn fetch_web_source_excerpts_blocking(
                         cache_status: Some("miss".to_string()),
                         cached_at: None,
                         cache_ttl_seconds: None,
+                        excerpt_quality: Some("failed".to_string()),
+                        extractor: Some("none".to_string()),
+                        excerpt_reason: Some("web excerpt worker panicked".to_string()),
+                        code_blocks_truncated: Some(false),
                     },
                 ));
             }
