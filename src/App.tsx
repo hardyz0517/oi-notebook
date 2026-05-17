@@ -74,6 +74,7 @@ const PREVIEW_FONT_SIZE_STORAGE_KEY = "oi-notebook.previewFontSize";
 const READING_DENSITY_STORAGE_KEY = "oi-notebook.readingDensity";
 const TOOLBAR_FONT_SIZE_STORAGE_KEY = "oi-notebook.toolbarFontSize";
 const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
+const DEVELOPER_MODE_STORAGE_KEY = "oi-notebook.developerMode";
 const FONT_SIZE_MIN = 13;
 const FONT_SIZE_MAX = 20;
 const EDITOR_FONT_SIZE_DEFAULT = 14;
@@ -116,7 +117,7 @@ type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
 type SettingsSection = "general" | "appearance" | "editor" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
-type AiSettingsTab = "api" | "web-search" | "prompts";
+type AiSettingsTab = "api" | "web-search" | "prompts" | "local-notes";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
@@ -294,21 +295,20 @@ const READING_DENSITY_OPTIONS: Array<{
     calloutSpacing: "1.25rem",
   },
 ];
-const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string }> = [
-  { id: "general", label: "常规", blurb: "基础设置" },
+const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string; developerOnly?: boolean }> = [
   { id: "appearance", label: "外观", blurb: "主题与字号" },
-  { id: "editor", label: "编辑器", blurb: "编辑体验" },
   { id: "ai", label: "AI", blurb: "模型、API 与 Prompt" },
   { id: "luogu", label: "洛谷", blurb: "导入与扫描" },
   { id: "blog", label: "博客", blurb: "本地预览" },
-  { id: "git", label: "Git", blurb: "同步入口" },
+  { id: "git", label: "Git", blurb: "进阶同步入口", developerOnly: true },
   { id: "data", label: "数据与存储", blurb: "目录与说明" },
   { id: "about", label: "关于", blurb: "版本与说明" },
 ];
 const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string; description: string }> = [
   { id: "api", label: "模型与 API", description: "配置 OpenAI-compatible API、模型和默认项" },
   { id: "web-search", label: "联网搜索", description: "配置真实搜索 Provider" },
-  { id: "prompts", label: "Prompt 模板", description: "编辑本地 AI Prompt 模板" },
+  { id: "prompts", label: "Prompt 模板", description: "管理本地 AI 提示词模板" },
+  { id: "local-notes", label: "本地笔记", description: "说明本地笔记检索和索引边界" },
 ];
 const MARKDOWN_CAPABILITIES = [
   "KaTeX",
@@ -532,6 +532,51 @@ function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
 
 function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
+
+function formatWebSearchTestError(provider: string, error: unknown): string {
+  const message = getErrorMessage(error);
+  const lower = message.toLowerCase();
+  if (message.includes("公开搜索测试超时")) {
+    return "公开搜索测试超时。公共实例可能不可用，可以更换 SearXNG 实例或改用 Bocha。";
+  }
+  if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) {
+    return provider === "searxng"
+      ? "公开搜索实例被限流了。可以稍后重试、更换 SearXNG 实例，或改用 Bocha。"
+      : "搜索服务返回限流。可以稍后重试，或检查当前 Provider 的额度。";
+  }
+  if (lower.includes("json") || message.includes("不是 JSON")) {
+    return provider === "searxng"
+      ? "公开搜索实例没有返回可解析的 JSON。这个公共实例可能不支持当前接口，可以更换 SearXNG 实例或改用 Bocha。"
+      : "搜索服务返回格式不符合预期，请检查 Endpoint 是否填写为 API 地址。";
+  }
+  if (lower.includes("timeout") || message.includes("超时")) {
+    return provider === "searxng"
+      ? "公开搜索测试超时。公共实例可能不可用，可以更换 SearXNG 实例或改用 Bocha。"
+      : "搜索服务测试超时。请检查 Endpoint 或稍后重试。";
+  }
+  if (lower.includes("network") || message.includes("网络") || message.includes("不可用") || message.includes("failed")) {
+    return provider === "searxng"
+      ? "公开搜索实例暂时不可用。测试失败不影响 AI 模型，可以更换 SearXNG 实例或改用 Bocha。"
+      : "搜索服务暂时不可用。测试失败不影响 AI 模型和设置保存。";
+  }
+  return message || "搜索测试失败。测试失败不影响设置保存，也不影响普通聊天。";
 }
 
 function normalizeTagValue(tag: string): string {
@@ -821,6 +866,10 @@ function getInitialReadingDensity(): ReadingDensity {
   return isReadingDensity(stored) ? stored : "standard";
 }
 
+function getInitialDeveloperMode(): boolean {
+  return window.localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) === "true";
+}
+
 function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
   const file = files.find((item) => item.path === path);
   const name = file?.name ?? path.split("/").pop() ?? path;
@@ -862,16 +911,31 @@ function isAiConfigMissingError(message: string): boolean {
 }
 
 interface PromptUsageInfo {
+  title: string;
+  scope: string;
   purpose: string;
-  variables: string[];
+  variables: PromptVariableInfo[];
   notes: string[];
+}
+
+interface PromptVariableInfo {
+  name: string;
+  meaning: string;
+  usage: string;
 }
 
 function getPromptUsageInfo(fileName: string): PromptUsageInfo {
   if (fileName === "luogu-insight.md") {
     return {
+      title: "洛谷 insight 整理",
+      scope: "洛谷同步、洛谷导入后的 AI 整理",
       purpose: "用于把洛谷提交里的候选 insight、trick、坑点或总结整理成结构化笔记。",
-      variables: ["{{problem_id}}", "{{problem_title}}", "{{submission_id}}", "{{candidate_comment}}"],
+      variables: [
+        { name: "{{problem_id}}", meaning: "识别到的洛谷题号。", usage: "在模板中写入该变量，执行整理时会替换成题号。" },
+        { name: "{{problem_title}}", meaning: "识别到的题目标题。", usage: "适合放在题目背景或输出格式要求里。" },
+        { name: "{{submission_id}}", meaning: "当前洛谷提交记录 ID。", usage: "用于让 AI 知道这次整理来自哪条提交。" },
+        { name: "{{candidate_comment}}", meaning: "从提交备注或上下文里提取出的候选 insight。", usage: "通常应保留在正文输入区，AI 会基于它判断是否值得导入。" },
+      ],
       notes: [
         "只编辑 Prompt 文本本身，不要写入 API Key、Base URL、Cookie 等密钥。",
         "这个模板会参与洛谷 insight 整理流程，返回格式要求请保留在 Prompt 内容里。",
@@ -881,8 +945,13 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
 
   if (fileName === "note-metadata.md") {
     return {
+      title: "当前笔记元数据",
+      scope: "AI 生成标题、标签、摘要建议",
       purpose: "用于根据当前笔记正文生成 title、tags、summary 等元信息建议。",
-      variables: ["{{note_path}}", "{{content}}"],
+      variables: [
+        { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "在模板中写入该变量，执行时会替换为 notes 内的相对路径。" },
+        { name: "{{content}}", meaning: "当前笔记完整 Markdown 内容。", usage: "用于让 AI 根据正文生成标题、标签和摘要。" },
+      ],
       notes: [
         "这个模板只负责元数据补全，不应该要求 AI 改写正文。",
         "保存后会影响后续 AI 元数据整理请求，但不会自动改动当前笔记。",
@@ -892,8 +961,13 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
 
   if (fileName === "note-polish.md") {
     return {
+      title: "当前笔记全文润色",
+      scope: "AI 润色正文、题解格式化审核",
       purpose: "用于润色当前笔记正文 body，并先生成可预览的润色结果。",
-      variables: ["{{note_path}}", "{{body}}"],
+      variables: [
+        { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "可用于提示 AI 保持与当前文件主题一致。" },
+        { name: "{{body}}", meaning: "去掉 frontmatter 后的正文 Markdown。", usage: "用于让 AI 只润色正文，不改动 frontmatter。" },
+      ],
       notes: [
         "这个模板面向正文润色，不处理 frontmatter。",
         "建议保留代码块、公式、链接和表格的保护约束，避免 AI 误改关键内容。",
@@ -902,6 +976,8 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
   }
 
   return {
+    title: "自定义 Prompt 模板",
+    scope: "对应 AI 功能",
     purpose: "用于配置本地 AI Prompt 模板。",
     variables: [],
     notes: [
@@ -1360,6 +1436,7 @@ export default function App() {
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateSummary[]>([]);
   const [selectedPromptFileName, setSelectedPromptFileName] = useState("");
   const [promptContent, setPromptContent] = useState("");
+  const [isPromptAdvancedEditorOpen, setIsPromptAdvancedEditorOpen] = useState(false);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
@@ -1367,7 +1444,8 @@ export default function App() {
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(getInitialDeveloperMode);
   const [searchQuery, setSearchQuery] = useState("");
   const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
@@ -1623,6 +1701,18 @@ export default function App() {
   const luoguStatusLabel =
     !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已配置" : "未配置";
   const gitStatusLabel = isPushingGit ? "同步中" : "同步入口";
+  const visibleSettingsSections = useMemo(
+    () => SETTINGS_SECTIONS.filter((section) => developerModeEnabled || !section.developerOnly),
+    [developerModeEnabled],
+  );
+  const selectedPromptUsage = useMemo(
+    () => getPromptUsageInfo(selectedPromptFileName),
+    [selectedPromptFileName],
+  );
+  const selectedPromptTemplate = useMemo(
+    () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
+    [promptTemplates, selectedPromptFileName],
+  );
   const editorViewModeLabel =
     editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
   const activeActivityItem: ActivityBarItem | null =
@@ -2454,16 +2544,24 @@ export default function App() {
     setIsTestingWebSearchConnection(true);
     setWebSearchConnectionMessage(null);
     try {
-      await testWebSearchConnection({
-        provider: webSearchConfig.provider,
-        apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : undefined,
-        endpoint: webSearchConfig.provider === "bocha"
-          ? webSearchConfig.bochaEndpoint
-          : webSearchConfig.searxngEndpoint,
-      });
-      setWebSearchConnectionMessage("连接成功");
+      const result = await withTimeout(
+        testWebSearchConnection({
+          provider: webSearchConfig.provider,
+          apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : undefined,
+          endpoint: webSearchConfig.provider === "bocha"
+            ? webSearchConfig.bochaEndpoint
+            : webSearchConfig.searxngEndpoint,
+        }),
+        webSearchConfig.provider === "searxng" ? 5000 : 8000,
+        webSearchConfig.provider === "searxng" ? "公开搜索测试超时" : "搜索测试超时",
+      );
+      setWebSearchConnectionMessage(
+        result.endpoint
+          ? `连接成功：${result.provider === "searxng" ? "公开搜索" : "Bocha"}，Endpoint ${result.endpoint}`
+          : "连接成功",
+      );
     } catch (e) {
-      setWebSearchConnectionMessage(getErrorMessage(e));
+      setWebSearchConnectionMessage(formatWebSearchTestError(webSearchConfig.provider, e));
     } finally {
       setIsTestingWebSearchConnection(false);
     }
@@ -2538,6 +2636,7 @@ export default function App() {
 
   const handleSelectPrompt = (fileName: string) => {
     if (fileName === selectedPromptFileName || isLoadingPrompt || isSavingPrompt) return;
+    setIsPromptAdvancedEditorOpen(false);
     void loadPromptContent(fileName);
   };
 
@@ -2555,6 +2654,15 @@ export default function App() {
       toast.error(`Prompt 保存失败：${getErrorMessage(e)}`);
     } finally {
       setIsSavingPrompt(false);
+    }
+  };
+
+  const handleCopyPromptVariable = async (variableName: string) => {
+    try {
+      await navigator.clipboard.writeText(variableName);
+      toast.success(`已复制变量 ${variableName}`);
+    } catch (e) {
+      toast.error(`复制变量失败：${getErrorMessage(e)}`);
     }
   };
 
@@ -3717,6 +3825,16 @@ export default function App() {
   };
 
   const openSettingsSection = (section: SettingsSection) => {
+    if (section === "editor") {
+      setSettingsSection("about");
+      setIsAdvancedActionsOpen(true);
+      return;
+    }
+    if (section === "git" && !developerModeEnabled) {
+      setSettingsSection("appearance");
+      setIsAdvancedActionsOpen(true);
+      return;
+    }
     setSettingsSection(section);
     setIsAdvancedActionsOpen(true);
     if (section === "ai" && !aiConfigDraft && !isLoadingAiConfig) {
@@ -3725,7 +3843,7 @@ export default function App() {
   };
 
   const openSettingsCenter = () => {
-    openSettingsSection("general");
+    openSettingsSection("appearance");
   };
 
   const closeSettingsCenter = () => {
@@ -3735,6 +3853,7 @@ export default function App() {
     if (hasAiConfigDraftChanges && aiConfig) {
       setAiConfigDraft(cloneAiConfig(aiConfig));
     }
+    setIsPromptAdvancedEditorOpen(false);
     setIsAdvancedActionsOpen(false);
   };
 
@@ -3836,6 +3955,13 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_FONT_SIZE_STORAGE_KEY, String(settingsFontSize));
   }, [settingsFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, developerModeEnabled ? "true" : "false");
+    if (!developerModeEnabled && settingsSection === "git") {
+      setSettingsSection("appearance");
+    }
+  }, [developerModeEnabled, settingsSection]);
 
   useEffect(() => {
     window.localStorage.setItem(LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
@@ -5655,7 +5781,7 @@ export default function App() {
             </div>
             <ScrollArea className="min-h-0 flex-1 max-h-[24vh] md:max-h-none">
               <div className="grid gap-1 p-3">
-                {SETTINGS_SECTIONS.map((section) => {
+                {visibleSettingsSections.map((section) => {
                   const isActive = settingsSection === section.id;
                   return (
                     <Button
@@ -5684,30 +5810,6 @@ export default function App() {
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
             <ScrollArea className="h-full min-h-0">
               <div className="grid min-w-0 gap-4 p-6">
-                {settingsSection === "general" && (
-                  <>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">常规</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          集中查看常用设置、工具入口和桌面工作流，方便从一个位置进入常用操作。
-                        </div>
-                      </div>
-                      <div className="rounded-md border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                        外观、编辑器、AI、洛谷、博客、Git 和数据目录设置都可以在这里统一管理。
-                      </div>
-                    </section>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="text-sm font-medium text-foreground">当前可直接前往</div>
-                      <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
-                        <div>AI：模型配置、Prompt 编辑、连接测试</div>
-                        <div>洛谷：账号配置、扫描规则、预览与确认写入入口</div>
-                        <div>博客 / Git / 数据：本地博客、同步工具和 notes 目录入口</div>
-                      </div>
-                    </section>
-                  </>
-                )}
-
                 {settingsSection === "appearance" && (
                   <>
                     <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
@@ -6001,20 +6103,6 @@ export default function App() {
                   </>
                 )}
 
-                {settingsSection === "editor" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="text-base font-semibold text-foreground">编辑器</div>
-                    <div className="text-sm leading-6 text-muted-foreground">
-                      当前已经支持双栏、仅编辑、仅预览三种工作模式。视图切换和缩放控制仍保留在 Markdown toolbar 右侧，本刀不新增状态。
-                    </div>
-                    <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                      <div>双栏：同时查看编辑区和预览区</div>
-                      <div>仅编辑：更专注地处理 Markdown 正文</div>
-                      <div>仅预览：快速检查渲染效果</div>
-                    </div>
-                  </section>
-                )}
-
                 {settingsSection === "ai" && (
                   <section className="flex min-h-[620px] min-w-0 flex-col gap-4">
                     <div className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
@@ -6294,20 +6382,20 @@ export default function App() {
                         </div>
 
                         <div className="grid gap-4 rounded-md border border-border/70 bg-background/50 p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="grid gap-1">
-                              <div className="text-sm font-semibold text-foreground">启用真实搜索服务</div>
-                              <div className="text-xs leading-5 text-muted-foreground">
-                                composer 里的“联网搜索”仍然只是允许按需搜索；这里决定是否真的调用 Provider。
+                          <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="grid min-w-0 gap-1">
+                              <div className="text-sm font-semibold text-foreground">启用联网搜索 Provider</div>
+                              <div className="max-w-3xl text-xs leading-5 text-muted-foreground">
+                                允许 NoteX 调用所选公开搜索服务。关闭后只保留搜索计划，不会真正请求 Provider。
                               </div>
                             </div>
                             <button
                               type="button"
                               className={cn(
-                                "inline-flex h-8 items-center rounded-full border px-1 text-xs font-medium transition-colors",
+                                "relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60",
                                 aiConfigDraft?.web_search.enabled
-                                  ? "border-primary/60 bg-primary/15 text-primary"
-                                  : "border-border bg-muted/30 text-muted-foreground hover:text-foreground",
+                                  ? "border-primary/70 bg-primary"
+                                  : "border-border bg-muted/40",
                               )}
                               onClick={() => updateAiConfigDraft((config) => ({
                                 ...config,
@@ -6317,15 +6405,14 @@ export default function App() {
                                 },
                               }))}
                               disabled={!aiConfigDraft || isSavingAiConfig}
-                              aria-pressed={aiConfigDraft?.web_search.enabled === true}
+                              role="switch"
+                              aria-checked={aiConfigDraft?.web_search.enabled === true}
+                              aria-label="启用联网搜索 Provider"
                             >
                               <span className={cn(
-                                "mr-2 h-5 w-5 rounded-full bg-current opacity-80 transition-transform",
+                                "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
                                 aiConfigDraft?.web_search.enabled && "translate-x-5",
                               )} />
-                              <span className="min-w-[3.5rem]">
-                                {aiConfigDraft?.web_search.enabled ? "已启用" : "未启用"}
-                              </span>
                             </button>
                           </div>
 
@@ -6460,8 +6547,8 @@ export default function App() {
                                     }))}
                                     disabled={!aiConfigDraft || isSavingAiConfig}
                                   />
-                                  <div className="text-xs leading-5 text-muted-foreground">
-                                    无需 API Key，适合开箱即用。公共搜索实例可能不稳定，失败时可更换实例或改用博查。
+                                  <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                                    公开搜索无需 Key，适合开箱即用。公共实例可能限流、返回非标准 JSON 或暂时不可用；如果频繁失败，可以填写自定义 SearXNG 实例，或配置 Bocha API Key。测试失败不代表 NoteX AI 模型不可用，只代表当前公开搜索 Provider 不可用。
                                   </div>
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Button
@@ -6474,7 +6561,7 @@ export default function App() {
                                       {isTestingWebSearchConnection ? "测试中..." : "测试公开搜索"}
                                     </Button>
                                     {webSearchConnectionMessage && (
-                                      <span className="text-xs leading-5 text-muted-foreground">
+                                      <span className="min-w-[220px] flex-1 text-xs leading-5 text-muted-foreground">
                                         {webSearchConnectionMessage}
                                       </span>
                                     )}
@@ -6537,28 +6624,41 @@ export default function App() {
                     )}
 
                     {aiSettingsTab === "prompts" && (
-                      <section className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                        <div className="grid gap-1">
+                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                        <div className="grid gap-2 rounded-md border border-border/70 bg-background/50 p-4">
                           <div className="text-base font-semibold text-foreground">Prompt 模板</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            Prompt 模板保存在本地 `.oinb/prompts/`，可单独编辑，不和 API 配置的保存草稿混在一起。
+                          <div className="max-w-4xl text-sm leading-6 text-muted-foreground">
+                            这些模板会影响 NoteX 在洛谷整理、笔记润色、题解格式化等场景中的回答方式。一般只需要调整语气和偏好，不建议随意删除结构要求。
+                          </div>
+                          <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
+                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">修改模板会影响对应 AI 功能。</div>
+                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">保存后只影响本机。</div>
+                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">如果输出异常，可以回到这里检查模板内容。</div>
                           </div>
                         </div>
                         {promptTemplates.length === 0 && !selectedPromptFileName ? (
-                          <div className="flex flex-wrap items-start gap-2 rounded-md border border-dashed border-border px-4 py-8">
-                            <Button
-                              variant="outline"
-                              onClick={() => void loadPromptTemplates()}
-                              disabled={isLoadingPrompt || isSavingPrompt}
-                            >
-                              <FileText className="h-3.5 w-3.5" />
-                              读取 Prompt 模板
-                            </Button>
-                            <span className="pt-2 text-xs text-muted-foreground">在设置中心内直接编辑，不再打开二级大窗口。</span>
+                          <div className="grid gap-3 rounded-md border border-dashed border-border px-4 py-8">
+                            <div className="grid gap-1">
+                              <div className="text-sm font-medium text-foreground">读取本机模板</div>
+                              <div className="text-sm leading-6 text-muted-foreground">
+                                模板保存在本地 `.oinb/prompts/`，不会写入 API Key、Cookie 或其它敏感配置。
+                              </div>
+                            </div>
+                            <div>
+                              <Button
+                                variant="outline"
+                                onClick={() => void loadPromptTemplates()}
+                                disabled={isLoadingPrompt || isSavingPrompt}
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                读取 Prompt 模板
+                              </Button>
+                            </div>
                           </div>
                         ) : (
-                          <div className="grid min-h-0 min-w-0 overflow-hidden rounded-md border border-border/70 md:grid-cols-[240px_minmax(0,1fr)]">
-                            <aside className="min-h-0 border-b border-border/70 bg-muted/10 p-2 md:border-b-0 md:border-r">
+                          <div className="grid min-h-0 min-w-0 overflow-hidden rounded-md border border-border/70 lg:grid-cols-[300px_minmax(0,1fr)]">
+                            <aside className="min-h-0 border-b border-border/70 bg-muted/10 p-3 md:border-b-0 md:border-r">
+                              <div className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">模板</div>
                               <div className="grid max-h-[420px] gap-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
                                 {promptTemplates.map((prompt) => {
                                   const isActive = prompt.fileName === selectedPromptFileName;
@@ -6568,39 +6668,128 @@ export default function App() {
                                       key={prompt.fileName}
                                       type="button"
                                       className={cn(
-                                        "grid min-w-0 gap-1 rounded-md px-2.5 py-2 text-left transition-colors",
+                                        "grid min-w-0 gap-1 rounded-md border px-3 py-2.5 text-left transition-colors",
                                         isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                                       )}
                                       onClick={() => handleSelectPrompt(prompt.fileName)}
                                       disabled={isLoadingPrompt || isSavingPrompt}
                                     >
-                                      <span className="truncate text-sm font-medium">{prompt.displayName}</span>
+                                      <span className="truncate text-sm font-medium">{promptUsage.title || prompt.displayName}</span>
                                       <span className={cn("truncate text-[11px]", isActive ? "text-accent-foreground/75" : "text-muted-foreground")}>{prompt.fileName}</span>
-                                      <span className={cn("truncate text-[11px]", isActive ? "text-accent-foreground/70" : "text-muted-foreground")}>{promptUsage.purpose}</span>
+                                      <span className={cn("line-clamp-2 text-[11px] leading-5", isActive ? "text-accent-foreground/70" : "text-muted-foreground")}>{promptUsage.purpose}</span>
                                     </button>
                                   );
                                 })}
                               </div>
                             </aside>
-                            <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-3">
-                              <div className="flex min-w-0 items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm font-medium text-foreground">{selectedPromptFileName || "未选择 Prompt"}</div>
-                                  <div className="text-xs text-muted-foreground">保存 Prompt 会立即写入本地模板文件。</div>
+                            <main className="grid min-h-0 min-w-0 gap-4 p-4">
+                              <div className="grid gap-3 rounded-md border border-border/70 bg-background/50 p-4">
+                                <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-foreground">{selectedPromptUsage.title}</div>
+                                    <div className="mt-1 text-xs leading-5 text-muted-foreground">{selectedPromptUsage.purpose}</div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setIsPromptAdvancedEditorOpen(true)}
+                                      disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
+                                    >
+                                      编辑高级内容
+                                    </Button>
+                                  </div>
                                 </div>
-                                <Button size="sm" onClick={() => void handleSavePrompt()} disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}>
-                                  {isSavingPrompt ? "保存中..." : "保存 Prompt"}
-                                </Button>
+                                <div className="grid gap-3 text-xs leading-5 text-muted-foreground md:grid-cols-3">
+                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
+                                    <div className="font-medium text-foreground">用途</div>
+                                    <div>{selectedPromptUsage.purpose}</div>
+                                  </div>
+                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
+                                    <div className="font-medium text-foreground">保存位置</div>
+                                    <div>.oinb/prompts/</div>
+                                  </div>
+                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
+                                    <div className="font-medium text-foreground">影响范围</div>
+                                    <div>{selectedPromptUsage.scope}</div>
+                                  </div>
+                                </div>
+                                <div className="grid gap-1 rounded-md border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                                  {selectedPromptUsage.notes.map((note) => (
+                                    <div key={note}>{note}</div>
+                                  ))}
+                                  {!developerModeEnabled && (
+                                    <div>原始文件路径和底层调试说明会在开发者模式启用后显示。</div>
+                                  )}
+                                  {developerModeEnabled && selectedPromptFileName && (
+                                    <div>当前模板文件：{selectedPromptFileName}</div>
+                                  )}
+                                </div>
+                                <div className="text-xs leading-5 text-muted-foreground">
+                                  当前没有恢复默认入口；保存前请确认没有写入 API Key、Cookie 或其它敏感配置。
+                                </div>
                               </div>
-                              <textarea
-                                value={promptContent}
-                                onChange={(event) => setPromptContent(event.target.value)}
-                                disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
-                                className="min-h-[320px] resize-none rounded-md border border-border bg-background px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary"
-                              />
+                              {selectedPromptUsage.variables.length > 0 ? (
+                                <div className="grid gap-3 rounded-md border border-border/70 bg-background/50 p-4">
+                                  <div className="grid gap-1">
+                                    <div className="text-sm font-medium text-foreground">可用变量</div>
+                                    <div className="text-xs leading-5 text-muted-foreground">
+                                      使用双大括号写入变量，例如 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{selectedPromptUsage.variables[0]?.name}</code>。执行对应 AI 功能时，NoteX 会把变量替换成实际内容。
+                                    </div>
+                                  </div>
+                                  <div className="grid gap-2">
+                                    {selectedPromptUsage.variables.map((variable) => (
+                                      <button
+                                        key={variable.name}
+                                        type="button"
+                                        className="grid gap-1 rounded-md border border-border/70 bg-muted/10 px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                                        onClick={() => void handleCopyPromptVariable(variable.name)}
+                                        title={`复制 ${variable.name}`}
+                                      >
+                                        <span className="font-mono text-xs font-semibold text-foreground">{variable.name}</span>
+                                        <span className="text-xs leading-5 text-muted-foreground">{variable.meaning}</span>
+                                        <span className="text-[11px] leading-5 text-muted-foreground">{variable.usage} 点击可复制变量名。</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                                  这个模板没有登记可替换变量。可以编辑普通 Prompt 文本，但不要写入 API Key、Cookie 或本机绝对路径。
+                                </div>
+                              )}
                             </main>
                           </div>
                         )}
+                      </section>
+                    )}
+
+                    {aiSettingsTab === "local-notes" && (
+                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
+                        <div className="grid gap-1">
+                          <div className="text-base font-semibold text-foreground">本地笔记</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            NoteX 可以按需检索本地 Markdown 笔记，为回答提供私有上下文。索引和检索结果只保存在本机，不上传到 Provider。
+                          </div>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
+                            <div className="text-sm font-medium text-foreground">索引目录</div>
+                            <div className="mt-2 text-sm text-muted-foreground">.oinb/local-index/</div>
+                          </div>
+                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
+                            <div className="text-sm font-medium text-foreground">隐私边界</div>
+                            <div className="mt-2 text-sm leading-6 text-muted-foreground">索引只来自本地 notes 内容；不会暴露绝对路径。</div>
+                          </div>
+                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
+                            <div className="text-sm font-medium text-foreground">使用方式</div>
+                            <div className="mt-2 text-sm leading-6 text-muted-foreground">聊天中的本地笔记检索会按需读取相关片段，不改变原始笔记。</div>
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                          当前设置中心只展示本地索引说明；清理或重建索引入口后续接入已有后端能力时再显示。
+                        </div>
                       </section>
                     )}
                   </section>
@@ -6676,7 +6865,7 @@ export default function App() {
                   </section>
                 )}
 
-                {settingsSection === "git" && (
+                {developerModeEnabled && settingsSection === "git" && (
                   <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
                     <div className="grid gap-1">
                       <div className="text-base font-semibold text-foreground">Git</div>
@@ -6718,6 +6907,11 @@ export default function App() {
                       <div className="text-sm leading-6 text-muted-foreground">
                         OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
                       </div>
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">桌面工作台</span>
+                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">本地优先</span>
+                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">版本：0.1.0</span>
+                      </div>
                     </section>
 
                     <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
@@ -6738,12 +6932,115 @@ export default function App() {
                         ))}
                       </div>
                     </section>
+
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="grid gap-1">
+                        <div className="text-base font-semibold text-foreground">编辑与预览</div>
+                        <div className="text-sm leading-6 text-muted-foreground">
+                          编辑器能力集中在主工作台，不再单独占用设置页。视图切换和缩放控制保留在 Markdown toolbar 右侧。
+                        </div>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-3">
+                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
+                          <span className="font-medium text-foreground">双栏</span>：同时查看编辑区和预览区。
+                        </div>
+                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
+                          <span className="font-medium text-foreground">仅编辑</span>：更专注地处理 Markdown 正文。
+                        </div>
+                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
+                          <span className="font-medium text-foreground">仅预览</span>：快速检查渲染效果。
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="grid gap-1">
+                          <div className="text-base font-semibold text-foreground">开发者模式</div>
+                          <div className="text-sm leading-6 text-muted-foreground">
+                            显示 Git、诊断、自检和底层调试入口。普通使用不需要开启。
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className={cn(
+                            "relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                            developerModeEnabled
+                              ? "border-primary/70 bg-primary"
+                              : "border-border bg-muted",
+                          )}
+                          onClick={() => setDeveloperModeEnabled((enabled) => !enabled)}
+                          role="switch"
+                          aria-checked={developerModeEnabled}
+                          aria-label="启用开发者模式"
+                        >
+                          <span className={cn(
+                            "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
+                            developerModeEnabled && "translate-x-5",
+                          )} />
+                        </button>
+                      </div>
+                    </section>
                   </div>
                 )}
               </div>
             </ScrollArea>
           </main>
         </div>
+        {isPromptAdvancedEditorOpen && selectedPromptFileName && (
+          <div className="fixed inset-0 z-[80] grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
+            <section className="grid h-[min(820px,calc(100vh-64px))] w-[min(1100px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-border bg-background shadow-2xl">
+              <div className="flex min-w-0 flex-col gap-3 border-b border-border/80 bg-card/95 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="text-base font-semibold text-foreground">编辑高级内容</div>
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{selectedPromptUsage.title}</span>
+                    <span className="font-mono">{selectedPromptTemplate?.fileName ?? selectedPromptFileName}</span>
+                  </div>
+                  <div className="mt-2 max-w-4xl text-xs leading-5 text-muted-foreground">
+                    {selectedPromptUsage.purpose} 这里会直接修改底层 Prompt，错误修改可能影响对应 AI 功能输出。建议保留变量、返回格式和结构约束。
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleSavePrompt()}
+                    disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
+                  >
+                    {isSavingPrompt ? "保存中..." : "保存 Prompt"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsPromptAdvancedEditorOpen(false)}
+                    disabled={isSavingPrompt}
+                  >
+                    关闭编辑
+                  </Button>
+                </div>
+              </div>
+              <div className="min-h-0 p-4">
+                <textarea
+                  value={promptContent}
+                  onChange={(event) => setPromptContent(event.target.value)}
+                  disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
+                  spellCheck={false}
+                  className="h-full min-h-[60vh] w-full resize-none rounded-md border border-border bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2 border-t border-border/80 bg-muted/15 px-5 py-3 text-xs leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  保存位置：.oinb/prompts/。不要写入 API Key、Cookie、本机绝对路径或其它敏感配置。
+                </div>
+                <div className="shrink-0">
+                  {promptContent.length.toLocaleString()} 字符
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
         <DialogFooter className="shrink-0 border-t border-border/80 bg-background/95 px-6 py-3 sm:items-center sm:justify-between">
           {hasAiConfigDraftChanges ? (
             <>
@@ -7066,13 +7363,15 @@ export default function App() {
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">数据与存储</div>
                           <div className="mt-1 text-sm font-medium text-foreground">notes 本地目录</div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
-                            <span>笔记保存在本机目录里，Git 同步仍是进阶能力。</span>
+                            <span>笔记保存在本机目录里，备份或同步前可以先打开目录确认内容。</span>
                             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={openNotesFolder}>
                               打开目录
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void handlePushGit()}>
-                              {gitStatusLabel}
-                            </Button>
+                            {developerModeEnabled && (
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void handlePushGit()}>
+                                {gitStatusLabel}
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -7194,7 +7493,7 @@ export default function App() {
                             <Settings className="h-4 w-4 text-muted-foreground" />
                             <div>
                               <div className="text-sm font-medium text-foreground">打开设置</div>
-                              <div className="text-xs text-muted-foreground">外观、AI、Blog、Git、数据目录都在这里。</div>
+                              <div className="text-xs text-muted-foreground">外观、AI、Blog、数据目录都在这里。</div>
                             </div>
                           </div>
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -7516,15 +7815,17 @@ export default function App() {
             </button>
           </div>
           <div className="app-status-group flex min-w-0 flex-wrap items-center justify-end gap-y-1">
-            <button
-              type="button"
-              className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
-              onClick={() => void handlePushGit()}
-              disabled={isPushingGit}
-              title="同步 Git"
-            >
-              Git：{gitStatusLabel}
-            </button>
+            {developerModeEnabled && (
+              <button
+                type="button"
+                className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
+                onClick={() => void handlePushGit()}
+                disabled={isPushingGit}
+                title="同步 Git"
+              >
+                Git：{gitStatusLabel}
+              </button>
+            )}
             <span className="app-status-item whitespace-nowrap">视图：{editorViewModeLabel}</span>
             <span className="app-status-item whitespace-nowrap">界面：{appZoomLabel}</span>
             <span className="app-status-item whitespace-nowrap">内容：{contentZoomLabel}</span>

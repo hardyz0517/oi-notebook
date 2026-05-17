@@ -4946,7 +4946,15 @@ pub fn clear_web_cache() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn test_web_search_connection(
+pub async fn test_web_search_connection(
+    input: TestWebSearchConnectionInput,
+) -> Result<TestWebSearchConnectionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || test_web_search_connection_blocking(input))
+        .await
+        .map_err(|e| format!("联网搜索测试任务失败: {e}"))?
+}
+
+fn test_web_search_connection_blocking(
     input: TestWebSearchConnectionInput,
 ) -> Result<TestWebSearchConnectionResult, String> {
     let provider = input.provider.trim();
