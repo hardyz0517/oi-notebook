@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tauri::Emitter;
@@ -16,6 +16,7 @@ use tauri::Emitter;
 use crate::luogu::{read_config, write_config, AiConfigFields, AiModel, AiProvider};
 use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
+use crate::web_cache;
 
 const LUOGU_INSIGHT_TASK: &str = "luogu-insight";
 const NOTE_METADATA_TASK: &str = "note-metadata";
@@ -35,6 +36,11 @@ const WEB_EXTRACT_MAX_SOURCES: usize = 3;
 const WEB_EXTRACT_MAX_CHARS_PER_SOURCE: usize = 5000;
 const WEB_EXTRACT_TOTAL_CONTEXT_CHARS: usize = 15000;
 const WEB_EXTRACT_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const WEB_SEARCH_NEWS_TTL_SECONDS: i64 = 2 * 60 * 60;
+const WEB_SEARCH_OI_TTL_SECONDS: i64 = 14 * 24 * 60 * 60;
+const WEB_EXCERPT_DEFAULT_TTL_SECONDS: i64 = 14 * 24 * 60 * 60;
+const WEB_EXCERPT_NEWS_TTL_SECONDS: i64 = 6 * 60 * 60;
+const WEB_EXCERPT_FAILURE_TTL_SECONDS: i64 = 20 * 60;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
 const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
@@ -179,6 +185,8 @@ pub struct WebSearchRequestInput {
     #[serde(default)]
     pub problem_id: Option<String>,
     #[serde(default)]
+    pub algorithm_keywords: Vec<String>,
+    #[serde(default)]
     pub max_results: Option<usize>,
     #[serde(default)]
     pub provider: Option<String>,
@@ -203,6 +211,9 @@ pub struct WebSearchResult {
     pub excerpt: Option<String>,
     pub excerpt_error: Option<String>,
     pub fetched_at: Option<i64>,
+    pub cache_status: Option<String>,
+    pub cached_at: Option<String>,
+    pub cache_ttl_seconds: Option<i64>,
     pub is_constructed: Option<bool>,
     pub constructed_reason: Option<String>,
     pub selected: Option<bool>,
@@ -218,7 +229,7 @@ pub struct FetchWebSourceExcerptsInput {
     pub max_chars_per_source: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSourceExcerptResult {
     pub id: String,
@@ -228,6 +239,9 @@ pub struct WebSourceExcerptResult {
     pub excerpt: Option<String>,
     pub error: Option<String>,
     pub fetched_at: i64,
+    pub cache_status: Option<String>,
+    pub cached_at: Option<String>,
+    pub cache_ttl_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -483,11 +497,18 @@ fn sanitize_ai_provider(provider: &AiProvider) -> Option<AiProvider> {
     }
     let mut models = Vec::new();
     for model in provider.models.iter().filter_map(sanitize_ai_model) {
-        if !models.iter().any(|existing: &AiModel| existing.id == model.id) {
+        if !models
+            .iter()
+            .any(|existing: &AiModel| existing.id == model.id)
+        {
             models.push(model);
         }
     }
-    if let Some(default_model) = provider.default_model.as_deref().and_then(|model| model_from_id(model, "manual")) {
+    if let Some(default_model) = provider
+        .default_model
+        .as_deref()
+        .and_then(|model| model_from_id(model, "manual"))
+    {
         if !models.iter().any(|model| model.id == default_model.id) {
             models.push(default_model);
         }
@@ -558,7 +579,12 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
         .map(str::trim)
         .filter(|id| providers.iter().any(|provider| provider.id == *id))
         .map(ToOwned::to_owned)
-        .or_else(|| providers.iter().find(|provider| provider.enabled).map(|provider| provider.id.clone()))
+        .or_else(|| {
+            providers
+                .iter()
+                .find(|provider| provider.enabled)
+                .map(|provider| provider.id.clone())
+        })
         .or_else(|| providers.first().map(|provider| provider.id.clone()));
     let default_provider = default_provider_id
         .as_deref()
@@ -569,7 +595,12 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
         .map(str::trim)
         .filter(|model_id| {
             default_provider
-                .map(|provider| provider.models.iter().any(|model| model.id == *model_id && model.enabled))
+                .map(|provider| {
+                    provider
+                        .models
+                        .iter()
+                        .any(|model| model.id == *model_id && model.enabled)
+                })
                 .unwrap_or(false)
         })
         .map(ToOwned::to_owned)
@@ -583,7 +614,13 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
                     .map(|model| model.id.clone())
             })
         })
-        .or_else(|| if legacy_model.is_empty() { None } else { Some(legacy_model.clone()) });
+        .or_else(|| {
+            if legacy_model.is_empty() {
+                None
+            } else {
+                Some(legacy_model.clone())
+            }
+        });
     let (base_url, api_key, model) = match default_provider {
         Some(provider) => (
             provider.base_url.clone(),
@@ -604,7 +641,9 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
     }
 }
 
-fn normalize_web_search_config(config: &crate::luogu::WebSearchConfigFields) -> crate::luogu::WebSearchConfigFields {
+fn normalize_web_search_config(
+    config: &crate::luogu::WebSearchConfigFields,
+) -> crate::luogu::WebSearchConfigFields {
     let provider = match config.provider.trim() {
         WEB_SEARCH_DEFAULT_PROVIDER => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
         WEB_SEARCH_COMPAT_PROVIDER => WEB_SEARCH_COMPAT_PROVIDER.to_string(),
@@ -656,11 +695,20 @@ fn resolve_ai_config(
         }
         let model = selected_model_id
             .or_else(|| provider.default_model.clone())
-            .or_else(|| provider.models.iter().find(|model| model.enabled).map(|model| model.id.clone()))
+            .or_else(|| {
+                provider
+                    .models
+                    .iter()
+                    .find(|model| model.enabled)
+                    .map(|model| model.id.clone())
+            })
             .unwrap_or_default();
         if !model.trim().is_empty()
             && !provider.models.is_empty()
-            && !provider.models.iter().any(|item| item.id == model && item.enabled)
+            && !provider
+                .models
+                .iter()
+                .any(|item| item.id == model && item.enabled)
         {
             return Err("AI connection failed: selected model does not exist".to_string());
         }
@@ -746,7 +794,11 @@ fn build_model_identity_context(resolved: &ResolvedAiConfig) -> String {
         .filter(|kind| !kind.is_empty())
         .unwrap_or("not provided");
     let model_id = resolved.model.trim();
-    let model_id = if model_id.is_empty() { "not provided" } else { model_id };
+    let model_id = if model_id.is_empty() {
+        "not provided"
+    } else {
+        model_id
+    };
     let model_name = resolved
         .model_name
         .as_deref()
@@ -773,7 +825,11 @@ fn ai_request_target_debug(resolved: &ResolvedAiConfig) -> String {
         .or(resolved.provider_id.as_deref())
         .unwrap_or("not provided");
     let model = resolved.model.trim();
-    let model = if model.is_empty() { "not provided" } else { model };
+    let model = if model.is_empty() {
+        "not provided"
+    } else {
+        model
+    };
     format!(
         "provider={}; model={}",
         sanitize_ai_detail(provider),
@@ -798,6 +854,126 @@ fn stable_hash_hex(content: &str) -> String {
     }
 
     format!("{first:016x}{second:016x}")
+}
+
+fn cache_time_string(timestamp_ms: i64) -> String {
+    Utc.timestamp_millis_opt(timestamp_ms)
+        .single()
+        .unwrap_or_else(Utc::now)
+        .to_rfc3339()
+}
+
+fn is_news_like_web_request(intent: &str, queries: &[String]) -> bool {
+    if intent == "general_web" {
+        return true;
+    }
+    let haystack = queries.join("\n").to_ascii_lowercase();
+    [
+        "recent", "latest", "news", "today", "最近", "最新", "新闻", "今日", "今天",
+    ]
+    .iter()
+    .any(|keyword| haystack.contains(keyword))
+}
+
+fn search_cache_ttl_seconds(request: &WebSearchRequestInput) -> i64 {
+    if is_news_like_web_request(&request.intent, &request.queries) {
+        WEB_SEARCH_NEWS_TTL_SECONDS
+    } else {
+        WEB_SEARCH_OI_TTL_SECONDS
+    }
+}
+
+fn excerpt_cache_ttl_seconds(source: &WebSearchResult) -> i64 {
+    let haystack = format!(
+        "{}\n{}\n{}",
+        source.title,
+        source.url,
+        source.snippet.as_deref().unwrap_or("")
+    )
+    .to_ascii_lowercase();
+    if [
+        "news", "recent", "latest", "最近", "最新", "新闻", "今日", "今天",
+    ]
+    .iter()
+    .any(|keyword| haystack.contains(keyword))
+    {
+        WEB_EXCERPT_NEWS_TTL_SECONDS
+    } else {
+        WEB_EXCERPT_DEFAULT_TTL_SECONDS
+    }
+}
+
+fn build_web_search_cache_key(
+    provider: &str,
+    request: &WebSearchRequestInput,
+    max_results: usize,
+    endpoint_hint: Option<&str>,
+) -> Result<String, String> {
+    let normalized_queries = request
+        .queries
+        .iter()
+        .map(|query| query.trim())
+        .filter(|query| !query.is_empty())
+        .take(WEB_SEARCH_MAX_QUERIES)
+        .collect::<Vec<_>>();
+    let normalized_keywords = request
+        .algorithm_keywords
+        .iter()
+        .map(|keyword| keyword.trim())
+        .filter(|keyword| !keyword.is_empty())
+        .take(12)
+        .collect::<Vec<_>>();
+    let key_json = json!({
+        "version": web_cache::cache_version(),
+        "provider": provider,
+        "queries": normalized_queries,
+        "intent": request.intent.trim(),
+        "problemId": request.problem_id.as_deref().unwrap_or("").trim(),
+        "algorithmKeywords": normalized_keywords,
+        "maxResults": max_results,
+        "endpointHash": endpoint_hint
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(stable_hash_hex),
+    });
+    let key_text = serde_json::to_string(&key_json)
+        .map_err(|e| format!("Web cache failed: cannot serialize search cache key: {e}"))?;
+    Ok(stable_hash_hex(&key_text))
+}
+
+fn build_web_excerpt_cache_key(url: &str, max_chars: usize) -> String {
+    let key_json = json!({
+        "version": web_cache::cache_version(),
+        "extractor": "public-html-text-v1",
+        "urlHash": stable_hash_hex(url.trim()),
+        "maxChars": max_chars,
+    });
+    stable_hash_hex(&serde_json::to_string(&key_json).unwrap_or_else(|_| url.to_string()))
+}
+
+fn mark_search_sources_cache_status(
+    sources: &mut [WebSearchResult],
+    status: &str,
+    cached_at_ms: i64,
+    ttl_seconds: i64,
+) {
+    let cached_at = cache_time_string(cached_at_ms);
+    for source in sources {
+        source.cache_status = Some(status.to_string());
+        source.cached_at = Some(cached_at.clone());
+        source.cache_ttl_seconds = Some(ttl_seconds);
+    }
+}
+
+fn mark_excerpt_cache_status(
+    result: &mut WebSourceExcerptResult,
+    status: &str,
+    cached_at_ms: i64,
+    ttl_seconds: i64,
+) {
+    result.cache_status = Some(status.to_string());
+    result.cached_at = Some(cache_time_string(cached_at_ms));
+    result.cache_ttl_seconds = Some(ttl_seconds);
 }
 
 fn build_ai_cache_key(
@@ -866,7 +1042,13 @@ fn write_ai_cache(
 fn diagnostic_preview(text: &str) -> String {
     let normalized = text
         .chars()
-        .map(|ch| if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' { ' ' } else { ch })
+        .map(|ch| {
+            if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' {
+                ' '
+            } else {
+                ch
+            }
+        })
         .collect::<String>();
     let preview = normalized
         .chars()
@@ -887,7 +1069,9 @@ fn diagnostic_json_preview(value: &JsonValue) -> String {
 }
 
 fn sanitize_ai_detail(text: &str) -> String {
-    let detail = diagnostic_preview(text).replace('\n', "\\n").replace('\r', "\\r");
+    let detail = diagnostic_preview(text)
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
     if detail.is_empty() {
         "<empty>".to_string()
     } else {
@@ -902,7 +1086,11 @@ fn decode_response_body(bytes: &[u8]) -> String {
 
 fn looks_like_html(text: &str) -> bool {
     let trimmed = text.trim_start();
-    let lowered = trimmed.chars().take(32).collect::<String>().to_ascii_lowercase();
+    let lowered = trimmed
+        .chars()
+        .take(32)
+        .collect::<String>()
+        .to_ascii_lowercase();
     lowered.starts_with("<!doctype html")
         || lowered.starts_with("<html")
         || lowered.starts_with("<body")
@@ -910,7 +1098,8 @@ fn looks_like_html(text: &str) -> bool {
 }
 
 fn extract_provider_error_message(value: &JsonValue) -> Option<String> {
-    value.get("error")
+    value
+        .get("error")
         .and_then(|error| error.get("message"))
         .and_then(JsonValue::as_str)
         .map(str::trim)
@@ -1144,21 +1333,26 @@ fn request_chat_completion_with_options(
                 let issue_error = issue.clone().into_error(scope);
                 eprintln!(
                     "{scope}: attempt {attempt}/{} failed: {}; target={target_debug}",
-                    AI_RESPONSE_RETRY_ATTEMPTS,
-                    issue_error
+                    AI_RESPONSE_RETRY_ATTEMPTS, issue_error
                 );
                 if should_retry {
                     last_issue = Some(issue);
                     continue;
                 }
-                return Err(format!("{}; target={target_debug}", issue.into_error(scope)));
+                return Err(format!(
+                    "{}; target={target_debug}",
+                    issue.into_error(scope)
+                ));
             }
         }
     }
 
     Err(last_issue
         .unwrap_or_else(|| {
-            AiResponseIssue::retryable("AI 服务返回了无法解析的响应，请重试。", "debug=retry-exhausted")
+            AiResponseIssue::retryable(
+                "AI 服务返回了无法解析的响应，请重试。",
+                "debug=retry-exhausted",
+            )
         })
         .into_error(scope))
 }
@@ -1284,11 +1478,7 @@ fn split_ai_error_detail(message: String) -> (String, Option<String>) {
     }
 }
 
-fn emit_stream_chunk(
-    app: &tauri::AppHandle,
-    stream_id: &str,
-    delta: String,
-) -> Result<(), String> {
+fn emit_stream_chunk(app: &tauri::AppHandle, stream_id: &str, delta: String) -> Result<(), String> {
     app.emit(
         "ai-chat-stream-chunk",
         NoteChatStreamChunkPayload {
@@ -1459,6 +1649,18 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_web_excerpt_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "no webpage excerpt available".to_string());
+        let cache_status = source
+            .cache_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("miss");
+        let cached_at = source
+            .cached_at
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("none");
         let source_origin = if source.is_constructed == Some(true) {
             "constructed public OI source"
         } else {
@@ -1472,7 +1674,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .unwrap_or_else(|| "none".to_string());
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             index + 1,
             title,
             site,
@@ -1487,6 +1689,8 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             relevance,
             relevance_label,
             relevance_reason,
+            cache_status,
+            cached_at,
             excerpt_status,
             excerpt_error,
             excerpt,
@@ -1508,6 +1712,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Sources marked as constructed public OI sources are public entry points only. If their Web excerpt status is not fetched, do not infer their page content; say they are available to open but current summaries are insufficient.\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
+- If Cache status is stale, treat that source as potentially outdated and state time-sensitive claims cautiously.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
 - Strongly related sources may be used cautiously for the target problem. Candidate or related-algorithm sources are only background algorithm material and must not be presented as target-problem-specific evidence.\n\
 - If there are not enough strongly related editorial, discussion, or pitfall summaries, explicitly say the search result summaries are insufficient to directly summarize this problem's common pitfalls. You may add general OI troubleshooting advice, but label it as general experience rather than search-result evidence.\n\
@@ -1553,7 +1758,8 @@ fn build_stream_note_chat_messages(
     let note_path = context.note_path.trim();
     let markdown = context.markdown.trim();
     let selected_text = context.selected_text.trim();
-    let has_full_note_context = !note_path.is_empty() || !note_title.is_empty() || !markdown.is_empty();
+    let has_full_note_context =
+        !note_path.is_empty() || !note_title.is_empty() || !markdown.is_empty();
     let context_prompt = if has_full_note_context {
         let selection_section = if selected_text.is_empty() {
             "The user has no selected text.".to_string()
@@ -1666,7 +1872,9 @@ fn parse_stream_line(line: &str, scope: &str) -> Result<Option<String>, String> 
     })?;
 
     if let Some(provider_message) = extract_provider_error_message(&value) {
-        return Err(format!("{scope}: {provider_message}; debug=provider_error=true"));
+        return Err(format!(
+            "{scope}: {provider_message}; debug=provider_error=true"
+        ));
     }
 
     Ok(extract_stream_delta(&value))
@@ -1975,7 +2183,10 @@ fn normalize_suggested_tags(
         if existing.iter().any(|existing_tag| existing_tag == &trimmed) {
             continue;
         }
-        if normalized.iter().any(|existing_tag| existing_tag == &trimmed) {
+        if normalized
+            .iter()
+            .any(|existing_tag| existing_tag == &trimmed)
+        {
             continue;
         }
         normalized.push(trimmed);
@@ -1989,7 +2200,9 @@ fn normalize_suggested_tags(
     }
 
     if normalized.len() > 8 {
-        return Err(format!("{scope}: response suggestedTags must contain at most 8 items"));
+        return Err(format!(
+            "{scope}: response suggestedTags must contain at most 8 items"
+        ));
     }
 
     Ok(normalized)
@@ -2012,7 +2225,9 @@ fn validate_note_tag_suggestion(
     let mut raw_tags = Vec::new();
     for tag in tags_value {
         let Some(tag_text) = tag.as_str() else {
-            return Err(format!("{scope}: response suggestedTags must only contain strings"));
+            return Err(format!(
+                "{scope}: response suggestedTags must only contain strings"
+            ));
         };
         raw_tags.push(tag_text.to_string());
     }
@@ -2094,7 +2309,9 @@ fn validate_polished_full_note(value: JsonValue, scope: &str) -> Result<Polished
         })?;
     let polished_body = strip_wrapping_markdown_fence(raw_body);
     if polished_body.trim().is_empty() {
-        return Err(format!("{scope}: response polishedBody was empty after cleanup"));
+        return Err(format!(
+            "{scope}: response polishedBody was empty after cleanup"
+        ));
     }
 
     Ok(PolishedFullNote { polished_body })
@@ -2303,11 +2520,7 @@ fn suggest_note_tags_blocking(
     }
 
     let config = read_config()?.ai;
-    let resolved = resolve_ai_config(
-        &config,
-        provider_id.as_deref(),
-        model_id.as_deref(),
-    )?;
+    let resolved = resolve_ai_config(&config, provider_id.as_deref(), model_id.as_deref())?;
     require_resolved_ai_config(&resolved)?;
     let selected_config = config_from_resolved(resolved.clone());
 
@@ -2372,7 +2585,8 @@ JSON 格式必须是：{{\"suggestedTags\":[\"动态规划\",\"单调队列\"],\
             "content": user_prompt
         }
     ]);
-    let content = request_chat_completion(&selected_config, messages, 0.2, "AI tag suggestion failed")?;
+    let content =
+        request_chat_completion(&selected_config, messages, 0.2, "AI tag suggestion failed")?;
     let value = parse_json_object_from_ai_content(&content, "AI tag suggestion failed")?;
     validate_note_tag_suggestion(value, &context.tags, "AI tag suggestion failed")
 }
@@ -2401,11 +2615,7 @@ fn polish_selected_text_blocking(
     }
 
     let config = read_config()?.ai;
-    let resolved = resolve_ai_config(
-        &config,
-        provider_id.as_deref(),
-        model_id.as_deref(),
-    )?;
+    let resolved = resolve_ai_config(&config, provider_id.as_deref(), model_id.as_deref())?;
     require_resolved_ai_config(&resolved)?;
     let selected_config = config_from_resolved(resolved.clone());
 
@@ -2461,7 +2671,12 @@ Selected text:\n{selected_text}"
             "content": user_prompt
         }
     ]);
-    let content = request_chat_completion(&selected_config, messages, 0.2, "AI selection polish failed")?;
+    let content = request_chat_completion(
+        &selected_config,
+        messages,
+        0.2,
+        "AI selection polish failed",
+    )?;
     let value = parse_json_object_from_ai_content(&content, "AI selection polish failed")?;
     validate_polished_selected_text(value, "AI selection polish failed")
 }
@@ -2495,11 +2710,7 @@ fn polish_full_note_blocking(
     }
 
     let config = read_config()?.ai;
-    let resolved = resolve_ai_config(
-        &config,
-        provider_id.as_deref(),
-        model_id.as_deref(),
-    )?;
+    let resolved = resolve_ai_config(&config, provider_id.as_deref(), model_id.as_deref())?;
     require_resolved_ai_config(&resolved)?;
     let selected_config = config_from_resolved(resolved.clone());
 
@@ -2620,11 +2831,7 @@ pub fn chat_with_current_note(
     }
 
     let config = read_config()?.ai;
-    let resolved = resolve_ai_config(
-        &config,
-        provider_id.as_deref(),
-        model_id.as_deref(),
-    )?;
+    let resolved = resolve_ai_config(&config, provider_id.as_deref(), model_id.as_deref())?;
     let selected_config = config_from_resolved(resolved.clone());
     let selected_text = context.selected_text.trim();
     let tags_text = if context.tags.is_empty() {
@@ -2746,9 +2953,15 @@ pub async fn chat_with_current_note_stream(
         search_sources,
     );
     let selected_config = config_from_resolved(resolved);
-    let result =
-        request_chat_completion_stream(&selected_config, messages, 0.2, "AI chat stream failed", app.clone(), stream_id.clone())
-            .await;
+    let result = request_chat_completion_stream(
+        &selected_config,
+        messages,
+        0.2,
+        "AI chat stream failed",
+        app.clone(),
+        stream_id.clone(),
+    )
+    .await;
 
     if let Err(error) = result {
         emit_stream_error(&app, &stream_id, error.clone());
@@ -2765,7 +2978,9 @@ fn request_provider_models(provider: &AiProvider) -> Result<Vec<String>, String>
         return Err("AI models sync failed: base_url is missing".to_string());
     }
     if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-        return Err("AI models sync failed: base_url must start with http:// or https://".to_string());
+        return Err(
+            "AI models sync failed: base_url must start with http:// or https://".to_string(),
+        );
     }
     if api_key.is_empty() {
         return Err("AI models sync failed: api_key is missing".to_string());
@@ -2797,7 +3012,9 @@ fn request_provider_models(provider: &AiProvider) -> Result<Vec<String>, String>
     let body_trimmed = body.trim();
     if !status.is_success() {
         if status_code == 401 || status_code == 403 {
-            return Err("AI models sync failed: API key is invalid or has no permission".to_string());
+            return Err(
+                "AI models sync failed: API key is invalid or has no permission".to_string(),
+            );
         }
         return Err(format!(
             "AI models sync failed: service returned HTTP {status_code}; debug=body_preview={}",
@@ -2810,7 +3027,10 @@ fn request_provider_models(provider: &AiProvider) -> Result<Vec<String>, String>
     let data = value
         .get("data")
         .and_then(JsonValue::as_array)
-        .ok_or_else(|| "AI models sync failed: /models response had no data array. Please add models manually.".to_string())?;
+        .ok_or_else(|| {
+            "AI models sync failed: /models response had no data array. Please add models manually."
+                .to_string()
+        })?;
     let mut model_ids = Vec::new();
     for item in data {
         let Some(id) = item.get("id").and_then(JsonValue::as_str).map(str::trim) else {
@@ -3080,7 +3300,11 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         title: if title.is_empty() { url.clone() } else { title },
         url,
         site,
-        snippet: if snippet_text.is_empty() { None } else { Some(snippet_text) },
+        snippet: if snippet_text.is_empty() {
+            None
+        } else {
+            Some(snippet_text)
+        },
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3092,6 +3316,9 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        cache_status: None,
+        cached_at: None,
+        cache_ttl_seconds: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -3133,7 +3360,11 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         title: if title.is_empty() { url.clone() } else { title },
         url,
         site,
-        snippet: if snippet_text.is_empty() { None } else { Some(snippet_text) },
+        snippet: if snippet_text.is_empty() {
+            None
+        } else {
+            Some(snippet_text)
+        },
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3145,6 +3376,9 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        cache_status: None,
+        cached_at: None,
+        cache_ttl_seconds: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -3279,6 +3513,9 @@ fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchRes
         excerpt: None,
         excerpt_error: None,
         fetched_at: None,
+        cache_status: None,
+        cached_at: None,
+        cache_ttl_seconds: None,
         is_constructed: None,
         constructed_reason: None,
         selected: None,
@@ -3418,7 +3655,10 @@ fn search_bocha_sources(
 
         let parsed = serde_json::from_str::<BochaSearchResponse>(body_trimmed)
             .map_err(|_| "联网搜索失败：博查搜索返回格式异常".to_string())?;
-        let items = parsed.web_pages.map(|web_pages| web_pages.value).unwrap_or_default();
+        let items = parsed
+            .web_pages
+            .map(|web_pages| web_pages.value)
+            .unwrap_or_default();
         for item in items {
             if results.len() >= max_results {
                 break;
@@ -3485,7 +3725,9 @@ fn search_bocha_sources_with_fallback(
                     if is_bocha_connectivity_retryable(&error) && index + 1 < endpoints.len() {
                         continue;
                     }
-                    return Err(last_error.unwrap_or_else(|| "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()));
+                    return Err(last_error.unwrap_or_else(|| {
+                        "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()
+                    }));
                 }
             };
 
@@ -3564,7 +3806,9 @@ fn search_searxng_sources(
             let mut url = match reqwest::Url::parse(endpoint) {
                 Ok(url) => url,
                 Err(_) => {
-                    last_error = Some("公开搜索实例地址无效，请在 AI 设置中检查 SearXNG 实例地址".to_string());
+                    last_error = Some(
+                        "公开搜索实例地址无效，请在 AI 设置中检查 SearXNG 实例地址".to_string(),
+                    );
                     continue;
                 }
             };
@@ -3580,7 +3824,10 @@ fn search_searxng_sources(
 
             let response = client
                 .get(url)
-                .header(reqwest::header::ACCEPT, "application/json,text/html;q=0.9,*/*;q=0.8")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "application/json,text/html;q=0.9,*/*;q=0.8",
+                )
                 .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
                 .send();
 
@@ -3609,7 +3856,9 @@ fn search_searxng_sources(
             let parsed = match serde_json::from_str::<SearxngSearchResponse>(body_trimmed) {
                 Ok(parsed) => parsed,
                 Err(_) => {
-                    last_error = Some("公开搜索实例不支持 JSON 结果，可在 AI 设置中更换 SearXNG 实例".to_string());
+                    last_error = Some(
+                        "公开搜索实例不支持 JSON 结果，可在 AI 设置中更换 SearXNG 实例".to_string(),
+                    );
                     continue;
                 }
             };
@@ -3664,8 +3913,8 @@ fn is_private_or_local_ip(ip: IpAddr) -> bool {
 }
 
 fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
-    let parsed = reqwest::Url::parse(url.trim())
-        .map_err(|_| "网页地址无效，无法读取正文".to_string())?;
+    let parsed =
+        reqwest::Url::parse(url.trim()).map_err(|_| "网页地址无效，无法读取正文".to_string())?;
     match parsed.scheme() {
         "http" | "https" => {}
         _ => return Err("只允许读取公开 http / https 网页".to_string()),
@@ -3765,8 +4014,21 @@ fn strip_html_tags_to_text(html: &str) -> String {
                     .to_ascii_lowercase();
                 if matches!(
                     name.as_str(),
-                    "p" | "br" | "div" | "section" | "article" | "li" | "ul" | "ol" | "pre"
-                        | "code" | "h1" | "h2" | "h3" | "h4" | "h5" | "tr"
+                    "p" | "br"
+                        | "div"
+                        | "section"
+                        | "article"
+                        | "li"
+                        | "ul"
+                        | "ol"
+                        | "pre"
+                        | "code"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "tr"
                 ) {
                     text.push('\n');
                 }
@@ -3790,7 +4052,8 @@ fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
-        if lower.contains("广告") || lower.contains("copyright") || lower.contains("版权所有") {
+        if lower.contains("广告") || lower.contains("copyright") || lower.contains("版权所有")
+        {
             continue;
         }
         lines.push(trimmed.to_string());
@@ -3823,9 +4086,30 @@ fn fetch_single_web_source_excerpt(
                 excerpt: None,
                 error: Some(error),
                 fetched_at,
+                cache_status: Some("miss".to_string()),
+                cached_at: None,
+                cache_ttl_seconds: None,
             };
         }
     };
+    let cache_key = build_web_excerpt_cache_key(&url, max_chars);
+    let cached = web_cache::read_cached_json("excerpts", &cache_key, web_cache::now_ms());
+    if let Some(cached_entry) = cached.as_ref().filter(|entry| entry.is_fresh) {
+        if let Ok(mut result) =
+            serde_json::from_value::<WebSourceExcerptResult>(cached_entry.value.clone())
+        {
+            result.id = id;
+            result.url = url;
+            result.title = title;
+            mark_excerpt_cache_status(
+                &mut result,
+                "hit",
+                cached_entry.cached_at_ms,
+                cached_entry.ttl_seconds,
+            );
+            return result;
+        }
+    }
 
     let mut response = match client
         .get(parsed_url)
@@ -3842,7 +4126,7 @@ fn fetch_single_web_source_excerpt(
             } else {
                 "读取网页正文失败".to_string()
             };
-            return WebSourceExcerptResult {
+            let result = WebSourceExcerptResult {
                 id,
                 url,
                 title,
@@ -3850,13 +4134,17 @@ fn fetch_single_web_source_excerpt(
                 excerpt: None,
                 error: Some(message),
                 fetched_at,
+                cache_status: Some("miss".to_string()),
+                cached_at: None,
+                cache_ttl_seconds: None,
             };
+            return finish_web_excerpt_result(result, &cache_key, cached);
         }
     };
 
     let status = response.status();
     if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::UNAUTHORIZED {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3864,10 +4152,14 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("网页正文不可用或需要登录".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
     if status == reqwest::StatusCode::NOT_FOUND {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3875,10 +4167,14 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("网页不存在或地址不可用".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
     if !status.is_success() {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3886,7 +4182,11 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("网页暂时不可读取".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
 
     let content_type = response
@@ -3901,7 +4201,7 @@ fn fetch_single_web_source_excerpt(
         || content_type.starts_with("audio/")
         || content_type.contains("application/octet-stream")
     {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3909,14 +4209,18 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("当前来源不是可直接提取的网页正文".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
     if response
         .content_length()
         .map(|length| length > WEB_EXTRACT_MAX_RESPONSE_BYTES as u64)
         .unwrap_or(false)
     {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3924,7 +4228,11 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("网页正文过大，已跳过读取".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
 
     let mut body_bytes = Vec::new();
@@ -3935,7 +4243,7 @@ fn fetch_single_web_source_excerpt(
     let body = match read_result {
         Ok(_) => {
             if body_bytes.len() > WEB_EXTRACT_MAX_RESPONSE_BYTES {
-                return WebSourceExcerptResult {
+                let result = WebSourceExcerptResult {
                     id,
                     url,
                     title,
@@ -3943,12 +4251,16 @@ fn fetch_single_web_source_excerpt(
                     excerpt: None,
                     error: Some("网页正文过大，已跳过读取".to_string()),
                     fetched_at,
+                    cache_status: Some("miss".to_string()),
+                    cached_at: None,
+                    cache_ttl_seconds: None,
                 };
+                return finish_web_excerpt_result(result, &cache_key, cached);
             }
             decode_response_body(&body_bytes)
         }
         Err(_) => {
-            return WebSourceExcerptResult {
+            let result = WebSourceExcerptResult {
                 id,
                 url,
                 title,
@@ -3956,7 +4268,11 @@ fn fetch_single_web_source_excerpt(
                 excerpt: None,
                 error: Some("网页正文读取失败".to_string()),
                 fetched_at,
+                cache_status: Some("miss".to_string()),
+                cached_at: None,
+                cache_ttl_seconds: None,
             };
+            return finish_web_excerpt_result(result, &cache_key, cached);
         }
     };
     let extracted = if content_type.contains("text/plain") {
@@ -3966,7 +4282,7 @@ fn fetch_single_web_source_excerpt(
     };
 
     if extracted.chars().count() < 120 {
-        return WebSourceExcerptResult {
+        let result = WebSourceExcerptResult {
             id,
             url,
             title,
@@ -3974,10 +4290,14 @@ fn fetch_single_web_source_excerpt(
             excerpt: None,
             error: Some("网页正文不可用或需要登录".to_string()),
             fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
         };
+        return finish_web_excerpt_result(result, &cache_key, cached);
     }
 
-    WebSourceExcerptResult {
+    let result = WebSourceExcerptResult {
         id,
         url,
         title,
@@ -3985,7 +4305,75 @@ fn fetch_single_web_source_excerpt(
         excerpt: Some(extracted),
         error: None,
         fetched_at,
+        cache_status: Some("miss".to_string()),
+        cached_at: None,
+        cache_ttl_seconds: None,
+    };
+    finish_web_excerpt_result(result, &cache_key, cached)
+}
+
+fn finish_web_excerpt_result(
+    mut result: WebSourceExcerptResult,
+    cache_key: &str,
+    stale_cache: Option<web_cache::CachedJson>,
+) -> WebSourceExcerptResult {
+    if !result.fetched {
+        if let Some(cached_entry) = stale_cache {
+            if let Ok(mut cached_result) =
+                serde_json::from_value::<WebSourceExcerptResult>(cached_entry.value)
+            {
+                if cached_result.fetched {
+                    cached_result.id = result.id;
+                    cached_result.url = result.url;
+                    cached_result.title = result.title;
+                    mark_excerpt_cache_status(
+                        &mut cached_result,
+                        "stale",
+                        cached_entry.cached_at_ms,
+                        cached_entry.ttl_seconds,
+                    );
+                    return cached_result;
+                }
+            }
+        }
     }
+
+    let ttl_seconds = if result.fetched {
+        excerpt_cache_ttl_seconds(&WebSearchResult {
+            id: result.id.clone(),
+            title: result.title.clone(),
+            url: result.url.clone(),
+            site: site_from_url(&result.url),
+            snippet: None,
+            source_type: None,
+            reliability: None,
+            reliability_label: None,
+            reliability_reason: None,
+            relevance: None,
+            relevance_label: None,
+            relevance_reason: None,
+            excerpt_status: None,
+            excerpt: None,
+            excerpt_error: None,
+            fetched_at: None,
+            cache_status: None,
+            cached_at: None,
+            cache_ttl_seconds: None,
+            is_constructed: None,
+            constructed_reason: None,
+            selected: None,
+        })
+    } else {
+        WEB_EXCERPT_FAILURE_TTL_SECONDS
+    };
+    let _ = web_cache::write_cached_json(
+        "excerpts",
+        cache_key,
+        serde_json::to_value(&result).unwrap_or(JsonValue::Null),
+        ttl_seconds,
+    );
+    mark_excerpt_cache_status(&mut result, "miss", web_cache::now_ms(), ttl_seconds);
+    result
 }
 
 fn fetch_web_source_excerpts_blocking(
@@ -4018,7 +4406,12 @@ fn fetch_web_source_excerpts_blocking(
         .enumerate()
         .map(|(index, source)| {
             let client = client.clone();
-            std::thread::spawn(move || (index, fetch_single_web_source_excerpt(&client, &source, max_chars)))
+            std::thread::spawn(move || {
+                (
+                    index,
+                    fetch_single_web_source_excerpt(&client, &source, max_chars),
+                )
+            })
         })
         .collect::<Vec<_>>();
     let mut results = Vec::new();
@@ -4036,6 +4429,9 @@ fn fetch_web_source_excerpts_blocking(
                         excerpt: None,
                         error: Some("网页摘录任务失败".to_string()),
                         fetched_at: Utc::now().timestamp_millis(),
+                        cache_status: Some("miss".to_string()),
+                        cached_at: None,
+                        cache_ttl_seconds: None,
                     },
                 ));
             }
@@ -4074,7 +4470,9 @@ pub async fn fetch_web_source_excerpts(
         .map_err(|e| format!("网页摘录任务失败: {e}"))?
 }
 
-fn search_web_sources_blocking(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
+fn search_web_sources_blocking(
+    request: WebSearchRequestInput,
+) -> Result<Vec<WebSearchResult>, String> {
     let provider = request
         .provider
         .as_deref()
@@ -4105,37 +4503,65 @@ fn search_web_sources_blocking(request: WebSearchRequestInput) -> Result<Vec<Web
         .max_results
         .unwrap_or(WEB_SEARCH_MAX_RESULTS)
         .clamp(1, WEB_SEARCH_MAX_RESULTS);
-    match provider {
+    let endpoint_hint = match provider {
+        WEB_SEARCH_COMPAT_PROVIDER => Some(search_config.bocha_endpoint.as_str()),
+        WEB_SEARCH_PUBLIC_PROVIDER => Some(search_config.searxng_endpoint.as_str()),
+        WEB_SEARCH_DEFAULT_PROVIDER if search_config.brave_api_key.trim().is_empty() => {
+            Some(search_config.searxng_endpoint.as_str())
+        }
+        _ => None,
+    };
+    let cache_key = build_web_search_cache_key(provider, &request, max_results, endpoint_hint)?;
+    let ttl_seconds = search_cache_ttl_seconds(&request);
+    let now_ms = web_cache::now_ms();
+    let cached = web_cache::read_cached_json("search", &cache_key, now_ms);
+    if let Some(cached_entry) = cached.as_ref().filter(|entry| entry.is_fresh) {
+        if let Ok(mut sources) =
+            serde_json::from_value::<Vec<WebSearchResult>>(cached_entry.value.clone())
+        {
+            mark_search_sources_cache_status(
+                &mut sources,
+                "hit",
+                cached_entry.cached_at_ms,
+                cached_entry.ttl_seconds,
+            );
+            return Ok(sources);
+        }
+    }
+
+    let provider_result = match provider {
         WEB_SEARCH_DEFAULT_PROVIDER => {
             if search_config.brave_api_key.trim().is_empty() {
-                return search_searxng_sources(
+                search_searxng_sources(
                     &request,
                     Some(search_config.searxng_endpoint.as_str()),
                     max_results,
-                );
+                )
+            } else {
+                if search_config.brave_api_key.contains(['\r', '\n']) {
+                    return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
+                }
+                search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
             }
-            if search_config.brave_api_key.contains(['\r', '\n']) {
-                return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
-            }
-            search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
         }
         WEB_SEARCH_COMPAT_PROVIDER => {
             if search_config.bocha_api_key.trim().is_empty() {
-                return search_searxng_sources(
+                search_searxng_sources(
                     &request,
                     Some(search_config.searxng_endpoint.as_str()),
                     max_results,
-                );
+                )
+            } else {
+                if search_config.bocha_api_key.contains(['\r', '\n']) {
+                    return Err("联网搜索失败：博查 API Key 包含非法字符".to_string());
+                }
+                search_bocha_sources_with_fallback(
+                    &request,
+                    search_config.bocha_api_key.trim(),
+                    Some(search_config.bocha_endpoint.as_str()),
+                    max_results,
+                )
             }
-            if search_config.bocha_api_key.contains(['\r', '\n']) {
-                return Err("联网搜索失败：博查 API Key 包含非法字符".to_string());
-            }
-            search_bocha_sources_with_fallback(
-                &request,
-                search_config.bocha_api_key.trim(),
-                Some(search_config.bocha_endpoint.as_str()),
-                max_results,
-            )
         }
         WEB_SEARCH_PUBLIC_PROVIDER => search_searxng_sources(
             &request,
@@ -4143,18 +4569,61 @@ fn search_web_sources_blocking(request: WebSearchRequestInput) -> Result<Vec<Web
             max_results,
         ),
         _ => Err("联网搜索失败：当前 Provider 不受支持".to_string()),
+    };
+
+    match provider_result {
+        Ok(mut sources) => {
+            let _ = web_cache::write_cached_json(
+                "search",
+                &cache_key,
+                serde_json::to_value(&sources).unwrap_or(JsonValue::Null),
+                ttl_seconds,
+            );
+            mark_search_sources_cache_status(
+                &mut sources,
+                "miss",
+                web_cache::now_ms(),
+                ttl_seconds,
+            );
+            Ok(sources)
+        }
+        Err(error) => {
+            if let Some(cached_entry) = cached {
+                if let Ok(mut sources) =
+                    serde_json::from_value::<Vec<WebSearchResult>>(cached_entry.value)
+                {
+                    mark_search_sources_cache_status(
+                        &mut sources,
+                        "stale",
+                        cached_entry.cached_at_ms,
+                        cached_entry.ttl_seconds,
+                    );
+                    return Ok(sources);
+                }
+            }
+            Err(error)
+        }
     }
 }
 
 #[tauri::command]
-pub async fn search_web_sources(request: WebSearchRequestInput) -> Result<Vec<WebSearchResult>, String> {
+pub async fn search_web_sources(
+    request: WebSearchRequestInput,
+) -> Result<Vec<WebSearchResult>, String> {
     tauri::async_runtime::spawn_blocking(move || search_web_sources_blocking(request))
         .await
         .map_err(|e| format!("联网搜索任务失败: {e}"))?
 }
 
 #[tauri::command]
-pub fn test_web_search_connection(input: TestWebSearchConnectionInput) -> Result<TestWebSearchConnectionResult, String> {
+pub fn clear_web_cache() -> Result<(), String> {
+    web_cache::clear_web_cache()
+}
+
+#[tauri::command]
+pub fn test_web_search_connection(
+    input: TestWebSearchConnectionInput,
+) -> Result<TestWebSearchConnectionResult, String> {
     let provider = input.provider.trim();
     match provider {
         WEB_SEARCH_COMPAT_PROVIDER => {
@@ -4176,10 +4645,12 @@ pub fn test_web_search_connection(input: TestWebSearchConnectionInput) -> Result
                 queries: vec!["P1000 洛谷".to_string()],
                 intent: "general_web".to_string(),
                 problem_id: None,
+                algorithm_keywords: Vec::new(),
                 max_results: Some(3),
                 provider: Some(WEB_SEARCH_COMPAT_PROVIDER.to_string()),
             };
-            let _ = search_bocha_sources_with_fallback(&request, api_key, Some(endpoint.as_str()), 3)?;
+            let _ =
+                search_bocha_sources_with_fallback(&request, api_key, Some(endpoint.as_str()), 3)?;
             Ok(TestWebSearchConnectionResult {
                 ok: true,
                 provider: WEB_SEARCH_COMPAT_PROVIDER.to_string(),
@@ -4196,6 +4667,7 @@ pub fn test_web_search_connection(input: TestWebSearchConnectionInput) -> Result
                 queries: vec!["P3379 LCA".to_string()],
                 intent: "general_web".to_string(),
                 problem_id: None,
+                algorithm_keywords: Vec::new(),
                 max_results: Some(3),
                 provider: Some(WEB_SEARCH_PUBLIC_PROVIDER.to_string()),
             };
@@ -4280,9 +4752,16 @@ pub fn delete_ai_provider(provider_id: String) -> Result<AiConfigFields, String>
     }
     let mut app_config = read_config()?;
     app_config.ai = normalize_ai_config(&app_config.ai);
-    app_config.ai.providers.retain(|provider| provider.id != provider_id);
+    app_config
+        .ai
+        .providers
+        .retain(|provider| provider.id != provider_id);
     if app_config.ai.default_provider_id.as_deref() == Some(provider_id) {
-        app_config.ai.default_provider_id = app_config.ai.providers.first().map(|provider| provider.id.clone());
+        app_config.ai.default_provider_id = app_config
+            .ai
+            .providers
+            .first()
+            .map(|provider| provider.id.clone());
         app_config.ai.default_model_id = app_config
             .ai
             .providers
@@ -4302,14 +4781,21 @@ pub fn delete_ai_provider(provider_id: String) -> Result<AiConfigFields, String>
 }
 
 #[tauri::command]
-pub fn set_default_ai_model(provider_id: String, model_id: String) -> Result<AiConfigFields, String> {
+pub fn set_default_ai_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<AiConfigFields, String> {
     let provider_id = provider_id.trim().to_string();
     let model_id = model_id.trim().to_string();
     if provider_id.is_empty() || model_id.is_empty() {
         return Err("AI default model failed: provider id and model id are required".to_string());
     }
     let mut config = update_config_provider(&provider_id, |provider| {
-        if !provider.models.iter().any(|model| model.id == model_id && model.enabled) {
+        if !provider
+            .models
+            .iter()
+            .any(|model| model.id == model_id && model.enabled)
+        {
             return Err("AI default model failed: model does not exist".to_string());
         }
         provider.default_model = Some(model_id.clone());
@@ -4342,7 +4828,11 @@ pub fn sync_ai_provider_models(provider_id: String) -> Result<SyncAiProviderMode
     let mut updated_config = update_config_provider(&provider_id, |provider| {
         let now = now_timestamp_millis();
         for model_id in &synced_models {
-            if let Some(existing) = provider.models.iter_mut().find(|model| model.id == *model_id) {
+            if let Some(existing) = provider
+                .models
+                .iter_mut()
+                .find(|model| model.id == *model_id)
+            {
                 existing.enabled = true;
                 existing.source = "synced".to_string();
                 existing.updated_at = Some(now);
@@ -4377,14 +4867,20 @@ pub fn sync_ai_provider_models(provider_id: String) -> Result<SyncAiProviderMode
 }
 
 #[tauri::command]
-pub fn sync_ai_provider_models_draft(provider: AiProvider) -> Result<SyncAiProviderDraftModelsResult, String> {
+pub fn sync_ai_provider_models_draft(
+    provider: AiProvider,
+) -> Result<SyncAiProviderDraftModelsResult, String> {
     let mut provider = sanitize_ai_provider(&provider)
         .ok_or_else(|| "AI models sync failed: provider id is missing".to_string())?;
     let synced_models = request_provider_models(&provider)?;
     let synced_count = synced_models.len();
     let now = now_timestamp_millis();
     for model_id in &synced_models {
-        if let Some(existing) = provider.models.iter_mut().find(|model| model.id == *model_id) {
+        if let Some(existing) = provider
+            .models
+            .iter_mut()
+            .find(|model| model.id == *model_id)
+        {
             existing.enabled = true;
             existing.source = "synced".to_string();
             existing.updated_at = Some(now);
@@ -4441,7 +4937,10 @@ pub fn test_ai_provider_draft(provider: AiProvider) -> Result<TestAiProviderResu
 }
 
 #[tauri::command]
-pub fn add_ai_provider_model(provider_id: String, model_id: String) -> Result<AiProviderActionResult, String> {
+pub fn add_ai_provider_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<AiProviderActionResult, String> {
     let provider_id = provider_id.trim().to_string();
     let model_id = model_id.trim().to_string();
     if provider_id.is_empty() || model_id.is_empty() {
@@ -4449,7 +4948,9 @@ pub fn add_ai_provider_model(provider_id: String, model_id: String) -> Result<Ai
     }
     let config = update_config_provider(&provider_id, |provider| {
         if !provider.models.iter().any(|model| model.id == model_id) {
-            provider.models.push(model_from_id(&model_id, "manual").expect("model id was checked"));
+            provider
+                .models
+                .push(model_from_id(&model_id, "manual").expect("model id was checked"));
         }
         if provider.default_model.is_none() {
             provider.default_model = Some(model_id.clone());
@@ -4466,7 +4967,10 @@ pub fn add_ai_provider_model(provider_id: String, model_id: String) -> Result<Ai
 }
 
 #[tauri::command]
-pub fn delete_ai_provider_model(provider_id: String, model_id: String) -> Result<AiProviderActionResult, String> {
+pub fn delete_ai_provider_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<AiProviderActionResult, String> {
     let provider_id = provider_id.trim().to_string();
     let model_id = model_id.trim().to_string();
     if provider_id.is_empty() || model_id.is_empty() {

@@ -841,6 +841,19 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       fetchedAt: typeof source.fetchedAt === "number" && Number.isFinite(source.fetchedAt)
         ? source.fetchedAt
         : undefined,
+      cacheStatus:
+        source.cacheStatus === "miss" ||
+        source.cacheStatus === "hit" ||
+        source.cacheStatus === "stale" ||
+        source.cacheStatus === "disabled"
+          ? source.cacheStatus
+          : undefined,
+      cachedAt: typeof source.cachedAt === "string" && source.cachedAt.trim()
+        ? source.cachedAt.trim()
+        : undefined,
+      cacheTtlSeconds: typeof source.cacheTtlSeconds === "number" && Number.isFinite(source.cacheTtlSeconds)
+        ? source.cacheTtlSeconds
+        : undefined,
       isConstructed: source.isConstructed === true,
       constructedReason: typeof source.constructedReason === "string" && source.constructedReason.trim()
         ? source.constructedReason.trim()
@@ -1561,6 +1574,8 @@ const getSourceRelevanceLabel = (source: WebSource): string =>
   source.relevanceLabel || (source.relevance === "candidate" ? "相关资料" : "强相关");
 
 const getSourceExcerptStatusLabel = (source: WebSource): string => {
+  if (source.excerptStatus === "fetched" && source.cacheStatus === "hit") return "已读取缓存摘要";
+  if (source.excerptStatus === "fetched" && source.cacheStatus === "stale") return "已读取过期摘要";
   if (source.excerptStatus === "fetched") return "已读取摘要";
   if (source.excerptStatus === "unavailable") return "正文不可用";
   if (source.excerptStatus === "failed") return "读取失败";
@@ -1661,7 +1676,11 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
                   </span>
                   <span
                     className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-200"
-                    title={source.excerptError}
+                    title={[
+                      source.excerptError,
+                      source.cacheStatus === "hit" ? "来自本地联网缓存" : undefined,
+                      source.cacheStatus === "stale" ? "Provider 失败，使用过期本地缓存" : undefined,
+                    ].filter(Boolean).join("；") || undefined}
                   >
                     {getSourceExcerptStatusLabel(source)}
                   </span>
@@ -2400,6 +2419,9 @@ export default function AiSidebar({
           excerpt: result.excerpt,
           excerptError: result.error,
           fetchedAt: result.fetchedAt,
+          cacheStatus: result.cacheStatus,
+          cachedAt: result.cachedAt,
+          cacheTtlSeconds: result.cacheTtlSeconds,
         };
       });
       return { prepared, sources: sourcesWithExcerpts };
@@ -2421,6 +2443,7 @@ export default function AiSidebar({
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
+        algorithmKeywords: decision.algorithmKeywords,
         maxResults: 32,
       });
       if (!isCurrent()) return {};
@@ -2467,6 +2490,7 @@ export default function AiSidebar({
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
+        algorithmKeywords: decision.algorithmKeywords,
         maxResults: 32,
       });
       const prepared = prepareWebSourcesForDecision(sources, decision);

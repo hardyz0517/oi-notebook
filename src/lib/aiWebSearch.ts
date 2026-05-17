@@ -20,6 +20,8 @@ export type WebSourceExcerptStatus =
   | "unavailable"
   | "failed";
 
+export type WebCacheStatus = "miss" | "hit" | "stale" | "disabled";
+
 export type ResearchIntent =
   | "no_search"
   | "oi_problem"
@@ -45,6 +47,9 @@ export type WebSource = {
   excerpt?: string;
   excerptError?: string;
   fetchedAt?: number;
+  cacheStatus?: WebCacheStatus;
+  cachedAt?: string;
+  cacheTtlSeconds?: number;
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
@@ -73,6 +78,7 @@ export type WebSearchRequest = {
   queries: string[];
   intent: ResearchIntent;
   problemId?: string;
+  algorithmKeywords?: string[];
   maxResults?: number;
 };
 
@@ -93,6 +99,9 @@ export type WebSearchResult = {
   excerpt?: string;
   excerptError?: string;
   fetchedAt?: number;
+  cacheStatus?: WebCacheStatus;
+  cachedAt?: string;
+  cacheTtlSeconds?: number;
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
@@ -112,6 +121,9 @@ export type WebSourceExcerptResult = {
   excerpt?: string;
   error?: string;
   fetchedAt: number;
+  cacheStatus?: WebCacheStatus;
+  cachedAt?: string;
+  cacheTtlSeconds?: number;
 };
 
 export type SearchDecision = {

@@ -18,7 +18,7 @@ import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes, testWebSearchConnection } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
 import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
@@ -1348,6 +1348,8 @@ export default function App() {
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
   const [isTestingWebSearchConnection, setIsTestingWebSearchConnection] = useState(false);
   const [webSearchConnectionMessage, setWebSearchConnectionMessage] = useState<string | null>(null);
+  const [isClearingWebCache, setIsClearingWebCache] = useState(false);
+  const [webCacheMessage, setWebCacheMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
@@ -2464,6 +2466,22 @@ export default function App() {
       setWebSearchConnectionMessage(getErrorMessage(e));
     } finally {
       setIsTestingWebSearchConnection(false);
+    }
+  };
+
+  const handleClearWebCache = async () => {
+    setIsClearingWebCache(true);
+    setWebCacheMessage(null);
+    try {
+      await clearWebCache();
+      setWebCacheMessage("联网缓存已清理");
+      toast.success("联网缓存已清理");
+    } catch (e) {
+      const message = getErrorMessage(e);
+      setWebCacheMessage(message);
+      toast.error(message);
+    } finally {
+      setIsClearingWebCache(false);
     }
   };
 
@@ -6451,6 +6469,26 @@ export default function App() {
 
                           <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
                             API Key 和自定义 SearXNG 实例地址随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。公开搜索无需 Key，但公共实例失败时会自动降级。
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
+                            <div className="grid gap-1">
+                              <div className="text-sm font-medium text-foreground">联网缓存</div>
+                              <div className="text-xs leading-5 text-muted-foreground">
+                                保存公开搜索结果和网页摘录，用于减少重复请求；不保存 API Key、用户笔记或聊天全文。
+                              </div>
+                              {webCacheMessage && (
+                                <div className="text-xs leading-5 text-muted-foreground">{webCacheMessage}</div>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleClearWebCache()}
+                              disabled={isClearingWebCache}
+                            >
+                              {isClearingWebCache ? "清理中..." : "清理联网缓存"}
+                            </Button>
                           </div>
                           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
                             <div className="grid gap-1">

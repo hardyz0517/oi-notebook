@@ -685,6 +685,14 @@ export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest): Pr
   }
 }
 
+export async function clearWebCache(): Promise<void> {
+  try {
+    await invoke("clear_web_cache");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function testWebSearchConnection(
   input: TestWebSearchConnectionInput,
 ): Promise<TestWebSearchConnectionResult> {
