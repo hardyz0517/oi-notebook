@@ -1346,30 +1346,56 @@ const getCitationStatusLabel = (citation: WebSourceCitation): string => {
   return "仅搜索摘要";
 };
 
-const getUsedCitationIds = (text: string, citations: WebSourceCitation[]): Set<string> => {
+type CitationDisplayEntry = {
+  citation: WebSourceCitation;
+  displayNumber: number;
+};
+
+const stripMarkdownRegionsForCitationScan = (text: string): string =>
+  text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/~~~[\s\S]*?~~~/g, "")
+    .replace(/`[^`\n]*(?:\n[^`]*)?`/g, "");
+
+const getUsedCitationIdList = (text: string, citations: WebSourceCitation[]): string[] => {
   const validIds = new Set(citations.map((citation) => citation.citationId));
-  const usedIds = new Set<string>();
+  const usedIds: string[] = [];
+  const seenIds = new Set<string>();
   const pattern = /\[\[(S\d{1,2})\]\]/g;
+  const searchableText = stripMarkdownRegionsForCitationScan(text);
   let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
+  while ((match = pattern.exec(searchableText)) !== null) {
     const citationId = match[1];
-    if (validIds.has(citationId)) usedIds.add(citationId);
+    if (validIds.has(citationId) && !seenIds.has(citationId)) {
+      usedIds.push(citationId);
+      seenIds.add(citationId);
+    }
   }
   return usedIds;
 };
 
-const getDisplayedSourceCitations = (text: string, citations: WebSourceCitation[]): WebSourceCitation[] => {
+const getUsedCitationIds = (text: string, citations: WebSourceCitation[]): Set<string> =>
+  new Set(getUsedCitationIdList(text, citations));
+
+const getDisplayedSourceCitations = (text: string, citations: WebSourceCitation[]): DisplayedSourceCitation[] => {
   if (citations.length === 0) return [];
-  const usedIds = getUsedCitationIds(text, citations);
-  const displayed = usedIds.size > 0
-    ? citations.filter((citation) => usedIds.has(citation.citationId))
+  const citationById = new Map(citations.map((citation) => [citation.citationId, citation]));
+  const usedIds = getUsedCitationIdList(text, citations);
+  const displayed = usedIds.length > 0
+    ? usedIds.map((citationId) => citationById.get(citationId)).filter((citation): citation is WebSourceCitation => Boolean(citation))
     : citations;
-  return displayed.sort(
-    (left, right) => Number(left.citationId.slice(1)) - Number(right.citationId.slice(1)),
-  );
+  return displayed.map((citation, index) => ({ ...citation, displayNumber: index + 1 }));
 };
 
-const decorateAiCitationMarkers = (html: string, citations: Map<string, WebSourceCitation>): string => {
+const getCitationDisplayMap = (text: string, citations: WebSourceCitation[]): Map<string, CitationDisplayEntry> =>
+  new Map(
+    getDisplayedSourceCitations(text, citations).map((citation) => [
+      citation.citationId,
+      { citation, displayNumber: citation.displayNumber },
+    ]),
+  );
+
+const decorateAiCitationMarkers = (html: string, citations: Map<string, CitationDisplayEntry>): string => {
   if (citations.size === 0 || !/\[\[S\d{1,2}\]\]/.test(html)) return html;
 
   const template = document.createElement("template");
@@ -1398,25 +1424,26 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, WebSourc
         fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
       }
 
-      const citation = citations.get(citationId);
-      if (!citation) {
+      const displayEntry = citations.get(citationId);
+      if (!displayEntry) {
         fragment.append(document.createTextNode(rawMarker));
       } else {
+        const { citation, displayNumber } = displayEntry;
         const sup = document.createElement("sup");
         sup.className = "not-prose";
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.aiCitationId = citationId;
         button.className = "ml-0.5 inline align-super text-[10px] font-semibold leading-none text-primary/70 opacity-75 transition-opacity hover:text-primary hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-        button.textContent = citationId.slice(1);
+        button.textContent = String(displayNumber);
         button.title = [
-          `来源 ${citationId.slice(1)}：${citation.site ?? citation.reliabilityLabel ?? "来源"}`,
+          `来源 ${displayNumber}：${citation.site ?? citation.reliabilityLabel ?? "来源"}`,
           citation.title,
           citation.site,
           citation.reliabilityLabel,
           getCitationStatusLabel(citation),
         ].filter(Boolean).join(" · ");
-        button.setAttribute("aria-label", `定位来源 ${citationId}`);
+        button.setAttribute("aria-label", `定位来源 ${displayNumber}`);
         sup.append(button);
         fragment.append(sup);
       }
@@ -1446,8 +1473,8 @@ function AiMarkdownMessage({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const normalizedMarkdown = useMemo(() => normalizeAiMathDelimiters(markdown), [markdown]);
   const citationMap = useMemo(
-    () => new Map((citations ?? []).map((citation) => [citation.citationId, citation])),
-    [citations],
+    () => getCitationDisplayMap(markdown, citations ?? []),
+    [citations, markdown],
   );
 
   useEffect(() => {
@@ -1592,6 +1619,10 @@ type WebSourceCitation = {
   excerptStatus?: WebSource["excerptStatus"];
   excerptQuality?: WebSource["excerptQuality"];
   isConstructed?: boolean;
+};
+
+type DisplayedSourceCitation = WebSourceCitation & {
+  displayNumber: number;
 };
 
 const getSearchConfidenceLabel = (confidence: number | undefined): string => {
@@ -1997,7 +2028,7 @@ function AssistantCitationList({
   highlightedCitationId,
   onToggle,
 }: {
-  citations: WebSourceCitation[];
+  citations: DisplayedSourceCitation[];
   messageId: string;
   isExpanded: boolean;
   hasUsedCitations: boolean;
@@ -2022,7 +2053,6 @@ function AssistantCitationList({
       {isExpanded && (
       <div className="mt-1 grid gap-1">
         {citations.map((citation) => {
-          const number = citation.citationId.slice(1);
           const statusLabel = getCitationStatusLabel(citation);
           const meta = Array.from(new Set([citation.site, citation.reliabilityLabel].filter(Boolean)));
           return (
@@ -2041,7 +2071,7 @@ function AssistantCitationList({
               }}
             >
               <span className="mt-px w-4 shrink-0 text-right font-semibold tabular-nums text-foreground/70">
-                {number}.
+                {citation.displayNumber}.
               </span>
               <span className="min-w-0 flex-1">
                 <span className="min-w-0 break-words text-foreground/90">
