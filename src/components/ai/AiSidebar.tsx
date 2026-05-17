@@ -928,6 +928,9 @@ const sanitizeLocalNoteSourcesForStorage = (value: unknown): LocalNoteSearchResu
       lineStart: typeof source.lineStart === "number" && Number.isFinite(source.lineStart) ? Math.max(1, Math.floor(source.lineStart)) : undefined,
       lineEnd: typeof source.lineEnd === "number" && Number.isFinite(source.lineEnd) ? Math.max(1, Math.floor(source.lineEnd)) : undefined,
       isCurrentNote: source.isCurrentNote === true,
+      localCitationId: typeof source.localCitationId === "string" && /^N\d{1,2}$/.test(source.localCitationId.trim())
+        ? source.localCitationId.trim()
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 5) : undefined;
@@ -1395,7 +1398,16 @@ const getCitationStatusLabel = (citation: WebSourceCitation): string => {
 type CitationDisplayEntry = {
   citation: WebSourceCitation;
   displayNumber: number;
+  kind: "web";
 };
+
+type LocalNoteCitationDisplayEntry = {
+  source: LocalNoteSearchResult;
+  displayNumber: number;
+  kind: "local";
+};
+
+type AiCitationDisplayEntry = CitationDisplayEntry | LocalNoteCitationDisplayEntry;
 
 const stripMarkdownRegionsForCitationScan = (text: string): string =>
   text
@@ -1403,20 +1415,62 @@ const stripMarkdownRegionsForCitationScan = (text: string): string =>
     .replace(/~~~[\s\S]*?~~~/g, "")
     .replace(/`[^`\n]*(?:\n[^`]*)?`/g, "");
 
-const citationMarkerPattern = /\[\[(S\d{1,2})\]\]|\[(S\d{1,2})\](?!\(|\[)/g;
+type CitationMarkerMatch = {
+  index: number;
+  rawMarker: string;
+  citationId: string;
+};
 
-const getCitationIdFromMarkerMatch = (match: RegExpExecArray): string => match[1] || match[2];
+const possibleCitationMarkerPattern = /\[\[?[SN]\d{1,2}\]\]?/;
 
-const getUsedCitationIdList = (text: string, citations: WebSourceCitation[]): string[] => {
-  const validIds = new Set(citations.map((citation) => citation.citationId));
+const findCitationMarkerMatches = (text: string): CitationMarkerMatch[] => {
+  const matches: CitationMarkerMatch[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    if (text.startsWith("[[", index)) {
+      const doubleBracketMatch = /^\[\[([SN]\d{1,2})\]\]/.exec(text.slice(index));
+      if (doubleBracketMatch) {
+        matches.push({
+          index,
+          rawMarker: doubleBracketMatch[0],
+          citationId: doubleBracketMatch[1],
+        });
+        index += doubleBracketMatch[0].length;
+        continue;
+      }
+    }
+
+    if (text[index] === "[" && text[index - 1] !== "[") {
+      const singleBracketMatch = /^\[([SN]\d{1,2})\]/.exec(text.slice(index));
+      if (singleBracketMatch) {
+        const nextChar = text[index + singleBracketMatch[0].length];
+        if (nextChar !== "(" && nextChar !== "[" && nextChar !== "]") {
+          matches.push({
+            index,
+            rawMarker: singleBracketMatch[0],
+            citationId: singleBracketMatch[1],
+          });
+          index += singleBracketMatch[0].length;
+          continue;
+        }
+      }
+    }
+
+    index += 1;
+  }
+
+  return matches;
+};
+
+const getUsedCitationIdList = (text: string, validIds: Iterable<string>): string[] => {
+  const validIdSet = new Set(validIds);
   const usedIds: string[] = [];
   const seenIds = new Set<string>();
-  const pattern = new RegExp(citationMarkerPattern);
   const searchableText = stripMarkdownRegionsForCitationScan(text);
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(searchableText)) !== null) {
-    const citationId = getCitationIdFromMarkerMatch(match);
-    if (validIds.has(citationId) && !seenIds.has(citationId)) {
+  for (const match of findCitationMarkerMatches(searchableText)) {
+    const citationId = match.citationId;
+    if (validIdSet.has(citationId) && !seenIds.has(citationId)) {
       usedIds.push(citationId);
       seenIds.add(citationId);
     }
@@ -1424,13 +1478,16 @@ const getUsedCitationIdList = (text: string, citations: WebSourceCitation[]): st
   return usedIds;
 };
 
+const getUsedSourceCitationIdList = (text: string, citations: WebSourceCitation[]): string[] =>
+  getUsedCitationIdList(text, citations.map((citation) => citation.citationId));
+
 const getUsedCitationIds = (text: string, citations: WebSourceCitation[]): Set<string> =>
-  new Set(getUsedCitationIdList(text, citations));
+  new Set(getUsedSourceCitationIdList(text, citations));
 
 const getDisplayedSourceCitations = (text: string, citations: WebSourceCitation[]): DisplayedSourceCitation[] => {
   if (citations.length === 0) return [];
   const citationById = new Map(citations.map((citation) => [citation.citationId, citation]));
-  const usedIds = getUsedCitationIdList(text, citations);
+  const usedIds = getUsedSourceCitationIdList(text, citations);
   const displayed = usedIds.length > 0
     ? usedIds.map((citationId) => citationById.get(citationId)).filter((citation): citation is WebSourceCitation => Boolean(citation))
     : citations;
@@ -1441,12 +1498,37 @@ const getCitationDisplayMap = (text: string, citations: WebSourceCitation[]): Ma
   new Map(
     getDisplayedSourceCitations(text, citations).map((citation) => [
       citation.citationId,
-      { citation, displayNumber: citation.displayNumber },
+      { citation, displayNumber: citation.displayNumber, kind: "web" },
     ]),
   );
 
-const decorateAiCitationMarkers = (html: string, citations: Map<string, CitationDisplayEntry>): string => {
-  if (citations.size === 0 || !/\[\[S\d{1,2}\]\]|\[S\d{1,2}\]/.test(html)) return html;
+const getLocalNoteCitationId = (source: LocalNoteSearchResult): string | undefined =>
+  typeof source.localCitationId === "string" && /^N\d{1,2}$/.test(source.localCitationId.trim())
+    ? source.localCitationId.trim()
+    : undefined;
+
+const getLocalNoteCitationDisplayMap = (sources: LocalNoteSearchResult[] | undefined): Map<string, LocalNoteCitationDisplayEntry> =>
+  new Map(
+    (sources ?? []).slice(0, 5).flatMap((source, index) => {
+      const localCitationId = getLocalNoteCitationId(source);
+      return localCitationId
+        ? [[localCitationId, { source, displayNumber: index + 1, kind: "local" as const }]]
+        : [];
+    }),
+  );
+
+const getAiCitationDisplayMap = (
+  text: string,
+  citations: WebSourceCitation[],
+  localNoteSources?: LocalNoteSearchResult[],
+): Map<string, AiCitationDisplayEntry> =>
+  new Map<string, AiCitationDisplayEntry>([
+    ...getCitationDisplayMap(text, citations).entries(),
+    ...getLocalNoteCitationDisplayMap(localNoteSources).entries(),
+  ]);
+
+const decorateAiCitationMarkers = (html: string, citations: Map<string, AiCitationDisplayEntry>): string => {
+  if (citations.size === 0 || !possibleCitationMarkerPattern.test(html)) return html;
 
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1458,43 +1540,55 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, Citation
     if (!(node instanceof Text)) continue;
     const parent = node.parentElement;
     if (!parent || parent.closest("pre, code, kbd, samp, button, a")) continue;
-    if (/\[\[S\d{1,2}\]\]|\[S\d{1,2}\]/.test(node.data)) textNodes.push(node);
+    if (possibleCitationMarkerPattern.test(node.data)) textNodes.push(node);
   }
 
   for (const node of textNodes) {
     const fragment = document.createDocumentFragment();
     const text = node.data;
-    const pattern = new RegExp(citationMarkerPattern);
     let lastIndex = 0;
-    let match: RegExpExecArray | null;
 
-    while ((match = pattern.exec(text)) !== null) {
-      const [rawMarker] = match;
+    for (const match of findCitationMarkerMatches(text)) {
+      const { rawMarker } = match;
       if (match.index > lastIndex) {
         fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
       }
 
-      const normalizedCitationId = getCitationIdFromMarkerMatch(match);
+      const normalizedCitationId = match.citationId;
       const displayEntry = citations.get(normalizedCitationId);
       if (!displayEntry) {
         fragment.append(document.createTextNode(rawMarker));
       } else {
-        const { citation, displayNumber } = displayEntry;
+        const { displayNumber } = displayEntry;
         const sup = document.createElement("sup");
         sup.className = "not-prose";
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.aiCitationId = normalizedCitationId;
-        button.className = "ml-0.5 inline align-super text-[10px] font-semibold leading-none text-primary/70 opacity-75 transition-opacity hover:text-primary hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-        button.textContent = String(displayNumber);
-        button.title = [
-          `来源 ${displayNumber}：${citation.site ?? citation.reliabilityLabel ?? "来源"}`,
-          citation.title,
-          citation.site,
-          citation.reliabilityLabel,
-          getCitationStatusLabel(citation),
-        ].filter(Boolean).join(" · ");
-        button.setAttribute("aria-label", `定位来源 ${displayNumber}`);
+        if (displayEntry.kind === "local") {
+          button.dataset.aiCitationKind = "local";
+          button.className = "ml-1 inline align-super text-[9px] font-semibold leading-none text-amber-700/80 opacity-80 transition-opacity hover:text-amber-700 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:text-amber-300/80 dark:hover:text-amber-200";
+          button.textContent = `N${displayNumber}`;
+          button.title = [
+            `本地笔记 ${displayNumber}：${displayEntry.source.title}`,
+            displayEntry.source.relativePath,
+            displayEntry.source.reason,
+          ].filter(Boolean).join(" · ");
+          button.setAttribute("aria-label", `定位本地笔记 ${displayNumber}`);
+        } else {
+          const { citation } = displayEntry;
+          button.dataset.aiCitationKind = "web";
+          button.className = "ml-0.5 inline align-super text-[10px] font-semibold leading-none text-primary/70 opacity-75 transition-opacity hover:text-primary hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+          button.textContent = String(displayNumber);
+          button.title = [
+            `来源 ${displayNumber}：${citation.site ?? citation.reliabilityLabel ?? "来源"}`,
+            citation.title,
+            citation.site,
+            citation.reliabilityLabel,
+            getCitationStatusLabel(citation),
+          ].filter(Boolean).join(" · ");
+          button.setAttribute("aria-label", `定位来源 ${displayNumber}`);
+        }
         sup.append(button);
         fragment.append(sup);
       }
@@ -1514,18 +1608,20 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, Citation
 function AiMarkdownMessage({
   markdown,
   citations,
+  localNoteSources,
   onCitationClick,
 }: {
   markdown: string;
   citations?: WebSourceCitation[];
+  localNoteSources?: LocalNoteSearchResult[];
   onCitationClick?: (citationId: string) => void;
 }) {
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const normalizedMarkdown = useMemo(() => normalizeAiMathDelimiters(markdown), [markdown]);
   const citationMap = useMemo(
-    () => getCitationDisplayMap(markdown, citations ?? []),
-    [citations, markdown],
+    () => getAiCitationDisplayMap(markdown, citations ?? [], localNoteSources),
+    [citations, localNoteSources, markdown],
   );
 
   useEffect(() => {
@@ -1559,7 +1655,7 @@ function AiMarkdownMessage({
       const citationButton = target.closest<HTMLButtonElement>("button[data-ai-citation-id]");
       if (citationButton && root.contains(citationButton)) {
         const citationId = citationButton.dataset.aiCitationId;
-        if (isValidCitationId(citationId)) {
+        if (isValidCitationId(citationId) || isValidLocalCitationId(citationId)) {
           event.preventDefault();
           onCitationClick?.(citationId);
         }
@@ -1820,6 +1916,9 @@ const getSourceRelevanceLabel = (source: WebSource): string =>
 const isValidCitationId = (citationId: string | undefined): citationId is string =>
   typeof citationId === "string" && /^S\d{1,2}$/.test(citationId);
 
+const isValidLocalCitationId = (citationId: string | undefined): citationId is string =>
+  typeof citationId === "string" && /^N\d{1,2}$/.test(citationId);
+
 const getPromptCitationCandidates = (sources: WebSource[]): WebSource[] => {
   const selectedSources = sources.filter((source) => source.selected === true && source.relevance !== "unrelated");
   const candidates = selectedSources.length > 0
@@ -1839,6 +1938,12 @@ const assignWebSourceCitationIds = (sources: WebSource[] | undefined): WebSource
     return { ...source, citationId: `S${citationIndex}` };
   });
 };
+
+const assignLocalNoteCitationIds = (sources: LocalNoteSearchResult[] | undefined): LocalNoteSearchResult[] | undefined =>
+  sources?.slice(0, 5).map((source, index) => ({
+    ...source,
+    localCitationId: `N${index + 1}`,
+  }));
 
 const getSourceCitations = (sources: WebSource[] | undefined): WebSourceCitation[] =>
   (sources ?? [])
@@ -1963,12 +2068,14 @@ function LocalNoteSourcesCard({
   sources,
   messageId,
   isExpanded,
+  highlightedLocalCitationId,
   onToggle,
   onOpenLocalNote,
 }: {
   sources?: LocalNoteSearchResult[];
   messageId: string;
   isExpanded: boolean;
+  highlightedLocalCitationId?: string | null;
   onToggle: () => void;
   onOpenLocalNote?: (relativePath: string, lineStart?: number | null) => boolean | Promise<boolean>;
 }) {
@@ -1986,6 +2093,7 @@ function LocalNoteSourcesCard({
       {isExpanded && (
         <div className="mt-1.5 grid gap-1.5">
           {visibleSources.map((source, index) => {
+            const localCitationId = getLocalNoteCitationId(source);
             const lineLabel = source.lineStart
               ? source.lineEnd && source.lineEnd !== source.lineStart
                 ? `L${source.lineStart}-${source.lineEnd}`
@@ -2000,7 +2108,11 @@ function LocalNoteSourcesCard({
                 type="button"
                 data-local-note-message-id={messageId}
                 data-local-note-id={source.id}
-                className="grid gap-0.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+                data-local-note-citation-id={localCitationId}
+                className={cn(
+                  "grid gap-0.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]",
+                  highlightedLocalCitationId && localCitationId === highlightedLocalCitationId && "border-primary/60 bg-primary/10 ring-1 ring-primary/25 dark:bg-primary/15",
+                )}
                 onClick={openSource}
                 disabled={!onOpenLocalNote}
                 title={onOpenLocalNote ? `打开本地笔记：${source.relativePath}` : source.relativePath}
@@ -2622,6 +2734,7 @@ export default function AiSidebar({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const [highlightedCitationId, setHighlightedCitationId] = useState<string | null>(null);
+  const [highlightedLocalCitationId, setHighlightedLocalCitationId] = useState<string | null>(null);
   const [expandedCitationMessageIds, setExpandedCitationMessageIds] = useState<Record<string, boolean>>({});
   const [expandedLocalNoteMessageIds, setExpandedLocalNoteMessageIds] = useState<Record<string, boolean>>({});
   const [messageCopyFeedback, setMessageCopyFeedback] = useState<{
@@ -2636,6 +2749,7 @@ export default function AiSidebar({
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
   const messageCopyFeedbackTimerRef = useRef<number | null>(null);
   const citationHighlightTimerRef = useRef<number | null>(null);
+  const localCitationHighlightTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2833,6 +2947,9 @@ export default function AiSidebar({
     if (citationHighlightTimerRef.current !== null) {
       window.clearTimeout(citationHighlightTimerRef.current);
     }
+    if (localCitationHighlightTimerRef.current !== null) {
+      window.clearTimeout(localCitationHighlightTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -2905,6 +3022,32 @@ export default function AiSidebar({
       citationHighlightTimerRef.current = window.setTimeout(() => {
         setHighlightedCitationId((current) => (current === highlightKey ? null : current));
         citationHighlightTimerRef.current = null;
+      }, 1800);
+    }, 0);
+  }, []);
+
+  const handleLocalNoteCitationClick = useCallback((messageId: string, citationId: string) => {
+    const container = messagesScrollRef.current;
+    if (!container || !isValidLocalCitationId(citationId)) return;
+
+    setExpandedLocalNoteMessageIds((current) => ({ ...current, [messageId]: true }));
+    window.setTimeout(() => {
+      const latestContainer = messagesScrollRef.current;
+      if (!latestContainer) return;
+      const target = latestContainer.querySelector<HTMLElement>(
+        `[data-local-note-message-id="${messageId}"][data-local-note-citation-id="${citationId}"]`,
+      );
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      const highlightKey = `${messageId}:${citationId}`;
+      setHighlightedLocalCitationId(highlightKey);
+      if (localCitationHighlightTimerRef.current !== null) {
+        window.clearTimeout(localCitationHighlightTimerRef.current);
+      }
+      localCitationHighlightTimerRef.current = window.setTimeout(() => {
+        setHighlightedLocalCitationId((current) => (current === highlightKey ? null : current));
+        localCitationHighlightTimerRef.current = null;
       }, 1800);
     }, 0);
   }, []);
@@ -3081,7 +3224,8 @@ export default function AiSidebar({
         maxCharsPerResult: 1000,
       });
       options.onStatus?.("done");
-      return results.length > 0 ? { localNoteSources: results } : {};
+      const sourcesWithCitations = assignLocalNoteCitationIds(results);
+      return sourcesWithCitations && sourcesWithCitations.length > 0 ? { localNoteSources: sourcesWithCitations } : {};
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("Local note search failed", {
@@ -5469,6 +5613,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 const activeHighlightedCitationId = highlightedCitationId?.startsWith(`${message.id}:`)
                   ? highlightedCitationId.slice(message.id.length + 1)
                   : null;
+                const activeHighlightedLocalCitationId = highlightedLocalCitationId?.startsWith(`${message.id}:`)
+                  ? highlightedLocalCitationId.slice(message.id.length + 1)
+                  : null;
                 return (
                   <div key={message.id} className="mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
                     {timingLabel && (
@@ -5531,7 +5678,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           <AiMarkdownMessage
                             markdown={message.text || (message.state === "streaming" ? "Generating..." : "")}
                             citations={sourceCitations}
-                            onCitationClick={(citationId) => handleSourceCitationClick(message.id, citationId)}
+                            localNoteSources={message.localNoteSources}
+                            onCitationClick={(citationId) => {
+                              if (isValidLocalCitationId(citationId)) {
+                                handleLocalNoteCitationClick(message.id, citationId);
+                                return;
+                              }
+                              handleSourceCitationClick(message.id, citationId);
+                            }}
                           />
                           <AssistantCitationList
                             citations={displayedSourceCitations}
@@ -5545,6 +5699,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             sources={message.localNoteSources}
                             messageId={message.id}
                             isExpanded={isLocalNoteListExpanded}
+                            highlightedLocalCitationId={activeHighlightedLocalCitationId}
                             onToggle={() => toggleLocalNoteList(message.id)}
                             onOpenLocalNote={onOpenLocalNote}
                           />

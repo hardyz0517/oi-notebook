@@ -1590,6 +1590,7 @@ fn truncate_web_excerpt_text(text: &str) -> String {
 
 fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
     let mut entries = Vec::new();
+    let mut citation_ids = Vec::new();
     let selected_sources = sources
         .iter()
         .filter(|source| source.selected.unwrap_or(false))
@@ -1751,9 +1752,12 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             })
             .map(str::to_string)
             .unwrap_or_else(|| format!("S{}", index + 1));
+        citation_ids.push(citation_id.clone());
 
         entries.push(format!(
-            "[{}]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            citation_id,
+            citation_id,
             citation_id,
             source.id,
             title,
@@ -1787,8 +1791,11 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         return None;
     }
 
+    let citation_id_list = citation_ids.join(", ");
+
     Some(format!(
         "The following context has two layers: web search result summaries, and optional extracted webpage excerpts for sources whose Web excerpt status is fetched. Search result summaries are only titles, sites, URLs, snippets, source types, and reliability labels. Web excerpts are extracted text snippets, not full pages.\n\
+Available web citation IDs: {}. To cite one, output the exact double-bracket marker shown in that source card, such as [[S1]].\n\
 You may use these summaries to answer, but follow these rules strictly:\n\
 - Call them search result summaries or source summaries, not webpages you have read in full.\n\
 - Only sources marked with Web excerpt status: fetched may be described as webpage excerpts. Do not use failed or unavailable sources as webpage content.\n\
@@ -1828,11 +1835,16 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - When a point is directly supported by sources, cite it sparingly with the marker. When a point is general reasoning or OI experience, make that distinction naturally instead of pretending it came from a source.\n\
 - Let reliability guide your tone: official can be more certain, wiki is algorithm reference, community_solution is community solution material, discussion is discussion or experience, blog is a personal blog view, unknown needs extra caution.\n\
 - Use citation markers only to support key conclusions, concrete facts, problem-specific details, or claims directly backed by webpage excerpts. Citations are evidence, not decoration.\n\
+- If the answer uses any concrete facts, summaries, or excerpts from the listed web sources, it must include at least one web citation marker such as [[S1]] at the end of a key supporting sentence. Usually cite 1 to 3 key points. Use no web citation markers only when no concrete web source supports the answer.\n\
 - Each bullet or numbered point should usually have at most one citation marker; each paragraph should usually have 0 to 2 citation markers. Do not cite every sentence.\n\
+- When web sources and local notes are both available, the same sentence should usually have at most one web marker and one local-note marker. If several sources support the same point, cite the strongest one instead of stacking markers such as [[S1]][[S2]][[N1]].\n\
+- Use web markers for webpage facts, recent facts, official pages, or search-result evidence. Use local-note markers only when the point specifically relies on the user's local notes or when saying the user's notes also mention it.\n\
+- If the same point is supported by both web sources and local notes, prefer splitting it into two natural sentences instead of putting several markers at one sentence end.\n\
+- Correct web citation example: \"倍增循环方向写反时，容易跳过应检查的祖先。[[S1]]\" Incorrect examples: \"根据 S1，倍增循环方向写反。\" \"S1 中提到倍增循环方向。\" \"倍增循环方向写反。[S1]\"\n\
 - Do not put citation markers on headings. Do not mechanically cite every list item. If a whole subsection relies on one source, cite only the first key claim or the subsection's final summary sentence.\n\
-- Only use the citation IDs explicitly listed above, such as [[S1]] or [[S2]]. Never invent IDs, never cite sources that are not listed, and never use unrelated or non-injected sources.\n\
-- The only valid citation syntax is the double-bracket token [[S1]] at the end of a sentence. Never write plain single-bracket tokens like [S1], [S2], or [S3].\n\
-- Treat citation IDs as invisible control tokens, not user-facing source names. A citation ID may appear only inside a marker exactly like [[S1]] at the end of a supporting sentence.\n\
+- Only use the web citation IDs explicitly listed above, such as [[S1]] or [[S2]], for claims supported by web sources. Never invent IDs, never cite sources that are not listed, and never use unrelated or non-injected sources.\n\
+- The only valid web citation syntax is the double-bracket token [[S1]] at the end of a sentence. Never write plain single-bracket tokens like [S1], [S2], or [S3].\n\
+- Treat web citation IDs as invisible control tokens, not user-facing source names. A web citation ID may appear only inside a marker exactly like [[S1]] at the end of a supporting sentence.\n\
 - Never expose citation IDs as prose. Do not write phrases such as \"S4\", \"S4 摘要\", \"S4 片段\", \"S4 提到\", \"S4 摘要明确提醒\", \"S4 同样提到\", \"摘自 S4\", \"来自 S4 片段\", \"根据 S4\", \"S4 中提到\", \"S4 says\", \"the S4 excerpt\", or \"mainly from S4\" in the answer body.\n\
 - Also avoid source-report phrases such as \"搜索源 S1\", \"来源 S1\", \"S1、S2、S3\", \"S4 标题\", \"S4 snippet\", \"source S4\", \"from S4\", or any sentence that names an internal ID as if it were visible to the user.\n\
 - Do not explain that a claim \"comes from S4\" or any other numbered source. Write the claim naturally, then add the marker if it needs support, for example: \"位运算和比较运算混用时要加括号，否则可能因优先级导致判断错误。[[S4]]\"\n\
@@ -1843,7 +1855,8 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - If a point is general OI experience rather than directly supported by a listed source, it may omit a citation and should be phrased as experience.\n\
 - Constructed public OI source entries without fetched webpage excerpts may only support \"entry point for further reading\" statements. Do not cite them for concrete page content.\n\
 - If source evidence is insufficient, use fewer citations or none. Do not force citations or invent cited content.\n\
-- You may briefly mention that the source cards above can be opened for confirmation.\n\n{}",
+-- You may briefly mention that the source cards above can be opened for confirmation.\n\n{}",
+        citation_id_list,
         entries.join("\n\n")
     ))
 }
@@ -1861,7 +1874,15 @@ fn truncate_local_note_context_text(text: &str, max_chars: usize) -> String {
 
 fn build_local_note_sources_context(sources: &[LocalNoteSearchResult]) -> Option<String> {
     let mut entries = Vec::new();
+    let mut citation_ids = Vec::new();
     for (index, source) in sources.iter().take(5).enumerate() {
+        let local_citation_id = source
+            .local_citation_id
+            .as_deref()
+            .filter(|id| is_valid_local_note_citation_id(id))
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("N{}", index + 1));
+        citation_ids.push(local_citation_id.clone());
         let title = truncate_local_note_context_text(&source.title, 180);
         let relative_path = truncate_local_note_context_text(&source.relative_path, 220);
         let snippet = truncate_local_note_context_text(&source.snippet, 1200);
@@ -1875,8 +1896,10 @@ fn build_local_note_sources_context(sources: &[LocalNoteSearchResult]) -> Option
             _ => "unknown".to_string(),
         };
         entries.push(format!(
-            "[L{}]\nTitle: {}\nRelative path: {}\nIs current note: {}\nScore: {}\nReason: {}\nLines: {}\nSnippet:\n{}",
-            index + 1,
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nTitle: {}\nRelative path: {}\nIs current note: {}\nScore: {}\nReason: {}\nLines: {}\nSnippet:\n{}",
+            local_citation_id,
+            local_citation_id,
+            local_citation_id,
             title,
             relative_path,
             source.is_current_note,
@@ -1891,17 +1914,38 @@ fn build_local_note_sources_context(sources: &[LocalNoteSearchResult]) -> Option
         return None;
     }
 
+    let citation_id_list = citation_ids.join(", ");
+
     Some(format!(
         "The following context comes from local Markdown notes in the user's OI Notebook. It is private local note context, not web search, not official material, and not a source for web citation markers.\n\
+Available local-note citation IDs: {}. To cite one, output the exact double-bracket marker shown in that note card, such as [[N1]].\n\
 Use it only when relevant to the user's question, and follow these rules:\n\
 - Do not call local notes official sources unless the note text itself clearly quotes an official source.\n\
-- Do not generate web citation markers such as [[S1]] for local notes. Web citation markers are only for web sources listed separately.\n\
+- If a concrete answer point directly uses a local note snippet, you may cite it sparingly with the local note marker [[N1]], [[N2]], etc. Use only the N IDs listed below.\n\
+- If the answer uses any concrete content from these local notes, it must include at least one local-note citation marker such as [[N1]] at the end of a key supporting sentence. Usually cite 1 to 3 key points. Use no local-note citation markers only when the notes did not support the answer.\n\
+- Local note citations must use [[N1]] style markers. Do not use web markers such as [[S1]] for local notes, and do not use local markers for web sources.\n\
+- When web search context is also present, do not pile local and web markers together. A sentence should usually have at most one local note marker and one web marker; if multiple sources support the same point, cite the strongest source or split the idea into separate sentences.\n\
+- Do not output plain [N1] or [S1]. The frontend tolerates single brackets only as a legacy fallback; the answer must use [[N1]] or [[S1]] control tokens.\n\
+- Treat N IDs as invisible control tokens. Never write prose such as \"N1 笔记\", \"根据 N1\", \"N1 中提到\", \"来自 N1\", or plain [N1]. Put [[N1]] only at the end of the supported sentence.\n\
+- Correct local-note citation example: \"你的本地笔记里也强调，点分树查询距离必须使用原树距离。[[N1]]\" Incorrect examples: \"根据 N1，点分树查询距离要用原树距离。\" \"N1 笔记提到原树距离。\" \"点分树查询距离要用原树距离。[N1]\"\n\
 - Do not expose absolute local paths. If you mention a note, use its title or relative path only.\n\
 - Local notes may be incomplete, outdated, or personal draft material. If they conflict with web sources, state the difference cautiously.\n\
 - Do not repeat long note passages. Summarize the useful point and only mention the note when it helps the user understand why.\n\
+- Do not output a reference list for local notes. The frontend will show the local-note list separately.\n\
 - If the current note is also included, avoid duplicating it; use the retrieved snippet as a pointer to the relevant part.\n\n{}",
+        citation_id_list,
         entries.join("\n\n")
     ))
+}
+
+fn is_valid_local_note_citation_id(id: &str) -> bool {
+    let Some(number) = id.strip_prefix('N') else {
+        return false;
+    };
+    !number.is_empty()
+        && number.len() <= 2
+        && number.chars().all(|ch| ch.is_ascii_digit())
+        && number != "0"
 }
 
 fn build_stream_note_chat_messages(

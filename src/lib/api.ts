@@ -266,6 +266,7 @@ export interface LocalNoteSearchResult {
   lineStart?: number;
   lineEnd?: number;
   isCurrentNote?: boolean;
+  localCitationId?: string;
 }
 
 export interface TestWebSearchConnectionInput {

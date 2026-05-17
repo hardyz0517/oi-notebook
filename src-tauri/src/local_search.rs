@@ -53,6 +53,8 @@ pub struct LocalNoteSearchResult {
     pub line_start: Option<usize>,
     pub line_end: Option<usize>,
     pub is_current_note: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_citation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -206,6 +208,7 @@ fn search_local_notes_blocking(
                 line_start,
                 line_end,
                 is_current_note,
+                local_citation_id: None,
             })
         })
         .collect())
