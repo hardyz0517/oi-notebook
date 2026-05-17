@@ -1831,10 +1831,12 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Each bullet or numbered point should usually have at most one citation marker; each paragraph should usually have 0 to 2 citation markers. Do not cite every sentence.\n\
 - Do not put citation markers on headings. Do not mechanically cite every list item. If a whole subsection relies on one source, cite only the first key claim or the subsection's final summary sentence.\n\
 - Only use the citation IDs explicitly listed above, such as [[S1]] or [[S2]]. Never invent IDs, never cite sources that are not listed, and never use unrelated or non-injected sources.\n\
+- The only valid citation syntax is the double-bracket token [[S1]] at the end of a sentence. Never write plain single-bracket tokens like [S1], [S2], or [S3].\n\
 - Treat citation IDs as invisible control tokens, not user-facing source names. A citation ID may appear only inside a marker exactly like [[S1]] at the end of a supporting sentence.\n\
 - Never expose citation IDs as prose. Do not write phrases such as \"S4\", \"S4 摘要\", \"S4 片段\", \"S4 提到\", \"S4 摘要明确提醒\", \"S4 同样提到\", \"摘自 S4\", \"来自 S4 片段\", \"根据 S4\", \"S4 中提到\", \"S4 says\", \"the S4 excerpt\", or \"mainly from S4\" in the answer body.\n\
+- Also avoid source-report phrases such as \"搜索源 S1\", \"来源 S1\", \"S1、S2、S3\", \"S4 标题\", \"S4 snippet\", \"source S4\", \"from S4\", or any sentence that names an internal ID as if it were visible to the user.\n\
 - Do not explain that a claim \"comes from S4\" or any other numbered source. Write the claim naturally, then add the marker if it needs support, for example: \"位运算和比较运算混用时要加括号，否则可能因优先级导致判断错误。[[S4]]\"\n\
-- Do not introduce the answer by saying it is mainly based on a numbered source. If you need to discuss source quality, use natural language such as \"搜索结果主要来自社区题解，可靠性不如官方材料，因此下面更适合作为排查清单。\" Never mention S1, S2, S3, or S4 in that prose.\n\
+- Do not introduce the answer by saying it is based on \"搜索源 S1/S2/S3\" or any numbered source. If you need to describe source scope, use natural language such as \"从当前能读取到的来源看……\" or \"这些来源主要覆盖最近几天的新闻……\" Never mention S1, S2, S3, or S4 in that prose.\n\
 - Prefer paraphrasing source content. Do not quote long source text, and do not wrap claims in source-report phrasing like \"the excerpt says\" unless necessary.\n\
 - Do not output bare URLs or long URLs in the answer body. The frontend source list will show source links.\n\
 - Do not use paper-style citations such as [1], footnote lists, \"来源：...\", APA, MLA, BibTeX, references sections, or copied URL lists. The frontend will generate a compact citation source list automatically.\n\

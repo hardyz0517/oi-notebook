@@ -108,6 +108,8 @@ pub(crate) fn ensure_data_dirs() -> Result<(), String> {
         .map_err(|e| format!("Failed to create .oinb/web-cache/search directory: {e}"))?;
     fs::create_dir_all(oinb_dir.join("web-cache").join("excerpts"))
         .map_err(|e| format!("Failed to create .oinb/web-cache/excerpts directory: {e}"))?;
+    fs::create_dir_all(oinb_dir.join("local-index"))
+        .map_err(|e| format!("Failed to create .oinb/local-index directory: {e}"))?;
 
     Ok(())
 }

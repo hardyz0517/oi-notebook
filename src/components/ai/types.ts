@@ -71,4 +71,5 @@ export interface AiSidebarProps {
   onApplyPolishedFullNote: (input: ApplyPolishedFullNoteInput) => Promise<void>;
   onOpenPolishReview: (preview: AiPolishPreview) => void;
   onPolishReviewChange: (preview: AiPolishPreview) => void;
+  onOpenLocalNote?: (relativePath: string, lineStart?: number | null) => boolean | Promise<boolean>;
 }

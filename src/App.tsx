@@ -3609,6 +3609,23 @@ export default function App() {
     handleSelectFile(path, { closeSearchOnSuccess: true });
   };
 
+  const handleOpenLocalNoteFromAi = (relativePath: string, lineStart?: number | null): boolean => {
+    const normalizedPath = relativePath.trim().replace(/\\/g, "/");
+    if (!normalizedPath || normalizedPath.startsWith("/") || normalizedPath.split("/").includes("..")) {
+      toast.error("本地笔记路径无效");
+      return false;
+    }
+    if (!files.some((file) => file.path === normalizedPath)) {
+      toast.warning("这条本地笔记可能已被移动或删除");
+      return false;
+    }
+    const opened = handleSelectFile(normalizedPath);
+    if (opened) {
+      toast.success(lineStart ? `已打开笔记，相关片段约在 L${lineStart}` : "已打开笔记");
+    }
+    return opened;
+  };
+
   const showSavedToast = (message: string, warning: string | null) => {
     if (warning) {
       toast.warning(`${message}（${warning}）`);
@@ -7446,6 +7463,7 @@ export default function App() {
           onApplyPolishedFullNote={handleApplyPolishedFullNote}
           onOpenPolishReview={handleOpenPolishReview}
           onPolishReviewChange={handlePolishReviewChange}
+          onOpenLocalNote={handleOpenLocalNoteFromAi}
         />
         </div>
       </div>

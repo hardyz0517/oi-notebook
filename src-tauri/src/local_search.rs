@@ -1,7 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -9,14 +10,17 @@ use walkdir::WalkDir;
 
 use crate::paths;
 
+const INDEX_VERSION: u32 = 2;
 const DEFAULT_MAX_RESULTS: usize = 5;
 const MAX_RESULTS_LIMIT: usize = 8;
 const DEFAULT_MAX_CHARS_PER_RESULT: usize = 900;
 const MAX_CHARS_PER_RESULT_LIMIT: usize = 1200;
 const MAX_NOTE_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_SCANNED_FILES: usize = 1500;
-const MIN_RESULT_SCORE: i64 = 14;
+const MIN_RESULT_SCORE: i64 = 22;
 const MAX_CODE_CHARS_PER_BLOCK: usize = 500;
+const MAX_INDEX_CHUNKS_PER_NOTE: usize = 80;
+const MAX_INDEX_CHUNK_CHARS: usize = 2400;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,21 +63,57 @@ struct NoteFrontmatter {
 }
 
 #[derive(Debug, Clone)]
-struct NoteCandidate {
-    relative_path: String,
-    title: String,
-    body: String,
-    frontmatter_text: String,
-    tags: Vec<String>,
-    summary: String,
-    is_current_note: bool,
+struct SearchTerms {
+    terms: Vec<String>,
+    specific_terms: HashSet<String>,
+    general_news_query: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ScoredNote {
-    note: NoteCandidate,
+    note: IndexedNote,
     score: i64,
     reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NoteFileMeta {
+    path: PathBuf,
+    relative_path: String,
+    modified_secs: u64,
+    size: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalNoteIndex {
+    version: u32,
+    updated_at: u64,
+    notes: Vec<IndexedNote>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IndexedNote {
+    relative_path: String,
+    modified_secs: u64,
+    size: u64,
+    title: String,
+    tags: Vec<String>,
+    summary: String,
+    frontmatter_text: String,
+    headings: Vec<String>,
+    chunks: Vec<IndexedChunk>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IndexedChunk {
+    text: String,
+    normalized_text: String,
+    line_start: usize,
+    line_end: usize,
+    is_code: bool,
 }
 
 #[tauri::command]
@@ -85,7 +125,9 @@ pub async fn search_local_notes(
         .map_err(|e| format!("Local note search task failed: {e}"))?
 }
 
-fn search_local_notes_blocking(input: LocalNoteSearchInput) -> Result<Vec<LocalNoteSearchResult>, String> {
+fn search_local_notes_blocking(
+    input: LocalNoteSearchInput,
+) -> Result<Vec<LocalNoteSearchResult>, String> {
     let query = input.query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -99,8 +141,8 @@ fn search_local_notes_blocking(input: LocalNoteSearchInput) -> Result<Vec<LocalN
         .max_chars_per_result
         .unwrap_or(DEFAULT_MAX_CHARS_PER_RESULT)
         .clamp(300, MAX_CHARS_PER_RESULT_LIMIT);
-    let terms = build_search_terms(&input);
-    if terms.is_empty() {
+    let search_terms = build_search_terms(&input);
+    if search_terms.terms.is_empty() || search_terms.general_news_query {
         return Ok(Vec::new());
     }
 
@@ -114,69 +156,25 @@ fn search_local_notes_blocking(input: LocalNoteSearchInput) -> Result<Vec<LocalN
         .as_deref()
         .and_then(normalize_relative_note_path);
 
-    let mut scanned_files = 0usize;
-    let mut scored = Vec::new();
+    let indexed_notes = load_or_update_index(&canonical_notes_dir).unwrap_or_else(|e| {
+        eprintln!("Local note index unavailable, falling back to direct scan: {e}");
+        build_index_from_scan(&canonical_notes_dir).unwrap_or_default()
+    });
 
-    for entry in WalkDir::new(&canonical_notes_dir)
-        .min_depth(1)
-        .follow_links(false)
+    let mut scored = indexed_notes
         .into_iter()
-        .filter_entry(|entry| should_visit_entry(entry.path()))
-    {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        if !path.is_file() || !is_markdown_path(path) {
-            continue;
-        }
-        scanned_files += 1;
-        if scanned_files > MAX_SCANNED_FILES {
-            break;
-        }
-        let Ok(metadata) = fs::metadata(path) else {
-            continue;
-        };
-        if metadata.len() > MAX_NOTE_FILE_BYTES {
-            continue;
-        }
-
-        let relative_path = match relative_note_path(path, &canonical_notes_dir) {
-            Some(value) => value,
-            None => continue,
-        };
-        let Ok(content) = fs::read_to_string(path) else {
-            continue;
-        };
-        let (frontmatter, body, frontmatter_text) = split_frontmatter(&content);
-        let title = if frontmatter.title.trim().is_empty() {
-            fallback_title(&relative_path)
-        } else {
-            frontmatter.title.trim().to_string()
-        };
-        let is_current_note = current_note_path
-            .as_deref()
-            .map(|current| current.eq_ignore_ascii_case(&relative_path))
-            .unwrap_or(false);
-        let note = NoteCandidate {
-            relative_path,
-            title,
-            body,
-            frontmatter_text,
-            tags: frontmatter.tags,
-            summary: frontmatter.summary,
-            is_current_note,
-        };
-        if let Some(scored_note) = score_note(note, &terms) {
-            scored.push(scored_note);
-        }
-    }
+        .filter_map(|note| {
+            let is_current_note = current_note_path
+                .as_deref()
+                .map(|current| current.eq_ignore_ascii_case(&note.relative_path))
+                .unwrap_or(false);
+            score_note(note, is_current_note, &search_terms)
+        })
+        .collect::<Vec<_>>();
 
     scored.sort_by(|a, b| {
         b.score
             .cmp(&a.score)
-            .then_with(|| b.note.is_current_note.cmp(&a.note.is_current_note))
             .then_with(|| a.note.relative_path.cmp(&b.note.relative_path))
     });
 
@@ -184,12 +182,19 @@ fn search_local_notes_blocking(input: LocalNoteSearchInput) -> Result<Vec<LocalN
         .into_iter()
         .take(max_results)
         .filter_map(|scored_note| {
-            let (snippet, line_start, line_end) =
-                build_snippet(&scored_note.note.body, &terms, max_chars_per_result);
+            let (snippet, line_start, line_end) = build_snippet(
+                &scored_note.note.chunks,
+                &search_terms,
+                max_chars_per_result,
+            );
             if snippet.trim().is_empty() {
                 return None;
             }
             let relative_path = scored_note.note.relative_path;
+            let is_current_note = current_note_path
+                .as_deref()
+                .map(|current| current.eq_ignore_ascii_case(&relative_path))
+                .unwrap_or(false);
             Some(LocalNoteSearchResult {
                 id: stable_local_note_id(&relative_path),
                 title: scored_note.note.title,
@@ -200,10 +205,167 @@ fn search_local_notes_blocking(input: LocalNoteSearchInput) -> Result<Vec<LocalN
                 reason: summarize_reasons(&scored_note.reasons),
                 line_start,
                 line_end,
-                is_current_note: scored_note.note.is_current_note,
+                is_current_note,
             })
         })
         .collect())
+}
+
+fn load_or_update_index(notes_dir: &Path) -> Result<Vec<IndexedNote>, String> {
+    let index_path = local_index_path()?;
+    let existing_index = read_index_file(&index_path).unwrap_or_else(|e| {
+        eprintln!("Local note index will be rebuilt: {e}");
+        LocalNoteIndex {
+            version: INDEX_VERSION,
+            updated_at: 0,
+            notes: Vec::new(),
+        }
+    });
+
+    let file_metas = collect_markdown_files(notes_dir)?;
+    let file_meta_by_path = file_metas
+        .into_iter()
+        .map(|meta| (meta.relative_path.clone(), meta))
+        .collect::<HashMap<_, _>>();
+    let mut existing_by_path = existing_index
+        .notes
+        .into_iter()
+        .map(|note| (note.relative_path.clone(), note))
+        .collect::<HashMap<_, _>>();
+    let mut notes = Vec::new();
+
+    for (relative_path, meta) in &file_meta_by_path {
+        if let Some(existing) = existing_by_path.remove(relative_path) {
+            if existing.modified_secs == meta.modified_secs && existing.size == meta.size {
+                notes.push(existing);
+                continue;
+            }
+        }
+        if let Some(indexed) = index_note_file(meta) {
+            notes.push(indexed);
+        }
+    }
+
+    notes.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    let next_index = LocalNoteIndex {
+        version: INDEX_VERSION,
+        updated_at: now_secs(),
+        notes: notes.clone(),
+    };
+    if let Err(e) = write_index_file(&index_path, &next_index) {
+        eprintln!("Failed to write local note index: {e}");
+    }
+    Ok(notes)
+}
+
+fn build_index_from_scan(notes_dir: &Path) -> Result<Vec<IndexedNote>, String> {
+    Ok(collect_markdown_files(notes_dir)?
+        .iter()
+        .filter_map(index_note_file)
+        .collect())
+}
+
+fn local_index_path() -> Result<PathBuf, String> {
+    Ok(paths::oinb_dir()?
+        .join("local-index")
+        .join("notes-index.json"))
+}
+
+fn read_index_file(path: &Path) -> Result<LocalNoteIndex, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read failed: {e}"))?;
+    let index = serde_json::from_slice::<LocalNoteIndex>(&bytes)
+        .map_err(|e| format!("parse failed: {e}"))?;
+    if index.version != INDEX_VERSION {
+        return Err(format!(
+            "version mismatch: found {}, expected {}",
+            index.version, INDEX_VERSION
+        ));
+    }
+    Ok(index)
+}
+
+fn write_index_file(path: &Path, index: &LocalNoteIndex) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create index dir failed: {e}"))?;
+    }
+    let bytes = serde_json::to_vec(index).map_err(|e| format!("serialize failed: {e}"))?;
+    fs::write(path, bytes).map_err(|e| format!("write failed: {e}"))
+}
+
+fn collect_markdown_files(notes_dir: &Path) -> Result<Vec<NoteFileMeta>, String> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(notes_dir)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| should_visit_entry(entry.path()))
+    {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_file() || !is_markdown_path(path) {
+            continue;
+        }
+        if files.len() >= MAX_SCANNED_FILES {
+            break;
+        }
+        let Ok(metadata) = fs::metadata(path) else {
+            continue;
+        };
+        if metadata.len() > MAX_NOTE_FILE_BYTES {
+            continue;
+        }
+        let Some(relative_path) = relative_note_path(path, notes_dir) else {
+            continue;
+        };
+        files.push(NoteFileMeta {
+            path: path.to_path_buf(),
+            relative_path,
+            modified_secs: metadata_modified_secs(&metadata),
+            size: metadata.len(),
+        });
+    }
+    Ok(files)
+}
+
+fn index_note_file(meta: &NoteFileMeta) -> Option<IndexedNote> {
+    let content = fs::read_to_string(&meta.path).ok()?;
+    let (frontmatter, body, frontmatter_text) = split_frontmatter(&content);
+    let title = if frontmatter.title.trim().is_empty() {
+        fallback_title(&meta.relative_path)
+    } else {
+        frontmatter.title.trim().to_string()
+    };
+    let chunks = split_blocks(&body)
+        .into_iter()
+        .take(MAX_INDEX_CHUNKS_PER_NOTE)
+        .map(|block| {
+            let text = truncate_chars(&block.text, MAX_INDEX_CHUNK_CHARS);
+            IndexedChunk {
+                normalized_text: normalize_text_for_search(&text),
+                text,
+                line_start: block.start_line,
+                line_end: block.end_line,
+                is_code: block.is_code,
+            }
+        })
+        .collect::<Vec<_>>();
+    Some(IndexedNote {
+        relative_path: meta.relative_path.clone(),
+        modified_secs: meta.modified_secs,
+        size: meta.size,
+        title,
+        tags: frontmatter.tags,
+        summary: frontmatter.summary,
+        frontmatter_text,
+        headings: extract_headings(&body),
+        chunks,
+    })
 }
 
 fn should_visit_entry(path: &Path) -> bool {
@@ -248,7 +410,11 @@ fn normalize_relative_note_path(value: &str) -> Option<String> {
 fn split_frontmatter(content: &str) -> (NoteFrontmatter, String, String) {
     let normalized = content.strip_prefix('\u{feff}').unwrap_or(content);
     if !normalized.starts_with("---\n") && !normalized.starts_with("---\r\n") {
-        return (NoteFrontmatter::default(), normalized.to_string(), String::new());
+        return (
+            NoteFrontmatter::default(),
+            normalized.to_string(),
+            String::new(),
+        );
     }
 
     let after_marker = if let Some(value) = normalized.strip_prefix("---\r\n") {
@@ -259,7 +425,11 @@ fn split_frontmatter(content: &str) -> (NoteFrontmatter, String, String) {
         normalized
     };
     let Some(end_index) = after_marker.find("\n---") else {
-        return (NoteFrontmatter::default(), normalized.to_string(), String::new());
+        return (
+            NoteFrontmatter::default(),
+            normalized.to_string(),
+            String::new(),
+        );
     };
     let frontmatter_text = &after_marker[..end_index];
     let body_start = end_index + "\n---".len();
@@ -336,7 +506,17 @@ fn fallback_title(relative_path: &str) -> String {
     file_name.replace(['-', '_'], " ")
 }
 
-fn build_search_terms(input: &LocalNoteSearchInput) -> Vec<String> {
+fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
+    let combined = [
+        input.query.as_str(),
+        input.problem_id.as_deref().unwrap_or(""),
+        input.problem_title.as_deref().unwrap_or(""),
+        &input.algorithm_keywords.join(" "),
+    ]
+    .join(" ");
+    let combined_normalized = normalize_text_for_search(&combined);
+    let general_news_query = is_general_news_query(&combined_normalized);
+
     let mut terms = Vec::new();
     push_term(&mut terms, &input.query);
     if let Some(problem_id) = &input.problem_id {
@@ -348,32 +528,44 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> Vec<String> {
     for keyword in &input.algorithm_keywords {
         push_term(&mut terms, keyword);
     }
-
-    let combined = [
-        input.query.as_str(),
-        input.problem_id.as_deref().unwrap_or(""),
-        input.problem_title.as_deref().unwrap_or(""),
-        &input.algorithm_keywords.join(" "),
-    ]
-    .join(" ")
-    .to_lowercase();
+    for token in tokenize_query(&combined_normalized) {
+        push_term(&mut terms, &token);
+    }
+    for group in algorithm_alias_groups() {
+        if group
+            .iter()
+            .any(|alias| combined_normalized.contains(&normalize_term(alias)))
+        {
+            for alias in group.iter().copied() {
+                push_term(&mut terms, alias);
+            }
+        }
+    }
     for keyword in known_algorithm_terms() {
-        if combined.contains(&keyword.to_lowercase()) {
+        if combined_normalized.contains(&normalize_term(keyword)) {
             push_term(&mut terms, keyword);
         }
     }
-    for token in tokenize_query(&combined) {
-        push_term(&mut terms, &token);
-    }
 
     let mut seen = HashSet::new();
-    terms
+    let terms = terms
         .into_iter()
         .map(|term| normalize_term(&term))
         .filter(|term| term.chars().count() >= 2 && !is_low_value_term(term))
         .filter(|term| seen.insert(term.clone()))
-        .take(24)
-        .collect()
+        .take(32)
+        .collect::<Vec<_>>();
+    let specific_terms = terms
+        .iter()
+        .filter(|term| looks_specific(term))
+        .cloned()
+        .collect::<HashSet<_>>();
+
+    SearchTerms {
+        terms,
+        specific_terms,
+        general_news_query,
+    }
 }
 
 fn push_term(terms: &mut Vec<String>, value: &str) {
@@ -384,6 +576,10 @@ fn push_term(terms: &mut Vec<String>, value: &str) {
 }
 
 fn normalize_term(value: &str) -> String {
+    normalize_text_for_search(value).trim().to_string()
+}
+
+fn normalize_text_for_search(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
@@ -423,6 +619,18 @@ fn tokenize_query(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn algorithm_alias_groups() -> &'static [&'static [&'static str]] {
+    &[
+        &["点分树", "动态点分治", "点分治"],
+        &["lca", "最近公共祖先", "倍增"],
+        &["dijkstra", "最短路", "单源最短路"],
+        &["dsu", "并查集"],
+        &["bit", "树状数组"],
+        &["线段树", "segment tree"],
+        &["kmp", "字符串匹配"],
+    ]
+}
+
 fn known_algorithm_terms() -> &'static [&'static str] {
     &[
         "P3379",
@@ -432,6 +640,7 @@ fn known_algorithm_terms() -> &'static [&'static str] {
         "Dijkstra",
         "最短路",
         "点分树",
+        "动态点分治",
         "点分治",
         "并查集",
         "DSU",
@@ -467,51 +676,110 @@ fn is_low_value_term(term: &str) -> bool {
             | "怎么"
             | "我的"
             | "一下"
+            | "结合"
             | "联网"
             | "最近"
+            | "最新"
             | "新闻"
             | "消息"
+            | "资料"
+            | "内容"
+            | "回答"
+            | "常见"
+            | "哪里"
+            | "容易"
+            | "树"
+            | "图"
     )
 }
 
-fn score_note(note: NoteCandidate, terms: &[String]) -> Option<ScoredNote> {
-    let title = note.title.to_lowercase();
-    let path = note.relative_path.to_lowercase();
-    let frontmatter = note.frontmatter_text.to_lowercase();
-    let tags = note.tags.join(" ").to_lowercase();
-    let summary = note.summary.to_lowercase();
-    let body = note.body.to_lowercase();
+fn is_general_news_query(combined: &str) -> bool {
+    let has_news_word = [
+        "最近", "最新", "新闻", "消息", "今天", "这周", "近期", "ai news",
+    ]
+    .iter()
+    .any(|word| combined.contains(&normalize_term(word)));
+    if !has_news_word {
+        return false;
+    }
+    let has_local_oi_signal = known_algorithm_terms()
+        .iter()
+        .any(|term| combined.contains(&normalize_term(term)))
+        || ["信息学", "竞赛", "洛谷", "oi", "acm", "icpc"]
+            .iter()
+            .any(|term| combined.contains(term));
+    !has_local_oi_signal
+}
+
+fn score_note(
+    note: IndexedNote,
+    is_current_note: bool,
+    search_terms: &SearchTerms,
+) -> Option<ScoredNote> {
+    let title = normalize_text_for_search(&note.title);
+    let path = normalize_text_for_search(&note.relative_path);
+    let frontmatter = normalize_text_for_search(&note.frontmatter_text);
+    let tags = normalize_text_for_search(&note.tags.join(" "));
+    let summary = normalize_text_for_search(&note.summary);
+    let headings = normalize_text_for_search(&note.headings.join(" "));
 
     let mut score = 0i64;
     let mut reasons = Vec::new();
-    for term in terms {
-        let term_weight = if looks_specific(term) { 2 } else { 1 };
+    let mut matched_specific = false;
+
+    for term in &search_terms.terms {
+        let term_weight = if search_terms.specific_terms.contains(term) {
+            2
+        } else {
+            1
+        };
         if title.contains(term) {
-            score += 24 * term_weight;
-            reasons.push(format!("title matched {term}"));
-        }
-        if path.contains(term) {
-            score += 18 * term_weight;
-            reasons.push(format!("path matched {term}"));
+            score += 34 * term_weight;
+            reasons.push(format!("标题命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
         }
         if tags.contains(term) {
-            score += 18 * term_weight;
-            reasons.push(format!("tag matched {term}"));
+            score += 30 * term_weight;
+            reasons.push(format!("标签命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
         }
-        if frontmatter.contains(term) || summary.contains(term) {
-            score += 12 * term_weight;
-            reasons.push(format!("metadata matched {term}"));
+        if summary.contains(term) || frontmatter.contains(term) {
+            score += 22 * term_weight;
+            reasons.push(format!("摘要命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
         }
-        let body_matches = body.matches(term).count().min(6) as i64;
+        if headings.contains(term) {
+            score += 20 * term_weight;
+            reasons.push(format!("标题段命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
+        }
+        if path.contains(term) {
+            score += 16 * term_weight;
+            reasons.push(format!("路径命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
+        }
+        let body_matches = note
+            .chunks
+            .iter()
+            .map(|chunk| chunk.normalized_text.matches(term).count())
+            .sum::<usize>()
+            .min(6) as i64;
         if body_matches > 0 {
-            score += body_matches * 5 * term_weight as i64;
-            reasons.push(format!("body matched {term}"));
+            score += body_matches * 4 * term_weight as i64;
+            reasons.push(format!("正文命中 {term}"));
+            matched_specific |= search_terms.specific_terms.contains(term);
         }
     }
-    if note.is_current_note && score > 0 {
-        score += 8;
-        reasons.push("current note boost".to_string());
+
+    if is_current_note && score > 0 {
+        score += 6;
+        reasons.push("当前笔记轻微加权".to_string());
     }
+
+    if !matched_specific && !search_terms.specific_terms.is_empty() {
+        score -= 12;
+    }
+
     if score >= MIN_RESULT_SCORE {
         Some(ScoredNote {
             note,
@@ -526,9 +794,13 @@ fn score_note(note: NoteCandidate, terms: &[String]) -> Option<ScoredNote> {
 fn looks_specific(term: &str) -> bool {
     term.chars().any(|ch| ch.is_ascii_digit())
         || term.chars().count() >= 4
+        || algorithm_alias_groups()
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .any(|known| normalize_term(known) == term)
         || known_algorithm_terms()
             .iter()
-            .any(|known| known.eq_ignore_ascii_case(term))
+            .any(|known| normalize_term(known) == term)
 }
 
 fn summarize_reasons(reasons: &[String]) -> String {
@@ -542,20 +814,23 @@ fn summarize_reasons(reasons: &[String]) -> String {
         .join("; ")
 }
 
-fn build_snippet(body: &str, terms: &[String], max_chars: usize) -> (String, Option<usize>, Option<usize>) {
-    let blocks = split_blocks(body);
-    if blocks.is_empty() {
+fn build_snippet(
+    chunks: &[IndexedChunk],
+    search_terms: &SearchTerms,
+    max_chars: usize,
+) -> (String, Option<usize>, Option<usize>) {
+    if chunks.is_empty() {
         return (String::new(), None, None);
     }
 
-    let mut scored_blocks = blocks
+    let mut scored_chunks = chunks
         .iter()
         .enumerate()
-        .map(|(index, block)| (score_block(block, terms), index, block))
+        .map(|(index, chunk)| (score_chunk(chunk, search_terms), index, chunk))
         .collect::<Vec<_>>();
-    scored_blocks.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored_chunks.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
-    let mut selected_indices = scored_blocks
+    let mut selected_indices = scored_chunks
         .iter()
         .filter(|(score, _, _)| *score > 0)
         .take(3)
@@ -572,14 +847,17 @@ fn build_snippet(body: &str, terms: &[String], max_chars: usize) -> (String, Opt
     let mut line_start = None;
     let mut line_end = None;
     for index in selected_indices {
-        let block = &blocks[index];
-        let prepared = prepare_snippet_block(&block.text, max_chars.saturating_sub(used_chars));
+        let chunk = &chunks[index];
+        let prepared = prepare_snippet_block(&chunk.text, max_chars.saturating_sub(used_chars));
         if prepared.trim().is_empty() {
             continue;
         }
         used_chars += prepared.chars().count();
-        line_start = Some(line_start.map_or(block.start_line, |current: usize| current.min(block.start_line)));
-        line_end = Some(line_end.map_or(block.end_line, |current: usize| current.max(block.end_line)));
+        line_start = Some(line_start.map_or(chunk.line_start, |current: usize| {
+            current.min(chunk.line_start)
+        }));
+        line_end =
+            Some(line_end.map_or(chunk.line_end, |current: usize| current.max(chunk.line_end)));
         parts.push(prepared);
         if used_chars >= max_chars {
             break;
@@ -594,6 +872,7 @@ struct TextBlock {
     text: String,
     start_line: usize,
     end_line: usize,
+    is_code: bool,
 }
 
 fn split_blocks(body: &str) -> Vec<TextBlock> {
@@ -601,22 +880,38 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
     let mut current = Vec::new();
     let mut start_line = 1usize;
     let mut in_code = false;
+    let mut current_is_code = false;
 
     for (line_index, line) in body.lines().enumerate() {
         let line_no = line_index + 1;
         let trimmed = line.trim();
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            if !current.is_empty() {
+            if !current.is_empty() && !in_code {
                 blocks.push(TextBlock {
                     text: current.join("\n"),
                     start_line,
                     end_line: line_no.saturating_sub(1).max(start_line),
+                    is_code: current_is_code,
                 });
                 current.clear();
             }
+            if current.is_empty() {
+                start_line = line_no;
+                current_is_code = true;
+            }
             in_code = !in_code;
-            start_line = line_no;
             current.push(line.to_string());
+            if !in_code {
+                blocks.push(TextBlock {
+                    text: current.join("\n"),
+                    start_line,
+                    end_line: line_no.max(start_line),
+                    is_code: true,
+                });
+                current.clear();
+                current_is_code = false;
+                start_line = line_no + 1;
+            }
             continue;
         }
         if !in_code && trimmed.is_empty() {
@@ -625,14 +920,17 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
                     text: current.join("\n"),
                     start_line,
                     end_line: line_no.saturating_sub(1).max(start_line),
+                    is_code: current_is_code,
                 });
                 current.clear();
+                current_is_code = false;
             }
             start_line = line_no + 1;
             continue;
         }
         if current.is_empty() {
             start_line = line_no;
+            current_is_code = in_code;
         }
         current.push(line.to_string());
     }
@@ -642,32 +940,39 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
             text: current.join("\n"),
             start_line,
             end_line,
+            is_code: current_is_code,
         });
     }
     blocks
 }
 
-fn score_block(block: &TextBlock, terms: &[String]) -> i64 {
-    let text = block.text.to_lowercase();
+fn score_chunk(chunk: &IndexedChunk, search_terms: &SearchTerms) -> i64 {
     let mut score = 0i64;
-    for term in terms {
-        let matches = text.matches(term).count().min(4) as i64;
+    for term in &search_terms.terms {
+        let matches = chunk.normalized_text.matches(term).count().min(4) as i64;
         if matches > 0 {
-            score += matches * if looks_specific(term) { 8 } else { 4 };
+            score += matches
+                * if search_terms.specific_terms.contains(term) {
+                    9
+                } else {
+                    4
+                };
         }
     }
-    if text.contains("wa")
-        || text.contains("tle")
-        || text.contains("re")
-        || text.contains("复杂度")
-        || text.contains("实现")
-        || text.contains("注意")
-        || text.contains("坑")
+    if chunk.normalized_text.contains("wa")
+        || chunk.normalized_text.contains("tle")
+        || chunk.normalized_text.contains("re")
+        || chunk.normalized_text.contains("复杂度")
+        || chunk.normalized_text.contains("实现")
+        || chunk.normalized_text.contains("注意")
+        || chunk.normalized_text.contains("坑")
+        || chunk.normalized_text.contains("初始化")
+        || chunk.normalized_text.contains("边界")
     {
         score += 6;
     }
-    if text.trim_start().starts_with("```") || text.trim_start().starts_with("~~~") {
-        score += 3;
+    if chunk.is_code {
+        score += 2;
     }
     score
 }
@@ -679,6 +984,7 @@ fn prepare_snippet_block(text: &str, remaining_chars: usize) -> String {
     let mut output = String::new();
     let mut in_code = false;
     let mut code_chars = 0usize;
+    let mut code_truncated = false;
     for line in text.lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
@@ -690,7 +996,10 @@ fn prepare_snippet_block(text: &str, remaining_chars: usize) -> String {
         if in_code {
             let line_chars = line.chars().count();
             if code_chars + line_chars > MAX_CODE_CHARS_PER_BLOCK {
-                output.push_str("[code block truncated]\n");
+                if !code_truncated {
+                    output.push_str("[code block truncated]\n");
+                    code_truncated = true;
+                }
                 continue;
             }
             code_chars += line_chars;
@@ -701,11 +1010,38 @@ fn prepare_snippet_block(text: &str, remaining_chars: usize) -> String {
             break;
         }
     }
-    let mut trimmed = output.trim().chars().take(remaining_chars).collect::<String>();
+    let mut trimmed = output
+        .trim()
+        .chars()
+        .take(remaining_chars)
+        .collect::<String>();
     if output.chars().count() > remaining_chars {
         trimmed.push_str("...");
     }
     trimmed
+}
+
+fn extract_headings(body: &str) -> Vec<String> {
+    body.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with('#') {
+                return None;
+            }
+            Some(trimmed.trim_start_matches('#').trim().to_string())
+        })
+        .filter(|heading| !heading.is_empty())
+        .take(24)
+        .collect()
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut truncated = value.chars().take(max_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn stable_local_note_id(relative_path: &str) -> String {
@@ -715,4 +1051,20 @@ fn stable_local_note_id(relative_path: &str) -> String {
         hash = hash.wrapping_mul(1099511628211);
     }
     format!("local-note-{hash:016x}")
+}
+
+fn metadata_modified_secs(metadata: &fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
 }

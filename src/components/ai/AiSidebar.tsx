@@ -1403,15 +1403,19 @@ const stripMarkdownRegionsForCitationScan = (text: string): string =>
     .replace(/~~~[\s\S]*?~~~/g, "")
     .replace(/`[^`\n]*(?:\n[^`]*)?`/g, "");
 
+const citationMarkerPattern = /\[\[(S\d{1,2})\]\]|\[(S\d{1,2})\](?!\(|\[)/g;
+
+const getCitationIdFromMarkerMatch = (match: RegExpExecArray): string => match[1] || match[2];
+
 const getUsedCitationIdList = (text: string, citations: WebSourceCitation[]): string[] => {
   const validIds = new Set(citations.map((citation) => citation.citationId));
   const usedIds: string[] = [];
   const seenIds = new Set<string>();
-  const pattern = /\[\[(S\d{1,2})\]\]/g;
+  const pattern = new RegExp(citationMarkerPattern);
   const searchableText = stripMarkdownRegionsForCitationScan(text);
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(searchableText)) !== null) {
-    const citationId = match[1];
+    const citationId = getCitationIdFromMarkerMatch(match);
     if (validIds.has(citationId) && !seenIds.has(citationId)) {
       usedIds.push(citationId);
       seenIds.add(citationId);
@@ -1442,7 +1446,7 @@ const getCitationDisplayMap = (text: string, citations: WebSourceCitation[]): Ma
   );
 
 const decorateAiCitationMarkers = (html: string, citations: Map<string, CitationDisplayEntry>): string => {
-  if (citations.size === 0 || !/\[\[S\d{1,2}\]\]/.test(html)) return html;
+  if (citations.size === 0 || !/\[\[S\d{1,2}\]\]|\[S\d{1,2}\]/.test(html)) return html;
 
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1454,23 +1458,24 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, Citation
     if (!(node instanceof Text)) continue;
     const parent = node.parentElement;
     if (!parent || parent.closest("pre, code, kbd, samp, button, a")) continue;
-    if (/\[\[S\d{1,2}\]\]/.test(node.data)) textNodes.push(node);
+    if (/\[\[S\d{1,2}\]\]|\[S\d{1,2}\]/.test(node.data)) textNodes.push(node);
   }
 
   for (const node of textNodes) {
     const fragment = document.createDocumentFragment();
     const text = node.data;
-    const pattern = /\[\[(S\d{1,2})\]\]/g;
+    const pattern = new RegExp(citationMarkerPattern);
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
     while ((match = pattern.exec(text)) !== null) {
-      const [rawMarker, citationId] = match;
+      const [rawMarker] = match;
       if (match.index > lastIndex) {
         fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
       }
 
-      const displayEntry = citations.get(citationId);
+      const normalizedCitationId = getCitationIdFromMarkerMatch(match);
+      const displayEntry = citations.get(normalizedCitationId);
       if (!displayEntry) {
         fragment.append(document.createTextNode(rawMarker));
       } else {
@@ -1479,7 +1484,7 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, Citation
         sup.className = "not-prose";
         const button = document.createElement("button");
         button.type = "button";
-        button.dataset.aiCitationId = citationId;
+        button.dataset.aiCitationId = normalizedCitationId;
         button.className = "ml-0.5 inline align-super text-[10px] font-semibold leading-none text-primary/70 opacity-75 transition-opacity hover:text-primary hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
         button.textContent = String(displayNumber);
         button.title = [
@@ -1959,11 +1964,13 @@ function LocalNoteSourcesCard({
   messageId,
   isExpanded,
   onToggle,
+  onOpenLocalNote,
 }: {
   sources?: LocalNoteSearchResult[];
   messageId: string;
   isExpanded: boolean;
   onToggle: () => void;
+  onOpenLocalNote?: (relativePath: string, lineStart?: number | null) => boolean | Promise<boolean>;
 }) {
   const visibleSources = (sources ?? []).slice(0, 5);
   if (visibleSources.length === 0) return null;
@@ -1984,12 +1991,19 @@ function LocalNoteSourcesCard({
                 ? `L${source.lineStart}-${source.lineEnd}`
                 : `L${source.lineStart}`
               : null;
+            const openSource = () => {
+              void onOpenLocalNote?.(source.relativePath, source.lineStart ?? null);
+            };
             return (
-              <div
+              <button
                 key={source.id || source.relativePath}
+                type="button"
                 data-local-note-message-id={messageId}
                 data-local-note-id={source.id}
-                className="grid gap-0.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.03]"
+                className="grid gap-0.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+                onClick={openSource}
+                disabled={!onOpenLocalNote}
+                title={onOpenLocalNote ? `打开本地笔记：${source.relativePath}` : source.relativePath}
               >
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="shrink-0 text-[10px] text-muted-foreground/80">{index + 1}.</span>
@@ -2008,7 +2022,7 @@ function LocalNoteSourcesCard({
                 <div className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-muted-foreground">
                   {source.snippet}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -2569,6 +2583,7 @@ export default function AiSidebar({
   onApplyPolishedFullNote,
   onOpenPolishReview,
   onPolishReviewChange,
+  onOpenLocalNote,
 }: AiSidebarProps) {
   const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
   if (initialConversationStateRef.current === null) {
@@ -5531,6 +5546,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             messageId={message.id}
                             isExpanded={isLocalNoteListExpanded}
                             onToggle={() => toggleLocalNoteList(message.id)}
+                            onOpenLocalNote={onOpenLocalNote}
                           />
                         </>
                       )}
