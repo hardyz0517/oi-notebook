@@ -266,6 +266,8 @@ const AI_WEB_SEARCH_MODE_STORAGE_KEY = "oi-notebook.ai.webSearchMode";
 const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const WEB_SEARCH_PREP_TIMEOUT_MS = 20000;
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 56;
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 180;
 
 const waitForNextFrame = (): Promise<void> =>
   new Promise((resolve) => {
@@ -2229,6 +2231,18 @@ export default function AiSidebar({
     category,
     commands: visibleCommands.filter((command) => command.category === category),
   })).filter((group) => group.commands.length > 0);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    const nextHeight = Math.min(
+      Math.max(input.scrollHeight, COMPOSER_TEXTAREA_MIN_HEIGHT),
+      COMPOSER_TEXTAREA_MAX_HEIGHT,
+    );
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > COMPOSER_TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  }, [inputValue]);
 
   useEffect(() => {
     if (!activeConversation) {
@@ -5033,7 +5047,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           />
         )}
 
-        <div className="ai-composer relative rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2.5 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
+        <div className="ai-composer relative rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
           <textarea
             ref={inputRef}
             value={inputValue}
@@ -5051,11 +5065,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               event.currentTarget.focus();
             }}
             onKeyDown={handleInputKeyDown}
-            rows={3}
+            rows={2}
             placeholder="Ask a question, or type /"
-            className="max-h-36 min-h-20 w-full resize-none border-0 !bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/75 focus:!shadow-none"
+            className="max-h-[180px] min-h-14 w-full resize-none border-0 !bg-transparent px-2 py-1 text-sm leading-5 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/75 focus:!shadow-none"
           />
-          <div className="flex min-w-0 items-center gap-1 overflow-hidden px-1.5 pt-2 text-[11px] text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden px-1.5 pt-1.5 text-[11px] text-muted-foreground">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <button
                 type="button"
