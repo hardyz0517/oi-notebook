@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -886,6 +886,9 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       constructedReason: typeof source.constructedReason === "string" && source.constructedReason.trim()
         ? source.constructedReason.trim()
         : undefined,
+      citationId: typeof source.citationId === "string" && /^S\d{1,2}$/.test(source.citationId.trim())
+        ? source.citationId.trim()
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 10) : undefined;
@@ -1334,10 +1337,118 @@ const decorateAiCodeBlocks = (html: string): string => {
 
 const isHttpUrl = (href: string): boolean => /^https?:\/\//i.test(href);
 
-function AiMarkdownMessage({ markdown }: { markdown: string }) {
+const getCitationStatusLabel = (citation: WebSourceCitation): string => {
+  if (citation.isConstructed && citation.excerptStatus !== "fetched") return "公开资料入口";
+  if (citation.excerptStatus === "fetched" && citation.excerptQuality === "partial") return "部分摘要";
+  if (citation.excerptStatus === "fetched") return "已读取摘要";
+  if (citation.excerptQuality === "blocked" || citation.excerptStatus === "unavailable") return "正文不可用";
+  if (citation.excerptStatus === "failed") return "读取失败";
+  return "仅搜索摘要";
+};
+
+const getUsedCitationIds = (text: string, citations: WebSourceCitation[]): Set<string> => {
+  const validIds = new Set(citations.map((citation) => citation.citationId));
+  const usedIds = new Set<string>();
+  const pattern = /\[\[(S\d{1,2})\]\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const citationId = match[1];
+    if (validIds.has(citationId)) usedIds.add(citationId);
+  }
+  return usedIds;
+};
+
+const getDisplayedSourceCitations = (text: string, citations: WebSourceCitation[]): WebSourceCitation[] => {
+  if (citations.length === 0) return [];
+  const usedIds = getUsedCitationIds(text, citations);
+  const displayed = usedIds.size > 0
+    ? citations.filter((citation) => usedIds.has(citation.citationId))
+    : citations;
+  return displayed.sort(
+    (left, right) => Number(left.citationId.slice(1)) - Number(right.citationId.slice(1)),
+  );
+};
+
+const decorateAiCitationMarkers = (html: string, citations: Map<string, WebSourceCitation>): string => {
+  if (citations.size === 0 || !/\[\[S\d{1,2}\]\]/.test(html)) return html;
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!(node instanceof Text)) continue;
+    const parent = node.parentElement;
+    if (!parent || parent.closest("pre, code, kbd, samp, button, a")) continue;
+    if (/\[\[S\d{1,2}\]\]/.test(node.data)) textNodes.push(node);
+  }
+
+  for (const node of textNodes) {
+    const fragment = document.createDocumentFragment();
+    const text = node.data;
+    const pattern = /\[\[(S\d{1,2})\]\]/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(text)) !== null) {
+      const [rawMarker, citationId] = match;
+      if (match.index > lastIndex) {
+        fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+
+      const citation = citations.get(citationId);
+      if (!citation) {
+        fragment.append(document.createTextNode(rawMarker));
+      } else {
+        const sup = document.createElement("sup");
+        sup.className = "not-prose";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.aiCitationId = citationId;
+        button.className = "ml-0.5 inline align-super text-[10px] font-semibold leading-none text-primary/70 opacity-75 transition-opacity hover:text-primary hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+        button.textContent = citationId.slice(1);
+        button.title = [
+          `来源 ${citationId.slice(1)}：${citation.site ?? citation.reliabilityLabel ?? "来源"}`,
+          citation.title,
+          citation.site,
+          citation.reliabilityLabel,
+          getCitationStatusLabel(citation),
+        ].filter(Boolean).join(" · ");
+        button.setAttribute("aria-label", `定位来源 ${citationId}`);
+        sup.append(button);
+        fragment.append(sup);
+      }
+
+      lastIndex = match.index + rawMarker.length;
+    }
+
+    if (lastIndex < text.length) {
+      fragment.append(document.createTextNode(text.slice(lastIndex)));
+    }
+    node.replaceWith(fragment);
+  }
+
+  return template.innerHTML;
+};
+
+function AiMarkdownMessage({
+  markdown,
+  citations,
+  onCitationClick,
+}: {
+  markdown: string;
+  citations?: WebSourceCitation[];
+  onCitationClick?: (citationId: string) => void;
+}) {
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const normalizedMarkdown = useMemo(() => normalizeAiMathDelimiters(markdown), [markdown]);
+  const citationMap = useMemo(
+    () => new Map((citations ?? []).map((citation) => [citation.citationId, citation])),
+    [citations],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1345,7 +1456,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
 
     renderMarkdownForTheme(normalizedMarkdown, theme)
       .then((html) => {
-        if (!cancelled) setRenderedHtml(decorateAiCodeBlocks(html));
+        if (!cancelled) setRenderedHtml(decorateAiCitationMarkers(decorateAiCodeBlocks(html), citationMap));
       })
       .catch((error) => {
         console.warn("Render AI markdown message failed:", error);
@@ -1355,7 +1466,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
     return () => {
       cancelled = true;
     };
-  }, [normalizedMarkdown]);
+  }, [citationMap, normalizedMarkdown]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -1366,6 +1477,16 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
     const handleClick = async (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+
+      const citationButton = target.closest<HTMLButtonElement>("button[data-ai-citation-id]");
+      if (citationButton && root.contains(citationButton)) {
+        const citationId = citationButton.dataset.aiCitationId;
+        if (isValidCitationId(citationId)) {
+          event.preventDefault();
+          onCitationClick?.(citationId);
+        }
+        return;
+      }
 
       const button = target.closest<HTMLButtonElement>("button[data-ai-code-copy-button='true']");
       if (button && root.contains(button)) {
@@ -1421,7 +1542,7 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [renderedHtml]);
+  }, [onCitationClick, renderedHtml]);
 
   if (!renderedHtml) {
     return <div className="whitespace-pre-wrap break-words">{markdown}</div>;
@@ -1459,6 +1580,19 @@ function AiMarkdownMessage({ markdown }: { markdown: string }) {
 
 const SEARCH_PLAN_QUERY_LIMIT = 6;
 const SEARCH_SOURCE_PREVIEW_LIMIT = 8;
+const WEB_SOURCE_CITATION_LIMIT = 8;
+
+type WebSourceCitation = {
+  id: string;
+  citationId: string;
+  title: string;
+  url?: string;
+  site?: string;
+  reliabilityLabel?: string;
+  excerptStatus?: WebSource["excerptStatus"];
+  excerptQuality?: WebSource["excerptQuality"];
+  isConstructed?: boolean;
+};
 
 const getSearchConfidenceLabel = (confidence: number | undefined): string => {
   if (typeof confidence !== "number") return "按需判断";
@@ -1601,6 +1735,44 @@ const getReliabilityLabel = (source: WebSource): string => source.reliabilityLab
 const getSourceRelevanceLabel = (source: WebSource): string =>
   source.relevanceLabel || (source.relevance === "candidate" ? "相关资料" : "强相关");
 
+const isValidCitationId = (citationId: string | undefined): citationId is string =>
+  typeof citationId === "string" && /^S\d{1,2}$/.test(citationId);
+
+const getPromptCitationCandidates = (sources: WebSource[]): WebSource[] => {
+  const selectedSources = sources.filter((source) => source.selected === true && source.relevance !== "unrelated");
+  const candidates = selectedSources.length > 0
+    ? selectedSources
+    : sources.filter((source) => source.relevance !== "unrelated");
+  return candidates.slice(0, WEB_SOURCE_CITATION_LIMIT);
+};
+
+const assignWebSourceCitationIds = (sources: WebSource[] | undefined): WebSource[] | undefined => {
+  if (!sources || sources.length === 0) return sources;
+  const targetKeys = new Set(getPromptCitationCandidates(sources).map((source) => source.id || source.url));
+  let citationIndex = 0;
+  return sources.map((source) => {
+    const key = source.id || source.url;
+    if (!targetKeys.has(key)) return { ...source, citationId: undefined };
+    citationIndex += 1;
+    return { ...source, citationId: `S${citationIndex}` };
+  });
+};
+
+const getSourceCitations = (sources: WebSource[] | undefined): WebSourceCitation[] =>
+  (sources ?? [])
+    .filter((source) => isValidCitationId(source.citationId))
+    .map((source) => ({
+      id: source.id || source.url,
+      citationId: source.citationId!,
+      title: source.title,
+      url: source.url,
+      site: source.site,
+      reliabilityLabel: getReliabilityLabel(source),
+      excerptStatus: source.excerptStatus,
+      excerptQuality: source.excerptQuality,
+      isConstructed: source.isConstructed,
+    }));
+
 const getSourceExcerptStatusLabel = (source: WebSource): string => {
   const rawExcerptStatus = source.excerptStatus as string | undefined;
   if (source.excerptStatus === "fetched" && source.excerptQuality === "partial") return "部分摘要";
@@ -1685,7 +1857,17 @@ const getWebSearchProviderFallbackNotice = (
     ? "当前 Provider 未配置 API Key，已尝试使用公开搜索兜底。"
     : undefined;
 
-function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error?: string }) {
+function WebSearchSourcesCard({
+  sources,
+  error,
+  messageId,
+  highlightedCitationId,
+}: {
+  sources?: WebSource[];
+  error?: string;
+  messageId?: string;
+  highlightedCitationId?: string | null;
+}) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
   const strongCount = (sources ?? []).filter((source) => source.relevance !== "candidate").length;
@@ -1712,8 +1894,21 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
             {visibleSources.map((source) => {
               const description = getSourceCardDescription(source);
               return (
-              <div key={source.id || source.url} className="grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+              <div
+                key={source.id || source.url}
+                data-source-message-id={messageId}
+                data-source-citation-id={source.citationId}
+                className={cn(
+                  "grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 transition-colors dark:border-white/10 dark:bg-white/[0.04]",
+                  highlightedCitationId && source.citationId === highlightedCitationId && "border-primary/60 bg-primary/10 ring-1 ring-primary/30 dark:bg-primary/15",
+                )}
+              >
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {source.citationId && (
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      {source.citationId}
+                    </span>
+                  )}
                   <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200">
                     {getSourceTypeLabel(source.sourceType)}
                   </span>
@@ -1789,6 +1984,76 @@ function WebSearchSourcesCard({ sources, error }: { sources?: WebSource[]; error
         </>
       ) : (
         <div className="text-[11px] leading-5 text-muted-foreground">{error}</div>
+      )}
+    </div>
+  );
+}
+
+function AssistantCitationList({
+  citations,
+  messageId,
+  isExpanded,
+  hasUsedCitations,
+  highlightedCitationId,
+  onToggle,
+}: {
+  citations: WebSourceCitation[];
+  messageId: string;
+  isExpanded: boolean;
+  hasUsedCitations: boolean;
+  highlightedCitationId?: string | null;
+  onToggle: () => void;
+}) {
+  if (citations.length === 0) return null;
+  const title = hasUsedCitations ? "引用来源" : "参考来源";
+
+  return (
+    <div className="mt-2 border-t border-border/60 pt-1.5 text-[11px] leading-5 text-muted-foreground">
+      <button
+        type="button"
+        className="inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+      >
+        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <span className="font-medium">{title}</span>
+        <span className="text-muted-foreground/80">· {citations.length}</span>
+      </button>
+      {isExpanded && (
+      <div className="mt-1 grid gap-1">
+        {citations.map((citation) => {
+          const number = citation.citationId.slice(1);
+          const statusLabel = getCitationStatusLabel(citation);
+          const meta = Array.from(new Set([citation.site, citation.reliabilityLabel].filter(Boolean)));
+          return (
+            <button
+              key={citation.citationId}
+              type="button"
+              data-citation-list-message-id={messageId}
+              data-citation-list-id={citation.citationId}
+              className={cn(
+                "flex min-w-0 items-start gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                highlightedCitationId === citation.citationId && "bg-primary/10 text-foreground ring-1 ring-primary/25",
+              )}
+              title={citation.url}
+              onClick={() => {
+                if (citation.url) void openExternalUrl(citation.url);
+              }}
+            >
+              <span className="mt-px w-4 shrink-0 text-right font-semibold tabular-nums text-foreground/70">
+                {number}.
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="min-w-0 break-words text-foreground/90">
+                  {meta.length > 0 ? `${meta.join(" · ")} · ` : ""}
+                  {citation.title}
+                </span>
+                <span className="ml-1 whitespace-nowrap text-muted-foreground/80">· {statusLabel}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
       )}
     </div>
   );
@@ -2162,6 +2427,8 @@ export default function AiSidebar({
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
+  const [highlightedCitationId, setHighlightedCitationId] = useState<string | null>(null);
+  const [expandedCitationMessageIds, setExpandedCitationMessageIds] = useState<Record<string, boolean>>({});
   const [messageCopyFeedback, setMessageCopyFeedback] = useState<{
     messageId: string;
     status: "copied" | "failed";
@@ -2173,6 +2440,7 @@ export default function AiSidebar({
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
   const messageCopyFeedbackTimerRef = useRef<number | null>(null);
+  const citationHighlightTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2367,6 +2635,9 @@ export default function AiSidebar({
     if (messageCopyFeedbackTimerRef.current !== null) {
       window.clearTimeout(messageCopyFeedbackTimerRef.current);
     }
+    if (citationHighlightTimerRef.current !== null) {
+      window.clearTimeout(citationHighlightTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -2398,6 +2669,43 @@ export default function AiSidebar({
     shouldAutoScrollRef.current = isNearBottom;
     setShowScrollToBottom(!isNearBottom);
   };
+
+  const toggleCitationList = useCallback((messageId: string) => {
+    setExpandedCitationMessageIds((current) => ({
+      ...current,
+      [messageId]: !current[messageId],
+    }));
+  }, []);
+
+  const handleSourceCitationClick = useCallback((messageId: string, citationId: string) => {
+    const container = messagesScrollRef.current;
+    if (!container || !isValidCitationId(citationId)) return;
+
+    setExpandedCitationMessageIds((current) => ({ ...current, [messageId]: true }));
+    window.setTimeout(() => {
+      const latestContainer = messagesScrollRef.current;
+      if (!latestContainer) return;
+      const target =
+        latestContainer.querySelector<HTMLElement>(
+          `[data-citation-list-message-id="${messageId}"][data-citation-list-id="${citationId}"]`,
+        ) ??
+        latestContainer.querySelector<HTMLElement>(
+          `[data-source-message-id="${messageId}"][data-source-citation-id="${citationId}"]`,
+        );
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      const highlightKey = `${messageId}:${citationId}`;
+      setHighlightedCitationId(highlightKey);
+      if (citationHighlightTimerRef.current !== null) {
+        window.clearTimeout(citationHighlightTimerRef.current);
+      }
+      citationHighlightTimerRef.current = window.setTimeout(() => {
+        setHighlightedCitationId((current) => (current === highlightKey ? null : current));
+        citationHighlightTimerRef.current = null;
+      }, 1800);
+    }, 0);
+  }, []);
 
   const createMessage = (message: Omit<AiChatMessage, "id">): AiChatMessage => {
     messageSeqRef.current += 1;
@@ -3903,10 +4211,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
     ) return;
     webSearchPrepTokensRef.current.delete(streamId);
+    const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
     replaceMessage(conversationId, assistantMessage.id, (message) => ({
       ...message,
       state: "streaming",
-      sources: searchResult.sources,
+      sources: sourcesWithCitations,
       searchError: searchResult.error,
       webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
       webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
@@ -3922,7 +4231,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       webSearchMode: requestWebSearchEnabled ? "auto" : "off",
       webSearchEnabled: requestWebSearchEnabled,
       searchDecision,
-      searchSources: searchResult.sources,
+      searchSources: sourcesWithCitations,
     }).catch((error) => {
       console.warn("AI sidebar chat request failed", {
         requestId,
@@ -4091,10 +4400,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
       ) return;
       webSearchPrepTokensRef.current.delete(streamId);
+      const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
       replaceMessage(conversationId, assistantMessage.id, (current) => ({
         ...current,
         state: "streaming",
-        sources: searchResult.sources,
+        sources: sourcesWithCitations,
         searchError: searchResult.error,
         webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
         webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
@@ -4110,7 +4420,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchMode: requestWebSearchEnabled ? "auto" : "off",
         webSearchEnabled: requestWebSearchEnabled,
         searchDecision,
-        searchSources: searchResult.sources,
+        searchSources: sourcesWithCitations,
       });
     })().catch((error) => {
       console.warn("AI sidebar retry request failed", {
@@ -4851,6 +5161,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 const copyFeedback = messageCopyFeedback?.messageId === message.id ? messageCopyFeedback.status : null;
                 const canCopyAssistantMessage = message.text.trim().length > 0;
                 const canRetryMessage = canRetryAssistantMessage(message);
+                const sourceCitations = getSourceCitations(message.sources);
+                const displayedSourceCitations = getDisplayedSourceCitations(message.text, sourceCitations);
+                const hasUsedSourceCitations = getUsedCitationIds(message.text, sourceCitations).size > 0;
+                const isCitationListExpanded = expandedCitationMessageIds[message.id] === true;
+                const activeHighlightedCitationId = highlightedCitationId?.startsWith(`${message.id}:`)
+                  ? highlightedCitationId.slice(message.id.length + 1)
+                  : null;
                 return (
                   <div key={message.id} className="mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
                     {timingLabel && (
@@ -4872,7 +5189,12 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         <WebSearchProgressCard status={message.webSearchStatus} text={message.webSearchStatusText} />
                       )}
                       {message.searchDecision?.shouldSearch && (
-                        <WebSearchSourcesCard sources={message.sources} error={message.searchError} />
+                        <WebSearchSourcesCard
+                          sources={message.sources}
+                          error={message.searchError}
+                          messageId={message.id}
+                          highlightedCitationId={activeHighlightedCitationId}
+                        />
                       )}
                       {message.kind === "tag-suggestion" && message.tagSuggestion ? (
                         <TagSuggestionCard
@@ -4900,7 +5222,21 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           <div className="line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5">{message.text || "准备摘要"}</div>
                         </div>
                       ) : (
-                        <AiMarkdownMessage markdown={message.text || (message.state === "streaming" ? "Generating..." : "")} />
+                        <>
+                          <AiMarkdownMessage
+                            markdown={message.text || (message.state === "streaming" ? "Generating..." : "")}
+                            citations={sourceCitations}
+                            onCitationClick={(citationId) => handleSourceCitationClick(message.id, citationId)}
+                          />
+                          <AssistantCitationList
+                            citations={displayedSourceCitations}
+                            messageId={message.id}
+                            isExpanded={isCitationListExpanded}
+                            hasUsedCitations={hasUsedSourceCitations}
+                            highlightedCitationId={activeHighlightedCitationId}
+                            onToggle={() => toggleCitationList(message.id)}
+                          />
+                        </>
                       )}
                       {!isAssistantBusy && (canCopyAssistantMessage || canRetryMessage) && (
                         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">

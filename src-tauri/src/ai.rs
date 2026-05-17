@@ -224,6 +224,7 @@ pub struct WebSearchResult {
     pub is_constructed: Option<bool>,
     pub constructed_reason: Option<String>,
     pub selected: Option<bool>,
+    pub citation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1591,7 +1592,16 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         .filter(|source| source.selected.unwrap_or(false))
         .collect::<Vec<_>>();
     let context_sources = if selected_sources.is_empty() {
-        sources.iter().collect::<Vec<_>>()
+        sources
+            .iter()
+            .filter(|source| {
+                source
+                    .relevance
+                    .as_deref()
+                    .map(|value| value != "unrelated")
+                    .unwrap_or(true)
+            })
+            .collect::<Vec<_>>()
     } else {
         selected_sources
     };
@@ -1726,10 +1736,23 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_search_context_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "none".to_string());
+        let citation_id = source
+            .citation_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| {
+                value.len() >= 2
+                    && value.len() <= 4
+                    && value.starts_with('S')
+                    && value[1..].chars().all(|ch| ch.is_ascii_digit())
+            })
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("S{}", index + 1));
 
         entries.push(format!(
-            "Result {}:\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
-            index + 1,
+            "[{}]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            citation_id,
+            source.id,
             title,
             site,
             url,
@@ -1791,7 +1814,15 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - For LCA problems, do not include advice like confusing Lowest Common Ancestor with unrelated names such as Longest Common Ancestor unless the user explicitly asks about terminology. Prefer implementation issues such as lifting table size, depth/fa initialization, root choice, DFS stack depth, query jump order, and IO.\n\
 - Answer like an experienced OI teammate summarizing useful practice, not like a search-result report.\n\
 - Let reliability guide your tone: official can be more certain, wiki is algorithm reference, community_solution is community solution material, discussion is discussion or experience, blog is a personal blog view, unknown needs extra caution.\n\
-- Do not create formal citation numbers or pretend there are verified citations.\n\
+- Use citation markers only to support key conclusions, concrete facts, problem-specific details, or claims directly backed by webpage excerpts. Citations are evidence, not decoration.\n\
+- Each bullet or numbered point should usually have at most one citation marker; each paragraph should usually have 0 to 2 citation markers. Do not cite every sentence.\n\
+- Do not put citation markers on headings. Do not mechanically cite every list item. If a whole subsection relies on one source, cite only the first key claim or the subsection's final summary sentence.\n\
+- Only use the citation IDs explicitly listed above, such as [[S1]] or [[S2]]. Never invent IDs, never cite sources that are not listed, and never use unrelated or non-injected sources.\n\
+- Do not output bare URLs or long URLs in the answer body. The frontend source list will show source links.\n\
+- Do not use paper-style citations such as [1], footnote lists, \"来源：...\", APA, MLA, BibTeX, references sections, or copied URL lists. The frontend will generate a compact citation source list automatically.\n\
+- If a point is general OI experience rather than directly supported by a listed source, it may omit a citation and should be phrased as experience.\n\
+- Constructed public OI source entries without fetched webpage excerpts may only support \"entry point for further reading\" statements. Do not cite them for concrete page content.\n\
+- If source evidence is insufficient, use fewer citations or none. Do not force citations or invent cited content.\n\
 - You may briefly mention that the source cards above can be opened for confirmation.\n\n{}",
         entries.join("\n\n")
     ))
@@ -3394,6 +3425,7 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         is_constructed: None,
         constructed_reason: None,
         selected: None,
+        citation_id: None,
     })
 }
 
@@ -3460,6 +3492,7 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         is_constructed: None,
         constructed_reason: None,
         selected: None,
+        citation_id: None,
     })
 }
 
@@ -3603,6 +3636,7 @@ fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchRes
         is_constructed: None,
         constructed_reason: None,
         selected: None,
+        citation_id: None,
     })
 }
 
@@ -4517,6 +4551,7 @@ fn finish_web_excerpt_result(
             is_constructed: None,
             constructed_reason: None,
             selected: None,
+            citation_id: None,
         })
     } else {
         WEB_EXCERPT_FAILURE_TTL_SECONDS

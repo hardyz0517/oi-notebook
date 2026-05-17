@@ -59,6 +59,7 @@ export type WebSource = {
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
+  citationId?: string;
 };
 
 export type PublicWebRequestPolicy = {
@@ -117,6 +118,7 @@ export type WebSearchResult = {
   isConstructed?: boolean;
   constructedReason?: string;
   selected?: boolean;
+  citationId?: string;
 };
 
 export type WebSourceExcerptRequest = {
