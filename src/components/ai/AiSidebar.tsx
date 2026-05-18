@@ -31,7 +31,7 @@ import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
+import { buildExplicitUrlReadPlan, buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
@@ -805,8 +805,15 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       id: source.id.trim() || url,
       title,
       url,
+      finalUrl: typeof source.finalUrl === "string" && source.finalUrl.trim() ? source.finalUrl.trim() : undefined,
       site: typeof source.site === "string" && source.site.trim() ? source.site.trim() : undefined,
       snippet: typeof source.snippet === "string" && source.snippet.trim() ? source.snippet.trim() : undefined,
+      sourceKind:
+        source.sourceKind === "explicit_url" ||
+        source.sourceKind === "search_result" ||
+        source.sourceKind === "constructed_source"
+          ? source.sourceKind
+          : undefined,
       sourceType: source.sourceType && sourceTypes.has(source.sourceType) ? source.sourceType : "unknown",
       reliability:
         source.reliability === "official" ||
@@ -836,6 +843,7 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         : undefined,
       excerptStatus:
         source.excerptStatus === "fetched" ||
+        source.excerptStatus === "blocked" ||
         source.excerptStatus === "unavailable" ||
         source.excerptStatus === "failed" ||
         source.excerptStatus === "not_requested"
@@ -857,6 +865,16 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         source.cacheStatus === "disabled"
           ? source.cacheStatus
           : undefined,
+      readStatus:
+        source.readStatus === "fetched" ||
+        source.readStatus === "partial" ||
+        source.readStatus === "blocked" ||
+        source.readStatus === "failed" ||
+        source.readStatus === "cached" ||
+        source.readStatus === "stale"
+          ? source.readStatus
+          : undefined,
+      errorKind: typeof source.errorKind === "string" ? source.errorKind : undefined,
       cachedAt: typeof source.cachedAt === "string" && source.cachedAt.trim()
         ? source.cachedAt.trim()
         : undefined,
@@ -1906,7 +1924,39 @@ const getSourceExcerptStatusLabel = (source: WebSource): string => {
 };
 
 const getSourceOriginLabel = (source: WebSource): string =>
-  source.isConstructed ? "公开资料入口" : "搜索结果";
+  source.sourceKind === "explicit_url" ? "用户链接" : source.isConstructed ? "公开资料入口" : "搜索结果";
+
+const getSourceDebugKindLabel = (source: WebSource): string => {
+  if (source.sourceKind === "explicit_url") return "用户提供 URL";
+  if (source.sourceKind === "constructed_source" || source.isConstructed) return "公开资料入口";
+  return "搜索结果";
+};
+
+const getSourceDebugReadMethodLabel = (source: WebSource): string => {
+  if (source.sourceKind === "explicit_url") return "本地公开网页读取";
+  if (source.sourceKind === "constructed_source" || source.isConstructed) {
+    return source.excerptStatus === "fetched" ? "构造入口 + 本地公开网页读取" : "构造入口；尚未读取正文";
+  }
+  return "搜索结果 + 本地公开网页摘录";
+};
+
+const getSourceDebugCacheLabel = (source: WebSource): string => {
+  if (source.excerptStatus === "failed" || source.excerptQuality === "failed") return "读取失败";
+  if (source.excerptStatus === "unavailable" || source.excerptQuality === "blocked" || (source.excerptStatus as string | undefined) === "blocked") return "读取失败";
+  if (!source.excerptStatus || source.excerptStatus === "not_requested") return "未读取正文";
+  if (source.cacheStatus === "hit") return "缓存命中";
+  if (source.cacheStatus === "stale") return "缓存过期";
+  if (source.cacheStatus === "miss") return "缓存未命中";
+  if (source.cacheStatus === "disabled") return "缓存未使用";
+  return source.excerptStatus === "fetched" ? "缓存未命中" : "未读取正文";
+};
+
+const getProviderDebugLabel = (source: WebSource, provider: WebSearchProvider): string => {
+  if (source.sourceKind === "explicit_url" || source.sourceKind === "constructed_source" || source.isConstructed) {
+    return "Provider 未使用";
+  }
+  return `Provider: ${provider === "bocha" ? "Bocha" : "Brave"}`;
+};
 
 const getSourceCardDescription = (source: WebSource): string | undefined => {
   const rawExcerptStatus = source.excerptStatus as string | undefined;
@@ -2077,6 +2127,7 @@ function LocalNoteSourcesCard({
 
 const shouldFetchWebSourceExcerpt = (source: WebSource, strongCount: number): boolean => {
   if (source.relevance === "unrelated") return false;
+  if (source.sourceKind === "explicit_url") return true;
   if (source.relevance === "strong") return true;
   if (strongCount >= 2) return false;
   return source.reliability === "wiki" || source.reliability === "official";
@@ -2088,16 +2139,62 @@ const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): str
     : "需要在 AI 设置中配置 Brave Search API Key";
 };
 
+const buildWebContextDecision = (
+  question: string,
+  context: NoteChatContextPayload,
+  requestWebSearchEnabled: boolean,
+  explicitPlan: ExplicitUrlReadPlan,
+): SearchDecision => {
+  if (!requestWebSearchEnabled) {
+    return explicitPlan.shouldRead || explicitPlan.blockedUrls.length > 0
+      ? {
+        shouldSearch: true,
+        intent: "general_web",
+        queries: [],
+        confidence: 1,
+        reason: "Explicit URL reading was requested, but online public web reading is disabled.",
+      }
+      : buildSearchDecision("");
+  }
+  const decision = buildSearchDecision(question, context);
+  if (explicitPlan.shouldRead || explicitPlan.blockedUrls.length > 0) {
+    return {
+      ...decision,
+      shouldSearch: true,
+      intent: decision.intent === "no_search" ? "general_web" : decision.intent,
+      confidence: Math.max(decision.confidence ?? 0, 0.95),
+      reason: [decision.reason, "User explicitly provided URL reading context."].filter(Boolean).join("；"),
+    };
+  }
+  return decision;
+};
+
+const getExplicitUrlPlanNotice = (plan: ExplicitUrlReadPlan, requestWebSearchEnabled: boolean): string | undefined => {
+  const notes: string[] = [];
+  if (plan.omittedCount > 0) notes.push("只读取前 3 个链接");
+  if (!requestWebSearchEnabled && plan.shouldRead) notes.push("需要开启联网/网页读取后才能读取链接");
+  if (plan.blockedUrls.some((item) => item.reason === "private_network")) {
+    notes.push("为安全起见，NoteX 不访问 localhost 或内网地址");
+  } else if (plan.blockedUrls.some((item) => item.reason === "unsupported_scheme")) {
+    notes.push("该链接不是公开 http/https 页面");
+  } else if (plan.blockedUrls.length > 0 || plan.invalidUrls.length > 0) {
+    notes.push("部分链接无法读取公开正文");
+  }
+  return notes.length > 0 ? Array.from(new Set(notes)).join("；") : undefined;
+};
+
 function WebSearchSourcesCard({
   sources,
   error,
   messageId,
   highlightedCitationId,
+  provider,
 }: {
   sources?: WebSource[];
   error?: string;
   messageId?: string;
   highlightedCitationId?: string | null;
+  provider: WebSearchProvider;
 }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
@@ -2113,7 +2210,7 @@ function WebSearchSourcesCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="font-medium text-foreground">找到 {sources?.length ?? visibleSources.length} 个来源</span>
             <span className="rounded-full border border-emerald-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-emerald-700 dark:border-emerald-300/20 dark:bg-white/[0.05] dark:text-emerald-200">
-              仅搜索结果
+              {visibleSources.some((source) => source.sourceKind === "explicit_url") ? "含用户链接" : "仅搜索结果"}
             </span>
             {visibleSources.length > 0 && (
               <span className="text-[11px] text-muted-foreground">
@@ -2124,6 +2221,12 @@ function WebSearchSourcesCard({
           <div className="grid gap-2">
             {visibleSources.map((source) => {
               const description = getSourceCardDescription(source);
+              const debugItems = [
+                `来源类型：${getSourceDebugKindLabel(source)}`,
+                `读取方式：${getSourceDebugReadMethodLabel(source)}`,
+                getProviderDebugLabel(source, provider),
+                `缓存：${getSourceDebugCacheLabel(source)}`,
+              ];
               return (
               <div
                 key={source.id || source.url}
@@ -2193,6 +2296,11 @@ function WebSearchSourcesCard({
                 )}
                 <div className="min-w-0 break-all text-[10px] leading-4 text-muted-foreground/80">
                   {source.url}
+                </div>
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted-foreground/75">
+                  {debugItems.map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
                 </div>
               </div>
               );
@@ -3018,6 +3126,7 @@ export default function AiSidebar({
       token?: number;
       userInput?: string;
       context?: NoteChatContextPayload;
+      explicitSources?: WebSource[];
       onStatus?: (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => void;
     },
   ): Promise<{ sources?: WebSource[]; error?: string }> => {
@@ -3030,10 +3139,20 @@ export default function AiSidebar({
       if (!isCurrent()) return;
       options?.onStatus?.(status, text);
     };
+    const explicitSources = options?.explicitSources ?? [];
+    const mergeSources = (rawSources: WebSource[]): WebSource[] => {
+      const seen = new Set<string>();
+      return [...explicitSources, ...rawSources].filter((source) => {
+        const key = source.url.trim().toLocaleLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
     const prepareSourcesWithExcerpts = async (rawSources: WebSource[]) => {
       if (!isCurrent()) return { prepared: prepareWebSourcesForDecision([], decision, options?.userInput, options?.context), sources: [] as WebSource[] };
       setStatus("filtering", "正在筛选相关来源...");
-      const prepared = prepareWebSourcesForDecision(rawSources, decision, options?.userInput, options?.context);
+      const prepared = prepareWebSourcesForDecision(mergeSources(rawSources), decision, options?.userInput, options?.context);
       const strongCount = prepared.sources.filter((source) => source.relevance === "strong").length;
       const excerptTargets = prepared.sources
         .filter((source) => shouldFetchWebSourceExcerpt(source, strongCount))
@@ -3063,11 +3182,19 @@ export default function AiSidebar({
         if (!result) return { ...source, excerptStatus: source.excerptStatus ?? "not_requested" as const };
         return {
           ...source,
+          finalUrl: result.finalUrl,
           excerptStatus: result.fetched ? "fetched" as const : (
-            result.error?.includes("不可用") || result.error?.includes("登录") ? "unavailable" as const : "failed" as const
+            result.errorKind === "private_network" ||
+            result.errorKind === "unsupported_scheme" ||
+            result.errorKind === "redirect_blocked" ||
+            result.errorKind === "content_type_unsupported" ||
+            result.errorKind === "too_large" ? "blocked" as const :
+              result.error?.includes("不可用") || result.error?.includes("登录") ? "unavailable" as const : "failed" as const
           ),
+          readStatus: result.status,
           excerpt: result.excerpt,
           excerptError: result.error,
+          errorKind: result.errorKind,
           fetchedAt: result.fetchedAt,
           cacheStatus: result.cacheStatus,
           cachedAt: result.cachedAt,
@@ -3084,12 +3211,15 @@ export default function AiSidebar({
       };
     };
     if (!canUseWebSearchProvider) {
-      const prepared = prepareWebSourcesForDecision([], decision, options?.userInput, options?.context);
+      const { prepared, sources } = await prepareSourcesWithExcerpts([]);
+      const hasExplicitSources = explicitSources.length > 0;
       return {
-        sources: prepared.sources.length > 0 ? prepared.sources : undefined,
-        error: hasPublicWebSearchConsent
-          ? getWebSearchProviderMissingKeyMessage(activeWebSearchProvider)
-          : "需要先授权公开网页搜索",
+        sources: sources.length > 0 ? sources : prepared.sources.length > 0 ? prepared.sources : undefined,
+        error: hasExplicitSources
+          ? undefined
+          : hasPublicWebSearchConsent
+            ? getWebSearchProviderMissingKeyMessage(activeWebSearchProvider)
+            : "需要先授权公开网页搜索",
       };
     }
 
@@ -4436,9 +4566,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const chatContext = snapshot ?? buildChatContext();
     const requestWebSearchEnabled = webSearchEnabled && !userFacingText.startsWith("/");
     const requestLocalNoteSearchEnabled = includeCurrentNoteContext && !userFacingText.startsWith("/");
-    const searchDecision = requestWebSearchEnabled
-      ? buildSearchDecision(question, chatContext)
-      : buildSearchDecision("");
+    const explicitUrlPlan = buildExplicitUrlReadPlan(question);
+    const explicitUrlNotice = getExplicitUrlPlanNotice(explicitUrlPlan, requestWebSearchEnabled);
+    const searchDecision = buildWebContextDecision(question, chatContext, requestWebSearchEnabled, explicitUrlPlan);
 
     const requestId = requestSeqRef.current + 1;
     requestSeqRef.current = requestId;
@@ -4498,7 +4628,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         localNoteSearchError: error,
       }));
     };
-    const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = requestWebSearchEnabled && searchDecision.shouldSearch
+    const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = !requestWebSearchEnabled && explicitUrlPlan.shouldRead
+      ? Promise.resolve({ error: explicitUrlNotice ?? "需要开启联网/网页读取后才能读取链接" })
+      : requestWebSearchEnabled && explicitUrlPlan.sources.length === 0 && explicitUrlPlan.blockedUrls.length > 0 && searchDecision.queries.length === 0
+      ? Promise.resolve({ error: explicitUrlNotice ?? "需要开启联网/网页读取后才能读取链接" })
+      : requestWebSearchEnabled && searchDecision.shouldSearch
       ? withTimeout(
         fetchWebSourcesForDecision(searchDecision, {
           conversationId,
@@ -4507,6 +4641,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           token: webSearchPrepToken,
           userInput: question,
           context: chatContext,
+          explicitSources: explicitUrlPlan.sources,
           onStatus: updateWebSearchStatus,
         }),
         WEB_SEARCH_PREP_TIMEOUT_MS,
@@ -4537,19 +4672,20 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
     ) return;
     webSearchPrepTokensRef.current.delete(streamId);
+    const searchError = [explicitUrlNotice, searchResult.error].filter(Boolean).join("；") || undefined;
     const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
     replaceMessage(conversationId, assistantMessage.id, (message) => ({
       ...message,
       state: "streaming",
       sources: sourcesWithCitations,
-      searchError: searchResult.error,
+      searchError,
       localNoteSources: localNoteSearchResult.localNoteSources,
       localNoteSearchStatus: requestLocalNoteSearchEnabled
         ? localNoteSearchResult.error ? "failed" : "done"
         : undefined,
       localNoteSearchError: localNoteSearchResult.error,
-      webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
-      webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
+      webSearchStatus: searchDecision.shouldSearch ? "answering" : undefined,
+      webSearchStatusText: searchDecision.shouldSearch ? "正在生成回答..." : undefined,
     }));
 
     void startCurrentNoteChatStream({
@@ -4560,7 +4696,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       providerId: selectedProviderId,
       modelId: selectedModelId,
       webSearchMode: requestWebSearchEnabled ? "auto" : "off",
-      webSearchEnabled: requestWebSearchEnabled,
+      webSearchEnabled: requestWebSearchEnabled && searchDecision.shouldSearch,
       searchDecision,
       searchSources: sourcesWithCitations,
       localNoteSources: localNoteSearchResult.localNoteSources,
@@ -4660,9 +4796,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const chatContext = buildChatContext();
     const requestWebSearchEnabled = webSearchEnabled && !(message.retryDisplayText?.trim() ?? "").startsWith("/");
     const requestLocalNoteSearchEnabled = includeCurrentNoteContext && !(message.retryDisplayText?.trim() ?? "").startsWith("/");
-    const searchDecision = requestWebSearchEnabled
-      ? buildSearchDecision(question, chatContext)
-      : buildSearchDecision("");
+    const explicitUrlPlan = buildExplicitUrlReadPlan(question);
+    const explicitUrlNotice = getExplicitUrlPlanNotice(explicitUrlPlan, requestWebSearchEnabled);
+    const searchDecision = buildWebContextDecision(question, chatContext, requestWebSearchEnabled, explicitUrlPlan);
     const chatHistory = buildRequestHistoryFromMessages(
       conversation,
       conversation.messages.slice(0, previousUserIndex),
@@ -4718,7 +4854,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           localNoteSearchError: error,
         }));
       };
-      const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = requestWebSearchEnabled && searchDecision.shouldSearch
+      const webSearchPromise: Promise<{ sources?: WebSource[]; error?: string }> = !requestWebSearchEnabled && explicitUrlPlan.shouldRead
+        ? Promise.resolve({ error: explicitUrlNotice ?? "需要开启联网/网页读取后才能读取链接" })
+        : requestWebSearchEnabled && explicitUrlPlan.sources.length === 0 && explicitUrlPlan.blockedUrls.length > 0 && searchDecision.queries.length === 0
+        ? Promise.resolve({ error: explicitUrlNotice ?? "需要开启联网/网页读取后才能读取链接" })
+        : requestWebSearchEnabled && searchDecision.shouldSearch
         ? withTimeout(
           fetchWebSourcesForDecision(searchDecision, {
             conversationId,
@@ -4727,6 +4867,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             token: webSearchPrepToken,
             userInput: question,
             context: chatContext,
+            explicitSources: explicitUrlPlan.sources,
             onStatus: updateWebSearchStatus,
           }),
           WEB_SEARCH_PREP_TIMEOUT_MS,
@@ -4757,19 +4898,20 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchPrepTokensRef.current.get(streamId) !== webSearchPrepToken
       ) return;
       webSearchPrepTokensRef.current.delete(streamId);
+      const searchError = [explicitUrlNotice, searchResult.error].filter(Boolean).join("；") || undefined;
       const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
       replaceMessage(conversationId, assistantMessage.id, (current) => ({
         ...current,
         state: "streaming",
         sources: sourcesWithCitations,
-        searchError: searchResult.error,
+        searchError,
         localNoteSources: localNoteSearchResult.localNoteSources,
         localNoteSearchStatus: requestLocalNoteSearchEnabled
           ? localNoteSearchResult.error ? "failed" : "done"
           : undefined,
         localNoteSearchError: localNoteSearchResult.error,
-        webSearchStatus: requestWebSearchEnabled && searchDecision.shouldSearch ? "answering" : undefined,
-        webSearchStatusText: requestWebSearchEnabled && searchDecision.shouldSearch ? "正在生成回答..." : undefined,
+        webSearchStatus: searchDecision.shouldSearch ? "answering" : undefined,
+        webSearchStatusText: searchDecision.shouldSearch ? "正在生成回答..." : undefined,
       }));
 
       await startCurrentNoteChatStream({
@@ -4780,7 +4922,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         providerId: selectedProviderId,
         modelId: selectedModelId,
         webSearchMode: requestWebSearchEnabled ? "auto" : "off",
-        webSearchEnabled: requestWebSearchEnabled,
+        webSearchEnabled: requestWebSearchEnabled && searchDecision.shouldSearch,
         searchDecision,
         searchSources: sourcesWithCitations,
         localNoteSources: localNoteSearchResult.localNoteSources,
@@ -5571,6 +5713,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           error={message.searchError}
                           messageId={message.id}
                           highlightedCitationId={activeHighlightedCitationId}
+                          provider={activeWebSearchProvider}
                         />
                       )}
                       {message.kind === "tag-suggestion" && message.tagSuggestion ? (

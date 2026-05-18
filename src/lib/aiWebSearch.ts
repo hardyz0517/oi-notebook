@@ -17,10 +17,57 @@ export type WebSourceRelevance = "strong" | "candidate" | "unrelated";
 export type WebSourceExcerptStatus =
   | "not_requested"
   | "fetched"
+  | "blocked"
   | "unavailable"
   | "failed";
 
 export type WebCacheStatus = "miss" | "hit" | "stale" | "disabled";
+
+export type WebSourceKind = "explicit_url" | "search_result" | "constructed_source";
+
+export type WebReadErrorKind =
+  | "invalid_url"
+  | "unsupported_scheme"
+  | "private_network"
+  | "redirect_blocked"
+  | "dns_failed"
+  | "timeout"
+  | "tls_error"
+  | "http_status"
+  | "content_type_unsupported"
+  | "too_large"
+  | "blocked_or_unreadable"
+  | "parse_failed"
+  | "unknown";
+
+export type WebReadRequest = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  sourceKind: WebSourceKind;
+  reason?: string;
+  queryHint?: string;
+  maxChars?: number;
+  cachePolicy?: "default" | "refresh" | "cache_only";
+  relevanceHints?: string[];
+};
+
+export type WebReadResult = {
+  url: string;
+  finalUrl?: string;
+  title: string;
+  siteName?: string;
+  status: "fetched" | "partial" | "blocked" | "failed" | "cached" | "stale";
+  excerpt?: string;
+  excerptQuality?: "good" | "partial" | "empty" | "blocked" | "failed";
+  extractor?: "oi_wiki" | "cp_algorithms" | "luogu" | "generic" | "none";
+  excerptReason?: string;
+  codeBlocksTruncated?: boolean;
+  cacheStatus?: WebCacheStatus;
+  errorKind?: WebReadErrorKind;
+  errorMessage?: string;
+  fetchedAt: number;
+};
 
 export type ResearchIntent =
   | "no_search"
@@ -34,8 +81,10 @@ export type WebSource = {
   id: string;
   title: string;
   url: string;
+  finalUrl?: string;
   site?: string;
   snippet?: string;
+  sourceKind?: WebSourceKind;
   sourceType?: "problem" | "solution" | "discussion" | "wiki" | "blog" | "official" | "unknown";
   reliability?: WebSourceReliability;
   reliabilityLabel?: string;
@@ -48,6 +97,8 @@ export type WebSource = {
   excerptError?: string;
   fetchedAt?: number;
   cacheStatus?: WebCacheStatus;
+  readStatus?: WebReadResult["status"];
+  errorKind?: WebReadErrorKind;
   cachedAt?: string;
   cacheTtlSeconds?: number;
   excerptQuality?: "good" | "partial" | "empty" | "blocked" | "failed";
@@ -92,8 +143,10 @@ export type WebSearchResult = {
   id: string;
   title: string;
   url: string;
+  finalUrl?: string;
   site?: string;
   snippet?: string;
+  sourceKind?: WebSourceKind;
   sourceType?: WebSource["sourceType"];
   reliability?: WebSourceReliability;
   reliabilityLabel?: string;
@@ -106,6 +159,8 @@ export type WebSearchResult = {
   excerptError?: string;
   fetchedAt?: number;
   cacheStatus?: WebCacheStatus;
+  readStatus?: WebReadResult["status"];
+  errorKind?: WebReadErrorKind;
   cachedAt?: string;
   cacheTtlSeconds?: number;
   excerptQuality?: WebSource["excerptQuality"];
@@ -136,10 +191,13 @@ export type WebSourceExcerptRequest = {
 export type WebSourceExcerptResult = {
   id: string;
   url: string;
+  finalUrl?: string;
   title: string;
   fetched: boolean;
+  status?: WebReadResult["status"];
   excerpt?: string;
   error?: string;
+  errorKind?: WebReadErrorKind;
   fetchedAt: number;
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
@@ -217,6 +275,216 @@ const EXPLANATION_ONLY_KEYWORDS = ["是什么", "什么意思", "怎么理解", 
 const SEARCH_CONFIDENCE_THRESHOLD = 0.65;
 
 const unique = (items: string[]): string[] => [...new Set(items.filter(Boolean))];
+
+const EXPLICIT_URL_READ_LIMIT = 3;
+const EXPLICIT_URL_MARKDOWN_PATTERN = /\[[^\]]*]\((https?:\/\/[^\s<>"')]+)\)/gi;
+const EXPLICIT_URL_TEXT_PATTERN = /\bhttps?:\/\/[^\s<>"']+/gi;
+const TRAILING_URL_PUNCTUATION = /[.,;:!?，。！？、；：）)\]}】》>"'`]+$/u;
+const EXPLICIT_URL_READ_KEYWORDS = [
+  "read",
+  "summarize",
+  "summary",
+  "analyze",
+  "article",
+  "page",
+  "link",
+  "url",
+  "website",
+  "webpage",
+  "阅读",
+  "总结",
+  "概括",
+  "分析",
+  "看看",
+  "看下",
+  "网页",
+  "链接",
+  "文章",
+  "题解",
+  "结合",
+  "讲了什么",
+];
+const URL_AS_TEXT_KEYWORDS = ["润色", "改写", "翻译", "格式化", "提取链接文本"];
+
+export type ExplicitUrlExtractionResult = {
+  urls: string[];
+  omittedCount: number;
+  invalidUrls: string[];
+};
+
+export type ExplicitUrlReadPlan = ExplicitUrlExtractionResult & {
+  shouldRead: boolean;
+  blockedUrls: Array<{ url: string; reason: string }>;
+  sources: WebSource[];
+};
+
+const stableSourceHash = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+const trimTrailingUrlPunctuation = (value: string): string => {
+  let current = value.trim();
+  while (TRAILING_URL_PUNCTUATION.test(current)) {
+    current = current.replace(TRAILING_URL_PUNCTUATION, "");
+  }
+  return current;
+};
+
+const normalizeExplicitUrl = (value: string): string | null => {
+  const trimmed = trimTrailingUrlPunctuation(value);
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    parsed.hash = parsed.hash;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+const isPrivateIpv4 = (host: string): boolean => {
+  const parts = host.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  return a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254);
+};
+
+const isSearchEngineResultsUrl = (parsed: URL): boolean => {
+  const host = parsed.hostname.toLocaleLowerCase().replace(/\.$/, "");
+  const path = parsed.pathname.toLocaleLowerCase();
+  const params = parsed.searchParams;
+  if ((host === "www.google.com" || host.endsWith(".google.com") || host.startsWith("google.")) && path === "/search") return true;
+  if ((host === "www.bing.com" || host.endsWith(".bing.com")) && path === "/search") return true;
+  if ((host === "www.baidu.com" || host.endsWith(".baidu.com")) && path === "/s") return true;
+  if ((host === "duckduckgo.com" || host.endsWith(".duckduckgo.com")) && path === "/" && params.has("q")) return true;
+  return false;
+};
+
+export const getFrontendWebReadBlockReason = (url: string): string | null => {
+  try {
+    const parsed = new URL(trimTrailingUrlPunctuation(url));
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "unsupported_scheme";
+    }
+    if (isSearchEngineResultsUrl(parsed)) {
+      return "blocked_or_unreadable";
+    }
+    const host = parsed.hostname.toLocaleLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+    if (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal") ||
+      host.endsWith(".lan") ||
+      host === "::1" ||
+      host.startsWith("fe80:") ||
+      host.startsWith("fc") ||
+      host.startsWith("fd") ||
+      isPrivateIpv4(host)
+    ) {
+      return "private_network";
+    }
+    return null;
+  } catch {
+    return "invalid_url";
+  }
+};
+
+export const extractExplicitUrls = (input: string, limit = EXPLICIT_URL_READ_LIMIT): ExplicitUrlExtractionResult => {
+  const rawUrls: string[] = [];
+  for (const match of input.matchAll(EXPLICIT_URL_MARKDOWN_PATTERN)) {
+    if (match[1]) rawUrls.push(match[1]);
+  }
+  for (const match of input.matchAll(EXPLICIT_URL_TEXT_PATTERN)) {
+    if (match[0]) rawUrls.push(match[0]);
+  }
+
+  const urls: string[] = [];
+  const invalidUrls: string[] = [];
+  const seen = new Set<string>();
+  for (const rawUrl of rawUrls) {
+    const normalized = normalizeExplicitUrl(rawUrl);
+    if (!normalized) {
+      invalidUrls.push(trimTrailingUrlPunctuation(rawUrl));
+      continue;
+    }
+    const key = normalized.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    urls.push(normalized);
+  }
+
+  return {
+    urls: urls.slice(0, limit),
+    omittedCount: Math.max(0, urls.length - limit),
+    invalidUrls,
+  };
+};
+
+export const shouldReadExplicitUrls = (input: string): boolean => {
+  const extraction = extractExplicitUrls(input, Number.MAX_SAFE_INTEGER);
+  if (extraction.urls.length === 0) return false;
+  const withoutUrls = input
+    .replace(EXPLICIT_URL_MARKDOWN_PATTERN, " ")
+    .replace(EXPLICIT_URL_TEXT_PATTERN, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (withoutUrls.length <= 18) return true;
+  const normalized = input.toLocaleLowerCase();
+  if (URL_AS_TEXT_KEYWORDS.some((keyword) => normalized.includes(keyword.toLocaleLowerCase())) &&
+    !EXPLICIT_URL_READ_KEYWORDS.some((keyword) => normalized.includes(keyword.toLocaleLowerCase()))) {
+    return false;
+  }
+  return EXPLICIT_URL_READ_KEYWORDS.some((keyword) => normalized.includes(keyword.toLocaleLowerCase()));
+};
+
+export const buildExplicitUrlSources = (urls: string[], reason = "User explicitly provided this public URL for reading."): WebSource[] =>
+  urls.map((url, index) => {
+    const parsed = new URL(url);
+    const site = parsed.hostname.replace(/^www\./i, "");
+    return {
+      id: `explicit-url-${stableSourceHash(url)}`,
+      title: site ? `${site}${parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : ""}` : `Explicit URL ${index + 1}`,
+      url,
+      site,
+      snippet: "User-provided public URL; NoteX will try to read a cleaned excerpt before answering.",
+      sourceKind: "explicit_url",
+      sourceType: "unknown",
+      reliability: "unknown",
+      reliabilityLabel: "用户链接",
+      reliabilityReason: "This source was provided explicitly by the user, not discovered by a search provider.",
+      relevance: "strong",
+      relevanceLabel: "用户指定",
+      relevanceReason: reason,
+      selected: true,
+    };
+  });
+
+export const buildExplicitUrlReadPlan = (input: string): ExplicitUrlReadPlan => {
+  const extraction = extractExplicitUrls(input);
+  const blockedUrls = extraction.urls.flatMap((url) => {
+    const reason = getFrontendWebReadBlockReason(url);
+    return reason ? [{ url, reason }] : [];
+  });
+  const readableUrls = extraction.urls.filter((url) => !blockedUrls.some((blocked) => blocked.url === url));
+  const shouldRead = shouldReadExplicitUrls(input) && readableUrls.length > 0;
+  return {
+    ...extraction,
+    blockedUrls,
+    shouldRead,
+    sources: shouldRead ? buildExplicitUrlSources(readableUrls) : [],
+  };
+};
 
 export const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
   enabled: false,
@@ -835,6 +1103,11 @@ const scoreWebSourceRank = (
     reasons.push("excerpt unavailable");
   }
 
+  if (source.sourceKind === "explicit_url") {
+    score += 30;
+    reasons.push("user-provided URL");
+  }
+
   if (source.isConstructed) {
     score += source.excerptStatus === "fetched" ? 6 : -18;
     reasons.push(source.excerptStatus === "fetched" ? "constructed source verified by excerpt" : "constructed source not yet read");
@@ -894,6 +1167,7 @@ export const buildLuoguDeterministicSources = (problemId: string): WebSource[] =
       site: "洛谷",
       snippet: "根据题号构造的洛谷官方题目页，当前阶段尚未读取网页正文或题面内容。",
       sourceType: "problem",
+      sourceKind: "constructed_source",
       reliability: "official",
       reliabilityLabel: "官方",
       reliabilityReason: "洛谷公开题目页 URL 由题号确定性构造，未抓取网页正文。",
@@ -911,6 +1185,7 @@ export const buildLuoguDeterministicSources = (problemId: string): WebSource[] =
       site: "洛谷",
       snippet: "根据题号构造的洛谷题解页入口，当前阶段尚未读取网页正文或题解内容。",
       sourceType: "solution",
+      sourceKind: "constructed_source",
       reliability: "community_solution",
       reliabilityLabel: "社区题解",
       reliabilityReason: "洛谷题解页入口由题号确定性构造，内容来自社区题解，未抓取网页正文。",
@@ -958,6 +1233,7 @@ const buildAlgorithmSourceCandidates = (
           ? "由题名或算法关键词匹配的公开算法资料入口，不一定是目标题目的直接讨论。"
           : "由算法关键词匹配的公开算法资料入口。",
         isConstructed: true,
+        sourceKind: "constructed_source",
         constructedReason: "根据算法关键词构造的公开资料入口，当前阶段尚未读取网页正文。",
         selected: !decision.problemId,
       };
@@ -1010,6 +1286,10 @@ const classifyProblemSourceRelevance = (
   const hasEnoughTitleMatch = titleTokens.length > 0 && matchedTitleTokens.length >= Math.min(titleTokens.length, 2);
   const hasPartialTitleMatch = titleTokens.length > 1 && matchedTitleTokens.length >= 1;
   const hasAlgorithmSynonym = synonyms.some((keyword) => searchText.includes(normalizeSearchText(keyword)));
+
+  if (source.sourceKind === "explicit_url") {
+    return { relevance: "strong", score: 110, reason: "User explicitly provided this URL as reading context." };
+  }
 
   if (source.id === `luogu-problem-${normalizedProblemId}` || source.id === `luogu-solution-${normalizedProblemId}`) {
     return { relevance: "strong", score: 100, reason: "由目标题号构造的确定性洛谷入口。" };

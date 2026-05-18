@@ -203,8 +203,10 @@ pub struct WebSearchResult {
     pub id: String,
     pub title: String,
     pub url: String,
+    pub final_url: Option<String>,
     pub site: Option<String>,
     pub snippet: Option<String>,
+    pub source_kind: Option<String>,
     pub source_type: Option<String>,
     pub reliability: Option<String>,
     pub reliability_label: Option<String>,
@@ -217,6 +219,8 @@ pub struct WebSearchResult {
     pub excerpt_error: Option<String>,
     pub fetched_at: Option<i64>,
     pub cache_status: Option<String>,
+    pub read_status: Option<String>,
+    pub error_kind: Option<String>,
     pub cached_at: Option<String>,
     pub cache_ttl_seconds: Option<i64>,
     pub excerpt_quality: Option<String>,
@@ -260,10 +264,13 @@ pub struct FetchWebSourceExcerptsInput {
 pub struct WebSourceExcerptResult {
     pub id: String,
     pub url: String,
+    pub final_url: Option<String>,
     pub title: String,
     pub fetched: bool,
+    pub status: Option<String>,
     pub excerpt: Option<String>,
     pub error: Option<String>,
+    pub error_kind: Option<String>,
     pub fetched_at: i64,
     pub cache_status: Option<String>,
     pub cached_at: Option<String>,
@@ -1729,7 +1736,9 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_search_context_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "not ranked".to_string());
-        let source_origin = if source.is_constructed == Some(true) {
+        let source_origin = if source.source_kind.as_deref() == Some("explicit_url") {
+            "user-provided explicit public URL"
+        } else if source.is_constructed == Some(true) {
             "constructed public OI source"
         } else {
             "search provider result"
@@ -1799,6 +1808,7 @@ Available web citation IDs: {}. To cite one, output the exact double-bracket mar
 You may use these summaries to answer, but follow these rules strictly:\n\
 - Call them search result summaries or source summaries, not webpages you have read in full.\n\
 - Only sources marked with Web excerpt status: fetched may be described as webpage excerpts. Do not use failed or unavailable sources as webpage content.\n\
+- Sources whose Source origin is user-provided explicit public URL came directly from URLs the user pasted. Treat their fetched excerpts as explicit URL reading context, not as search-engine discovery.\n\
 - Even for fetched excerpts, do not say you read the full page. Say \"based on the extracted webpage excerpt\" or equivalent.\n\
 - Web excerpts are cleaned, selected, and truncated snippets, not complete webpages; if Web excerpt quality is partial, blocked, or empty, answer cautiously and avoid over-inference.\n\
 - A generic extractor is weaker evidence than a site-specific extractor such as oi_wiki, cp_algorithms, or luogu. If Luogu extraction is blocked or unavailable, do not guess problem statements or solution content from the Luogu page.\n\
@@ -1806,6 +1816,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
 - Do not say a webpage excerpt states something unless that excerpt contains it.\n\
 - Sources marked as constructed public OI sources are public entry points only. If their Web excerpt status is not fetched, do not infer their page content; say they are available to open but current summaries are insufficient.\n\
+- If a user-provided explicit URL failed, is blocked, or has no fetched excerpt, do not summarize that page from the URL, title, or general memory; say the public正文 could not be read.\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
 - If Cache status is stale, treat that source as potentially outdated and state time-sensitive claims cautiously.\n\
@@ -3661,12 +3672,14 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         id,
         title: if title.is_empty() { url.clone() } else { title },
         url,
+        final_url: None,
         site,
         snippet: if snippet_text.is_empty() {
             None
         } else {
             Some(snippet_text)
         },
+        source_kind: Some("search_result".to_string()),
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3679,6 +3692,8 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         excerpt_error: None,
         fetched_at: None,
         cache_status: None,
+        read_status: None,
+        error_kind: None,
         cached_at: None,
         cache_ttl_seconds: None,
         excerpt_quality: None,
@@ -3728,12 +3743,14 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         id,
         title: if title.is_empty() { url.clone() } else { title },
         url,
+        final_url: None,
         site,
         snippet: if snippet_text.is_empty() {
             None
         } else {
             Some(snippet_text)
         },
+        source_kind: Some("search_result".to_string()),
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3746,6 +3763,8 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         excerpt_error: None,
         fetched_at: None,
         cache_status: None,
+        read_status: None,
+        error_kind: None,
         cached_at: None,
         cache_ttl_seconds: None,
         excerpt_quality: None,
@@ -4037,6 +4056,46 @@ fn is_private_or_local_ip(ip: IpAddr) -> bool {
     }
 }
 
+fn is_search_engine_results_url(host: &str, path: &str, query: Option<&str>) -> bool {
+    let has_query = query.map(|value| !value.trim().is_empty()).unwrap_or(false);
+    ((host == "www.google.com" || host.ends_with(".google.com") || host.starts_with("google."))
+        && path == "/search")
+        || ((host == "www.bing.com" || host.ends_with(".bing.com")) && path == "/search")
+        || ((host == "www.baidu.com" || host.ends_with(".baidu.com")) && path == "/s")
+        || ((host == "duckduckgo.com" || host.ends_with(".duckduckgo.com"))
+            && path == "/"
+            && has_query)
+}
+
+#[derive(Debug, Clone)]
+struct WebReadFailure {
+    kind: &'static str,
+    message: String,
+}
+
+fn validate_public_web_url_for_read(url: &str) -> Result<reqwest::Url, WebReadFailure> {
+    match validate_public_web_url(url) {
+        Ok(parsed) => Ok(parsed),
+        Err(message) => {
+            let kind = if message.contains("http / https") {
+                "unsupported_scheme"
+            } else if message.contains("localhost")
+                || message.contains("内网")
+                || message.contains("本地")
+            {
+                "private_network"
+            } else if message.contains("search engine") {
+                "blocked_or_unreadable"
+            } else if message.contains("解析") {
+                "dns_failed"
+            } else {
+                "invalid_url"
+            };
+            Err(WebReadFailure { kind, message })
+        }
+    }
+}
+
 fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
     let parsed =
         reqwest::Url::parse(url.trim()).map_err(|_| "网页地址无效，无法读取正文".to_string())?;
@@ -4060,6 +4119,9 @@ fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
         || host.ends_with(".lan")
     {
         return Err("不会访问 localhost、内网或本地域名".to_string());
+    }
+    if is_search_engine_results_url(&host, parsed.path(), parsed.query()) {
+        return Err("search engine result pages are not read".to_string());
     }
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_or_local_ip(ip) {
@@ -4205,16 +4267,19 @@ fn fetch_single_web_source_excerpt(
     let id = source.id.clone();
     let url = source.url.clone();
     let title = source.title.clone();
-    let parsed_url = match validate_public_web_url(&url) {
+    let parsed_url = match validate_public_web_url_for_read(&url) {
         Ok(url) => url,
         Err(error) => {
             return WebSourceExcerptResult {
                 id,
                 url,
+                final_url: None,
                 title,
                 fetched: false,
+                status: Some("blocked".to_string()),
                 excerpt: None,
-                error: Some(error),
+                error: Some(error.message),
+                error_kind: Some(error.kind.to_string()),
                 fetched_at,
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
@@ -4263,10 +4328,13 @@ fn fetch_single_web_source_excerpt(
             let result = WebSourceExcerptResult {
                 id,
                 url,
+                final_url: None,
                 title,
                 fetched: false,
+                status: Some("failed".to_string()),
                 excerpt: None,
                 error: Some(message),
+                error_kind: Some(if error.is_timeout() { "timeout" } else { "unknown" }.to_string()),
                 fetched_at,
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
@@ -4279,6 +4347,30 @@ fn fetch_single_web_source_excerpt(
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
     };
+
+    let final_url = response.url().to_string();
+    if let Err(error) = validate_public_web_url_for_read(&final_url) {
+        let result = WebSourceExcerptResult {
+            id,
+            url,
+            final_url: Some(final_url),
+            title,
+            fetched: false,
+            status: Some("blocked".to_string()),
+            excerpt: None,
+            error: Some(error.message),
+            error_kind: Some("redirect_blocked".to_string()),
+            fetched_at,
+            cache_status: Some("miss".to_string()),
+            cached_at: None,
+            cache_ttl_seconds: None,
+            excerpt_quality: Some("blocked".to_string()),
+            extractor: Some("none".to_string()),
+            excerpt_reason: Some("Final URL failed public web safety validation".to_string()),
+            code_blocks_truncated: Some(false),
+        };
+        return finish_web_excerpt_result(result, &cache_key, cached);
+    }
 
     let status = response.status();
     if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::UNAUTHORIZED {
@@ -4295,6 +4387,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("blocked".to_string()),
+            error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some("HTTP status requires authorization".to_string()),
             code_blocks_truncated: Some(false),
         };
@@ -4314,6 +4409,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some("empty".to_string()),
             extractor: Some("none".to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("failed".to_string()),
+            error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not found".to_string()),
             code_blocks_truncated: Some(false),
         };
@@ -4333,6 +4431,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some("failed".to_string()),
             extractor: Some("none".to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("failed".to_string()),
+            error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not successful".to_string()),
             code_blocks_truncated: Some(false),
         };
@@ -4364,6 +4465,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("blocked".to_string()),
+            error_kind: Some("content_type_unsupported".to_string()),
             excerpt_reason: Some("Content type is not extractable text or HTML".to_string()),
             code_blocks_truncated: Some(false),
         };
@@ -4387,6 +4491,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("blocked".to_string()),
+            error_kind: Some("too_large".to_string()),
             excerpt_reason: Some("Response body is too large".to_string()),
             code_blocks_truncated: Some(false),
         };
@@ -4414,6 +4521,9 @@ fn fetch_single_web_source_excerpt(
                     cache_ttl_seconds: None,
                     excerpt_quality: Some("blocked".to_string()),
                     extractor: Some("none".to_string()),
+                    final_url: Some(final_url.clone()),
+                    status: Some("blocked".to_string()),
+                    error_kind: Some("too_large".to_string()),
                     excerpt_reason: Some("Response body exceeded size limit".to_string()),
                     code_blocks_truncated: Some(false),
                 };
@@ -4435,6 +4545,9 @@ fn fetch_single_web_source_excerpt(
                 cache_ttl_seconds: None,
                 excerpt_quality: Some("failed".to_string()),
                 extractor: Some("none".to_string()),
+                final_url: Some(final_url.clone()),
+                status: Some("failed".to_string()),
+                error_kind: Some("unknown".to_string()),
                 excerpt_reason: Some("Response body read failed".to_string()),
                 code_blocks_truncated: Some(false),
             };
@@ -4442,7 +4555,7 @@ fn fetch_single_web_source_excerpt(
         }
     };
     let extract_context = WebExtractContext {
-        url: url.clone(),
+        url: final_url.clone(),
         title: title.clone(),
         snippet: source.snippet.clone(),
         source_type: source.source_type.clone(),
@@ -4456,7 +4569,7 @@ fn fetch_single_web_source_excerpt(
         queries: context.queries.clone(),
     };
     let extracted = web_extract::extract_web_excerpt(
-        &url,
+        &final_url,
         &content_type,
         &body,
         &extract_context,
@@ -4477,6 +4590,9 @@ fn fetch_single_web_source_excerpt(
             cache_ttl_seconds: None,
             excerpt_quality: Some(extracted.quality.to_string()),
             extractor: Some(extracted.extractor.to_string()),
+            final_url: Some(final_url.clone()),
+            status: Some("blocked".to_string()),
+            error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some(extracted.reason),
             code_blocks_truncated: Some(extracted.code_blocks_truncated),
         };
@@ -4490,6 +4606,9 @@ fn fetch_single_web_source_excerpt(
         fetched: true,
         excerpt: Some(excerpt_text),
         error: None,
+        final_url: Some(final_url),
+        status: Some(if extracted.quality == "partial" { "partial" } else { "fetched" }.to_string()),
+        error_kind: None,
         fetched_at,
         cache_status: Some("miss".to_string()),
         cached_at: None,
@@ -4533,8 +4652,10 @@ fn finish_web_excerpt_result(
             id: result.id.clone(),
             title: result.title.clone(),
             url: result.url.clone(),
+            final_url: result.final_url.clone(),
             site: site_from_url(&result.url),
             snippet: None,
+            source_kind: None,
             source_type: None,
             reliability: None,
             reliability_label: None,
@@ -4547,6 +4668,8 @@ fn finish_web_excerpt_result(
             excerpt_error: None,
             fetched_at: None,
             cache_status: None,
+            read_status: result.status.clone(),
+            error_kind: result.error_kind.clone(),
             cached_at: None,
             cache_ttl_seconds: None,
             excerpt_quality: None,
@@ -4591,7 +4714,17 @@ fn fetch_web_source_excerpts_blocking(
         .clamp(500, WEB_EXTRACT_MAX_CHARS_PER_SOURCE);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.stop();
+            }
+            if validate_public_web_url_for_read(attempt.url().as_str()).is_ok() {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .user_agent("oi-notebook-public-web-excerpt/0.1")
         .build()
         .map_err(|e| format!("无法创建网页读取 client: {e}"))?;
@@ -4628,6 +4761,9 @@ fn fetch_web_source_excerpts_blocking(
                         excerpt: None,
                         error: Some("网页摘录任务失败".to_string()),
                         fetched_at: Utc::now().timestamp_millis(),
+                        final_url: None,
+                        status: Some("failed".to_string()),
+                        error_kind: Some("unknown".to_string()),
                         cache_status: Some("miss".to_string()),
                         cached_at: None,
                         cache_ttl_seconds: None,

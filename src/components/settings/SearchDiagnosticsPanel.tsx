@@ -12,12 +12,12 @@ import {
   type LocalNoteIndexStatusResult,
   type WebCacheStatusResult,
 } from "@/lib/api";
-import { buildSearchDecision, normalizeWebSearchConfig, type SearchDecision, type WebSearchConfig } from "@/lib/aiWebSearch";
+import { buildExplicitUrlReadPlan, buildSearchDecision, extractExplicitUrls, getFrontendWebReadBlockReason, normalizeWebSearchConfig, type SearchDecision, type WebSearchConfig } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsForCitationScan } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
 type DiagnosticStatus = "pass" | "warn" | "fail" | "skipped" | "running";
-type DiagnosticCategoryId = "decision" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "citations" | "prompt-contract";
+type DiagnosticCategoryId = "decision" | "url-reading" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "citations" | "prompt-contract";
 
 type DiagnosticItem = {
   id: string;
@@ -51,6 +51,7 @@ const STATUS_ORDER: DiagnosticStatus[] = ["pass", "warn", "fail", "skipped", "ru
 
 const emptyCategories = (): DiagnosticCategory[] => [
   { id: "decision", title: "搜索决策", items: [] },
+  { id: "url-reading", title: "URL 阅读规则", items: [] },
   { id: "provider-config", title: "Provider 配置", items: [] },
   {
     id: "provider-test",
@@ -180,6 +181,62 @@ const buildDecisionDiagnostics = (): DiagnosticItem[] => {
       safeDebugInfo: [`queryPreview=${queryPreview(decision)}`, `confidence=${decision.confidence ?? "n/a"}`],
     });
   });
+};
+
+const buildUrlReadingDiagnostics = (config: WebSearchConfig | null): DiagnosticItem[] => {
+  const plain = extractExplicitUrls("阅读这个网页：https://example.com/a?x=1。");
+  const markdown = extractExplicitUrls("[文章](https://example.com/post)");
+  const localhostBlock = getFrontendWebReadBlockReason("http://localhost:3000");
+  const privateBlock = getFrontendWebReadBlockReason("http://192.168.1.1");
+  const searchResultsBlock = getFrontendWebReadBlockReason("https://www.google.com/search?q=notex");
+  const noProviderPlan = buildExplicitUrlReadPlan("帮我总结这个网页：https://example.com/article");
+  const hasProviderKey = !!(config?.bochaApiKey || config?.braveApiKey);
+  return [
+    {
+      id: "url-plain-extract",
+      title: "URL 提取",
+      status: plain.urls[0] === "https://example.com/a?x=1" ? "pass" : "fail",
+      summary: `url=${plain.urls[0] ?? "none"}`,
+      detail: "离线规则检查，不请求 example.com。",
+    },
+    {
+      id: "url-markdown-extract",
+      title: "Markdown URL 提取",
+      status: markdown.urls[0] === "https://example.com/post" ? "pass" : "fail",
+      summary: `url=${markdown.urls[0] ?? "none"}`,
+      detail: "从 [text](url) 中提取目标 URL。",
+    },
+    {
+      id: "url-localhost-block",
+      title: "localhost 拦截",
+      status: localhostBlock === "private_network" ? "pass" : "fail",
+      summary: `reason=${localhostBlock ?? "none"}`,
+      detail: "前端离线标记；Rust 在请求前仍会做最终安全校验。",
+    },
+    {
+      id: "url-private-ip-block",
+      title: "私有 IP 拦截",
+      status: privateBlock === "private_network" ? "pass" : "fail",
+      summary: `reason=${privateBlock ?? "none"}`,
+      detail: "离线规则检查，不请求私有地址。",
+    },
+    {
+      id: "url-search-results-block",
+      title: "搜索结果页拦截",
+      status: searchResultsBlock === "blocked_or_unreadable" ? "pass" : "fail",
+      summary: `reason=${searchResultsBlock ?? "none"}`,
+      detail: "离线规则检查，不把直接 URL 阅读变成搜索引擎结果页爬取。",
+    },
+    {
+      id: "url-no-provider",
+      title: "显式 URL 不依赖 Provider",
+      status: noProviderPlan.shouldRead && noProviderPlan.sources.length === 1 ? "pass" : "fail",
+      summary: hasProviderKey
+        ? "Provider key present; direct URL reading remains independent."
+        : "No Provider key required for explicit URL reading; public web consent is still required.",
+      detail: "直接 URL 阅读复用 fetchWebSourceExcerpts，不调用 Bocha/Brave 搜索。",
+    },
+  ];
 };
 
 const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: string): DiagnosticItem[] => {
@@ -448,6 +505,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     setCategories(emptyCategories());
 
     replaceCategory(runId, "decision", buildDecisionDiagnostics());
+    replaceCategory(runId, "url-reading", buildUrlReadingDiagnostics(webSearchConfig));
     replaceCategory(runId, "provider-config", webSearchConfig
       ? buildProviderConfigDiagnostics(webSearchConfig, rawWebSearchProvider)
       : [{ id: "provider-config-missing", title: "Provider 配置", status: "warn", summary: "AI 配置尚未读取完成。" }]);
