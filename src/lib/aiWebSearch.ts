@@ -2,7 +2,7 @@ import type { NoteChatContextPayload } from "@/lib/api";
 
 export type WebSearchMode = "off" | "auto";
 
-export type WebSearchProvider = "brave" | "bocha" | "searxng";
+export type WebSearchProvider = "bocha" | "brave";
 
 export type WebSourceReliability =
   | "official"
@@ -77,7 +77,6 @@ export type WebSearchConfig = {
   braveApiKey: string;
   bochaApiKey: string;
   bochaEndpoint: string;
-  searxngEndpoint: string;
   publicSearchConsent: boolean;
 };
 
@@ -221,25 +220,24 @@ const unique = (items: string[]): string[] => [...new Set(items.filter(Boolean))
 
 export const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
   enabled: false,
-  provider: "searxng",
+  provider: "bocha",
   braveApiKey: "",
   bochaApiKey: "",
   bochaEndpoint: "https://api.bochaai.com/v1/web-search",
-  searxngEndpoint: "",
   publicSearchConsent: false,
 };
 
 const normalizeWebSearchProvider = (config: Partial<WebSearchConfig> | null | undefined): WebSearchProvider => {
-  if (config?.provider === "bocha" || config?.provider === "brave" || config?.provider === "searxng") {
+  if (config?.provider === "bocha" || config?.provider === "brave") {
     return config.provider;
-  }
-  if (typeof config?.braveApiKey === "string" && config.braveApiKey.trim()) {
-    return "brave";
   }
   if (typeof config?.bochaApiKey === "string" && config.bochaApiKey.trim()) {
     return "bocha";
   }
-  return "searxng";
+  if (typeof config?.braveApiKey === "string" && config.braveApiKey.trim()) {
+    return "brave";
+  }
+  return "bocha";
 };
 
 export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null | undefined): WebSearchConfig => ({
@@ -250,7 +248,6 @@ export const normalizeWebSearchConfig = (config: Partial<WebSearchConfig> | null
   bochaEndpoint: typeof config?.bochaEndpoint === "string"
     ? config.bochaEndpoint.trim()
     : DEFAULT_WEB_SEARCH_CONFIG.bochaEndpoint,
-  searxngEndpoint: typeof config?.searxngEndpoint === "string" ? config.searxngEndpoint.trim() : "",
   publicSearchConsent: config?.publicSearchConsent === true,
 });
 

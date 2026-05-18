@@ -29,9 +29,9 @@ const AI_DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 20;
 const AI_FULL_NOTE_POLISH_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
-const WEB_SEARCH_DEFAULT_PROVIDER: &str = "brave";
-const WEB_SEARCH_COMPAT_PROVIDER: &str = "bocha";
-const WEB_SEARCH_PUBLIC_PROVIDER: &str = "searxng";
+const WEB_SEARCH_DEFAULT_PROVIDER: &str = "bocha";
+const WEB_SEARCH_BRAVE_PROVIDER: &str = "brave";
+const WEB_SEARCH_REMOVED_SEARXNG_PROVIDER: &str = "searxng";
 const WEB_SEARCH_MAX_QUERIES: usize = 8;
 const WEB_SEARCH_MAX_RESULTS: usize = 40;
 const WEB_EXTRACT_MAX_SOURCES: usize = 3;
@@ -46,11 +46,6 @@ const WEB_EXCERPT_FAILURE_TTL_SECONDS: i64 = 20 * 60;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
 const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
-const SEARXNG_DEFAULT_INSTANCES: &[&str] = &[
-    "https://searx.party",
-    "https://searx.tiekoetter.com",
-    "https://search.privacyredirect.com",
-];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +122,12 @@ pub struct PolishedSelectedText {
 #[serde(rename_all = "camelCase")]
 pub struct PolishedFullNote {
     pub polished_body: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PolishedAiPromptTemplate {
+    pub polished_prompt: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -326,21 +327,6 @@ struct BochaWebResult {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct SearxngSearchResponse {
-    #[serde(default)]
-    results: Vec<SearxngWebResult>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SearxngWebResult {
-    title: Option<String>,
-    url: Option<String>,
-    content: Option<String>,
-    engine: Option<String>,
-    category: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestWebSearchConnectionInput {
     pub provider: String,
@@ -356,6 +342,16 @@ pub struct TestWebSearchConnectionResult {
     pub ok: bool,
     pub provider: String,
     pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptCitationContractStatus {
+    pub web_available_ids: bool,
+    pub web_marker_instruction: bool,
+    pub local_available_ids: bool,
+    pub local_marker_instruction: bool,
+    pub bare_id_warning: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -675,11 +671,16 @@ fn normalize_web_search_config(
 ) -> crate::luogu::WebSearchConfigFields {
     let provider = match config.provider.trim() {
         WEB_SEARCH_DEFAULT_PROVIDER => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
-        WEB_SEARCH_COMPAT_PROVIDER => WEB_SEARCH_COMPAT_PROVIDER.to_string(),
-        WEB_SEARCH_PUBLIC_PROVIDER => WEB_SEARCH_PUBLIC_PROVIDER.to_string(),
-        _ if !config.brave_api_key.trim().is_empty() => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
-        _ if !config.bocha_api_key.trim().is_empty() => WEB_SEARCH_COMPAT_PROVIDER.to_string(),
-        _ => WEB_SEARCH_PUBLIC_PROVIDER.to_string(),
+        WEB_SEARCH_BRAVE_PROVIDER => WEB_SEARCH_BRAVE_PROVIDER.to_string(),
+        WEB_SEARCH_REMOVED_SEARXNG_PROVIDER if !config.bocha_api_key.trim().is_empty() => {
+            WEB_SEARCH_DEFAULT_PROVIDER.to_string()
+        }
+        WEB_SEARCH_REMOVED_SEARXNG_PROVIDER if !config.brave_api_key.trim().is_empty() => {
+            WEB_SEARCH_BRAVE_PROVIDER.to_string()
+        }
+        _ if !config.bocha_api_key.trim().is_empty() => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
+        _ if !config.brave_api_key.trim().is_empty() => WEB_SEARCH_BRAVE_PROVIDER.to_string(),
+        _ => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
     };
     crate::luogu::WebSearchConfigFields {
         enabled: config.enabled,
@@ -691,7 +692,6 @@ fn normalize_web_search_config(
         } else {
             config.bocha_endpoint.trim().to_string()
         },
-        searxng_endpoint: config.searxng_endpoint.trim().to_string(),
         public_search_consent: config.public_search_consent,
     }
 }
@@ -2563,6 +2563,67 @@ fn parse_polished_full_note_content(
     })
 }
 
+fn extract_prompt_variables(content: &str) -> Vec<String> {
+    let mut variables = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("{{") {
+        let after_start = &remaining[start + 2..];
+        let Some(end) = after_start.find("}}") else {
+            break;
+        };
+        let variable = after_start[..end].trim();
+        if !variable.is_empty() {
+            let token = format!("{{{{{variable}}}}}");
+            if !variables.iter().any(|existing| existing == &token) {
+                variables.push(token);
+            }
+        }
+        remaining = &after_start[end + 2..];
+    }
+    variables
+}
+
+fn validate_polished_prompt_template_content(
+    original_content: &str,
+    content: &str,
+    scope: &str,
+) -> Result<PolishedAiPromptTemplate, String> {
+    let polished_prompt = strip_wrapping_markdown_fence(content);
+    let polished_prompt = polished_prompt.trim();
+    if polished_prompt.is_empty() {
+        return Err(format!("{scope}: AI returned empty prompt"));
+    }
+
+    let original_variables = extract_prompt_variables(original_content);
+    let polished_variables = extract_prompt_variables(polished_prompt);
+    let missing_variables = original_variables
+        .iter()
+        .filter(|variable| !polished_variables.iter().any(|candidate| candidate == *variable))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_variables.is_empty() {
+        return Err(format!(
+            "{scope}: AI response removed prompt variable(s): {}",
+            missing_variables.join(", ")
+        ));
+    }
+    let new_variables = polished_variables
+        .iter()
+        .filter(|variable| !original_variables.iter().any(|candidate| candidate == *variable))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !new_variables.is_empty() {
+        return Err(format!(
+            "{scope}: AI response added unsupported prompt variable(s): {}",
+            new_variables.join(", ")
+        ));
+    }
+
+    Ok(PolishedAiPromptTemplate {
+        polished_prompt: polished_prompt.to_string(),
+    })
+}
+
 pub(crate) fn organize_luogu_insight(
     config: &AiConfigFields,
     input: &OrganizeLuoguInsightInput,
@@ -3026,6 +3087,81 @@ pub async fn polish_full_note(
     })
     .await
     .map_err(|e| format!("AI full note polish failed: task join failed: {e}"))?
+}
+
+fn polish_ai_prompt_template_blocking(
+    file_name: String,
+    content: String,
+) -> Result<PolishedAiPromptTemplate, String> {
+    let file_name = file_name.trim();
+    let prompt_content = content.trim();
+    if file_name.is_empty() {
+        return Err("AI prompt polish failed: prompt file name is missing".to_string());
+    }
+    if prompt_content.is_empty() {
+        return Err("AI prompt polish failed: prompt content is empty".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let resolved = require_ai_config_resolved(&config)?;
+    let selected_config = config_from_resolved(resolved.clone());
+    let original_variables = extract_prompt_variables(prompt_content);
+    let variables_text = if original_variables.is_empty() {
+        "No variables are present in this template. Do not add any new {{variable}} placeholders.".to_string()
+    } else {
+        original_variables.join(", ")
+    };
+    let user_prompt = format!(
+        "You are optimizing an internal Prompt template for an app. Output only the optimized Prompt body. Do not explain. Do not wrap the result in a Markdown code block. Do not add a title.\n\n\
+Requirements:\n\
+- Preserve every existing variable placeholder exactly. Existing variables: {variables_text}\n\
+- Do not add variables that are not listed above.\n\
+- Preserve the original task goal, input/output constraints, safety boundaries, and core structure requirements.\n\
+- Improve clarity, consistency, wording, and rule order where useful.\n\
+- Reduce repeated, verbose, or conflicting rules.\n\
+- Do not add unrelated content.\n\
+- Do not delete key format requirements.\n\
+- Return only the polished Prompt.\n\n\
+Prompt file name: {file_name}\n\n\
+Original Prompt:\n{prompt_content}"
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": format!(
+                "Return only the polished Prompt body. Do not claim that files were modified. Do not force a fixed assistant identity.\n\n{}",
+                build_model_identity_context(&resolved)
+            )
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion_with_options(
+        &selected_config,
+        messages,
+        0.2,
+        "AI prompt polish failed",
+        ChatCompletionRequestOptions {
+            timeout_secs: AI_FULL_NOTE_POLISH_TIMEOUT_SECS,
+            json_response: false,
+            max_tokens: None,
+        },
+    )?;
+    validate_polished_prompt_template_content(prompt_content, &content, "AI prompt polish failed")
+}
+
+#[tauri::command]
+pub async fn polish_ai_prompt_template(
+    file_name: String,
+    content: String,
+) -> Result<PolishedAiPromptTemplate, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        polish_ai_prompt_template_blocking(file_name, content)
+    })
+    .await
+    .map_err(|e| format!("AI prompt polish failed: task join failed: {e}"))?
 }
 
 #[tauri::command]
@@ -3633,142 +3769,6 @@ fn bocha_response_items(response: BochaSearchResponse) -> Vec<BochaWebResult> {
         .unwrap_or_default()
 }
 
-fn normalize_searxng_instance_url(value: &str) -> Option<String> {
-    let trimmed = value.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut url = reqwest::Url::parse(trimmed).ok()?;
-    match url.scheme() {
-        "http" | "https" => {}
-        _ => return None,
-    }
-    let mut path = url.path().trim_end_matches('/').to_string();
-    if path.is_empty() {
-        path = "/search".to_string();
-    } else if !path.ends_with("/search") {
-        path.push_str("/search");
-    }
-    url.set_path(&path);
-    url.set_query(None);
-    url.set_fragment(None);
-    Some(url.to_string())
-}
-
-fn searxng_candidate_endpoints(endpoint: Option<&str>) -> Vec<String> {
-    let mut candidates = Vec::new();
-    if let Some(custom) = endpoint.and_then(normalize_searxng_instance_url) {
-        candidates.push(custom);
-    }
-    for instance in SEARXNG_DEFAULT_INSTANCES {
-        if let Some(endpoint) = normalize_searxng_instance_url(instance) {
-            if !candidates.iter().any(|item| item == &endpoint) {
-                candidates.push(endpoint);
-            }
-        }
-    }
-    candidates.into_iter().take(3).collect()
-}
-
-fn searxng_request_error(error: &reqwest::Error) -> String {
-    if error.is_timeout() {
-        return "公开搜索请求超时，已尝试降级".to_string();
-    }
-    "公开搜索实例暂时不可用".to_string()
-}
-
-fn searxng_status_retryable(status: reqwest::StatusCode) -> bool {
-    matches!(
-        status,
-        reqwest::StatusCode::FORBIDDEN
-            | reqwest::StatusCode::NOT_FOUND
-            | reqwest::StatusCode::NOT_ACCEPTABLE
-            | reqwest::StatusCode::TOO_MANY_REQUESTS
-    ) || status.is_server_error()
-}
-
-fn searxng_status_error(status: reqwest::StatusCode) -> String {
-    match status.as_u16() {
-        403 => "公开搜索实例拒绝访问，可在 AI 设置中更换 SearXNG 实例".to_string(),
-        404 => "公开搜索实例接口地址可能不正确，可在 AI 设置中更换 SearXNG 实例".to_string(),
-        429 => "公开搜索暂时不可用：公共实例请求过于频繁，可在 AI 设置中更换 SearXNG 实例或配置博查 API Key".to_string(),
-        500..=599 => "公开搜索实例暂时不可用".to_string(),
-        code => format!("公开搜索实例返回 HTTP {code}"),
-    }
-}
-
-fn searxng_result_to_web_source(result: SearxngWebResult) -> Option<WebSearchResult> {
-    let url = result.url?.trim().to_string();
-    if url.is_empty() {
-        return None;
-    }
-    let title = sanitize_search_text(result.title.as_deref().unwrap_or(&url), 120);
-    let snippet_text = sanitize_search_text(result.content.as_deref().unwrap_or(""), 220);
-    let site = site_from_url(&url).or_else(|| {
-        result
-            .engine
-            .as_deref()
-            .map(|name| sanitize_search_text(name, 80))
-            .filter(|name| !name.is_empty())
-    });
-    let source_type = infer_web_source_type(&title, &url, &snippet_text);
-    let (reliability, reliability_label, reliability_reason) =
-        infer_web_reliability(&title, &url, &snippet_text);
-    let id = format!("web-{}", &stable_hash_hex(&url)[..12]);
-    let provider_note = result
-        .engine
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|engine| format!("公开搜索 / {engine}"))
-        .or_else(|| {
-            result
-                .category
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|category| format!("公开搜索 / {category}"))
-        });
-    let snippet = match (snippet_text.is_empty(), provider_note) {
-        (true, Some(note)) => Some(note),
-        (false, Some(note)) => Some(format!("{snippet_text}（{note}）")),
-        (false, None) => Some(snippet_text),
-        (true, None) => None,
-    };
-
-    Some(WebSearchResult {
-        id,
-        title: if title.is_empty() { url.clone() } else { title },
-        url,
-        site,
-        snippet,
-        source_type: Some(source_type),
-        reliability: Some(reliability),
-        reliability_label: Some(reliability_label),
-        reliability_reason: Some(reliability_reason),
-        relevance: None,
-        relevance_label: None,
-        relevance_reason: None,
-        excerpt_status: None,
-        excerpt: None,
-        excerpt_error: None,
-        fetched_at: None,
-        cache_status: None,
-        cached_at: None,
-        cache_ttl_seconds: None,
-        excerpt_quality: None,
-        extractor: None,
-        excerpt_reason: None,
-        code_blocks_truncated: None,
-        rank_score: None,
-        rank_reason: None,
-        is_constructed: None,
-        constructed_reason: None,
-        selected: None,
-        citation_id: None,
-    })
-}
-
 fn search_brave_sources(
     request: &WebSearchRequestInput,
     api_key: &str,
@@ -4013,128 +4013,6 @@ fn search_bocha_sources_with_fallback(
         if let Some(error) = last_error {
             return Err(error);
         }
-    }
-
-    Ok(results)
-}
-
-fn search_searxng_sources(
-    request: &WebSearchRequestInput,
-    endpoint: Option<&str>,
-    max_results: usize,
-) -> Result<Vec<WebSearchResult>, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("NoteX PublicWebSearch")
-        .build()
-        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
-    let endpoints = searxng_candidate_endpoints(endpoint);
-    if endpoints.is_empty() {
-        return Err("公开搜索实例地址无效，请在 AI 设置中检查 SearXNG 实例地址".to_string());
-    }
-    let mut seen_urls = HashSet::new();
-    let mut results = Vec::new();
-    let mut last_error: Option<String> = None;
-
-    for query in request
-        .queries
-        .iter()
-        .map(|query| query.trim())
-        .filter(|query| !query.is_empty())
-        .take(WEB_SEARCH_MAX_QUERIES)
-    {
-        if results.len() >= max_results {
-            break;
-        }
-
-        let mut query_succeeded = false;
-        for endpoint in &endpoints {
-            let mut url = match reqwest::Url::parse(endpoint) {
-                Ok(url) => url,
-                Err(_) => {
-                    last_error = Some(
-                        "公开搜索实例地址无效，请在 AI 设置中检查 SearXNG 实例地址".to_string(),
-                    );
-                    continue;
-                }
-            };
-            if let Err(error) = validate_public_web_url(url.as_str()) {
-                last_error = Some(error);
-                continue;
-            }
-            url.query_pairs_mut()
-                .append_pair("q", query)
-                .append_pair("format", "json")
-                .append_pair("language", "zh-CN")
-                .append_pair("categories", "general");
-
-            let response = client
-                .get(url)
-                .header(
-                    reqwest::header::ACCEPT,
-                    "application/json,text/html;q=0.9,*/*;q=0.8",
-                )
-                .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
-                .send();
-
-            let response = match response {
-                Ok(response) => response,
-                Err(error) => {
-                    last_error = Some(searxng_request_error(&error));
-                    continue;
-                }
-            };
-
-            let status = response.status();
-            let body = response
-                .bytes()
-                .map(|bytes| decode_response_body(&bytes))
-                .map_err(|_| "公开搜索响应读取失败".to_string())?;
-            let body_trimmed = body.trim();
-            if !status.is_success() {
-                last_error = Some(searxng_status_error(status));
-                if searxng_status_retryable(status) {
-                    continue;
-                }
-                return Err(last_error.unwrap_or_else(|| "公开搜索暂时不可用".to_string()));
-            }
-
-            let parsed = match serde_json::from_str::<SearxngSearchResponse>(body_trimmed) {
-                Ok(parsed) => parsed,
-                Err(_) => {
-                    last_error = Some(
-                        "公开搜索实例不支持 JSON 结果，可在 AI 设置中更换 SearXNG 实例".to_string(),
-                    );
-                    continue;
-                }
-            };
-
-            for item in parsed.results {
-                if results.len() >= max_results {
-                    break;
-                }
-                let Some(source) = searxng_result_to_web_source(item) else {
-                    continue;
-                };
-                if seen_urls.insert(source.url.clone()) {
-                    results.push(source);
-                }
-            }
-            query_succeeded = true;
-            last_error = None;
-            break;
-        }
-
-        if !query_succeeded && results.is_empty() {
-            continue;
-        }
-    }
-
-    if results.is_empty() {
-        return Err(last_error.unwrap_or_else(|| {
-            "公开搜索暂时不可用，可在 AI 设置中更换 SearXNG 实例或配置博查 API Key".to_string()
-        }));
     }
 
     Ok(results)
@@ -4824,16 +4702,16 @@ fn search_web_sources_blocking(
         return Err("需要在 AI 设置中配置搜索服务".to_string());
     }
 
+    if provider == WEB_SEARCH_REMOVED_SEARXNG_PROVIDER {
+        return Err("SearXNG Provider 已移除，请配置 Bocha 或 Brave。".to_string());
+    }
+
     let max_results = request
         .max_results
         .unwrap_or(WEB_SEARCH_MAX_RESULTS)
         .clamp(1, WEB_SEARCH_MAX_RESULTS);
     let endpoint_hint = match provider {
-        WEB_SEARCH_COMPAT_PROVIDER => Some(search_config.bocha_endpoint.as_str()),
-        WEB_SEARCH_PUBLIC_PROVIDER => Some(search_config.searxng_endpoint.as_str()),
-        WEB_SEARCH_DEFAULT_PROVIDER if search_config.brave_api_key.trim().is_empty() => {
-            Some(search_config.searxng_endpoint.as_str())
-        }
+        WEB_SEARCH_DEFAULT_PROVIDER => Some(search_config.bocha_endpoint.as_str()),
         _ => None,
     };
     let cache_key = build_web_search_cache_key(provider, &request, max_results, endpoint_hint)?;
@@ -4856,29 +4734,11 @@ fn search_web_sources_blocking(
 
     let provider_result = match provider {
         WEB_SEARCH_DEFAULT_PROVIDER => {
-            if search_config.brave_api_key.trim().is_empty() {
-                search_searxng_sources(
-                    &request,
-                    Some(search_config.searxng_endpoint.as_str()),
-                    max_results,
-                )
-            } else {
-                if search_config.brave_api_key.contains(['\r', '\n']) {
-                    return Err("联网搜索失败：Brave Search API Key 包含非法字符".to_string());
-                }
-                search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
-            }
-        }
-        WEB_SEARCH_COMPAT_PROVIDER => {
             if search_config.bocha_api_key.trim().is_empty() {
-                search_searxng_sources(
-                    &request,
-                    Some(search_config.searxng_endpoint.as_str()),
-                    max_results,
-                )
+                Err("???????? Bocha API Key?????????? AI ???????".to_string())
             } else {
                 if search_config.bocha_api_key.contains(['\r', '\n']) {
-                    return Err("联网搜索失败：博查 API Key 包含非法字符".to_string());
+                    return Err("???????Bocha API Key ??????".to_string());
                 }
                 search_bocha_sources_with_fallback(
                     &request,
@@ -4888,12 +4748,17 @@ fn search_web_sources_blocking(
                 )
             }
         }
-        WEB_SEARCH_PUBLIC_PROVIDER => search_searxng_sources(
-            &request,
-            Some(search_config.searxng_endpoint.as_str()),
-            max_results,
-        ),
-        _ => Err("联网搜索失败：当前 Provider 不受支持".to_string()),
+        WEB_SEARCH_BRAVE_PROVIDER => {
+            if search_config.brave_api_key.trim().is_empty() {
+                Err("???????? Brave Search API Key?????????? AI ???????".to_string())
+            } else {
+                if search_config.brave_api_key.contains(['\r', '\n']) {
+                    return Err("???????Brave Search API Key ??????".to_string());
+                }
+                search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
+            }
+        }
+        _ => Err("????????? Provider ????".to_string()),
     };
 
     match provider_result {
@@ -4959,7 +4824,7 @@ fn test_web_search_connection_blocking(
 ) -> Result<TestWebSearchConnectionResult, String> {
     let provider = input.provider.trim();
     match provider {
-        WEB_SEARCH_COMPAT_PROVIDER => {
+        WEB_SEARCH_DEFAULT_PROVIDER => {
             let api_key = input.api_key.trim();
             if api_key.is_empty() {
                 return Err("需要先填写博查 API Key".to_string());
@@ -4975,45 +4840,67 @@ fn test_web_search_connection_blocking(
                 .unwrap_or(BOCHA_SEARCH_ENDPOINT)
                 .to_string();
             let request = WebSearchRequestInput {
-                queries: vec!["P1000 洛谷".to_string()],
+                queries: vec!["NoteX connectivity test".to_string()],
                 intent: "general_web".to_string(),
                 problem_id: None,
                 algorithm_keywords: Vec::new(),
                 max_results: Some(3),
-                provider: Some(WEB_SEARCH_COMPAT_PROVIDER.to_string()),
+                provider: Some(WEB_SEARCH_DEFAULT_PROVIDER.to_string()),
             };
             let _ =
                 search_bocha_sources_with_fallback(&request, api_key, Some(endpoint.as_str()), 3)?;
             Ok(TestWebSearchConnectionResult {
                 ok: true,
-                provider: WEB_SEARCH_COMPAT_PROVIDER.to_string(),
+                provider: WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
                 endpoint,
             })
         }
-        WEB_SEARCH_PUBLIC_PROVIDER => {
-            let endpoint = input
-                .endpoint
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
+        WEB_SEARCH_BRAVE_PROVIDER => {
+            let api_key = input.api_key.trim();
+            if api_key.is_empty() {
+                return Err("Brave Search API Key is missing".to_string());
+            }
+            if api_key.contains(['\r', '\n']) {
+                return Err("Brave Search API Key contains invalid characters".to_string());
+            }
             let request = WebSearchRequestInput {
-                queries: vec!["P3379 LCA".to_string()],
+                queries: vec!["NoteX connectivity test".to_string()],
                 intent: "general_web".to_string(),
                 problem_id: None,
                 algorithm_keywords: Vec::new(),
                 max_results: Some(3),
-                provider: Some(WEB_SEARCH_PUBLIC_PROVIDER.to_string()),
+                provider: Some(WEB_SEARCH_BRAVE_PROVIDER.to_string()),
             };
-            let _ = search_searxng_sources(&request, endpoint, 3)?;
+            let _ = search_brave_sources(&request, api_key, 3)?;
             Ok(TestWebSearchConnectionResult {
                 ok: true,
-                provider: WEB_SEARCH_PUBLIC_PROVIDER.to_string(),
-                endpoint: endpoint
-                    .and_then(normalize_searxng_instance_url)
-                    .unwrap_or_else(|| "内置候选实例".to_string()),
+                provider: WEB_SEARCH_BRAVE_PROVIDER.to_string(),
+                endpoint: BRAVE_SEARCH_ENDPOINT.to_string(),
             })
         }
-        _ => Err("当前测试连接支持博查 Bocha 或公开搜索。".to_string()),
+        WEB_SEARCH_REMOVED_SEARXNG_PROVIDER => {
+            Err("SearXNG Provider \u{5df2}\u{79fb}\u{9664}\u{ff0c}\u{8bf7}\u{914d}\u{7f6e} Bocha \u{6216} Brave\u{3002}".to_string())
+        }
+        _ => Err("Current connection test supports Bocha or Brave Search.".to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_prompt_citation_contract_status() -> PromptCitationContractStatus {
+    let source = include_str!("ai.rs");
+    let web_ids = ["Available web", " citation IDs"].concat();
+    let marker_instruction = ["Citation marker to use", " in answer: [[{}]]"].concat();
+    let local_ids = ["Available local-note", " citation IDs"].concat();
+    let local_marker = ["Local note citations must use", " [[N1]] style markers"].concat();
+    let bare_web = ["Never write plain single-bracket", " tokens like [S1]"].concat();
+    let bare_local = ["Do not output plain", " [N1] or [S1]"].concat();
+    PromptCitationContractStatus {
+        web_available_ids: source.contains(&web_ids),
+        web_marker_instruction: source.contains(&marker_instruction),
+        local_available_ids: source.contains(&local_ids),
+        local_marker_instruction: source.contains(&local_marker)
+            || source.contains(&marker_instruction),
+        bare_id_warning: source.contains(&bare_web) && source.contains(&bare_local),
     }
 }
 

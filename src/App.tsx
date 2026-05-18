@@ -1,8 +1,8 @@
 ﻿import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, ChevronRight, Columns2, Download, ExternalLink, Eye, FileText, FolderOpen, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FileText, FolderOpen, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,9 +16,10 @@ import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, ty
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
+import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
 import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
@@ -85,6 +86,13 @@ const TOOLBAR_FONT_SIZE_DEFAULT = 12;
 const SETTINGS_FONT_SIZE_MIN = 13;
 const SETTINGS_FONT_SIZE_MAX = 18;
 const SETTINGS_FONT_SIZE_DEFAULT = 14;
+const SETTINGS_CENTER_MIN_WIDTH = 860;
+const SETTINGS_CENTER_MIN_HEIGHT = 560;
+const SETTINGS_CENTER_DEFAULT_WIDTH = 1180;
+const SETTINGS_CENTER_DEFAULT_HEIGHT = 780;
+const SETTINGS_CENTER_MAXIMIZED_MARGIN_X = 24;
+const SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP = 56;
+const SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM = 40;
 const AI_CONFIG_MISSING_MESSAGE =
   "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
 const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
@@ -103,6 +111,174 @@ const EDITOR_PREVIEW_RATIO_MIN = 0.2;
 const EDITOR_PREVIEW_RATIO_MAX = 0.8;
 const EDITOR_PREVIEW_MIN_PANE_WIDTH = 320;
 
+type SettingsCenterRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type SettingsResizeHandle = "left" | "right" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+function isFinitePositiveNumber(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  const safeMax = Math.max(min, max);
+  return Math.min(Math.max(value, min), safeMax);
+}
+
+function getSettingsViewportSize() {
+  if (typeof window === "undefined") {
+    return {
+      width: SETTINGS_CENTER_DEFAULT_WIDTH + SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2,
+      height: SETTINGS_CENTER_DEFAULT_HEIGHT + SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP + SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM,
+    };
+  }
+  const viewportWidth = Number.isFinite(window.innerWidth) ? window.innerWidth : SETTINGS_CENTER_DEFAULT_WIDTH + SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2;
+  const viewportHeight = Number.isFinite(window.innerHeight) ? window.innerHeight : SETTINGS_CENTER_DEFAULT_HEIGHT + SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP + SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM;
+  return {
+    width: Math.max(320, viewportWidth),
+    height: Math.max(360, viewportHeight),
+  };
+}
+
+function getSettingsCenterMaxSize() {
+  const viewport = getSettingsViewportSize();
+  return {
+    width: Math.max(1, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2),
+    height: Math.max(1, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM),
+  };
+}
+
+function getDefaultSettingsCenterRect(): SettingsCenterRect {
+  const viewport = getSettingsViewportSize();
+  const maxSize = getSettingsCenterMaxSize();
+  const width = Math.min(SETTINGS_CENTER_DEFAULT_WIDTH, maxSize.width);
+  const height = Math.min(SETTINGS_CENTER_DEFAULT_HEIGHT, maxSize.height);
+  const left = Math.max(0, Math.min(Math.max(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, (viewport.width - width) / 2), viewport.width - width));
+  const top = Math.max(0, Math.min(Math.max(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, (viewport.height - height) / 2), viewport.height - height));
+  return {
+    left,
+    top,
+    width,
+    height,
+  };
+}
+
+function getMaximizedSettingsCenterRect(): SettingsCenterRect {
+  const maxSize = getSettingsCenterMaxSize();
+  return clampSettingsCenterRect({
+    left: SETTINGS_CENTER_MAXIMIZED_MARGIN_X,
+    top: SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP,
+    width: maxSize.width,
+    height: maxSize.height,
+  });
+}
+
+function clampSettingsCenterRect(rect: SettingsCenterRect): SettingsCenterRect {
+  const viewport = getSettingsViewportSize();
+  const maxSize = getSettingsCenterMaxSize();
+  const defaultRect = getDefaultSettingsCenterRect();
+  const minWidth = Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width);
+  const minHeight = Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height);
+  const width = Math.min(
+    Math.max(isFinitePositiveNumber(rect.width) ? rect.width : defaultRect.width, minWidth),
+    maxSize.width,
+  );
+  const height = Math.min(
+    Math.max(isFinitePositiveNumber(rect.height) ? rect.height : defaultRect.height, minHeight),
+    maxSize.height,
+  );
+  const minLeft = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, Math.max(0, viewport.width - width));
+  const maxLeft = Math.max(minLeft, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X - width);
+  const minTop = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, Math.max(0, viewport.height - height));
+  const maxTop = Math.max(minTop, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM - height);
+  const safeLeft = Number.isFinite(rect.left) ? rect.left : defaultRect.left;
+  const safeTop = Number.isFinite(rect.top) ? rect.top : defaultRect.top;
+  return {
+    left: Math.min(Math.max(safeLeft, minLeft), maxLeft),
+    top: Math.min(Math.max(safeTop, minTop), maxTop),
+    width,
+    height,
+  };
+}
+
+function isSettingsCenterRectFullyVisible(rect: SettingsCenterRect): boolean {
+  const viewport = getSettingsViewportSize();
+  return (
+    Number.isFinite(rect.left) &&
+    Number.isFinite(rect.top) &&
+    isFinitePositiveNumber(rect.width) &&
+    isFinitePositiveNumber(rect.height) &&
+    rect.left >= 0 &&
+    rect.top >= 0 &&
+    rect.left + rect.width <= viewport.width &&
+    rect.top + rect.height <= viewport.height
+  );
+}
+
+function getSafeOpenedSettingsCenterRect(rect: SettingsCenterRect): SettingsCenterRect {
+  const defaultRect = getDefaultSettingsCenterRect();
+  const maxSize = getSettingsCenterMaxSize();
+  if (!isFinitePositiveNumber(rect.width) || !isFinitePositiveNumber(rect.height)) return defaultRect;
+  const width = Math.min(Math.max(rect.width, Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width)), maxSize.width);
+  const height = Math.min(Math.max(rect.height, Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height)), maxSize.height);
+  const viewport = getSettingsViewportSize();
+  const centeredRect = clampSettingsCenterRect({
+    left: (viewport.width - width) / 2,
+    top: (viewport.height - height) / 2,
+    width,
+    height,
+  });
+  return isSettingsCenterRectFullyVisible(centeredRect) ? centeredRect : defaultRect;
+}
+
+function getSettingsCenterResizeCursor(handle: SettingsResizeHandle): string {
+  if (handle === "left" || handle === "right") return "ew-resize";
+  if (handle === "top" || handle === "bottom") return "ns-resize";
+  if (handle === "top-left" || handle === "bottom-right") return "nwse-resize";
+  return "nesw-resize";
+}
+
+function getResizedSettingsCenterRect(handle: SettingsResizeHandle, startRect: SettingsCenterRect, deltaX: number, deltaY: number): SettingsCenterRect {
+  const viewport = getSettingsViewportSize();
+  const maxSize = getSettingsCenterMaxSize();
+  const minWidth = Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width);
+  const minHeight = Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height);
+  const minLeft = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, Math.max(0, viewport.width - minWidth));
+  const minTop = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, Math.max(0, viewport.height - minHeight));
+  const rightLimit = Math.max(1, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X);
+  const bottomLimit = Math.max(1, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM);
+  const startRight = startRect.left + startRect.width;
+  const startBottom = startRect.top + startRect.height;
+  let left = startRect.left;
+  let top = startRect.top;
+  let right = startRight;
+  let bottom = startBottom;
+
+  if (handle.includes("left")) {
+    left = clampNumber(startRect.left + deltaX, minLeft, startRight - minWidth);
+  }
+  if (handle.includes("right")) {
+    right = clampNumber(startRight + deltaX, startRect.left + minWidth, rightLimit);
+  }
+  if (handle.includes("top")) {
+    top = clampNumber(startRect.top + deltaY, minTop, startBottom - minHeight);
+  }
+  if (handle.includes("bottom")) {
+    bottom = clampNumber(startBottom + deltaY, startRect.top + minHeight, bottomLimit);
+  }
+
+  return clampSettingsCenterRect({
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  });
+}
+
 type NewNoteDirectory = "tricks" | "problems";
 type NoteTemplateId = "blank" | "trick" | "solution";
 type EditorViewMode = "split" | "editor" | "preview";
@@ -116,8 +292,26 @@ type LuoguMissingInsightStrategy = "skip" | "draft";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type AppTheme = "dark" | "light";
 type ReadingDensity = "compact" | "standard" | "comfortable";
-type SettingsSection = "general" | "appearance" | "editor" | "ai" | "luogu" | "blog" | "git" | "data" | "about";
-type AiSettingsTab = "api" | "web-search" | "prompts" | "local-notes";
+type SettingsCategory = "appearance" | "ai" | "luogu" | "blog" | "data" | "about" | "diagnostics" | "git" | "editor";
+type SettingsSection =
+  | "appearance-theme"
+  | "ai-api"
+  | "ai-web-search"
+  | "ai-prompts"
+  | "ai-local-notes"
+  | "luogu-account"
+  | "blog-preview"
+  | "data-storage"
+  | "about-version"
+  | "about-markdown"
+  | "about-privacy"
+  | "diagnostics-search"
+  | "git-sync";
+type SettingsGroupId = Exclude<SettingsCategory, "editor">;
+type SettingsTarget =
+  | { type: "category"; category: SettingsGroupId }
+  | { type: "page"; page: SettingsSection };
+type SettingsView = "main" | "prompt-editor";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
@@ -295,21 +489,57 @@ const READING_DENSITY_OPTIONS: Array<{
     calloutSpacing: "1.25rem",
   },
 ];
-const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; blurb: string; developerOnly?: boolean }> = [
-  { id: "appearance", label: "外观", blurb: "主题与字号" },
-  { id: "ai", label: "AI", blurb: "模型、API 与 Prompt" },
-  { id: "luogu", label: "洛谷", blurb: "导入与扫描" },
-  { id: "blog", label: "博客", blurb: "本地预览" },
-  { id: "git", label: "Git", blurb: "进阶同步入口", developerOnly: true },
-  { id: "data", label: "数据与存储", blurb: "目录与说明" },
-  { id: "about", label: "关于", blurb: "版本与说明" },
+const SETTINGS_TREE: Array<{
+  id: SettingsGroupId;
+  label: string;
+  developerOnly?: boolean;
+  children: Array<{ id: SettingsSection; label: string }>;
+}> = [
+  { id: "appearance", label: "外观", children: [{ id: "appearance-theme", label: "主题与字号" }] },
+  {
+    id: "ai",
+    label: "AI",
+    children: [
+      { id: "ai-api", label: "模型与 API" },
+      { id: "ai-web-search", label: "联网搜索" },
+      { id: "ai-prompts", label: "Prompt 模板" },
+      { id: "ai-local-notes", label: "本地笔记" },
+    ],
+  },
+  { id: "luogu", label: "洛谷", children: [{ id: "luogu-account", label: "账号与扫描" }] },
+  { id: "blog", label: "博客", children: [{ id: "blog-preview", label: "本地预览" }] },
+  { id: "data", label: "数据与存储", children: [{ id: "data-storage", label: "目录与缓存" }] },
+  {
+    id: "about",
+    label: "关于",
+    children: [
+      { id: "about-version", label: "版本与说明" },
+      { id: "about-markdown", label: "Markdown 支持" },
+      { id: "about-privacy", label: "数据与隐私" },
+    ],
+  },
+  { id: "diagnostics", label: "诊断", developerOnly: true, children: [{ id: "diagnostics-search", label: "搜索自检" }] },
+  { id: "git", label: "Git", developerOnly: true, children: [{ id: "git-sync", label: "进阶同步入口" }] },
 ];
-const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string; description: string }> = [
-  { id: "api", label: "模型与 API", description: "配置 OpenAI-compatible API、模型和默认项" },
-  { id: "web-search", label: "联网搜索", description: "配置真实搜索 Provider" },
-  { id: "prompts", label: "Prompt 模板", description: "管理本地 AI 提示词模板" },
-  { id: "local-notes", label: "本地笔记", description: "说明本地笔记检索和索引边界" },
-];
+const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
+  appearance: "appearance-theme",
+  ai: "ai-api",
+  luogu: "luogu-account",
+  blog: "blog-preview",
+  data: "data-storage",
+  about: "about-version",
+  diagnostics: "diagnostics-search",
+  git: "git-sync",
+  editor: "about-markdown",
+};
+const SETTINGS_SECTION_LABELS = SETTINGS_TREE.reduce((labels, group) => {
+  for (const child of group.children) labels[child.id] = { group: group.label, groupId: group.id, section: child.label };
+  return labels;
+}, {} as Record<SettingsSection, { group: string; groupId: SettingsGroupId; section: string }>);
+const SETTINGS_CATEGORY_LABELS = SETTINGS_TREE.reduce((labels, group) => {
+  labels[group.id] = group.label;
+  return labels;
+}, {} as Record<SettingsGroupId, string>);
 const MARKDOWN_CAPABILITIES = [
   "KaTeX",
   "代码高亮",
@@ -550,31 +780,20 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
   });
 }
 
-function formatWebSearchTestError(provider: string, error: unknown): string {
+function formatWebSearchTestError(error: unknown): string {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
-  if (message.includes("公开搜索测试超时")) {
-    return "公开搜索测试超时。公共实例可能不可用，可以更换 SearXNG 实例或改用 Bocha。";
-  }
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) {
-    return provider === "searxng"
-      ? "公开搜索实例被限流了。可以稍后重试、更换 SearXNG 实例，或改用 Bocha。"
-      : "搜索服务返回限流。可以稍后重试，或检查当前 Provider 的额度。";
+    return "搜索服务返回限流。可以稍后重试，或检查当前 Provider 的额度。";
   }
   if (lower.includes("json") || message.includes("不是 JSON")) {
-    return provider === "searxng"
-      ? "公开搜索实例没有返回可解析的 JSON。这个公共实例可能不支持当前接口，可以更换 SearXNG 实例或改用 Bocha。"
-      : "搜索服务返回格式不符合预期，请检查 Endpoint 是否填写为 API 地址。";
+    return "搜索服务返回格式不符合预期，请检查 Endpoint 是否填写为 API 地址。";
   }
   if (lower.includes("timeout") || message.includes("超时")) {
-    return provider === "searxng"
-      ? "公开搜索测试超时。公共实例可能不可用，可以更换 SearXNG 实例或改用 Bocha。"
-      : "搜索服务测试超时。请检查 Endpoint 或稍后重试。";
+    return "搜索服务测试超时。请检查 Endpoint 或稍后重试。";
   }
   if (lower.includes("network") || message.includes("网络") || message.includes("不可用") || message.includes("failed")) {
-    return provider === "searxng"
-      ? "公开搜索实例暂时不可用。测试失败不影响 AI 模型，可以更换 SearXNG 实例或改用 Bocha。"
-      : "搜索服务暂时不可用。测试失败不影响 AI 模型和设置保存。";
+    return "搜索服务暂时不可用。测试失败不影响 AI 模型和设置保存。";
   }
   return message || "搜索测试失败。测试失败不影响设置保存，也不影响普通聊天。";
 }
@@ -915,13 +1134,40 @@ interface PromptUsageInfo {
   scope: string;
   purpose: string;
   variables: PromptVariableInfo[];
-  notes: string[];
+  editable: boolean;
 }
 
 interface PromptVariableInfo {
   name: string;
   meaning: string;
   usage: string;
+}
+
+function SettingsSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <section className="grid min-w-0 gap-0 py-2">
+      <div className="grid gap-1 py-3">
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        {description && <div className="max-w-4xl text-xs leading-5 text-muted-foreground">{description}</div>}
+      </div>
+      <div className="grid min-w-0 gap-0 border-t border-border/70">{children}</div>
+    </section>
+  );
+}
+
+function SettingRow({ title, description, children, align = "center" }: { title: string; description?: ReactNode; children?: ReactNode; align?: "center" | "start" }) {
+  return (
+    <div className={cn(
+      "grid min-w-0 gap-3 border-b border-border/60 py-3 lg:grid-cols-[minmax(220px,0.42fr)_minmax(280px,0.58fr)]",
+      align === "center" ? "lg:items-center" : "lg:items-start",
+    )}>
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        {description && <div className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">{description}</div>}
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
 }
 
 function getPromptUsageInfo(fileName: string): PromptUsageInfo {
@@ -936,10 +1182,7 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
         { name: "{{submission_id}}", meaning: "当前洛谷提交记录 ID。", usage: "用于让 AI 知道这次整理来自哪条提交。" },
         { name: "{{candidate_comment}}", meaning: "从提交备注或上下文里提取出的候选 insight。", usage: "通常应保留在正文输入区，AI 会基于它判断是否值得导入。" },
       ],
-      notes: [
-        "只编辑 Prompt 文本本身，不要写入 API Key、Base URL、Cookie 等密钥。",
-        "这个模板会参与洛谷 insight 整理流程，返回格式要求请保留在 Prompt 内容里。",
-      ],
+      editable: true,
     };
   }
 
@@ -952,10 +1195,7 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
         { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "在模板中写入该变量，执行时会替换为 notes 内的相对路径。" },
         { name: "{{content}}", meaning: "当前笔记完整 Markdown 内容。", usage: "用于让 AI 根据正文生成标题、标签和摘要。" },
       ],
-      notes: [
-        "这个模板只负责元数据补全，不应该要求 AI 改写正文。",
-        "保存后会影响后续 AI 元数据整理请求，但不会自动改动当前笔记。",
-      ],
+      editable: true,
     };
   }
 
@@ -968,10 +1208,7 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
         { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "可用于提示 AI 保持与当前文件主题一致。" },
         { name: "{{body}}", meaning: "去掉 frontmatter 后的正文 Markdown。", usage: "用于让 AI 只润色正文，不改动 frontmatter。" },
       ],
-      notes: [
-        "这个模板面向正文润色，不处理 frontmatter。",
-        "建议保留代码块、公式、链接和表格的保护约束，避免 AI 误改关键内容。",
-      ],
+      editable: true,
     };
   }
 
@@ -980,12 +1217,17 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
     scope: "对应 AI 功能",
     purpose: "用于配置本地 AI Prompt 模板。",
     variables: [],
-    notes: [
-      "Prompt 保存在本地 .oinb/prompts/，不会提交到 Git。",
-      "不要把 API Key、Base URL、Cookie 或其它密钥写进 Prompt。",
-    ],
+    editable: true,
   };
 }
+
+const PROMPT_STYLE_PLACEHOLDER: PromptUsageInfo = {
+  title: "NoteX 回答风格",
+  scope: "全局回答语气",
+  purpose: "通用语气、报告味和回答风格后续会作为独立模板接入；不会散落到每个任务 Prompt。",
+  variables: [],
+  editable: false,
+};
 
 interface LoadedMarkdownParts {
   frontmatterPrefix: string;
@@ -1421,7 +1663,7 @@ export default function App() {
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
   const [isUpdatingLuoguLastSubmissionId, setIsUpdatingLuoguLastSubmissionId] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
-  const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
+  const [isSavingAiConfig] = useState(false);
   const [isTestingWebSearchConnection, setIsTestingWebSearchConnection] = useState(false);
   const [webSearchConnectionMessage, setWebSearchConnectionMessage] = useState<string | null>(null);
   const [isClearingWebCache, setIsClearingWebCache] = useState(false);
@@ -1431,12 +1673,10 @@ export default function App() {
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
   const [aiManualModelId, setAiManualModelId] = useState("");
   const [aiModelSearchQuery, setAiModelSearchQuery] = useState("");
-  const [aiSettingsTab, setAiSettingsTab] = useState<AiSettingsTab>("api");
   const [aiProviderBusyId, setAiProviderBusyId] = useState<string | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateSummary[]>([]);
   const [selectedPromptFileName, setSelectedPromptFileName] = useState("");
   const [promptContent, setPromptContent] = useState("");
-  const [isPromptAdvancedEditorOpen, setIsPromptAdvancedEditorOpen] = useState(false);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
@@ -1444,7 +1684,22 @@ export default function App() {
   const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  const [activeSettingsTarget, setActiveSettingsTarget] = useState<SettingsTarget>({ type: "category", category: "appearance" });
+  const [settingsView, setSettingsView] = useState<SettingsView>("main");
+  const [settingsCenterRect, setSettingsCenterRect] = useState<SettingsCenterRect>(getDefaultSettingsCenterRect);
+  const [isSettingsCenterMaximized, setIsSettingsCenterMaximized] = useState(false);
+  const [isPolishingPrompt, setIsPolishingPrompt] = useState(false);
+  const [promptPolishMessage, setPromptPolishMessage] = useState<string | null>(null);
+  const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>(() => ({
+    appearance: false,
+    ai: false,
+    luogu: false,
+    blog: false,
+    data: false,
+    about: false,
+    diagnostics: false,
+    git: false,
+  }));
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(getInitialDeveloperMode);
   const [searchQuery, setSearchQuery] = useState("");
   const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
@@ -1460,6 +1715,11 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const settingsContentRef = useRef<HTMLDivElement>(null);
+  const settingsCenterPanelRef = useRef<HTMLDivElement>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const settingsCenterRestoreRectRef = useRef<SettingsCenterRect | null>(null);
+  const promptPolishRunRef = useRef(0);
   const searchRequestSeqRef = useRef(0);
   const luoguPrepareRunSeqRef = useRef(0);
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
@@ -1663,18 +1923,6 @@ export default function App() {
     Boolean(aiConfig?.base_url.trim() && aiConfig?.api_key.trim() && aiConfig?.model.trim());
   const selectedAiProvider =
     aiConfigDraft?.providers.find((provider) => provider.id === selectedAiProviderId) ?? null;
-  const savedAiProviderById = useMemo(
-    () => new Map((aiConfig?.providers ?? []).map((provider) => [provider.id, getAiConfigComparable({
-      base_url: "",
-      api_key: "",
-      model: "",
-      providers: [provider],
-      default_provider_id: provider.id,
-      default_model_id: provider.default_model,
-      web_search: DEFAULT_WEB_SEARCH_CONFIG,
-    })])),
-    [aiConfig],
-  );
   const hasAiConfigDraftChanges =
     aiConfigDraft !== null &&
     aiConfig !== null &&
@@ -1701,17 +1949,45 @@ export default function App() {
   const luoguStatusLabel =
     !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已配置" : "未配置";
   const gitStatusLabel = isPushingGit ? "同步中" : "同步入口";
-  const visibleSettingsSections = useMemo(
-    () => SETTINGS_SECTIONS.filter((section) => developerModeEnabled || !section.developerOnly),
+  const visibleSettingsTree = useMemo(
+    () => SETTINGS_TREE.filter((group) => developerModeEnabled || !group.developerOnly),
     [developerModeEnabled],
   );
-  const selectedPromptUsage = useMemo(
-    () => getPromptUsageInfo(selectedPromptFileName),
-    [selectedPromptFileName],
+  const visibleSettingsSectionIds = useMemo(
+    () => new Set(visibleSettingsTree.flatMap((group) => group.children.map((child) => child.id))),
+    [visibleSettingsTree],
   );
-  const selectedPromptTemplate = useMemo(
-    () => promptTemplates.find((prompt) => prompt.fileName === selectedPromptFileName) ?? null,
-    [promptTemplates, selectedPromptFileName],
+  const visibleSettingsCategoryIds = useMemo(
+    () => new Set(visibleSettingsTree.map((group) => group.id)),
+    [visibleSettingsTree],
+  );
+  const activeSettingsGroupId = useMemo<SettingsGroupId>(() => {
+    return activeSettingsTarget.type === "category"
+      ? activeSettingsTarget.category
+      : SETTINGS_SECTION_LABELS[activeSettingsTarget.page]?.groupId ?? "appearance";
+  }, [activeSettingsTarget]);
+  const activeSettingsLabel = useMemo(() => {
+    if (activeSettingsTarget.type === "category") {
+      return { group: SETTINGS_CATEGORY_LABELS[activeSettingsTarget.category] ?? "设置", section: "" };
+    }
+    const label = SETTINGS_SECTION_LABELS[activeSettingsTarget.page] ?? SETTINGS_SECTION_LABELS["appearance-theme"];
+    return { group: label.group, section: label.section };
+  }, [activeSettingsTarget]);
+  const activeSettingsPageKey = activeSettingsTarget.type === "page" ? activeSettingsTarget.page : null;
+  const shouldRenderSettingsPage = (pageKey: SettingsSection): boolean => {
+    if (activeSettingsTarget.type === "page") return activeSettingsTarget.page === pageKey;
+    return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeSettingsTarget.category;
+  };
+  const settingsPageSectionClass = cn(
+    "grid min-w-0 gap-0 px-6 py-5",
+    activeSettingsTarget.type === "category" && "border-b border-border/70 last:border-b-0",
+  );
+  const promptTemplateRows = useMemo(
+    () => promptTemplates.map((prompt) => ({
+      ...prompt,
+      usage: getPromptUsageInfo(prompt.fileName),
+    })),
+    [promptTemplates],
   );
   const editorViewModeLabel =
     editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
@@ -1727,7 +2003,7 @@ export default function App() {
             : isNotesSidebarOpen
               ? "notes"
               : null;
-  const isAiActivityActive = isAiSidebarOpen || (isAdvancedActionsOpen && settingsSection === "ai");
+  const isAiActivityActive = isAiSidebarOpen || (isAdvancedActionsOpen && activeSettingsGroupId === "ai");
   const appZoomLabel = `${Math.round(appZoom * 100)}%`;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
@@ -1752,6 +2028,26 @@ export default function App() {
   const settingsAppearanceStyle = {
     ...appearanceStyle,
     fontSize: "var(--settings-font-size)",
+  } as CSSProperties;
+  const settingsCenterMaxSize = getSettingsCenterMaxSize();
+  const settingsCenterMinSize = {
+    width: Math.min(SETTINGS_CENTER_MIN_WIDTH, settingsCenterMaxSize.width),
+    height: Math.min(SETTINGS_CENTER_MIN_HEIGHT, settingsCenterMaxSize.height),
+  };
+  const effectiveSettingsCenterRect = isSettingsCenterMaximized ? getMaximizedSettingsCenterRect() : clampSettingsCenterRect(settingsCenterRect);
+  const settingsCenterStyle = {
+    ...settingsAppearanceStyle,
+    left: `${effectiveSettingsCenterRect.left}px`,
+    top: `${effectiveSettingsCenterRect.top}px`,
+    width: `${effectiveSettingsCenterRect.width}px`,
+    height: `${effectiveSettingsCenterRect.height}px`,
+    minWidth: `${settingsCenterMinSize.width}px`,
+    minHeight: `${settingsCenterMinSize.height}px`,
+    maxWidth: `${settingsCenterMaxSize.width}px`,
+    maxHeight: `${settingsCenterMaxSize.height}px`,
+    transform: "none",
+    transition: "none",
+    animation: "none",
   } as CSSProperties;
   const dashboardNotes = useMemo(
     () =>
@@ -1878,6 +2174,10 @@ export default function App() {
 
   const updatePreviewFontSize = (nextSize: number) => {
     setPreviewFontSize(clampFontSize(nextSize));
+  };
+
+  const updateReadingDensity = (nextDensity: ReadingDensity) => {
+    setReadingDensity(nextDensity);
   };
 
   const updateToolbarFontSize = (nextSize: number) => {
@@ -2429,10 +2729,8 @@ export default function App() {
     return config;
   };
 
-  const openAiSettings = async () => {
-    setSettingsSection("ai");
-    setAiSettingsTab("api");
-    setIsAdvancedActionsOpen(true);
+  const ensureAiConfigLoadedForSettings = async () => {
+    if (aiConfigDraft || isLoadingAiConfig) return;
     setIsLoadingAiConfig(true);
     try {
       await refreshAiConfig();
@@ -2441,6 +2739,13 @@ export default function App() {
     } finally {
       setIsLoadingAiConfig(false);
     }
+  };
+
+  const openAiSettings = async (options?: { target?: SettingsTarget }) => {
+    activateSettingsTarget(options?.target ?? { type: "category", category: "ai" });
+    setSettingsView("main");
+    setIsAdvancedActionsOpen(true);
+    await ensureAiConfigLoadedForSettings();
   };
 
   const handleFillDeepSeekDefaults = () => {
@@ -2512,32 +2817,14 @@ export default function App() {
     }));
   };
 
-  const handleSaveAiConfig = async () => {
-    if (!aiConfigDraft) {
-      toast.error("AI 配置还没有读取完成");
-      return;
-    }
-    setIsSavingAiConfig(true);
-    try {
-      await saveAiConfig(normalizeAiConfigDraft(aiConfigDraft));
-      const config = await refreshAiConfig();
-      setAiConfigDraft(cloneAiConfig(config));
-      toast.success("AI 配置已保存");
-    } catch (e) {
-      toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
-    } finally {
-      setIsSavingAiConfig(false);
-    }
-  };
-
   const handleTestWebSearchConnection = async () => {
     const webSearchConfig = normalizeWebSearchConfig(aiConfigDraft?.web_search);
-    if (webSearchConfig.provider === "brave") {
-      setWebSearchConnectionMessage("当前测试连接支持博查 Bocha 或公开搜索。Brave Search 可通过保存后在聊天中验证。");
-      return;
-    }
     if (webSearchConfig.provider === "bocha" && !webSearchConfig.bochaApiKey.trim()) {
       setWebSearchConnectionMessage("需要先填写博查 API Key。");
+      return;
+    }
+    if (webSearchConfig.provider === "brave" && !webSearchConfig.braveApiKey.trim()) {
+      setWebSearchConnectionMessage("需要先填写 Brave Search API Key。");
       return;
     }
 
@@ -2547,21 +2834,19 @@ export default function App() {
       const result = await withTimeout(
         testWebSearchConnection({
           provider: webSearchConfig.provider,
-          apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : undefined,
-          endpoint: webSearchConfig.provider === "bocha"
-            ? webSearchConfig.bochaEndpoint
-            : webSearchConfig.searxngEndpoint,
+          apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : webSearchConfig.braveApiKey,
+          endpoint: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaEndpoint : undefined,
         }),
-        webSearchConfig.provider === "searxng" ? 5000 : 8000,
-        webSearchConfig.provider === "searxng" ? "公开搜索测试超时" : "搜索测试超时",
+        5000,
+        "搜索测试超时",
       );
       setWebSearchConnectionMessage(
         result.endpoint
-          ? `连接成功：${result.provider === "searxng" ? "公开搜索" : "Bocha"}，Endpoint ${result.endpoint}`
+          ? `连接成功：${result.provider === "bocha" ? "Bocha" : "Brave Search"}，Endpoint ${result.endpoint}`
           : "连接成功",
       );
     } catch (e) {
-      setWebSearchConnectionMessage(formatWebSearchTestError(webSearchConfig.provider, e));
+      setWebSearchConnectionMessage(formatWebSearchTestError(e));
     } finally {
       setIsTestingWebSearchConnection(false);
     }
@@ -2583,22 +2868,9 @@ export default function App() {
     }
   };
 
-  const handleCancelAiConfigDraft = () => {
-    if (!aiConfig) return;
-    const resetConfig = cloneAiConfig(aiConfig);
-    setAiConfigDraft(resetConfig);
-    setSelectedAiProviderId(
-      resetConfig.providers.find((provider) => provider.id === resetConfig.default_provider_id)?.id ??
-      resetConfig.providers[0]?.id ??
-      "",
-    );
-    setAiManualModelId("");
-    setAiModelSearchQuery("");
-    toast.info("已放弃未保存的 API 管理改动");
-  };
-
   const loadPromptContent = async (fileName: string) => {
     setIsLoadingPrompt(true);
+    setPromptPolishMessage(null);
     try {
       const prompt = await readAiPrompt(fileName);
       setSelectedPromptFileName(prompt.fileName);
@@ -2615,15 +2887,7 @@ export default function App() {
     try {
       const prompts = await listAiPrompts();
       setPromptTemplates(prompts);
-      const currentPrompt =
-        prompts.find((prompt) => prompt.fileName === selectedPromptFileName) ??
-        prompts[0] ??
-        null;
-      if (currentPrompt) {
-        const prompt = await readAiPrompt(currentPrompt.fileName);
-        setSelectedPromptFileName(prompt.fileName);
-        setPromptContent(prompt.content);
-      } else {
+      if (!prompts.some((prompt) => prompt.fileName === selectedPromptFileName)) {
         setSelectedPromptFileName("");
         setPromptContent("");
       }
@@ -2634,9 +2898,9 @@ export default function App() {
     }
   };
 
-  const handleSelectPrompt = (fileName: string) => {
-    if (fileName === selectedPromptFileName || isLoadingPrompt || isSavingPrompt) return;
-    setIsPromptAdvancedEditorOpen(false);
+  const handleEditPrompt = (fileName: string) => {
+    if (isLoadingPrompt || isSavingPrompt || isPolishingPrompt) return;
+    setSettingsView("prompt-editor");
     void loadPromptContent(fileName);
   };
 
@@ -2657,7 +2921,52 @@ export default function App() {
     }
   };
 
+  const handlePolishPrompt = async () => {
+    if (!selectedPromptFileName) {
+      toast.error("请先选择一个 Prompt");
+      return;
+    }
+    const originalContent = promptContent;
+    if (!originalContent.trim()) {
+      toast.error("当前 Prompt 为空");
+      return;
+    }
+
+    const runId = promptPolishRunRef.current + 1;
+    promptPolishRunRef.current = runId;
+    setIsPolishingPrompt(true);
+    setPromptPolishMessage(null);
+    try {
+      const result = await polishAiPromptTemplate(selectedPromptFileName, originalContent);
+      if (!isMountedRef.current || promptPolishRunRef.current !== runId) return;
+      setPromptContent(result.polishedPrompt);
+      setPromptPolishMessage("已覆盖编辑区，保存后生效。");
+      toast.success("Prompt 已润色，保存后生效");
+    } catch (e) {
+      if (!isMountedRef.current || promptPolishRunRef.current !== runId) return;
+      setPromptPolishMessage(`润色失败：${getErrorMessage(e)}`);
+      toast.error(`Prompt 润色失败：${getErrorMessage(e)}`);
+    } finally {
+      if (isMountedRef.current && promptPolishRunRef.current === runId) {
+        setIsPolishingPrompt(false);
+      }
+    }
+  };
+
   const handleCopyPromptVariable = async (variableName: string) => {
+    const textarea = promptTextareaRef.current;
+    if (textarea && document.activeElement === textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      setPromptContent((current) => `${current.slice(0, start)}${variableName}${current.slice(end)}`);
+      window.requestAnimationFrame(() => {
+        textarea.focus();
+        const nextCursor = start + variableName.length;
+        textarea.setSelectionRange(nextCursor, nextCursor);
+      });
+      toast.success(`已插入变量 ${variableName}`);
+      return;
+    }
     try {
       await navigator.clipboard.writeText(variableName);
       toast.success(`已复制变量 ${variableName}`);
@@ -3816,6 +4125,75 @@ export default function App() {
     }
   };
 
+  const handleToggleSettingsCenterMaximize = () => {
+    if (isSettingsCenterMaximized) {
+      const restoreRect = settingsCenterRestoreRectRef.current;
+      setSettingsCenterRect(restoreRect ? getSafeOpenedSettingsCenterRect(restoreRect) : getDefaultSettingsCenterRect());
+      setIsSettingsCenterMaximized(false);
+      return;
+    }
+    settingsCenterRestoreRectRef.current = clampSettingsCenterRect(settingsCenterRect);
+    setIsSettingsCenterMaximized(true);
+  };
+
+  const beginSettingsCenterResize = (handle: SettingsResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startRect = clampSettingsCenterRect(isSettingsCenterMaximized ? getMaximizedSettingsCenterRect() : settingsCenterRect);
+    const panel = settingsCenterPanelRef.current;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    const previousPanelWillChange = panel?.style.willChange ?? "";
+    const cursor = getSettingsCenterResizeCursor(handle);
+    let latestRect = startRect;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = cursor;
+    if (panel) {
+      panel.style.transition = "none";
+      panel.style.animation = "none";
+      panel.style.willChange = "left, top, width, height";
+    }
+    if (isSettingsCenterMaximized) setSettingsCenterRect(startRect);
+    setIsSettingsCenterMaximized(false);
+
+    const applyRectToPanel = (rect: SettingsCenterRect) => {
+      if (!panel) return;
+      panel.style.left = `${rect.left}px`;
+      panel.style.top = `${rect.top}px`;
+      panel.style.width = `${rect.width}px`;
+      panel.style.height = `${rect.height}px`;
+      panel.style.transform = "none";
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      const nextRect = getResizedSettingsCenterRect(handle, startRect, moveEvent.clientX - startX, moveEvent.clientY - startY);
+      latestRect = nextRect;
+      applyRectToPanel(latestRect);
+    };
+
+    const handlePointerUp = () => {
+      const finalRect = clampSettingsCenterRect(latestRect);
+      latestRect = finalRect;
+      applyRectToPanel(finalRect);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      if (panel) {
+        panel.style.willChange = previousPanelWillChange;
+      }
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      setSettingsCenterRect(finalRect);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  };
+
   const handleCloseWindow = async () => {
     try {
       await getCurrentWindow().close();
@@ -3824,36 +4202,93 @@ export default function App() {
     }
   };
 
-  const openSettingsSection = (section: SettingsSection) => {
-    if (section === "editor") {
-      setSettingsSection("about");
+  const activateSettingsTarget = (target: SettingsTarget) => {
+    setActiveSettingsTarget((current) => {
+      if (current.type !== target.type) return target;
+      if (target.type === "category" && current.type === "category") {
+        return current.category === target.category ? current : target;
+      }
+      if (target.type === "page" && current.type === "page") {
+        return current.page === target.page ? current : target;
+      }
+      return target;
+    });
+  };
+
+  const openSettingsSection = (target: SettingsSection | SettingsCategory) => {
+    setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+    if (target in SETTINGS_SECTION_FALLBACK) {
+      const category = target as SettingsCategory;
+      if (category === "editor") {
+        activateSettingsTarget({ type: "page", page: SETTINGS_SECTION_FALLBACK.editor });
+      } else if (visibleSettingsCategoryIds.has(category as SettingsGroupId)) {
+        activateSettingsTarget({ type: "category", category: category as SettingsGroupId });
+        setExpandedSettingsGroups((current) => (
+          current[category] === true ? current : { ...current, [category]: true }
+        ));
+      } else {
+        activateSettingsTarget({ type: "category", category: "appearance" });
+      }
+      setSettingsView("main");
+      setIsAdvancedActionsOpen(true);
+      if (category === "ai" && !aiConfigDraft && !isLoadingAiConfig) {
+        void ensureAiConfigLoadedForSettings();
+      } else if (category === "diagnostics" && !aiConfigDraft && !isLoadingAiConfig) {
+        setIsLoadingAiConfig(true);
+        void refreshAiConfig()
+          .catch((e) => toast.error(`AI 配置读取失败：${e}`))
+          .finally(() => setIsLoadingAiConfig(false));
+      }
+      return;
+    }
+    const section = target as SettingsSection;
+    if (!visibleSettingsSectionIds.has(section)) {
+      activateSettingsTarget({ type: "category", category: "appearance" });
+      setSettingsView("main");
       setIsAdvancedActionsOpen(true);
       return;
     }
-    if (section === "git" && !developerModeEnabled) {
-      setSettingsSection("appearance");
-      setIsAdvancedActionsOpen(true);
-      return;
-    }
-    setSettingsSection(section);
+    activateSettingsTarget({ type: "page", page: section });
+    setExpandedSettingsGroups((current) => {
+      const groupId = SETTINGS_SECTION_LABELS[section]?.groupId;
+      return groupId && current[groupId] !== true ? { ...current, [groupId]: true } : current;
+    });
+    setSettingsView("main");
     setIsAdvancedActionsOpen(true);
-    if (section === "ai" && !aiConfigDraft && !isLoadingAiConfig) {
-      void openAiSettings();
+    if (section.startsWith("ai-") && !aiConfigDraft && !isLoadingAiConfig) {
+      void ensureAiConfigLoadedForSettings();
+    } else if (section === "diagnostics-search" && !aiConfigDraft && !isLoadingAiConfig) {
+      setIsLoadingAiConfig(true);
+      void refreshAiConfig()
+        .catch((e) => toast.error(`AI 配置读取失败：${e}`))
+        .finally(() => setIsLoadingAiConfig(false));
     }
   };
 
   const openSettingsCenter = () => {
-    openSettingsSection("appearance");
+    setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+    activateSettingsTarget({ type: "category", category: "appearance" });
+    setSettingsView("main");
+    setIsAdvancedActionsOpen(true);
+  };
+
+  const toggleSettingsGroup = (groupId: string) => {
+    if (activeSettingsTarget.type === "page" && groupId === activeSettingsGroupId) {
+      setExpandedSettingsGroups((current) => ({ ...current, [groupId]: true }));
+      return;
+    }
+    setExpandedSettingsGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
   };
 
   const closeSettingsCenter = () => {
     if (hasAiConfigDraftChanges && !window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
       return;
     }
+    promptPolishRunRef.current += 1;
+    setIsPolishingPrompt(false);
     if (hasAiConfigDraftChanges && aiConfig) {
       setAiConfigDraft(cloneAiConfig(aiConfig));
     }
-    setIsPromptAdvancedEditorOpen(false);
     setIsAdvancedActionsOpen(false);
   };
 
@@ -3958,10 +4393,38 @@ export default function App() {
 
   useEffect(() => {
     window.localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, developerModeEnabled ? "true" : "false");
-    if (!developerModeEnabled && settingsSection === "git") {
-      setSettingsSection("appearance");
+    const activeTargetVisible = activeSettingsTarget.type === "category"
+      ? visibleSettingsCategoryIds.has(activeSettingsTarget.category)
+      : visibleSettingsSectionIds.has(activeSettingsTarget.page);
+    if (!activeTargetVisible) {
+      setActiveSettingsTarget({ type: "category", category: visibleSettingsTree[0]?.id ?? "appearance" });
+      setSettingsView("main");
     }
-  }, [developerModeEnabled, settingsSection]);
+  }, [activeSettingsTarget, developerModeEnabled, visibleSettingsCategoryIds, visibleSettingsSectionIds, visibleSettingsTree]);
+
+  useEffect(() => {
+    if (!isAdvancedActionsOpen) return;
+    setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+  }, [isAdvancedActionsOpen]);
+
+  useEffect(() => {
+    if (activeSettingsTarget.type === "page") {
+      setExpandedSettingsGroups((current) => (
+        current[activeSettingsGroupId] === true ? current : { ...current, [activeSettingsGroupId]: true }
+      ));
+    }
+    if (settingsView === "main") {
+      const settingsContent = settingsContentRef.current;
+      if (settingsContent) settingsContent.scrollTop = 0;
+    }
+  }, [activeSettingsGroupId, activeSettingsTarget, settingsView]);
+
+  useEffect(() => {
+    if (settingsView !== "prompt-editor" || selectedPromptFileName || isLoadingPrompt) return;
+    setSettingsView("main");
+    setActiveSettingsTarget({ type: "page", page: "ai-prompts" });
+    setExpandedSettingsGroups((current) => ({ ...current, ai: true }));
+  }, [isLoadingPrompt, selectedPromptFileName, settingsView]);
 
   useEffect(() => {
     window.localStorage.setItem(LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
@@ -3978,6 +4441,7 @@ export default function App() {
   useEffect(() => {
     const handleResize = () => {
       setAiSidebarWidth((currentWidth) => clampAiSidebarWidth(currentWidth));
+      setSettingsCenterRect((currentRect) => getSafeOpenedSettingsCenterRect(currentRect));
       const containerWidth = editorPreviewContainerRef.current?.getBoundingClientRect().width;
       setEditorPreviewRatio((currentRatio) => clampEditorPreviewRatio(currentRatio, containerWidth));
     };
@@ -5763,1308 +6227,540 @@ export default function App() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={isAdvancedActionsOpen} onOpenChange={(open) => open ? setIsAdvancedActionsOpen(true) : closeSettingsCenter()}>
+    <Dialog
+      open={isAdvancedActionsOpen}
+      onOpenChange={(open) => {
+        if (open) {
+          setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+          setIsAdvancedActionsOpen(true);
+          return;
+        }
+        closeSettingsCenter();
+      }}
+    >
       <DialogContent
-        className="settings-center flex h-[min(960px,calc(100vh-48px))] w-[min(1480px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
-        style={settingsAppearanceStyle}
+        ref={settingsCenterPanelRef}
+        className="settings-center fixed left-0 top-0 z-[60] flex max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-lg p-0 data-closed:zoom-out-100 data-open:zoom-in-100 sm:max-w-none"
+        style={settingsCenterStyle}
+        showCloseButton={false}
       >
-        <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-6 py-4 text-left">
-          <DialogTitle className="text-base">设置中心</DialogTitle>
-          <div className="text-sm text-muted-foreground">
-            管理 OI Notebook 的常用设置、工具入口和桌面工作流。
+        <div className="absolute right-2.5 top-2.5 z-30 flex items-center gap-1">
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            onClick={handleToggleSettingsCenterMaximize}
+            title={isSettingsCenterMaximized ? "还原设置中心" : "最大化设置中心"}
+            aria-label={isSettingsCenterMaximized ? "还原设置中心" : "最大化设置中心"}
+          >
+            {isSettingsCenterMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            onClick={closeSettingsCenter}
+            title="关闭设置中心"
+            aria-label="关闭设置中心"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-5 py-3 pr-24 text-left">
+          <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <DialogTitle className="text-base">{settingsView === "prompt-editor" ? "Prompt 编辑" : "设置中心"}</DialogTitle>
+              <div className="text-xs leading-5 text-muted-foreground">
+                {settingsView === "prompt-editor"
+                  ? selectedPromptFileName || "读取 Prompt 模板中"
+                  : "左侧选择设置页，右侧只显示当前页。"}
+              </div>
+            </div>
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
-          <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-border/80 bg-muted/10 md:w-[240px] md:min-w-[240px] md:border-b-0 md:border-r">
-            <div className="px-4 py-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              Sections
-            </div>
-            <ScrollArea className="min-h-0 flex-1 max-h-[24vh] md:max-h-none">
-              <div className="grid gap-1 p-3">
-                {visibleSettingsSections.map((section) => {
-                  const isActive = settingsSection === section.id;
-                  return (
-                    <Button
-                      key={section.id}
-                      variant="ghost"
-                      className={cn(
-                        "h-auto w-full justify-start rounded-md px-3 py-2 text-left",
-                        isActive
-                          ? "bg-accent text-accent-foreground hover:bg-accent"
-                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                      )}
-                      onClick={() => openSettingsSection(section.id)}
-                    >
-                      <div className="grid w-full min-w-0 gap-0.5">
-                        <div className="text-sm font-medium">{section.label}</div>
-                        <div className={cn("text-xs leading-5", isActive ? "text-accent-foreground/80" : "text-muted-foreground")}>
-                          {section.blurb}
+          {settingsView === "main" && (
+            <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-border/80 bg-muted/10 md:w-[236px] md:min-w-[236px] md:border-b-0 md:border-r">
+              <div className="px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">设置</div>
+              <ScrollArea className="min-h-0 flex-1 max-h-[28vh] md:max-h-none">
+                <div className="grid gap-0 p-2">
+                  {visibleSettingsTree.map((group) => {
+                    const isExpanded = expandedSettingsGroups[group.id] === true;
+                    const groupActive = activeSettingsGroupId === group.id;
+                    const categoryActive = activeSettingsTarget.type === "category" && activeSettingsTarget.category === group.id;
+                    return (
+                      <div key={group.id} className="grid gap-0">
+                        <div
+                          className={cn(
+                            "flex h-8 w-full items-center gap-1.5 rounded-sm px-2 text-left text-sm font-medium",
+                            categoryActive ? "bg-accent text-accent-foreground" : groupActive ? "text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                          )}
+                        >
+                          <button
+                            type="button"
+                            className="flex h-6 w-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted/60"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleSettingsGroup(group.id);
+                            }}
+                            aria-label={isExpanded ? `收起 ${group.label}` : `展开 ${group.label}`}
+                          >
+                            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 truncate text-left"
+                            onClick={() => openSettingsSection(group.id)}
+                          >
+                            {group.label}
+                          </button>
                         </div>
-                      </div>
-                    </Button>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-          </aside>
-          <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
-            <ScrollArea className="h-full min-h-0">
-              <div className="grid min-w-0 gap-4 p-6">
-                {settingsSection === "appearance" && (
-                  <>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">外观</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          分开调整主题、软件界面、工具栏文字、设置中心文字，以及 Markdown 编辑和预览内容。设置会立即生效并保存在本机。
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">主题</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          当前使用 {appThemeLabel}。切换后会立即影响主界面、编辑区、预览区、设置中心和弹窗。
-                        </div>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {THEME_OPTIONS.map((option) => {
-                          const isActive = appTheme === option.id;
-                          return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => setAppTheme(option.id)}
-                              className={cn(
-                                "grid min-w-0 gap-1 rounded-md border px-4 py-3 text-left transition-colors",
-                                isActive
-                                  ? "border-primary/50 bg-primary/10 text-foreground"
-                                  : "border-border/80 bg-muted/15 text-muted-foreground hover:bg-muted/30 hover:text-foreground",
-                              )}
-                            >
-                              <span className="text-sm font-medium">{option.label}</span>
-                              <span className={cn("text-xs leading-5", isActive ? "text-foreground/75" : "text-muted-foreground")}>
-                                {option.description}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="grid min-w-0 gap-1">
-                          <div className="text-sm font-medium text-foreground">界面密度</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            微调软件界面控件、间距和面板密度；全局缩放由下方“全局界面缩放”和快捷键控制。当前界面密度为 {uiScaleLabel}。
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-2">
-                          {UI_SCALE_PRESETS.map((scale) => {
-                            const isActive = Math.round(uiScale * 100) === Math.round(scale * 100);
-                            return (
-                              <Button
-                                key={scale}
-                                type="button"
-                                variant={isActive ? "default" : "outline"}
-                                size="sm"
-                                className="h-8 min-w-14 px-3"
-                                onClick={() => updateUiScale(scale)}
-                              >
-                                {Math.round(scale * 100)}%
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="grid min-w-0 gap-1">
-                          <div className="text-sm font-medium text-foreground">全局界面缩放</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            影响整个应用界面，包括侧栏、标签页、工具栏、编辑区、预览区和 AI Sidebar；状态栏“界面：{appZoomLabel}”显示同一数值。
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-2">
-                          {APP_ZOOM_PRESETS.map((zoom) => {
-                            const isActive = Math.round(appZoom * 100) === Math.round(zoom * 100);
-                            return (
-                              <Button
-                                key={zoom}
-                                type="button"
-                                variant={isActive ? "default" : "outline"}
-                                size="sm"
-                                className="h-8 min-w-14 px-3"
-                                onClick={() => updateAppZoom(zoom)}
-                              >
-                                {Math.round(zoom * 100)}%
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="grid min-w-0 gap-1">
-                          <div className="text-sm font-medium text-foreground">Markdown 内容缩放</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            只影响 Markdown 编辑正文和预览正文；Ctrl + 鼠标滚轮会调整这个值，状态栏“内容：{contentZoomLabel}”显示同一数值。
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-2">
-                          {CONTENT_ZOOM_PRESETS.map((zoom) => {
-                            const isActive = Math.round(contentZoom * 100) === Math.round(zoom * 100);
-                            return (
-                              <Button
-                                key={zoom}
-                                type="button"
-                                variant={isActive ? "default" : "outline"}
-                                size="sm"
-                                className="h-8 min-w-14 px-3"
-                                onClick={() => updateContentZoom(zoom)}
-                              >
-                                {Math.round(zoom * 100)}%
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">工具栏 / 顶部操作区文字大小</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          影响顶部文件状态、主要操作按钮和 Markdown 工具栏文字，不改变 Markdown 正文内容字号。
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-                        <input
-                          type="range"
-                          min={TOOLBAR_FONT_SIZE_MIN}
-                          max={TOOLBAR_FONT_SIZE_MAX}
-                          step={1}
-                          value={toolbarFontSize}
-                          onChange={(event) => updateToolbarFontSize(Number(event.target.value))}
-                          className="h-2 min-w-0 flex-1 accent-primary"
-                          aria-label="工具栏文字大小"
-                        />
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Input
-                            type="number"
-                            min={TOOLBAR_FONT_SIZE_MIN}
-                            max={TOOLBAR_FONT_SIZE_MAX}
-                            value={toolbarFontSize}
-                            onChange={(event) => updateToolbarFontSize(Number(event.target.value))}
-                            className="h-9 w-20"
-                            aria-label="工具栏文字大小数值"
-                          />
-                          <span className="text-sm text-muted-foreground">px</span>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">设置中心文字大小</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          影响设置中心标题、说明、设置项和表单文字，帮助长中文说明保持可读。
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-                        <input
-                          type="range"
-                          min={SETTINGS_FONT_SIZE_MIN}
-                          max={SETTINGS_FONT_SIZE_MAX}
-                          step={1}
-                          value={settingsFontSize}
-                          onChange={(event) => updateSettingsFontSize(Number(event.target.value))}
-                          className="h-2 min-w-0 flex-1 accent-primary"
-                          aria-label="设置中心文字大小"
-                        />
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Input
-                            type="number"
-                            min={SETTINGS_FONT_SIZE_MIN}
-                            max={SETTINGS_FONT_SIZE_MAX}
-                            value={settingsFontSize}
-                            onChange={(event) => updateSettingsFontSize(Number(event.target.value))}
-                            className="h-9 w-20"
-                            aria-label="设置中心文字大小数值"
-                          />
-                          <span className="text-sm text-muted-foreground">px</span>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">编辑区字体大小</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          影响 Markdown 编辑区正文，不改变工具栏和设置中心文字。
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-                        <input
-                          type="range"
-                          min={FONT_SIZE_MIN}
-                          max={FONT_SIZE_MAX}
-                          step={1}
-                          value={editorFontSize}
-                          onChange={(event) => updateEditorFontSize(Number(event.target.value))}
-                          className="h-2 min-w-0 flex-1 accent-primary"
-                          aria-label="编辑区字体大小"
-                        />
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Input
-                            type="number"
-                            min={FONT_SIZE_MIN}
-                            max={FONT_SIZE_MAX}
-                            value={editorFontSize}
-                            onChange={(event) => updateEditorFontSize(Number(event.target.value))}
-                            className="h-9 w-20"
-                            aria-label="编辑区字体大小数值"
-                          />
-                          <span className="text-sm text-muted-foreground">px</span>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">预览区字体大小</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          影响 Markdown 预览正文和标题比例，代码块、公式、表格和 callout 保持原有渲染结构。
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-                        <input
-                          type="range"
-                          min={FONT_SIZE_MIN}
-                          max={FONT_SIZE_MAX}
-                          step={1}
-                          value={previewFontSize}
-                          onChange={(event) => updatePreviewFontSize(Number(event.target.value))}
-                          className="h-2 min-w-0 flex-1 accent-primary"
-                          aria-label="预览区字体大小"
-                        />
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Input
-                            type="number"
-                            min={FONT_SIZE_MIN}
-                            max={FONT_SIZE_MAX}
-                            value={previewFontSize}
-                            onChange={(event) => updatePreviewFontSize(Number(event.target.value))}
-                            className="h-9 w-20"
-                            aria-label="预览区字体大小数值"
-                          />
-                          <span className="text-sm text-muted-foreground">px</span>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-sm font-medium text-foreground">阅读密度</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          调整预览正文的行高、段落间距、列表间距和 callout 外间距。默认使用标准。
-                        </div>
-                      </div>
-                      <div className="grid gap-2 lg:grid-cols-3">
-                        {READING_DENSITY_OPTIONS.map((option) => {
-                          const isActive = readingDensity === option.id;
-                          return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => setReadingDensity(option.id)}
-                              className={cn(
-                                "grid min-w-0 gap-1 rounded-md border px-4 py-3 text-left transition-colors",
-                                isActive
-                                  ? "border-primary/50 bg-primary/10 text-foreground"
-                                  : "border-border/80 bg-muted/15 text-muted-foreground hover:bg-muted/30 hover:text-foreground",
-                              )}
-                            >
-                              <span className="text-sm font-medium">{option.label}</span>
-                              <span className={cn("text-xs leading-5", isActive ? "text-foreground/75" : "text-muted-foreground")}>
-                                {option.description}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  </>
-                )}
-
-                {settingsSection === "ai" && (
-                  <section className="flex min-h-[620px] min-w-0 flex-col gap-4">
-                    <div className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid min-w-0 gap-1">
-                        <div className="text-base font-semibold text-foreground">AI 设置</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          管理模型配置与本地 Prompt 模板。API Key 只通过后端配置保存，不写入 localStorage。
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 gap-1 border-b border-border/80">
-                        {AI_SETTINGS_TABS.map((tab) => {
-                          const isActive = aiSettingsTab === tab.id;
-                          return (
-                            <button
-                              key={tab.id}
-                              type="button"
-                              className={cn(
-                                "-mb-px min-w-0 border-b-2 px-3 py-2 text-left text-sm transition-colors",
-                                isActive
-                                  ? "border-primary text-foreground"
-                                  : "border-transparent text-muted-foreground hover:text-foreground",
-                              )}
-                              onClick={() => setAiSettingsTab(tab.id)}
-                              title={tab.description}
-                            >
-                              {tab.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {aiSettingsTab === "api" && (
-                      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-border/80 bg-card/70 lg:grid-cols-[280px_minmax(0,1fr)]">
-                        <aside className="flex min-h-0 flex-col border-b border-border/80 bg-muted/10 p-3 lg:border-b-0 lg:border-r">
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">配置组</div>
-                            <Button size="xs" variant="outline" onClick={handleCreateAiProviderDraft} disabled={isLoadingAiConfig || isSavingAiConfig}>
-                              <Plus className="h-3 w-3" />
-                              添加配置组
-                            </Button>
-                          </div>
-                          <div className="grid min-h-0 flex-1 content-start gap-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
-                            {(aiConfigDraft?.providers ?? []).map((provider) => {
-                              const isActive = provider.id === selectedAiProviderId;
-                              const isDefault = provider.id === aiConfigDraft?.default_provider_id;
-                              const providerComparable = getAiConfigComparable({
-                                base_url: "",
-                                api_key: "",
-                                model: "",
-                                providers: [provider],
-                                default_provider_id: provider.id,
-                                default_model_id: provider.default_model,
-                                web_search: DEFAULT_WEB_SEARCH_CONFIG,
-                              });
-                              const isProviderDirty = savedAiProviderById.get(provider.id) !== providerComparable;
+                        {isExpanded && (
+                          <div className="grid gap-0 pl-5">
+                            {group.children.map((child) => {
+                              const isActive = activeSettingsPageKey === child.id;
                               return (
                                 <button
-                                  key={provider.id}
+                                  key={child.id}
                                   type="button"
                                   className={cn(
-                                    "grid min-w-0 gap-1 rounded-md border px-3 py-2.5 text-left transition-colors",
+                                    "h-7 truncate rounded-sm px-2 text-left text-sm",
                                     isActive
-                                      ? "border-primary/50 bg-primary/10 text-foreground"
-                                      : "border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/50 hover:text-foreground",
+                                      ? "bg-accent text-accent-foreground"
+                                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                                   )}
-                                  onClick={() => selectAiProviderForEdit(provider)}
+                                  onClick={() => openSettingsSection(child.id)}
                                 >
-                                  <span className="flex min-w-0 items-center justify-between gap-2">
-                                    <span className="truncate text-sm font-medium">{provider.name || provider.id}</span>
-                                    <span className="flex shrink-0 items-center gap-1">
-                                      {isDefault && <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">默认</span>}
-                                      {isProviderDirty && <span className="rounded-sm border border-border bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">未保存</span>}
-                                    </span>
-                                  </span>
-                                  <span className="truncate text-[11px] text-muted-foreground">{provider.base_url || "未填写 Base URL"}</span>
-                                  <span className="text-[11px] text-muted-foreground">{provider.models.length} models</span>
+                                  {child.label}
                                 </button>
                               );
                             })}
-                            {(aiConfigDraft?.providers.length ?? 0) === 0 && (
-                              <div className="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
-                                还没有配置组。点击上方添加一个 OpenAI-compatible API。
-                              </div>
-                            )}
-                          </div>
-                        </aside>
-
-                        <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden p-4">
-                          {isLoadingAiConfig ? (
-                            <div className="rounded-md border border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                              正在读取 AI 配置...
-                            </div>
-                          ) : selectedAiProvider ? (
-                            <>
-                              <section className="grid min-w-0 gap-3 rounded-md border border-border/70 bg-background/50 p-4">
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                  <div className="grid gap-1">
-                                    <div className="text-sm font-semibold text-foreground">连接配置</div>
-                                    <div className="text-xs leading-5 text-muted-foreground">
-                                      测试连接和同步模型会使用当前草稿内容；同步结果也先进入草稿，保存后才持久化。
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => updateAiConfigDraft((config) => ({
-                                        ...config,
-                                        default_provider_id: selectedAiProvider.id,
-                                        default_model_id: selectedAiProvider.default_model ?? selectedAiProvider.models.find((model) => model.enabled)?.id ?? selectedAiProvider.models[0]?.id ?? null,
-                                      }))}
-                                      disabled={isSavingAiConfig}
-                                    >
-                                      设为默认配置组
-                                    </Button>
-                                    <Button
-                                      variant="destructive"
-                                      size="sm"
-                                      onClick={() => void handleDeleteAiProvider(selectedAiProvider.id)}
-                                      disabled={aiProviderBusy || isSavingAiConfig}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      删除配置组
-                                    </Button>
-                                  </div>
-                                </div>
-
-                                <div className="grid gap-3 md:grid-cols-2">
-                                  <div className="grid gap-2">
-                                    <Label htmlFor="ai-provider-name">名称</Label>
-                                    <Input
-                                      id="ai-provider-name"
-                                      value={selectedAiProvider.name}
-                                      placeholder="DeepSeek / OpenAI / 中转站"
-                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, name: event.target.value, updated_at: Date.now() }))}
-                                    />
-                                  </div>
-                                  <div className="grid gap-2">
-                                    <Label htmlFor="ai-provider-default-model">默认模型</Label>
-                                    <Input
-                                      id="ai-provider-default-model"
-                                      value={selectedAiProvider.default_model ?? ""}
-                                      placeholder="deepseek-chat"
-                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, default_model: event.target.value.trim() || null, updated_at: Date.now() }))}
-                                    />
-                                  </div>
-                                  <div className="grid gap-2 md:col-span-2">
-                                    <Label htmlFor="ai-provider-base-url">Base URL</Label>
-                                    <Input
-                                      id="ai-provider-base-url"
-                                      value={selectedAiProvider.base_url}
-                                      placeholder="https://api.example.com/v1"
-                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, base_url: event.target.value, updated_at: Date.now() }))}
-                                    />
-                                  </div>
-                                  <div className="grid gap-2 md:col-span-2">
-                                    <Label htmlFor="ai-provider-api-key">API Key</Label>
-                                    <Input
-                                      id="ai-provider-api-key"
-                                      value={selectedAiProvider.api_key}
-                                      placeholder="sk-..."
-                                      type="password"
-                                      onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, api_key: event.target.value, updated_at: Date.now() }))}
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Button variant="outline" onClick={() => void handleTestAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}>
-                                    <PlugZap className="h-3.5 w-3.5" />
-                                    {aiProviderBusyId === selectedAiProvider.id ? "处理中..." : "测试连接"}
-                                  </Button>
-                                  <Button variant="outline" onClick={() => void handleSyncAiProviderModels(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}>
-                                    <RefreshCw className="h-3.5 w-3.5" />
-                                    同步模型
-                                  </Button>
-                                  <Button variant="ghost" onClick={handleFillDeepSeekDefaults} disabled={isSavingAiConfig}>
-                                    填入 DeepSeek 默认配置
-                                  </Button>
-                                </div>
-                              </section>
-
-                              <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-md border border-border/70 bg-background/50 p-4">
-                                <div className="grid gap-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <div>
-                                      <div className="text-sm font-semibold text-foreground">模型列表</div>
-                                      <div className="text-xs text-muted-foreground">手动添加、同步、删除和设为默认都先进入草稿。</div>
-                                    </div>
-                                    <div className="flex min-w-0 flex-wrap gap-2">
-                                      <div className="relative min-w-[180px] flex-1">
-                                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                                        <Input
-                                          value={aiModelSearchQuery}
-                                          placeholder="搜索模型"
-                                          onChange={(event) => setAiModelSearchQuery(event.target.value)}
-                                          className="pl-8"
-                                        />
-                                      </div>
-                                      <Input
-                                        value={aiManualModelId}
-                                        placeholder="手动添加模型 ID"
-                                        onChange={(event) => setAiManualModelId(event.target.value)}
-                                        className="min-w-[220px] flex-1"
-                                      />
-                                      <Button variant="outline" onClick={() => void handleAddAiProviderModel()} disabled={!aiManualModelId.trim()}>
-                                        添加模型
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="min-h-0 overflow-hidden rounded-md border border-border/70">
-                                  {selectedAiProvider.models.length > 0 ? (
-                                    <div className="h-full min-h-[260px] max-h-[360px] overflow-auto [scrollbar-width:thin]">
-                                      <div className="grid min-w-[720px] grid-cols-[minmax(260px,1fr)_96px_92px_92px_120px] items-center gap-3 border-b border-border/70 bg-muted/20 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                                        <div>模型 ID</div>
-                                        <div>来源</div>
-                                        <div>Stream</div>
-                                        <div>默认</div>
-                                        <div className="text-right">操作</div>
-                                      </div>
-                                      <div className="divide-y divide-border/60">
-                                        {filteredAiProviderModels.length > 0 ? filteredAiProviderModels.map((model) => {
-                                          const isDefault = selectedAiProvider.id === aiConfigDraft?.default_provider_id && model.id === aiConfigDraft.default_model_id;
-                                          return (
-                                            <div key={model.id} className="grid min-w-[720px] grid-cols-[minmax(260px,1fr)_96px_92px_92px_120px] items-center gap-3 px-3 py-2 text-sm">
-                                              <div className="min-w-0">
-                                                <div className="truncate font-medium text-foreground">{model.name || model.id}</div>
-                                                {model.name && <div className="truncate text-[11px] text-muted-foreground">{model.id}</div>}
-                                              </div>
-                                              <div className="text-xs text-muted-foreground">{model.source === "manual" ? "手动" : "同步"}</div>
-                                              <div className="text-xs text-muted-foreground">{model.supports_stream ? "yes" : "unknown"}</div>
-                                              <div>{isDefault ? <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">默认</span> : <span className="text-xs text-muted-foreground">-</span>}</div>
-                                              <div className="flex justify-end gap-1">
-                                                <Button size="xs" variant={isDefault ? "secondary" : "outline"} onClick={() => void handleSetDefaultAiModel(selectedAiProvider.id, model.id)}>
-                                                  {isDefault ? "已默认" : "设默认"}
-                                                </Button>
-                                                <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteAiProviderModel(selectedAiProvider.id, model.id)}>
-                                                  <Trash2 className="h-3 w-3" />
-                                                </Button>
-                                              </div>
-                                            </div>
-                                          );
-                                        }) : (
-                                          <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-                                            没有匹配的模型。
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-                                      暂无模型，可以同步 /models，或手动添加模型 ID。
-                                    </div>
-                                  )}
-                                </div>
-                              </section>
-                            </>
-                          ) : (
-                            <div className="rounded-md border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
-                              选择左侧配置组，或添加一个新的 OpenAI-compatible API。
-                            </div>
-                          )}
-                        </main>
-                      </div>
-                    )}
-
-                    {aiSettingsTab === "web-search" && (
-                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                        <div className="grid gap-1">
-                          <div className="text-base font-semibold text-foreground">联网搜索 Provider</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            用于 NoteX 的联网搜索来源卡片和少量强相关公开网页摘录。不会读取浏览器信息或登录态。
-                          </div>
-                        </div>
-
-                        <div className="grid gap-4 rounded-md border border-border/70 bg-background/50 p-4">
-                          <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="grid min-w-0 gap-1">
-                              <div className="text-sm font-semibold text-foreground">启用联网搜索 Provider</div>
-                              <div className="max-w-3xl text-xs leading-5 text-muted-foreground">
-                                允许 NoteX 调用所选公开搜索服务。关闭后只保留搜索计划，不会真正请求 Provider。
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className={cn(
-                                "relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60",
-                                aiConfigDraft?.web_search.enabled
-                                  ? "border-primary/70 bg-primary"
-                                  : "border-border bg-muted/40",
-                              )}
-                              onClick={() => updateAiConfigDraft((config) => ({
-                                ...config,
-                                web_search: {
-                                  ...normalizeWebSearchConfig(config.web_search),
-                                  enabled: !normalizeWebSearchConfig(config.web_search).enabled,
-                                },
-                              }))}
-                              disabled={!aiConfigDraft || isSavingAiConfig}
-                              role="switch"
-                              aria-checked={aiConfigDraft?.web_search.enabled === true}
-                              aria-label="启用联网搜索 Provider"
-                            >
-                              <span className={cn(
-                                "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-                                aiConfigDraft?.web_search.enabled && "translate-x-5",
-                              )} />
-                            </button>
-                          </div>
-
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="grid gap-2">
-                              <Label htmlFor="web-search-provider">Provider</Label>
-                              <div
-                                id="web-search-provider"
-                                className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-2"
-                              >
-                                {([
-                                  { value: "searxng", label: "公开搜索（无需 Key）", description: "无需 API Key，适合开箱即用；公共搜索实例可能不稳定。" },
-                                  { value: "bocha", label: "博查 Bocha", description: "适合中文搜索和 AI 应用联网搜索。" },
-                                  { value: "brave", label: "Brave Search", description: "保留现有 Brave 配置，适合继续兼容旧设置。" },
-                                ] as const).map((option) => {
-                                  const currentProvider = normalizeWebSearchConfig(aiConfigDraft?.web_search).provider;
-                                  const isSelected = currentProvider === option.value;
-                                  return (
-                                    <button
-                                      key={option.value}
-                                      type="button"
-                                      className={cn(
-                                        "grid gap-1 rounded-md border px-3 py-2 text-left transition-colors",
-                                        isSelected
-                                          ? "border-primary/60 bg-primary/10 text-foreground"
-                                          : "border-border/70 bg-background/70 text-muted-foreground hover:text-foreground",
-                                      )}
-                                      onClick={() => updateAiConfigDraft((config) => ({
-                                        ...config,
-                                        web_search: {
-                                          ...normalizeWebSearchConfig(config.web_search),
-                                          provider: option.value,
-                                        },
-                                      }))}
-                                      disabled={!aiConfigDraft || isSavingAiConfig}
-                                      aria-pressed={isSelected}
-                                    >
-                                      <span className="text-sm font-medium">{option.label}</span>
-                                      <span className="text-xs leading-5">{option.description}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                            <div className="grid gap-2">
-                              {normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "bocha" ? (
-                                <>
-                                  <Label htmlFor="web-search-bocha-api-key">Bocha API Key</Label>
-                                  <Input
-                                    id="web-search-bocha-api-key"
-                                    type="password"
-                                    value={aiConfigDraft?.web_search.bochaApiKey ?? ""}
-                                    placeholder="sk-..."
-                                    onChange={(event) => updateAiConfigDraft((config) => ({
-                                      ...config,
-                                      web_search: {
-                                        ...normalizeWebSearchConfig(config.web_search),
-                                        provider: "bocha",
-                                        bochaApiKey: event.target.value,
-                                      },
-                                    }))}
-                                    disabled={!aiConfigDraft || isSavingAiConfig}
-                                  />
-                                  <Label htmlFor="web-search-bocha-endpoint">Bocha API Endpoint</Label>
-                                  <Input
-                                    id="web-search-bocha-endpoint"
-                                    value={aiConfigDraft?.web_search.bochaEndpoint ?? ""}
-                                    placeholder="https://api.bochaai.com/v1/web-search"
-                                    onChange={(event) => updateAiConfigDraft((config) => ({
-                                      ...config,
-                                      web_search: {
-                                        ...normalizeWebSearchConfig(config.web_search),
-                                        provider: "bocha",
-                                        bochaEndpoint: event.target.value,
-                                      },
-                                    }))}
-                                    disabled={!aiConfigDraft || isSavingAiConfig}
-                                  />
-                                  <div className="text-xs leading-5 text-muted-foreground">
-                                    适合中文搜索和 AI 应用联网搜索。留空时使用默认地址；若默认地址不可达，可改成控制台或文档实际提供的接口地址。
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => void handleTestWebSearchConnection()}
-                                      disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}
-                                    >
-                                      {isTestingWebSearchConnection ? "测试中..." : "测试连接"}
-                                    </Button>
-                                    {webSearchConnectionMessage && (
-                                      <span className="text-xs leading-5 text-muted-foreground">
-                                        {webSearchConnectionMessage}
-                                      </span>
-                                    )}
-                                  </div>
-                                </>
-                              ) : normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "brave" ? (
-                                <>
-                                  <Label htmlFor="web-search-brave-api-key">Brave Search API Key</Label>
-                                  <Input
-                                    id="web-search-brave-api-key"
-                                    type="password"
-                                    value={aiConfigDraft?.web_search.braveApiKey ?? ""}
-                                    placeholder="BSA..."
-                                    onChange={(event) => updateAiConfigDraft((config) => ({
-                                      ...config,
-                                      web_search: {
-                                        ...normalizeWebSearchConfig(config.web_search),
-                                        provider: "brave",
-                                        braveApiKey: event.target.value,
-                                      },
-                                    }))}
-                                    disabled={!aiConfigDraft || isSavingAiConfig}
-                                  />
-                                </>
-                              ) : (
-                                <>
-                                  <Label htmlFor="web-search-searxng-endpoint">SearXNG 实例地址</Label>
-                                  <Input
-                                    id="web-search-searxng-endpoint"
-                                    value={aiConfigDraft?.web_search.searxngEndpoint ?? ""}
-                                    placeholder="留空则使用内置候选实例"
-                                    onChange={(event) => updateAiConfigDraft((config) => ({
-                                      ...config,
-                                      web_search: {
-                                        ...normalizeWebSearchConfig(config.web_search),
-                                        provider: "searxng",
-                                        searxngEndpoint: event.target.value,
-                                      },
-                                    }))}
-                                    disabled={!aiConfigDraft || isSavingAiConfig}
-                                  />
-                                  <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                                    公开搜索无需 Key，适合开箱即用。公共实例可能限流、返回非标准 JSON 或暂时不可用；如果频繁失败，可以填写自定义 SearXNG 实例，或配置 Bocha API Key。测试失败不代表 NoteX AI 模型不可用，只代表当前公开搜索 Provider 不可用。
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => void handleTestWebSearchConnection()}
-                                      disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}
-                                    >
-                                      {isTestingWebSearchConnection ? "测试中..." : "测试公开搜索"}
-                                    </Button>
-                                    {webSearchConnectionMessage && (
-                                      <span className="min-w-[220px] flex-1 text-xs leading-5 text-muted-foreground">
-                                        {webSearchConnectionMessage}
-                                      </span>
-                                    )}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                            API Key 和自定义 SearXNG 实例地址随 AI 配置保存在本机 `.oinb/config.json`，不会写进源码，也不会进入前端 localStorage。公开搜索无需 Key，但公共实例失败时会自动降级。
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
-                            <div className="grid gap-1">
-                              <div className="text-sm font-medium text-foreground">联网缓存</div>
-                              <div className="text-xs leading-5 text-muted-foreground">
-                                保存公开搜索结果和网页摘录，用于减少重复请求；不保存 API Key、用户笔记或聊天全文。
-                              </div>
-                              {webCacheMessage && (
-                                <div className="text-xs leading-5 text-muted-foreground">{webCacheMessage}</div>
-                              )}
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void handleClearWebCache()}
-                              disabled={isClearingWebCache}
-                            >
-                              {isClearingWebCache ? "清理中..." : "清理联网缓存"}
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2.5">
-                            <div className="grid gap-1">
-                              <div className="text-sm font-medium text-foreground">
-                                公开网页搜索授权：{aiConfigDraft?.web_search.publicSearchConsent ? "已启用" : "未启用"}
-                              </div>
-                              <div className="text-xs leading-5 text-muted-foreground">
-                                首次打开 NoteX 的“联网搜索”开关时会要求确认：只访问公开网页，不读取 Cookie、历史记录、密码、登录状态或本地隐私数据。
-                              </div>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => updateAiConfigDraft((config) => ({
-                                ...config,
-                                web_search: {
-                                  ...normalizeWebSearchConfig(config.web_search),
-                                  publicSearchConsent: false,
-                                },
-                              }))}
-                              disabled={!aiConfigDraft || isSavingAiConfig}
-                            >
-                              重新查看授权说明
-                            </Button>
-                          </div>
-                        </div>
-                      </section>
-                    )}
-
-                    {aiSettingsTab === "prompts" && (
-                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                        <div className="grid gap-2 rounded-md border border-border/70 bg-background/50 p-4">
-                          <div className="text-base font-semibold text-foreground">Prompt 模板</div>
-                          <div className="max-w-4xl text-sm leading-6 text-muted-foreground">
-                            这些模板会影响 NoteX 在洛谷整理、笔记润色、题解格式化等场景中的回答方式。一般只需要调整语气和偏好，不建议随意删除结构要求。
-                          </div>
-                          <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
-                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">修改模板会影响对应 AI 功能。</div>
-                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">保存后只影响本机。</div>
-                            <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">如果输出异常，可以回到这里检查模板内容。</div>
-                          </div>
-                        </div>
-                        {promptTemplates.length === 0 && !selectedPromptFileName ? (
-                          <div className="grid gap-3 rounded-md border border-dashed border-border px-4 py-8">
-                            <div className="grid gap-1">
-                              <div className="text-sm font-medium text-foreground">读取本机模板</div>
-                              <div className="text-sm leading-6 text-muted-foreground">
-                                模板保存在本地 `.oinb/prompts/`，不会写入 API Key、Cookie 或其它敏感配置。
-                              </div>
-                            </div>
-                            <div>
-                              <Button
-                                variant="outline"
-                                onClick={() => void loadPromptTemplates()}
-                                disabled={isLoadingPrompt || isSavingPrompt}
-                              >
-                                <FileText className="h-3.5 w-3.5" />
-                                读取 Prompt 模板
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="grid min-h-0 min-w-0 overflow-hidden rounded-md border border-border/70 lg:grid-cols-[300px_minmax(0,1fr)]">
-                            <aside className="min-h-0 border-b border-border/70 bg-muted/10 p-3 md:border-b-0 md:border-r">
-                              <div className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">模板</div>
-                              <div className="grid max-h-[420px] gap-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
-                                {promptTemplates.map((prompt) => {
-                                  const isActive = prompt.fileName === selectedPromptFileName;
-                                  const promptUsage = getPromptUsageInfo(prompt.fileName);
-                                  return (
-                                    <button
-                                      key={prompt.fileName}
-                                      type="button"
-                                      className={cn(
-                                        "grid min-w-0 gap-1 rounded-md border px-3 py-2.5 text-left transition-colors",
-                                        isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                                      )}
-                                      onClick={() => handleSelectPrompt(prompt.fileName)}
-                                      disabled={isLoadingPrompt || isSavingPrompt}
-                                    >
-                                      <span className="truncate text-sm font-medium">{promptUsage.title || prompt.displayName}</span>
-                                      <span className={cn("truncate text-[11px]", isActive ? "text-accent-foreground/75" : "text-muted-foreground")}>{prompt.fileName}</span>
-                                      <span className={cn("line-clamp-2 text-[11px] leading-5", isActive ? "text-accent-foreground/70" : "text-muted-foreground")}>{promptUsage.purpose}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </aside>
-                            <main className="grid min-h-0 min-w-0 gap-4 p-4">
-                              <div className="grid gap-3 rounded-md border border-border/70 bg-background/50 p-4">
-                                <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-foreground">{selectedPromptUsage.title}</div>
-                                    <div className="mt-1 text-xs leading-5 text-muted-foreground">{selectedPromptUsage.purpose}</div>
-                                  </div>
-                                  <div className="flex shrink-0 flex-wrap gap-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => setIsPromptAdvancedEditorOpen(true)}
-                                      disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
-                                    >
-                                      编辑高级内容
-                                    </Button>
-                                  </div>
-                                </div>
-                                <div className="grid gap-3 text-xs leading-5 text-muted-foreground md:grid-cols-3">
-                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
-                                    <div className="font-medium text-foreground">用途</div>
-                                    <div>{selectedPromptUsage.purpose}</div>
-                                  </div>
-                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
-                                    <div className="font-medium text-foreground">保存位置</div>
-                                    <div>.oinb/prompts/</div>
-                                  </div>
-                                  <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
-                                    <div className="font-medium text-foreground">影响范围</div>
-                                    <div>{selectedPromptUsage.scope}</div>
-                                  </div>
-                                </div>
-                                <div className="grid gap-1 rounded-md border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                                  {selectedPromptUsage.notes.map((note) => (
-                                    <div key={note}>{note}</div>
-                                  ))}
-                                  {!developerModeEnabled && (
-                                    <div>原始文件路径和底层调试说明会在开发者模式启用后显示。</div>
-                                  )}
-                                  {developerModeEnabled && selectedPromptFileName && (
-                                    <div>当前模板文件：{selectedPromptFileName}</div>
-                                  )}
-                                </div>
-                                <div className="text-xs leading-5 text-muted-foreground">
-                                  当前没有恢复默认入口；保存前请确认没有写入 API Key、Cookie 或其它敏感配置。
-                                </div>
-                              </div>
-                              {selectedPromptUsage.variables.length > 0 ? (
-                                <div className="grid gap-3 rounded-md border border-border/70 bg-background/50 p-4">
-                                  <div className="grid gap-1">
-                                    <div className="text-sm font-medium text-foreground">可用变量</div>
-                                    <div className="text-xs leading-5 text-muted-foreground">
-                                      使用双大括号写入变量，例如 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{selectedPromptUsage.variables[0]?.name}</code>。执行对应 AI 功能时，NoteX 会把变量替换成实际内容。
-                                    </div>
-                                  </div>
-                                  <div className="grid gap-2">
-                                    {selectedPromptUsage.variables.map((variable) => (
-                                      <button
-                                        key={variable.name}
-                                        type="button"
-                                        className="grid gap-1 rounded-md border border-border/70 bg-muted/10 px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
-                                        onClick={() => void handleCopyPromptVariable(variable.name)}
-                                        title={`复制 ${variable.name}`}
-                                      >
-                                        <span className="font-mono text-xs font-semibold text-foreground">{variable.name}</span>
-                                        <span className="text-xs leading-5 text-muted-foreground">{variable.meaning}</span>
-                                        <span className="text-[11px] leading-5 text-muted-foreground">{variable.usage} 点击可复制变量名。</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                                  这个模板没有登记可替换变量。可以编辑普通 Prompt 文本，但不要写入 API Key、Cookie 或本机绝对路径。
-                                </div>
-                              )}
-                            </main>
                           </div>
                         )}
-                      </section>
-                    )}
-
-                    {aiSettingsTab === "local-notes" && (
-                      <section className="grid min-w-0 gap-4 rounded-lg border border-border/80 bg-card/70 p-5">
-                        <div className="grid gap-1">
-                          <div className="text-base font-semibold text-foreground">本地笔记</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            NoteX 可以按需检索本地 Markdown 笔记，为回答提供私有上下文。索引和检索结果只保存在本机，不上传到 Provider。
-                          </div>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
-                            <div className="text-sm font-medium text-foreground">索引目录</div>
-                            <div className="mt-2 text-sm text-muted-foreground">.oinb/local-index/</div>
-                          </div>
-                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
-                            <div className="text-sm font-medium text-foreground">隐私边界</div>
-                            <div className="mt-2 text-sm leading-6 text-muted-foreground">索引只来自本地 notes 内容；不会暴露绝对路径。</div>
-                          </div>
-                          <div className="rounded-md border border-border/70 bg-background/50 p-4">
-                            <div className="text-sm font-medium text-foreground">使用方式</div>
-                            <div className="mt-2 text-sm leading-6 text-muted-foreground">聊天中的本地笔记检索会按需读取相关片段，不改变原始笔记。</div>
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                          当前设置中心只展示本地索引说明；清理或重建索引入口后续接入已有后端能力时再显示。
-                        </div>
-                      </section>
-                    )}
-                  </section>
-                )}
-
-                {settingsSection === "luogu" && (
-                  <>
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">洛谷配置</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          管理 Cookie 相关配置，并进入洛谷导入中心。扫描、规则、预览、确认写入仍复用现有流程。
-                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          onClick={() => {
-                            setIsAdvancedActionsOpen(false);
-                            void openLuoguSettings();
-                          }}
-                          disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
-                        >
-                          <Settings className="h-3.5 w-3.5" />
-                          洛谷设置
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setIsAdvancedActionsOpen(false);
-                            void openLuoguDialog();
-                          }}
-                          disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          洛谷导入中心
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={handleTestLuoguConnection}
-                          disabled={isTestingLuoguConnection || isSyncingLuogu}
-                        >
-                          <PlugZap className="h-3.5 w-3.5" />
-                          {isTestingLuoguConnection ? "测试中..." : "测试连接"}
-                        </Button>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </aside>
+          )}
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
+            {settingsView === "prompt-editor" ? (
+              <div className="flex h-full min-h-0 flex-col overflow-hidden">
+                <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/80 bg-background/95 px-6 py-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSettingsView("main")}>
+                      <ChevronRight className="h-3.5 w-3.5 rotate-180" />
+                      返回设置
+                    </Button>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                        <span>{getPromptUsageInfo(selectedPromptFileName).title}</span>
+                        <span className="font-mono text-xs font-normal text-muted-foreground">{selectedPromptFileName}</span>
+                        <span className="text-xs font-normal text-muted-foreground">{promptContent.length.toLocaleString()} 字符</span>
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        {luoguConnectionResult
-                          ? `最近一次 dry run 拉到 ${luoguConnectionResult.fetchedCount} 条提交。`
-                          : "先配置 `_uid` 和 `__client_id`，再进入扫描、规则、预览和确认写入流程。"}
-                      </div>
-                    </section>
-                  </>
-                )}
-
-                {settingsSection === "blog" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
+                      <div className="text-xs leading-5 text-muted-foreground">{getPromptUsageInfo(selectedPromptFileName).purpose}</div>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handlePolishPrompt()}
+                      disabled={!selectedPromptFileName || !promptContent.trim() || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
+                      title="让 AI 在不改变核心结构的前提下优化当前 Prompt 表达"
+                    >
+                      {isPolishingPrompt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {isPolishingPrompt ? "润色中..." : "AI 润色 Prompt"}
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => void handleSavePrompt()} disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}>
+                      <Save className="h-3.5 w-3.5" />
+                      {isSavingPrompt ? "保存中..." : "保存 Prompt"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <section className="grid min-h-0 min-w-0 gap-3 p-0">
                     <div className="grid gap-1">
-                      <div className="text-base font-semibold text-foreground">博客</div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        设置本地博客预览入口，管理阅读视图和服务状态。
-                      </div>
+                      <div className="text-sm font-semibold text-foreground">任务需求 / Prompt 内容</div>
+                      <div className="text-xs leading-5 text-muted-foreground">直接编辑模板内容；保留实际需要的变量和返回格式约束。</div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={handleOpenBlog}>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        打开博客
-                      </Button>
-                      <Button variant="outline" onClick={handleRestartBlog} disabled={isRestartingBlog}>
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        {isRestartingBlog ? "重启中..." : "重启博客"}
-                      </Button>
-                    </div>
-                  </section>
-                )}
-
-                {developerModeEnabled && settingsSection === "git" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="grid gap-1">
-                      <div className="text-base font-semibold text-foreground">Git</div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        这是进阶能力入口，适合在整理完本地改动后再使用，不作为主编辑流里的高频操作。
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}>
-                        <Upload className="h-3.5 w-3.5" />
-                        {isPushingGit ? "同步中..." : "同步 Git"}
-                      </Button>
-                    </div>
-                  </section>
-                )}
-
-                {settingsSection === "data" && (
-                  <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                    <div className="grid gap-1">
-                      <div className="text-base font-semibold text-foreground">数据与存储</div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        `notes` 是本地笔记目录。可以通过“打开笔记文件夹”查看实际位置；备份或迁移时，优先备份
-                        `notes` 目录。AI API Key、洛谷 Cookie / client_id 等敏感配置保存在本地配置文件中，不要随意打包分享整个数据目录。
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={handleOpenNotesFolder}>
-                        <FolderOpen className="h-3.5 w-3.5" />
-                        打开笔记文件夹
-                      </Button>
-                    </div>
-                  </section>
-                )}
-
-                {settingsSection === "about" && (
-                  <div className="grid min-w-0 gap-4">
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="text-base font-semibold text-foreground">关于</div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        OI Notebook 是面向 OI 训练场景的笔记编辑器，同时也是本地博客、洛谷整理和 AI 辅助沉淀的桌面工作台。
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">桌面工作台</span>
-                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">本地优先</span>
-                        <span className="rounded-md border border-border/70 bg-muted/15 px-2.5 py-1">版本：0.1.0</span>
-                      </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">Markdown 支持</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          Markdown 预览支持常用题解写作格式和本地博客展示效果。
+                    <div className="relative min-h-[60vh] min-w-0">
+                      <textarea
+                        ref={promptTextareaRef}
+                        value={promptContent}
+                        onChange={(event) => setPromptContent(event.target.value)}
+                        disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
+                        readOnly={isPolishingPrompt}
+                        spellCheck={false}
+                        className="h-full min-h-[60vh] w-full resize-none rounded-sm border border-border bg-background px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                      />
+                      {isPolishingPrompt && (
+                        <div className="absolute inset-0 grid place-items-center rounded-sm border border-primary/20 bg-background/75 backdrop-blur-[1px]">
+                          <div className="grid justify-items-center gap-3 rounded-sm border border-border/80 bg-background px-5 py-4 text-center shadow-lg">
+                            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                            <div className="grid gap-1">
+                              <div className="text-sm font-medium text-foreground">正在润色 Prompt...</div>
+                              <div className="text-xs leading-5 text-muted-foreground">保留变量和结构要求，请稍候</div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {MARKDOWN_CAPABILITIES.map((feature) => (
-                          <span
-                            key={feature}
-                            className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-xs text-foreground"
+                      )}
+                    </div>
+                    <div className={cn("text-xs leading-5", promptPolishMessage?.startsWith("润色失败") ? "text-destructive" : "text-muted-foreground")}>
+                      {promptPolishMessage ?? "不要写入 API Key、Cookie、密码或本机绝对路径。"}
+                    </div>
+                  </section>
+                  <aside className="grid content-start gap-3 border-t border-border/70 pt-4 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
+                    <div className="grid gap-1">
+                      <div className="text-sm font-semibold text-foreground">可用变量</div>
+                      <div className="text-xs leading-5 text-muted-foreground">编辑器聚焦时点击会插入；否则复制变量名。</div>
+                    </div>
+                    {getPromptUsageInfo(selectedPromptFileName).variables.length > 0 ? (
+                      <div className="grid gap-2">
+                        {getPromptUsageInfo(selectedPromptFileName).variables.map((variable) => (
+                          <button
+                            key={variable.name}
+                            type="button"
+                            className="grid gap-1 rounded-sm border border-border/70 bg-muted/10 px-2.5 py-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                            onClick={() => void handleCopyPromptVariable(variable.name)}
                           >
-                            {feature}
-                          </span>
+                            <span className="font-mono text-xs font-semibold text-foreground">{variable.name}</span>
+                            <span className="text-xs leading-5 text-muted-foreground">{variable.meaning}</span>
+                          </button>
                         ))}
                       </div>
-                    </section>
-
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="grid gap-1">
-                        <div className="text-base font-semibold text-foreground">编辑与预览</div>
-                        <div className="text-sm leading-6 text-muted-foreground">
-                          编辑器能力集中在主工作台，不再单独占用设置页。视图切换和缩放控制保留在 Markdown toolbar 右侧。
-                        </div>
+                    ) : (
+                      <div className="text-xs leading-5 text-muted-foreground">这个模板没有登记可替换变量。</div>
+                    )}
+                  </aside>
+                </div>
+              </div>
+            ) : (
+              <div ref={settingsContentRef} className="h-full min-h-0 overflow-auto">
+                <div className="sticky top-0 z-10 border-b border-border/80 bg-background/95 px-6 py-2 backdrop-blur">
+                  <div className="text-sm font-semibold text-foreground">{activeSettingsLabel.group}</div>
+                  {activeSettingsLabel.section && <div className="text-xs text-muted-foreground">{activeSettingsLabel.section}</div>}
+                </div>
+                <div className="grid min-w-0 gap-0 px-0 py-2">
+                  {shouldRenderSettingsPage("appearance-theme") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1">
+                        <div className="text-base font-semibold text-foreground">主题与字号</div>
                       </div>
-                      <div className="grid gap-2 md:grid-cols-3">
-                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
-                          <span className="font-medium text-foreground">双栏</span>：同时查看编辑区和预览区。
+                      <SettingRow title="主题" description={`当前使用 ${appThemeLabel}。`}>
+                        <div className="flex flex-wrap gap-2">
+                          {THEME_OPTIONS.map((option) => (
+                            <Button key={option.id} type="button" variant={appTheme === option.id ? "default" : "outline"} size="sm" onClick={() => setAppTheme(option.id)}>
+                              {option.label}
+                            </Button>
+                          ))}
                         </div>
-                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
-                          <span className="font-medium text-foreground">仅编辑</span>：更专注地处理 Markdown 正文。
+                      </SettingRow>
+                      <SettingRow title="界面密度" description={`当前 ${uiScaleLabel}。`}>
+                        <div className="flex flex-wrap gap-2">
+                          {UI_SCALE_PRESETS.map((scale) => (
+                            <Button key={scale} type="button" variant={Math.round(uiScale * 100) === Math.round(scale * 100) ? "default" : "outline"} size="sm" onClick={() => updateUiScale(scale)}>
+                              {Math.round(scale * 100)}%
+                            </Button>
+                          ))}
                         </div>
-                        <div className="rounded-md border border-border/70 bg-muted/15 px-3 py-2 text-sm leading-6 text-muted-foreground">
-                          <span className="font-medium text-foreground">仅预览</span>：快速检查渲染效果。
+                      </SettingRow>
+                      <SettingRow title="全局界面缩放" description={`当前 ${appZoomLabel}。`}>
+                        <div className="flex flex-wrap gap-2">
+                          {APP_ZOOM_PRESETS.map((zoom) => (
+                            <Button key={zoom} type="button" variant={Math.round(appZoom * 100) === Math.round(zoom * 100) ? "default" : "outline"} size="sm" onClick={() => updateAppZoom(zoom)}>
+                              {Math.round(zoom * 100)}%
+                            </Button>
+                          ))}
                         </div>
-                      </div>
+                      </SettingRow>
+                      <SettingRow title="设置中心文字大小" description={`${settingsFontSize}px。`}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <input type="range" min={SETTINGS_FONT_SIZE_MIN} max={SETTINGS_FONT_SIZE_MAX} step={1} value={settingsFontSize} onChange={(event) => updateSettingsFontSize(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="设置中心文字大小" />
+                          <Input type="number" min={SETTINGS_FONT_SIZE_MIN} max={SETTINGS_FONT_SIZE_MAX} value={settingsFontSize} onChange={(event) => updateSettingsFontSize(Number(event.target.value))} className="h-8 w-20" aria-label="设置中心文字大小数值" />
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="Markdown 内容缩放" description={`当前 ${contentZoomLabel}。`}>
+                        <div className="flex flex-wrap gap-2">
+                          {CONTENT_ZOOM_PRESETS.map((zoom) => (
+                            <Button key={zoom} type="button" variant={Math.round(contentZoom * 100) === Math.round(zoom * 100) ? "default" : "outline"} size="sm" onClick={() => updateContentZoom(zoom)}>
+                              {Math.round(zoom * 100)}%
+                            </Button>
+                          ))}
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="工具栏文字大小" description={`${toolbarFontSize}px。`}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <input type="range" min={TOOLBAR_FONT_SIZE_MIN} max={TOOLBAR_FONT_SIZE_MAX} step={1} value={toolbarFontSize} onChange={(event) => updateToolbarFontSize(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="工具栏文字大小" />
+                          <Input type="number" min={TOOLBAR_FONT_SIZE_MIN} max={TOOLBAR_FONT_SIZE_MAX} value={toolbarFontSize} onChange={(event) => updateToolbarFontSize(Number(event.target.value))} className="h-8 w-20" aria-label="工具栏文字大小数值" />
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="编辑区字体大小" description={`${editorFontSize}px。`}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <input type="range" min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} step={1} value={editorFontSize} onChange={(event) => updateEditorFontSize(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="编辑区字体大小" />
+                          <Input type="number" min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} value={editorFontSize} onChange={(event) => updateEditorFontSize(Number(event.target.value))} className="h-8 w-20" aria-label="编辑区字体大小数值" />
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="预览区字体大小" description={`${previewFontSize}px。`}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <input type="range" min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} step={1} value={previewFontSize} onChange={(event) => updatePreviewFontSize(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="预览区字体大小" />
+                          <Input type="number" min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} value={previewFontSize} onChange={(event) => updatePreviewFontSize(Number(event.target.value))} className="h-8 w-20" aria-label="预览区字体大小数值" />
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="阅读密度" description={activeReadingDensity.description}>
+                        <div className="flex flex-wrap gap-2">
+                          {READING_DENSITY_OPTIONS.map((option) => (
+                            <Button key={option.id} type="button" variant={readingDensity === option.id ? "default" : "outline"} size="sm" onClick={() => updateReadingDensity(option.id)}>
+                              {option.label}
+                            </Button>
+                          ))}
+                        </div>
+                      </SettingRow>
                     </section>
+                  )}
 
-                    <section className="grid min-w-0 gap-3 rounded-lg border border-border/80 bg-card/70 p-5">
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="grid gap-1">
-                          <div className="text-base font-semibold text-foreground">开发者模式</div>
-                          <div className="text-sm leading-6 text-muted-foreground">
-                            显示 Git、诊断、自检和底层调试入口。普通使用不需要开启。
+                  {shouldRenderSettingsPage("ai-api") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1">
+                        <div className="text-base font-semibold text-foreground">模型与 API</div>
+                        <div className="text-xs leading-5 text-muted-foreground">配置组、默认模型和连接测试。</div>
+                      </div>
+                      <SettingRow title="配置组" description="选择或新增 OpenAI-compatible API。" align="start">
+                        <div className="grid gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" onClick={handleCreateAiProviderDraft} disabled={isLoadingAiConfig || isSavingAiConfig}><Plus className="h-3.5 w-3.5" />添加配置组</Button>
+                            <Button size="sm" variant="outline" onClick={handleFillDeepSeekDefaults} disabled={isSavingAiConfig}>填入 DeepSeek 默认配置</Button>
+                          </div>
+                          <div className="grid gap-1">
+                            {(aiConfigDraft?.providers ?? []).map((provider) => (
+                              <button key={provider.id} type="button" className={cn("flex min-w-0 items-center justify-between gap-2 border-b border-border/50 px-2 py-2 text-left", provider.id === selectedAiProviderId ? "bg-accent/70 text-accent-foreground" : "text-muted-foreground hover:bg-muted/40 hover:text-foreground")} onClick={() => selectAiProviderForEdit(provider)}>
+                                <span className="min-w-0 truncate text-sm font-medium">{provider.name || provider.id}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{provider.models.length} models</span>
+                              </button>
+                            ))}
+                            {(aiConfigDraft?.providers.length ?? 0) === 0 && <div className="text-sm text-muted-foreground">还没有配置组。</div>}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          className={cn(
-                            "relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                            developerModeEnabled
-                              ? "border-primary/70 bg-primary"
-                              : "border-border bg-muted",
-                          )}
-                          onClick={() => setDeveloperModeEnabled((enabled) => !enabled)}
-                          role="switch"
-                          aria-checked={developerModeEnabled}
-                          aria-label="启用开发者模式"
-                        >
-                          <span className={cn(
-                            "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-                            developerModeEnabled && "translate-x-5",
-                          )} />
-                        </button>
-                      </div>
+                      </SettingRow>
+                      {selectedAiProvider && (
+                        <>
+                          <SettingRow title="名称 / 默认模型" description="默认模型会作为该配置组的首选模型。" align="start">
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <Input value={selectedAiProvider.name} placeholder="DeepSeek / OpenAI" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, name: event.target.value, updated_at: Date.now() }))} />
+                              <Input value={selectedAiProvider.default_model ?? ""} placeholder="deepseek-chat" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, default_model: event.target.value.trim() || null, updated_at: Date.now() }))} />
+                            </div>
+                          </SettingRow>
+                          <SettingRow title="Base URL" description="OpenAI-compatible endpoint。">
+                            <Input value={selectedAiProvider.base_url} placeholder="https://api.example.com/v1" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, base_url: event.target.value, updated_at: Date.now() }))} />
+                          </SettingRow>
+                          <SettingRow title="API Key" description="明文只在输入框中临时显示。">
+                            <Input value={selectedAiProvider.api_key} type="password" placeholder="sk-..." onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, api_key: event.target.value, updated_at: Date.now() }))} />
+                          </SettingRow>
+                          <SettingRow title="连接操作" description="测试和同步都使用当前草稿。">
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, default_provider_id: selectedAiProvider.id, default_model_id: selectedAiProvider.default_model ?? selectedAiProvider.models.find((model) => model.enabled)?.id ?? selectedAiProvider.models[0]?.id ?? null }))} disabled={isSavingAiConfig}>设为默认配置组</Button>
+                              <Button variant="outline" size="sm" onClick={() => void handleTestAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><PlugZap className="h-3.5 w-3.5" />{aiProviderBusyId === selectedAiProvider.id ? "处理中..." : "测试连接"}</Button>
+                              <Button variant="outline" size="sm" onClick={() => void handleSyncAiProviderModels(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><RefreshCw className="h-3.5 w-3.5" />同步模型</Button>
+                              <Button variant="destructive" size="sm" onClick={() => void handleDeleteAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><Trash2 className="h-3.5 w-3.5" />删除</Button>
+                            </div>
+                          </SettingRow>
+                          <SettingRow title="模型列表" description="手动添加、删除或设为默认。" align="start">
+                            <div className="grid gap-2">
+                              <div className="flex min-w-0 flex-wrap gap-2">
+                                <Input value={aiModelSearchQuery} placeholder="搜索模型" onChange={(event) => setAiModelSearchQuery(event.target.value)} className="min-w-[160px] flex-1" />
+                                <Input value={aiManualModelId} placeholder="手动添加模型 ID" onChange={(event) => setAiManualModelId(event.target.value)} className="min-w-[180px] flex-1" />
+                                <Button variant="outline" size="sm" onClick={() => void handleAddAiProviderModel()} disabled={!aiManualModelId.trim()}>添加模型</Button>
+                              </div>
+                              <div className="max-h-[260px] overflow-auto border-y border-border/60">
+                                {filteredAiProviderModels.length > 0 ? filteredAiProviderModels.map((model) => {
+                                  const isDefault = selectedAiProvider.id === aiConfigDraft?.default_provider_id && model.id === aiConfigDraft.default_model_id;
+                                  return (
+                                    <div key={model.id} className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 px-2 py-2 text-sm last:border-b-0">
+                                      <div className="min-w-0 truncate text-foreground">{model.name || model.id}</div>
+                                      <div className="flex shrink-0 gap-1">
+                                        <Button size="xs" variant={isDefault ? "secondary" : "outline"} onClick={() => void handleSetDefaultAiModel(selectedAiProvider.id, model.id)}>{isDefault ? "已默认" : "设默认"}</Button>
+                                        <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteAiProviderModel(selectedAiProvider.id, model.id)}><Trash2 className="h-3 w-3" /></Button>
+                                      </div>
+                                    </div>
+                                  );
+                                }) : <div className="px-2 py-6 text-center text-sm text-muted-foreground">暂无匹配模型。</div>}
+                              </div>
+                            </div>
+                          </SettingRow>
+                        </>
+                      )}
                     </section>
-                  </div>
-                )}
+                  )}
+
+                  {shouldRenderSettingsPage("ai-web-search") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1">
+                        <div className="text-base font-semibold text-foreground">联网搜索</div>
+                        <div className="text-xs leading-5 text-muted-foreground">Bocha 推荐用于中文搜索；Brave 适合已有配置。</div>
+                      </div>
+                      <SettingRow title="启用联网搜索 Provider" description="关闭后不会请求公开搜索 Provider。">
+                        <button type="button" className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", aiConfigDraft?.web_search.enabled ? "border-primary/70 bg-primary" : "border-border bg-muted/40")} onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), enabled: !normalizeWebSearchConfig(config.web_search).enabled } }))} disabled={!aiConfigDraft || isSavingAiConfig} role="switch" aria-checked={aiConfigDraft?.web_search.enabled === true} aria-label="启用联网搜索 Provider"><span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", aiConfigDraft?.web_search.enabled && "translate-x-5")} /></button>
+                      </SettingRow>
+                      <SettingRow title="Provider" description="Bocha 推荐；Brave 备用。">
+                        <div className="flex flex-wrap gap-2">
+                          {([{ value: "bocha", label: "Bocha" }, { value: "brave", label: "Brave" }] as const).map((option) => (
+                            <Button key={option.value} type="button" variant={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === option.value ? "default" : "outline"} size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: option.value } }))} disabled={!aiConfigDraft || isSavingAiConfig}>{option.label}</Button>
+                          ))}
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="Bocha API Key" description="推荐，适合中文搜索。"><Input type="password" value={aiConfigDraft?.web_search.bochaApiKey ?? ""} placeholder="sk-..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "bocha", bochaApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="Bocha Endpoint" description="留空使用默认地址。"><Input value={aiConfigDraft?.web_search.bochaEndpoint ?? ""} placeholder="https://api.bochaai.com/v1/web-search" onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "bocha", bochaEndpoint: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="Brave API Key" description="备用，适合已有配置。"><Input type="password" value={aiConfigDraft?.web_search.braveApiKey ?? ""} placeholder="BSA..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "brave", braveApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="测试连接" description={!normalizeWebSearchConfig(aiConfigDraft?.web_search).bochaApiKey && !normalizeWebSearchConfig(aiConfigDraft?.web_search).braveApiKey ? "需要配置 Provider 后才能联网搜索。" : "发送一个小查询测试当前 Provider。"}>
+                        <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleTestWebSearchConnection()} disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}>{isTestingWebSearchConnection ? "测试中..." : "测试连接"}</Button>{webSearchConnectionMessage && <span className="text-xs text-muted-foreground">{webSearchConnectionMessage}</span>}</div>
+                      </SettingRow>
+                      <SettingRow title="清理联网缓存" description="清理搜索结果和网页摘录缓存。"><div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleClearWebCache()} disabled={isClearingWebCache}>{isClearingWebCache ? "清理中..." : "清理联网缓存"}</Button>{webCacheMessage && <span className="text-xs text-muted-foreground">{webCacheMessage}</span>}</div></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("ai-prompts") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">Prompt 模板</div><div className="text-xs leading-5 text-muted-foreground">这里只列入口；编辑会打开单独视图。</div></div>
+                      {promptTemplates.length === 0 ? (
+                        <SettingRow title="本机模板" description="读取当前可编辑模板列表。"><Button variant="outline" onClick={() => void loadPromptTemplates()} disabled={isLoadingPrompt || isSavingPrompt}><FileText className="h-3.5 w-3.5" />读取 Prompt 模板</Button></SettingRow>
+                      ) : (
+                        <>
+                          {promptTemplateRows.map((prompt) => {
+                            return <SettingRow key={prompt.fileName} title={prompt.usage.title || prompt.displayName} description={<><span className="font-mono">{prompt.fileName}</span><span> · {prompt.usage.purpose}</span></>}><Button type="button" variant="outline" size="sm" onClick={() => handleEditPrompt(prompt.fileName)} disabled={isLoadingPrompt || isSavingPrompt}>编辑</Button></SettingRow>;
+                          })}
+                          <SettingRow title={PROMPT_STYLE_PLACEHOLDER.title} description={PROMPT_STYLE_PLACEHOLDER.purpose}><span className="text-xs text-muted-foreground">后续接入</span></SettingRow>
+                        </>
+                      )}
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("ai-local-notes") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记</div></div>
+                      <SettingRow title="检索使用方式" description="聊天中按需读取相关片段。"><span className="text-sm text-muted-foreground">当前无需额外配置</span></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("luogu-account") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">账号与扫描</div>
+                      <SettingRow title="洛谷设置" description={luoguConnectionResult ? `最近 dry run 拉到 ${luoguConnectionResult.fetchedCount} 条提交。` : "配置后可进入扫描和导入中心。"}><div className="flex flex-wrap gap-2"><Button onClick={() => { setIsAdvancedActionsOpen(false); void openLuoguSettings(); }} disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}><Settings className="h-3.5 w-3.5" />洛谷设置</Button><Button variant="outline" onClick={() => { setIsAdvancedActionsOpen(false); void openLuoguDialog(); }} disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}><Download className="h-3.5 w-3.5" />洛谷导入中心</Button><Button variant="outline" onClick={handleTestLuoguConnection} disabled={isTestingLuoguConnection || isSyncingLuogu}><PlugZap className="h-3.5 w-3.5" />{isTestingLuoguConnection ? "测试中..." : "测试连接"}</Button></div></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("blog-preview") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">本地预览</div>
+                      <SettingRow title="博客预览" description="打开或重启本地博客服务。"><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={handleOpenBlog}><ExternalLink className="h-3.5 w-3.5" />打开博客</Button><Button variant="outline" onClick={handleRestartBlog} disabled={isRestartingBlog}><RotateCcw className="h-3.5 w-3.5" />{isRestartingBlog ? "重启中..." : "重启博客"}</Button></div></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("data-storage") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">目录与缓存</div>
+                      <SettingRow title="打开笔记文件夹" description="查看当前笔记目录。"><Button variant="outline" onClick={handleOpenNotesFolder}><FolderOpen className="h-3.5 w-3.5" />打开笔记文件夹</Button></SettingRow>
+                      <SettingRow title="清理联网缓存" description="同联网搜索页的缓存操作。"><Button type="button" variant="outline" size="sm" onClick={() => void handleClearWebCache()} disabled={isClearingWebCache}>{isClearingWebCache ? "清理中..." : "清理联网缓存"}</Button></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("about-version") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">版本与说明</div>
+                      <SettingRow title="OI Notebook" description="面向 OI 训练场景的本地笔记、博客、洛谷整理和 AI 辅助工作台。"><span className="text-sm text-muted-foreground">版本：0.1.0</span></SettingRow>
+                      <SettingRow title="开发者模式" description="显示 Git、诊断、自检和底层调试入口。"><button type="button" className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", developerModeEnabled ? "border-primary/70 bg-primary" : "border-border bg-muted")} onClick={() => setDeveloperModeEnabled((enabled) => !enabled)} role="switch" aria-checked={developerModeEnabled} aria-label="启用开发者模式"><span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", developerModeEnabled && "translate-x-5")} /></button></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("about-markdown") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">Markdown 支持</div>
+                      <SettingRow title="预览能力" description="主工作台负责编辑和预览。"><div className="flex flex-wrap gap-2">{MARKDOWN_CAPABILITIES.map((feature) => <span key={feature} className="inline-flex items-center border border-border/70 bg-muted/20 px-2 py-1 text-xs text-foreground">{feature}</span>)}</div></SettingRow>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("about-privacy") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">数据与隐私</div>
+                      <SettingRow title="本机配置" description="配置保存在本机；API Key 不显示明文，不写入前端 localStorage。" />
+                      <SettingRow title="缓存与索引" description="本地笔记索引和联网缓存保存在 .oinb/。" />
+                      <SettingRow title="联网搜索" description="只向所选 Provider 发送必要查询词；网页摘录只读取公开 http/https 页面。" />
+                      <SettingRow title="本地笔记" description="不会上传到搜索 Provider；不读取 Cookie、历史记录、密码或登录态。" />
+                    </section>
+                  )}
+
+                  {developerModeEnabled && shouldRenderSettingsPage("diagnostics-search") && (
+                    <section className={settingsPageSectionClass}>
+                      <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
+                    </section>
+                  )}
+
+                  {developerModeEnabled && shouldRenderSettingsPage("git-sync") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 text-base font-semibold text-foreground">进阶同步入口</div>
+                      <SettingRow title="Git 同步" description="整理完本地改动后再使用。"><Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}><Upload className="h-3.5 w-3.5" />{isPushingGit ? "同步中..." : "同步 Git"}</Button></SettingRow>
+                    </section>
+                  )}
+                </div>
               </div>
-            </ScrollArea>
+            )}
           </main>
         </div>
-        {isPromptAdvancedEditorOpen && selectedPromptFileName && (
-          <div className="fixed inset-0 z-[80] grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
-            <section className="grid h-[min(820px,calc(100vh-64px))] w-[min(1100px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-border bg-background shadow-2xl">
-              <div className="flex min-w-0 flex-col gap-3 border-b border-border/80 bg-card/95 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="text-base font-semibold text-foreground">编辑高级内容</div>
-                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{selectedPromptUsage.title}</span>
-                    <span className="font-mono">{selectedPromptTemplate?.fileName ?? selectedPromptFileName}</span>
-                  </div>
-                  <div className="mt-2 max-w-4xl text-xs leading-5 text-muted-foreground">
-                    {selectedPromptUsage.purpose} 这里会直接修改底层 Prompt，错误修改可能影响对应 AI 功能输出。建议保留变量、返回格式和结构约束。
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => void handleSavePrompt()}
-                    disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
-                  >
-                    {isSavingPrompt ? "保存中..." : "保存 Prompt"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsPromptAdvancedEditorOpen(false)}
-                    disabled={isSavingPrompt}
-                  >
-                    关闭编辑
-                  </Button>
-                </div>
-              </div>
-              <div className="min-h-0 p-4">
-                <textarea
-                  value={promptContent}
-                  onChange={(event) => setPromptContent(event.target.value)}
-                  disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
-                  spellCheck={false}
-                  className="h-full min-h-[60vh] w-full resize-none rounded-md border border-border bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
-                />
-              </div>
-              <div className="flex min-w-0 flex-col gap-2 border-t border-border/80 bg-muted/15 px-5 py-3 text-xs leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  保存位置：.oinb/prompts/。不要写入 API Key、Cookie、本机绝对路径或其它敏感配置。
-                </div>
-                <div className="shrink-0">
-                  {promptContent.length.toLocaleString()} 字符
-                </div>
-              </div>
-            </section>
-          </div>
-        )}
-        <DialogFooter className="shrink-0 border-t border-border/80 bg-background/95 px-6 py-3 sm:items-center sm:justify-between">
-          {hasAiConfigDraftChanges ? (
-            <>
-              <div className="min-w-0 text-sm font-medium text-muted-foreground">有未保存的更改</div>
-              <div className="flex shrink-0 gap-2">
-                <Button variant="outline" onClick={handleCancelAiConfigDraft} disabled={isSavingAiConfig || aiProviderBusy}>
-                  取消
-                </Button>
-                <Button onClick={() => void handleSaveAiConfig()} disabled={isSavingAiConfig || aiProviderBusy}>
-                  {isSavingAiConfig ? "保存中..." : "保存更改"}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="min-w-0 text-sm leading-6 text-muted-foreground">
-                设置保存在本地，仅影响当前设备。
-              </div>
-              <Button variant="outline" className="shrink-0" onClick={closeSettingsCenter}>
-                关闭
-              </Button>
-            </>
-          )}
-        </DialogFooter>
+        <button
+          type="button"
+          className="absolute bottom-0 right-0 top-0 z-20 w-2 cursor-ew-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("right", event)}
+          aria-label="从右侧调整设置中心宽度"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute bottom-0 left-0 top-0 z-20 w-2 cursor-ew-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("left", event)}
+          aria-label="从左侧调整设置中心宽度"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("top", event)}
+          aria-label="从顶部调整设置中心高度"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("bottom", event)}
+          aria-label="从底部调整设置中心高度"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("top-left", event)}
+          aria-label="从左上角调整设置中心大小"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("top-right", event)}
+          aria-label="从右上角调整设置中心大小"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("bottom-left", event)}
+          aria-label="从左下角调整设置中心大小"
+          tabIndex={-1}
+        />
+        <button
+          type="button"
+          className="absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize bg-transparent"
+          onPointerDown={(event) => beginSettingsCenterResize("bottom-right", event)}
+          aria-label="从右下角调整设置中心大小"
+          tabIndex={-1}
+        />
       </DialogContent>
     </Dialog>
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
@@ -7306,7 +7002,7 @@ export default function App() {
                         <Button
                           variant="outline"
                           className="gap-2"
-                          onClick={openAiSettings}
+                          onClick={() => void openAiSettings()}
                           disabled={isLoadingAiConfig || isSavingAiConfig}
                         >
                           <Bot className="h-4 w-4" />
@@ -7472,7 +7168,7 @@ export default function App() {
                         <button
                           type="button"
                           className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={openAiSettings}
+                          onClick={() => void openAiSettings()}
                           disabled={isLoadingAiConfig || isSavingAiConfig}
                         >
                           <div className="flex items-center gap-3">
@@ -7753,6 +7449,7 @@ export default function App() {
           }}
           width={aiSidebarWidth}
           isMaximized={isAiSidebarMaximized}
+          developerModeEnabled={developerModeEnabled}
           onMaximizedChange={setIsAiSidebarMaximized}
           aiConfig={aiConfig}
           onAiConfigChange={handleAiConfigChangeFromSidebar}
@@ -7836,3 +7533,4 @@ export default function App() {
     </>
   );
 }
+

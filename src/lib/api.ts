@@ -222,6 +222,10 @@ export interface PolishedFullNote {
   polishedBody: string;
 }
 
+export interface PolishedAiPromptTemplate {
+  polishedPrompt: string;
+}
+
 export interface NoteChatHistoryMessage {
   role: "user" | "assistant";
   text: string;
@@ -279,6 +283,39 @@ export interface TestWebSearchConnectionResult {
   ok: boolean;
   provider: WebSearchConfig["provider"];
   endpoint: string;
+}
+
+export interface WebCacheStatusResult {
+  exists: boolean;
+  searchCacheCount: number;
+  excerptCacheCount: number;
+  approxSizeBytes: number;
+  readable: boolean;
+  writable: boolean;
+  pathLabel: string;
+  lastError?: string;
+}
+
+export interface LocalNoteIndexStatusResult {
+  exists: boolean;
+  version?: number;
+  noteCount: number;
+  chunkCount: number;
+  updatedAt?: number;
+  readable: boolean;
+  writable: boolean;
+  approxSizeBytes: number;
+  pathLabel: string;
+  sampleRelativePaths: string[];
+  lastError?: string;
+}
+
+export interface PromptCitationContractStatusResult {
+  webAvailableIds: boolean;
+  webMarkerInstruction: boolean;
+  localAvailableIds: boolean;
+  localMarkerInstruction: boolean;
+  bareIdWarning: boolean;
 }
 
 export interface NoteChatStreamChunkEvent {
@@ -736,6 +773,30 @@ export async function testWebSearchConnection(
   }
 }
 
+export async function getWebCacheStatus(): Promise<WebCacheStatusResult> {
+  try {
+    return await invoke<WebCacheStatusResult>("get_web_cache_status");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getLocalNoteIndexStatus(): Promise<LocalNoteIndexStatusResult> {
+  try {
+    return await invoke<LocalNoteIndexStatusResult>("get_local_note_index_status");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getPromptCitationContractStatus(): Promise<PromptCitationContractStatusResult> {
+  try {
+    return await invoke<PromptCitationContractStatusResult>("get_prompt_citation_contract_status");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function generateNoteMetadata(
   relativePath: string,
   markdownContent: string,
@@ -859,6 +920,17 @@ export async function readAiPrompt(fileName: string): Promise<PromptTemplateCont
 export async function saveAiPrompt(fileName: string, content: string): Promise<void> {
   try {
     await invoke<void>("save_ai_prompt", { fileName, content });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function polishAiPromptTemplate(
+  fileName: string,
+  content: string,
+): Promise<PolishedAiPromptTemplate> {
+  try {
+    return await invoke<PolishedAiPromptTemplate>("polish_ai_prompt_template", { fileName, content });
   } catch (e) {
     throw toError(e);
   }

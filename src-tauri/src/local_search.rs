@@ -57,6 +57,25 @@ pub struct LocalNoteSearchResult {
     pub local_citation_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalNoteIndexStatus {
+    exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<u32>,
+    note_count: usize,
+    chunk_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<u64>,
+    readable: bool,
+    writable: bool,
+    approx_size_bytes: u64,
+    path_label: String,
+    sample_relative_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct NoteFrontmatter {
     title: String,
@@ -125,6 +144,85 @@ pub async fn search_local_notes(
     tauri::async_runtime::spawn_blocking(move || search_local_notes_blocking(input))
         .await
         .map_err(|e| format!("Local note search task failed: {e}"))?
+}
+
+#[tauri::command]
+pub fn get_local_note_index_status() -> LocalNoteIndexStatus {
+    let mut status = LocalNoteIndexStatus {
+        exists: false,
+        version: None,
+        note_count: 0,
+        chunk_count: 0,
+        updated_at: None,
+        readable: false,
+        writable: false,
+        approx_size_bytes: 0,
+        path_label: ".oinb/local-index/".to_string(),
+        sample_relative_paths: Vec::new(),
+        last_error: None,
+    };
+
+    let index_path = match local_index_path() {
+        Ok(path) => path,
+        Err(e) => {
+            status.last_error = Some(e);
+            return status;
+        }
+    };
+    let Some(index_dir) = index_path.parent() else {
+        status.last_error = Some("local index directory is unavailable".to_string());
+        return status;
+    };
+
+    status.exists = index_path.exists();
+    status.writable = if index_dir.exists() {
+        probe_writable(index_dir).unwrap_or_else(|e| {
+            status.last_error = Some(e);
+            false
+        })
+    } else {
+        false
+    };
+
+    if !status.exists {
+        return status;
+    }
+
+    match fs::metadata(&index_path) {
+        Ok(metadata) => status.approx_size_bytes = metadata.len(),
+        Err(e) => {
+            status.last_error = Some(format!("metadata failed: {e}"));
+            return status;
+        }
+    }
+
+    match read_index_file(&index_path) {
+        Ok(index) => {
+            status.readable = true;
+            status.version = Some(index.version);
+            status.updated_at = Some(index.updated_at);
+            status.note_count = index.notes.len();
+            status.chunk_count = index.notes.iter().map(|note| note.chunks.len()).sum();
+            status.sample_relative_paths = index
+                .notes
+                .iter()
+                .take(3)
+                .map(|note| note.relative_path.clone())
+                .collect();
+        }
+        Err(e) => {
+            status.last_error = Some(e);
+        }
+    }
+
+    status
+}
+
+fn probe_writable(dir: &Path) -> Result<bool, String> {
+    let probe = dir.join(".diagnostic-probe.tmp");
+    fs::write(&probe, b"ok").map_err(|e| format!("write probe failed: {e}"))?;
+    fs::remove_file(&probe).map_err(|e| format!("remove probe failed: {e}"))?;
+    Ok(true)
 }
 
 fn search_local_notes_blocking(

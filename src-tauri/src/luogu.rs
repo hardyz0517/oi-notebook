@@ -72,8 +72,6 @@ pub struct WebSearchConfigFields {
     #[serde(default)]
     pub bocha_endpoint: String,
     #[serde(default)]
-    pub searxng_endpoint: String,
-    #[serde(default)]
     pub public_search_consent: bool,
 }
 
@@ -85,14 +83,13 @@ impl Default for WebSearchConfigFields {
             brave_api_key: String::new(),
             bocha_api_key: String::new(),
             bocha_endpoint: "https://api.bochaai.com/v1/web-search".to_string(),
-            searxng_endpoint: String::new(),
             public_search_consent: false,
         }
     }
 }
 
 fn default_web_search_provider() -> String {
-    "searxng".to_string()
+    "bocha".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

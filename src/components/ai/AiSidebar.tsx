@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
 import { buildSearchDecision, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, type SearchDecision, type WebSearchMode, type WebSource } from "@/lib/aiWebSearch";
+import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -1409,75 +1410,6 @@ type LocalNoteCitationDisplayEntry = {
 
 type AiCitationDisplayEntry = CitationDisplayEntry | LocalNoteCitationDisplayEntry;
 
-const stripMarkdownRegionsForCitationScan = (text: string): string =>
-  text
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/~~~[\s\S]*?~~~/g, "")
-    .replace(/`[^`\n]*(?:\n[^`]*)?`/g, "");
-
-type CitationMarkerMatch = {
-  index: number;
-  rawMarker: string;
-  citationId: string;
-};
-
-const possibleCitationMarkerPattern = /\[\[?[SN]\d{1,2}\]\]?/;
-
-const findCitationMarkerMatches = (text: string): CitationMarkerMatch[] => {
-  const matches: CitationMarkerMatch[] = [];
-  let index = 0;
-
-  while (index < text.length) {
-    if (text.startsWith("[[", index)) {
-      const doubleBracketMatch = /^\[\[([SN]\d{1,2})\]\]/.exec(text.slice(index));
-      if (doubleBracketMatch) {
-        matches.push({
-          index,
-          rawMarker: doubleBracketMatch[0],
-          citationId: doubleBracketMatch[1],
-        });
-        index += doubleBracketMatch[0].length;
-        continue;
-      }
-    }
-
-    if (text[index] === "[" && text[index - 1] !== "[") {
-      const singleBracketMatch = /^\[([SN]\d{1,2})\]/.exec(text.slice(index));
-      if (singleBracketMatch) {
-        const nextChar = text[index + singleBracketMatch[0].length];
-        if (nextChar !== "(" && nextChar !== "[" && nextChar !== "]") {
-          matches.push({
-            index,
-            rawMarker: singleBracketMatch[0],
-            citationId: singleBracketMatch[1],
-          });
-          index += singleBracketMatch[0].length;
-          continue;
-        }
-      }
-    }
-
-    index += 1;
-  }
-
-  return matches;
-};
-
-const getUsedCitationIdList = (text: string, validIds: Iterable<string>): string[] => {
-  const validIdSet = new Set(validIds);
-  const usedIds: string[] = [];
-  const seenIds = new Set<string>();
-  const searchableText = stripMarkdownRegionsForCitationScan(text);
-  for (const match of findCitationMarkerMatches(searchableText)) {
-    const citationId = match.citationId;
-    if (validIdSet.has(citationId) && !seenIds.has(citationId)) {
-      usedIds.push(citationId);
-      seenIds.add(citationId);
-    }
-  }
-  return usedIds;
-};
-
 const getUsedSourceCitationIdList = (text: string, citations: WebSourceCitation[]): string[] =>
   getUsedCitationIdList(text, citations.map((citation) => citation.citationId));
 
@@ -2150,22 +2082,11 @@ const shouldFetchWebSourceExcerpt = (source: WebSource, strongCount: number): bo
   return source.reliability === "wiki" || source.reliability === "official";
 };
 
-const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha" | "searxng"): string => {
-  if (provider === "searxng") {
-    return "需要在 AI 设置中启用公开搜索服务";
-  }
+const getWebSearchProviderMissingKeyMessage = (provider: "brave" | "bocha"): string => {
   return provider === "bocha"
     ? "需要在 AI 设置中配置博查 API Key"
     : "需要在 AI 设置中配置 Brave Search API Key";
 };
-
-const getWebSearchProviderFallbackNotice = (
-  activeProvider: "brave" | "bocha" | "searxng",
-  effectiveProvider: "brave" | "bocha" | "searxng",
-): string | undefined =>
-  activeProvider !== effectiveProvider && effectiveProvider === "searxng"
-    ? "当前 Provider 未配置 API Key，已尝试使用公开搜索兜底。"
-    : undefined;
 
 function WebSearchSourcesCard({
   sources,
@@ -2686,6 +2607,7 @@ export default function AiSidebar({
   onClose,
   width,
   isMaximized = false,
+  developerModeEnabled = false,
   onMaximizedChange,
   aiConfig,
   onAiConfigChange,
@@ -2788,14 +2710,14 @@ export default function AiSidebar({
   const webSearchConfig = normalizeWebSearchConfig(aiConfig?.web_search);
   const activeWebSearchProvider = webSearchConfig.provider;
   const hasPublicWebSearchConsent = webSearchConfig.publicSearchConsent;
-  const effectiveWebSearchProvider =
-    activeWebSearchProvider === "brave" && webSearchConfig.braveApiKey.trim().length > 0 ? "brave" :
-    activeWebSearchProvider === "bocha" && webSearchConfig.bochaApiKey.trim().length > 0 ? "bocha" :
-    "searxng";
   const webSearchEnabled = webSearchMode === "auto" && hasPublicWebSearchConsent;
   const canUseWebSearchProvider =
     hasPublicWebSearchConsent &&
-    webSearchConfig.enabled === true;
+    webSearchConfig.enabled === true &&
+    (
+      (activeWebSearchProvider === "bocha" && webSearchConfig.bochaApiKey.trim().length > 0) ||
+      (activeWebSearchProvider === "brave" && webSearchConfig.braveApiKey.trim().length > 0)
+    );
   const modelQuery = modelSearch.trim().toLocaleLowerCase();
   const selectableProviders = enabledProviders
     .map((provider) => ({
@@ -3174,7 +3096,7 @@ export default function AiSidebar({
     try {
       setStatus("searching", "正在搜索公开网页...");
       const sources = await searchWebSources({
-        provider: effectiveWebSearchProvider,
+        provider: activeWebSearchProvider,
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
@@ -3183,21 +3105,19 @@ export default function AiSidebar({
       });
       if (!isCurrent()) return {};
       const { prepared, sources: sourcesWithExcerpts } = await prepareSourcesWithExcerpts(sources);
-      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const filterNote = decision.problemId && prepared.filteredCount > 0
         ? `已过滤 ${prepared.filteredCount} 条明显无关结果`
         : undefined;
-      const searchNote = [fallbackNote, filterNote].filter(Boolean).join(" ");
+      const searchNote = [filterNote].filter(Boolean).join(" ");
       return sourcesWithExcerpts.length > 0
         ? { sources: sourcesWithExcerpts, error: searchNote || undefined }
         : { error: searchNote || "联网搜索没有返回可展示的来源" };
     } catch (error) {
-      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const errorMessage = getWebSearchErrorMessage(error);
       const { prepared, sources } = await prepareSourcesWithExcerpts([]);
       return {
         sources: sources.length > 0 ? sources : prepared.sources.length > 0 ? prepared.sources : undefined,
-        error: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
+        error: errorMessage,
       };
     }
   };
@@ -3258,7 +3178,7 @@ export default function AiSidebar({
 
     try {
       const sources = await searchWebSources({
-        provider: effectiveWebSearchProvider,
+        provider: activeWebSearchProvider,
         queries: decision.queries,
         intent: decision.intent,
         problemId: decision.problemId,
@@ -3270,17 +3190,16 @@ export default function AiSidebar({
         ...message,
         sources: prepared.sources.length > 0 ? prepared.sources : undefined,
         searchError: prepared.sources.length > 0
-          ? getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider)
+          ? undefined
           : "联网搜索没有返回可展示的来源",
       }));
     } catch (error) {
-      const fallbackNote = getWebSearchProviderFallbackNotice(activeWebSearchProvider, effectiveWebSearchProvider);
       const errorMessage = getWebSearchErrorMessage(error);
       const prepared = prepareWebSourcesForDecision([], decision);
       replaceMessage(conversationId, messageId, (message) => ({
         ...message,
         sources: prepared.sources.length > 0 ? prepared.sources : undefined,
-        searchError: fallbackNote ? `${fallbackNote} ${errorMessage}` : errorMessage,
+        searchError: errorMessage,
       }));
     }
   };
@@ -5630,7 +5549,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       "min-w-0",
                       message.state === "error" && "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2",
                     )}>
-                      {message.searchDecision?.shouldSearch && (
+                      {developerModeEnabled && message.searchDecision?.shouldSearch && (
                         <WebSearchPlanCard decision={message.searchDecision} />
                       )}
                       {message.searchDecision?.shouldSearch && (
@@ -5640,7 +5559,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         status={message.localNoteSearchStatus}
                         error={message.localNoteSearchError}
                       />
-                      {message.searchDecision?.shouldSearch && (
+                      {!developerModeEnabled && message.searchDecision?.shouldSearch && message.searchError && (
+                        <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-amber-200/70 bg-amber-50/70 px-2.5 py-1 text-[11px] leading-5 text-amber-800 dark:border-amber-300/20 dark:bg-amber-400/[0.08] dark:text-amber-100">
+                          <Info className="h-3.5 w-3.5 shrink-0" />
+                          <span className="min-w-0 truncate">{message.searchError}</span>
+                        </div>
+                      )}
+                      {developerModeEnabled && message.searchDecision?.shouldSearch && (
                         <WebSearchSourcesCard
                           sources={message.sources}
                           error={message.searchError}

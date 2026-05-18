@@ -62,6 +62,7 @@ export interface AiSidebarProps {
   onClose: () => void;
   width?: number;
   isMaximized?: boolean;
+  developerModeEnabled?: boolean;
   onMaximizedChange?: (isMaximized: boolean) => void;
   aiConfig: AiConfig | null;
   onAiConfigChange: (config: AiConfig) => void;

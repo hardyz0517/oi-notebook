@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use walkdir::WalkDir;
 
 use crate::paths;
 
@@ -52,6 +53,68 @@ pub fn clear_web_cache() -> Result<(), String> {
         fs::remove_dir_all(&root).map_err(|e| format!("Failed to clear .oinb/web-cache: {e}"))?;
     }
     ensure_web_cache_dirs()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebCacheStatus {
+    exists: bool,
+    search_cache_count: usize,
+    excerpt_cache_count: usize,
+    approx_size_bytes: u64,
+    readable: bool,
+    writable: bool,
+    path_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_web_cache_status() -> WebCacheStatus {
+    let mut status = WebCacheStatus {
+        exists: false,
+        search_cache_count: 0,
+        excerpt_cache_count: 0,
+        approx_size_bytes: 0,
+        readable: false,
+        writable: false,
+        path_label: ".oinb/web-cache/".to_string(),
+        last_error: None,
+    };
+
+    let root = match web_cache_dir() {
+        Ok(path) => path,
+        Err(e) => {
+            status.last_error = Some(e);
+            return status;
+        }
+    };
+
+    status.exists = root.exists();
+    if !status.exists {
+        return status;
+    }
+    if !root.is_dir() {
+        status.last_error = Some(".oinb/web-cache/ is not a directory".to_string());
+        return status;
+    }
+
+    match fs::read_dir(&root) {
+        Ok(_) => status.readable = true,
+        Err(e) => {
+            status.last_error = Some(format!("read failed: {e}"));
+            return status;
+        }
+    }
+
+    status.search_cache_count = count_json_files(&root.join("search"));
+    status.excerpt_cache_count = count_json_files(&root.join("excerpts"));
+    status.approx_size_bytes = approx_dir_size(&root);
+    status.writable = probe_writable(&root).unwrap_or_else(|e| {
+        status.last_error = Some(e);
+        false
+    });
+    status
 }
 
 pub fn read_cached_json(bucket: &str, key: &str, now_ms: i64) -> Option<CachedJson> {
@@ -145,4 +208,33 @@ fn is_safe_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn count_json_files(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+        .count()
+}
+
+fn approx_dir_size(dir: &Path) -> u64 {
+    WalkDir::new(dir)
+        .min_depth(1)
+        .max_depth(3)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| entry.metadata().ok().map(|metadata| metadata.len()))
+        .sum()
+}
+
+fn probe_writable(dir: &Path) -> Result<bool, String> {
+    let probe = dir.join(".diagnostic-probe.tmp");
+    fs::write(&probe, b"ok").map_err(|e| format!("write probe failed: {e}"))?;
+    fs::remove_file(&probe).map_err(|e| format!("remove probe failed: {e}"))?;
+    Ok(true)
 }
