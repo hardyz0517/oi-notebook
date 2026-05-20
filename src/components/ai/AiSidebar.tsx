@@ -31,8 +31,9 @@ import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPlan, buildSearchDecision, evaluateWebSourceEvidence, getWebReadBudgetPlan, limitWebSearchQueriesForProvider, markAiQueryPlannerFallback, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, shouldUseAiQueryPlanner, validateAiSearchQueryPlan, type AiSearchPlannerContext, type AiSearchPlannerState, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
+import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPlan, buildSearchDecision, evaluateWebSourceEvidence, getWebReadBudgetPlan, limitWebSearchQueriesForProvider, markAiQueryPlannerFallback, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, shouldUseAiQueryPlanner, validateAiSearchQueryPlan, WEB_CACHE_STATUSES, WEB_CONTENT_STATUSES, WEB_DISCOVERY_METHODS, WEB_EVIDENCE_STATUSES, WEB_PAGE_TYPES, WEB_SOURCE_EXCERPT_STATUSES, WEB_SOURCE_KINDS, WEB_SOURCE_RELIABILITIES, WEB_SOURCE_STRENGTHS, type AiSearchPlannerContext, type AiSearchPlannerState, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
+import { createSearchPreparationDiagnostics, encodeDebugValue, formatBingDiagnostics, formatDirectDiscoveryDiagnostics, formatNewsReadDiagnostics, formatSearchPreparationDiagnostics, formatSearchPreparationDiagnosticsForDisplay, getDebugReasonLabel, getSearchStageDebugLabel, mergeSearchDebug } from "@/lib/searchDiagnostics";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
@@ -532,78 +533,6 @@ const getWebSearchDebugMessage = (error: unknown): string | undefined => {
   return message.slice(0, 1800);
 };
 
-type SearchPreparationDiagnostics = {
-  searchPreparationStarted: boolean;
-  searchPreparationTimedOut: boolean;
-  timedOutStage?: string;
-  ruleIntent: string;
-  ruleFreshness: string;
-  plannerStarted: boolean;
-  plannerTimedOut: boolean;
-  plannerFailedReason?: string;
-  ruleFallbackUsed: boolean;
-  directDiscoveryScheduled: boolean;
-  directDiscoveryAttempted: boolean;
-  providerSearchScheduled: boolean;
-  providerSearchAttempted: boolean;
-  downgradedToNormalAnswer: boolean;
-  downgradeReason?: string;
-};
-
-const createSearchPreparationDiagnostics = (decision: SearchDecision): SearchPreparationDiagnostics => ({
-  searchPreparationStarted: true,
-  searchPreparationTimedOut: false,
-  ruleIntent: decision.intent,
-  ruleFreshness: decision.newsIntent ? "news" : decision.recencyIntent ? "recent" : "none",
-  plannerStarted: false,
-  plannerTimedOut: false,
-  ruleFallbackUsed: false,
-  directDiscoveryScheduled: decision.newsIntent === true ||
-    decision.recencyIntent === true ||
-    decision.vertical === "news" ||
-    decision.vertical === "algorithm" ||
-    decision.intent === "algorithm_reference" ||
-    decision.intent === "oi_discussion" ||
-    decision.intent === "general_web",
-  directDiscoveryAttempted: false,
-  providerSearchScheduled: decision.shouldSearch,
-  providerSearchAttempted: false,
-  downgradedToNormalAnswer: false,
-});
-
-const encodeDebugValue = (value: string | number | boolean | undefined): string => {
-  if (value === undefined) return "";
-  return String(value)
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[;|]/g, ",")
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-const formatSearchPreparationDiagnostics = (diagnostics: SearchPreparationDiagnostics): string => [
-  "debug=searchPreparation",
-  `searchPreparationStarted=${diagnostics.searchPreparationStarted ? "yes" : "no"}`,
-  `searchPreparationTimedOut=${diagnostics.searchPreparationTimedOut ? "yes" : "no"}`,
-  diagnostics.timedOutStage ? `timedOutStage=${encodeDebugValue(diagnostics.timedOutStage)}` : undefined,
-  `ruleIntent=${encodeDebugValue(diagnostics.ruleIntent)}`,
-  `ruleFreshness=${encodeDebugValue(diagnostics.ruleFreshness)}`,
-  `plannerStarted=${diagnostics.plannerStarted ? "yes" : "no"}`,
-  `plannerTimedOut=${diagnostics.plannerTimedOut ? "yes" : "no"}`,
-  diagnostics.plannerFailedReason ? `plannerFailedReason=${encodeDebugValue(diagnostics.plannerFailedReason)}` : undefined,
-  `ruleFallbackUsed=${diagnostics.ruleFallbackUsed ? "yes" : "no"}`,
-  `directDiscoveryScheduled=${diagnostics.directDiscoveryScheduled ? "yes" : "no"}`,
-  `directDiscoveryAttempted=${diagnostics.directDiscoveryAttempted ? "yes" : "no"}`,
-  `providerSearchScheduled=${diagnostics.providerSearchScheduled ? "yes" : "no"}`,
-  `providerSearchAttempted=${diagnostics.providerSearchAttempted ? "yes" : "no"}`,
-  `downgradedToNormalAnswer=${diagnostics.downgradedToNormalAnswer ? "yes" : "no"}`,
-  diagnostics.downgradeReason ? `downgradeReason=${encodeDebugValue(diagnostics.downgradeReason)}` : undefined,
-].filter((part): part is string => Boolean(part)).join("; ");
-
-const mergeSearchDebug = (...items: Array<string | undefined>): string | undefined => {
-  const parts = items.map((item) => item?.trim()).filter((item): item is string => Boolean(item));
-  return parts.length > 0 ? parts.join(" || ") : undefined;
-};
-
 const getEffectiveSearchTopicKeywords = (decision: SearchDecision): string[] | undefined => {
   const plannerKeywords = decision.aiPlanner?.topicKeywords?.filter((keyword) => keyword.trim().length > 0) ?? [];
   const ruleKeywords = decision.topicKeywords?.filter((keyword) => keyword.trim().length > 0) ?? [];
@@ -990,6 +919,9 @@ const sanitizeSearchDecisionForStorage = (value: unknown): SearchDecision | unde
   };
 };
 
+const isKnownStringValue = <T extends string>(values: readonly T[], value: unknown): value is T =>
+  typeof value === "string" && (values as readonly string[]).includes(value);
+
 const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
   if (!Array.isArray(value)) return undefined;
   const sourceTypes = new Set<NonNullable<WebSource["sourceType"]>>([
@@ -1008,12 +940,6 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
     const title = source.title.trim();
     const url = source.url.trim();
     if (!title || !url) return [];
-    const evidenceStatuses = new Set<NonNullable<WebSource["evidenceStatus"]>>(["candidate", "fetched", "usable", "rejected"]);
-    const pageTypes = new Set<NonNullable<WebSource["pageType"]>>(["article", "news_article", "docs", "homepage", "search_page", "redirect", "login", "download", "api_docs", "encyclopedia", "forum", "unknown"]);
-    const contentStatuses = new Set<NonNullable<WebSource["contentStatus"]>>(["not_fetched", "fetched", "partial", "unavailable", "needs_js", "blocked", "failed"]);
-    const sourceStrengths = new Set<NonNullable<WebSource["sourceStrength"]>>(["strong", "medium", "weak", "rejected"]);
-    const discoveryMethods = new Set<NonNullable<WebSource["discoveryMethod"]>>(["local_note", "explicit_url", "direct_rss", "direct_site", "constructed_source", "search_provider"]);
-    const sourceKinds = new Set<NonNullable<WebSource["sourceKind"]>>(["explicit_url", "search_result", "constructed_source", "rss_item", "official_news", "official_blog", "docs_page", "oi_reference"]);
     return [{
       id: source.id.trim() || url,
       title,
@@ -1021,8 +947,8 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       finalUrl: typeof source.finalUrl === "string" && source.finalUrl.trim() ? source.finalUrl.trim() : undefined,
       site: typeof source.site === "string" && source.site.trim() ? source.site.trim() : undefined,
       snippet: typeof source.snippet === "string" && source.snippet.trim() ? source.snippet.trim() : undefined,
-      sourceKind: source.sourceKind && sourceKinds.has(source.sourceKind) ? source.sourceKind : undefined,
-      discoveryMethod: source.discoveryMethod && discoveryMethods.has(source.discoveryMethod) ? source.discoveryMethod : undefined,
+      sourceKind: isKnownStringValue(WEB_SOURCE_KINDS, source.sourceKind) ? source.sourceKind : undefined,
+      discoveryMethod: isKnownStringValue(WEB_DISCOVERY_METHODS, source.discoveryMethod) ? source.discoveryMethod : undefined,
       sourceReliability: typeof source.sourceReliability === "string" && source.sourceReliability.trim()
         ? source.sourceReliability.trim() as WebSource["sourceReliability"]
         : undefined,
@@ -1053,7 +979,7 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         ? source.filteredReason.trim()
         : undefined,
       finalIncludedInPrompt: source.finalIncludedInPrompt === true ? true : source.finalIncludedInPrompt === false ? false : undefined,
-      evidenceStatus: source.evidenceStatus && evidenceStatuses.has(source.evidenceStatus) ? source.evidenceStatus : undefined,
+      evidenceStatus: isKnownStringValue(WEB_EVIDENCE_STATUSES, source.evidenceStatus) ? source.evidenceStatus : undefined,
       usableEvidence: source.usableEvidence === true ? true : source.usableEvidence === false ? false : undefined,
       injectedIntoAnswer: source.injectedIntoAnswer === true ? true : source.injectedIntoAnswer === false ? false : undefined,
       evidenceReason: typeof source.evidenceReason === "string" && source.evidenceReason.trim()
@@ -1062,18 +988,10 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       rejectedReason: typeof source.rejectedReason === "string" && source.rejectedReason.trim()
         ? source.rejectedReason.trim()
         : undefined,
-      pageType: source.pageType && pageTypes.has(source.pageType) ? source.pageType : undefined,
-      contentStatus: source.contentStatus && contentStatuses.has(source.contentStatus) ? source.contentStatus : undefined,
-      sourceStrength: source.sourceStrength && sourceStrengths.has(source.sourceStrength) ? source.sourceStrength : undefined,
-      reliability:
-        source.reliability === "official" ||
-        source.reliability === "wiki" ||
-        source.reliability === "community_solution" ||
-        source.reliability === "discussion" ||
-        source.reliability === "blog" ||
-        source.reliability === "unknown"
-          ? source.reliability
-          : "unknown",
+      pageType: isKnownStringValue(WEB_PAGE_TYPES, source.pageType) ? source.pageType : undefined,
+      contentStatus: isKnownStringValue(WEB_CONTENT_STATUSES, source.contentStatus) ? source.contentStatus : undefined,
+      sourceStrength: isKnownStringValue(WEB_SOURCE_STRENGTHS, source.sourceStrength) ? source.sourceStrength : undefined,
+      reliability: isKnownStringValue(WEB_SOURCE_RELIABILITIES, source.reliability) ? source.reliability : "unknown",
       reliabilityLabel: typeof source.reliabilityLabel === "string" && source.reliabilityLabel.trim()
         ? source.reliabilityLabel.trim()
         : undefined,
@@ -1091,14 +1009,7 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       relevanceReason: typeof source.relevanceReason === "string" && source.relevanceReason.trim()
         ? source.relevanceReason.trim()
         : undefined,
-      excerptStatus:
-        source.excerptStatus === "fetched" ||
-        source.excerptStatus === "blocked" ||
-        source.excerptStatus === "unavailable" ||
-        source.excerptStatus === "failed" ||
-        source.excerptStatus === "not_requested"
-          ? source.excerptStatus
-          : undefined,
+      excerptStatus: isKnownStringValue(WEB_SOURCE_EXCERPT_STATUSES, source.excerptStatus) ? source.excerptStatus : undefined,
       excerpt: typeof source.excerpt === "string" && source.excerpt.trim()
         ? source.excerpt.trim().slice(0, 5000)
         : undefined,
@@ -1108,13 +1019,7 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       fetchedAt: typeof source.fetchedAt === "number" && Number.isFinite(source.fetchedAt)
         ? source.fetchedAt
         : undefined,
-      cacheStatus:
-        source.cacheStatus === "miss" ||
-        source.cacheStatus === "hit" ||
-        source.cacheStatus === "stale" ||
-        source.cacheStatus === "disabled"
-          ? source.cacheStatus
-          : undefined,
+      cacheStatus: isKnownStringValue(WEB_CACHE_STATUSES, source.cacheStatus) ? source.cacheStatus : undefined,
       readStatus:
         source.readStatus === "fetched" ||
         source.readStatus === "partial" ||
@@ -2150,63 +2055,6 @@ const getPlannerTriggerLabel = (trigger?: string): string => {
 const getBooleanLabel = (value: boolean | undefined): string =>
   value === true ? "是" : value === false ? "否" : "未记录";
 
-const getDebugReasonLabel = (reason: string | undefined): string => {
-  if (!reason) return "";
-  const translated = reason
-    .replace(/topic_mismatch/g, "主题不匹配")
-    .replace(/not_news_like/g, "不像新闻")
-    .replace(/docs_or_homepage/g, "文档或首页")
-    .replace(/wiki_or_reference/g, "百科/资料页")
-    .replace(/rss_xml/g, "RSS/XML")
-    .replace(/bing_html/g, "Bing HTML")
-    .replace(/captcha_or_block_page/g, "验证或限制页")
-    .replace(/rss-returned-html-html/g, "RSS 返回 HTML，已转 HTML 解析")
-    .replace(/rss-returned-html->html/g, "RSS 返回 HTML，已转 HTML 解析")
-    .replace(/body-quality-gate/g, "返回体质量拦截")
-    .replace(/parser-panic-caught/g, "解析异常已拦截")
-    .replace(/parser_panic_caught/g, "解析异常已拦截")
-    .replace(/compressed_or_binary/g, "压缩或二进制内容")
-    .replace(/binary_or_control_chars/g, "二进制或控制字符过多")
-    .replace(/compressed_magic/g, "压缩数据头")
-    .replace(/corrupt_text/g, "文本解码异常")
-    .replace(/too_many_replacement_chars/g, "替换字符过多")
-    .replace(/body_decode_failed/g, "返回体解码失败")
-    .replace(/rss_no_item_or_entry/g, "RSS 中没有 item/entry")
-    .replace(/rss_items_missing_usable_title_or_link/g, "RSS 条目缺少可用标题或链接")
-    .replace(/rss_returned_html_no_html_candidates/g, "RSS 返回 HTML，但没有解析到候选")
-    .replace(/rss_returned_html_html_no_supported_result_selector_matched/g, "RSS 入口返回了 HTML，已使用 HTML 解析器兜底，但没有命中结果结构")
-    .replace(/rss_returned_html_html_selectors_matched_but_no_usable_external_links/g, "RSS 入口返回了 HTML，已使用 HTML 解析器兜底，但没有可用外链")
-    .replace(/rss_returned_html/g, "RSS 入口返回 HTML，已转 HTML 解析")
-    .replace(/html_no_supported_result_selector_matched/g, "没有命中支持的结果选择器")
-    .replace(/html_selectors_matched_but_no_usable_external_links/g, "命中选择器但没有可用外链")
-    .replace(/html_empty_body/g, "HTML 返回为空")
-    .replace(/html_body_not_html/g, "返回体不是 HTML")
-    .replace(/rss-xml/g, "RSS 解析")
-    .replace(/news-html/g, "HTML 新闻卡解析")
-    .replace(/web-html/g, "HTML 网页解析")
-    .replace(/all_anchors_fallback/g, "全页面链接扫描")
-    .replace(/all anchors fallback/g, "全页面链接扫描")
-    .replace(/all anchors news fallback/g, "新闻链接扫描")
-    .replace(/news-card anchors/g, "新闻卡片链接")
-    .replace(/missing_href/g, "缺少 href")
-    .replace(/url_decode_or_internal/g, "URL 解码失败或内部链接")
-    .replace(/empty_title/g, "标题为空")
-    .replace(/low_news_score/g, "新闻相关性不足")
-    .replace(/raw_url_not_news_like/g, "原文 URL 不像新闻")
-    .replace(/result_url_rejected/g, "候选 URL 被过滤")
-    .replace(/li\.b_algo h2 a/g, "自然结果标题链接")
-    .replace(/h2 a fallback/g, "标题链接兜底")
-    .replace(/^html$/g, "HTML")
-    .replace(/read_failed/g, "读取失败")
-    .replace(/query\/topic mismatch/g, "搜索词或主题不匹配")
-    .replace(/fallback/g, "兜底")
-    .replace(/enabled/g, "已启用")
-    .replace(/cache hit/g, "命中缓存")
-    .replace(/cache miss/g, "未命中缓存")
-    .replace(/cache stale/g, "缓存过期");
-  return translated;
-};
-
 function WebSearchPlanCard({
   decision,
   provider,
@@ -2581,28 +2429,6 @@ const getProviderDebugLabel = (source: WebSource, provider: WebSearchProvider): 
   return `当前搜索源：${getWebSearchProviderLabel(sourceProvider)}`;
 };
 
-const getSearchStageDebugLabel = (source: WebSource): string | null => {
-  if (source.discoveryMethod === "direct_rss") return "发现方式：No-Key Direct RSS";
-  if (source.discoveryMethod === "direct_site") return "发现方式：No-Key Direct Site";
-  if (source.sourceKind !== "search_result" || !source.searchStage) return null;
-  const stageLabel = source.searchStage === "news-rss"
-    ? "Bing 新闻 RSS"
-    : source.searchStage === "news-html"
-      ? "Bing 新闻页面"
-      : source.searchStage === "news-html-fallback"
-        ? "Bing 新闻页面备用解析"
-        : source.searchStage === "web-rss" || source.searchStage === "rss"
-          ? "Bing 普通网页 RSS"
-          : source.searchStage === "web-html" || source.searchStage === "html"
-            ? "Bing 普通网页页面"
-            : source.searchStage === "web-html-fallback" || source.searchStage === "html-fallback"
-              ? "Bing 普通网页备用解析"
-              : source.searchStage === "api"
-                ? "搜索 API"
-                : source.searchStage;
-  return `发现方式：${stageLabel}`;
-};
-
 const getSourceCardDescription = (source: WebSource): string | undefined => {
   const rawExcerptStatus = source.excerptStatus as string | undefined;
   if (source.excerptStatus === "fetched") {
@@ -2851,164 +2677,6 @@ const shouldStopRecentNewsWithoutSources = (
     source.filteredReason === "docs_or_homepage" ||
     source.filteredReason === "wiki_or_reference",
   );
-};
-
-const formatBingDiagnostics = (raw: string): string[] => {
-  const normalized = raw.replace(/^.*?debug=/, "");
-  const parts = normalized.split(";").map((part) => part.trim()).filter(Boolean);
-  const lookup = (key: string) => parts.find((part) => part.startsWith(`${key}=`))?.slice(key.length + 1);
-  const finalReason = lookup("finalFailureReason") ?? lookup("errorKind") ?? "unknown";
-  const cacheStatus = lookup("cacheStatus");
-  const cacheRemaining = lookup("cacheRemainingSeconds");
-  const browserHeaders = lookup("browserHeaders");
-  const attempted = lookup("attemptedStages") ?? raw.split("attemptedStages=")[1];
-  const lines = [
-    `最终原因：${getDebugReasonLabel(finalReason)}`,
-    browserHeaders ? `使用浏览器兼容请求头：${browserHeaders === "enabled" ? "是" : getDebugReasonLabel(browserHeaders)}` : undefined,
-    cacheStatus ? `缓存状态：${getDebugReasonLabel(cacheStatus)}${cacheRemaining ? `，剩余约 ${cacheRemaining} 秒` : ""}` : undefined,
-  ].filter((line): line is string => Boolean(line));
-  if (attempted) {
-    attempted.split("|").map((stage) => stage.trim()).filter(Boolean).forEach((stage) => {
-      const [name, status, ...fields] = stage.split(":");
-      const fieldText = fields
-        .map((field) => {
-          const [key, value] = field.split("=");
-          const label = key === "http" ? "HTTP"
-            : key === "error" ? "错误"
-            : key === "parsed" ? "解析"
-            : key === "filtered" ? "过滤"
-            : key === "final" ? "保留"
-            : key === "cache" ? "缓存"
-            : key === "ms" ? "耗时"
-            : key === "host" ? "最终域名"
-            : key === "ct" ? "Content-Type"
-            : key === "enc" ? "Content-Encoding"
-            : key === "bytes" ? "响应大小"
-            : key === "quality" ? "bodyQuality"
-            : key === "binary" ? "bodyLooksBinary"
-            : key === "replacement" ? "replacementCharCount"
-            : key === "controls" ? "controlCharCount"
-            : key === "kind" ? "返回体类型"
-            : key === "title" ? "页面标题"
-            : key === "parser" ? "使用解析器"
-            : key === "panic" ? "parserPanicCaught"
-            : key === "selectors" ? "命中选择器"
-            : key === "rawAnchors" ? "rawAnchorCount"
-            : key === "rawHrefs" ? "rawHrefCount"
-            : key === "decodedUrls" ? "decodedUrlCandidateCount"
-            : key === "anchors" ? "扫描链接"
-            : key === "external" ? "外部链接"
-            : key === "kept" ? "keptCandidateCount"
-            : key === "rejected" ? "拒绝候选"
-            : key === "filterReasons" ? "过滤原因统计"
-            : key === "hint" ? "解析提示"
-            : key === "text" ? "可见文本预览"
-            : key === "links" ? "外链预览"
-            : key;
-          return `${label}=${getDebugReasonLabel(value ?? "")}`;
-        })
-        .join("，");
-      lines.push(`${getSearchStageDebugLabel({ sourceKind: "search_result", searchStage: name } as WebSource)?.replace("发现方式：", "") ?? name}：${status === "success" ? "成功" : "失败"}${fieldText ? `（${fieldText}）` : ""}`);
-    });
-  }
-  return lines.length > 0 ? lines : [raw];
-};
-
-const formatDirectDiscoveryDiagnostics = (raw: string): string[] => {
-  const directChunk = raw
-    .split("||")
-    .map((chunk) => chunk.replace(/^.*?debug=/, "").trim())
-    .find((chunk) => chunk.includes("directDiscoveryIntent=") || chunk.includes("directDiscoverySourcesTried=") || chunk.includes("directSource1="));
-  if (!directChunk) return [];
-  const parts = directChunk.split(";").map((part) => part.trim()).filter(Boolean);
-  const lookup = (key: string) => parts.find((part) => part.startsWith(`${key}=`))?.slice(key.length + 1);
-  const attempted = lookup("directDiscoveryAttempted");
-  if (!attempted) return [];
-  const lines = [
-    `directDiscoveryAttempted：${attempted === "yes" ? "yes" : "no"}`,
-    lookup("directDiscoverySkippedReason") ? `directDiscoverySkippedReason：${lookup("directDiscoverySkippedReason")}` : undefined,
-    `directDiscoveryIntent：${lookup("directDiscoveryIntent") ?? "unknown"}`,
-    `directDiscoveryFreshness：${lookup("directDiscoveryFreshness") || "none"}`,
-    `directDiscoveryQuery：${lookup("directDiscoveryQuery") || "none"}`,
-    `directDiscoveryTopicKeywords：${lookup("directDiscoveryTopicKeywords") || "none"}`,
-    `directDiscoverySourcesTried：${lookup("directDiscoverySourcesTried") ?? "0"}`,
-    `directDiscoveryCandidatesFound：${lookup("directDiscoveryCandidatesFound") ?? "0"}`,
-    `directDiscoveryCandidatesKept：${lookup("directDiscoveryCandidatesKept") ?? "0"}`,
-    `directDiscoveryDurationMs：${lookup("directDiscoveryDurationMs") ?? "0"}`,
-    `directDiscoveryCacheBehavior：${lookup("directDiscoveryCacheBehavior") || "unknown"}`,
-  ].filter((line): line is string => Boolean(line));
-  parts
-    .filter((part) => /^directSource\d+=/.test(part))
-    .forEach((part) => {
-      const separatorIndex = part.indexOf("=");
-      const key = separatorIndex >= 0 ? part.slice(0, separatorIndex) : part;
-      const rawValue = separatorIndex >= 0 ? part.slice(separatorIndex + 1) : "";
-      const fields = Object.fromEntries(rawValue.split(",").map((field) => {
-        const [fieldKey, ...fieldValue] = field.split("=");
-        return [fieldKey, fieldValue.join("=")];
-      }));
-      lines.push([
-        `${key}：${fields.sourceName ?? "unknown"}`,
-        fields.sourceType ? `type=${fields.sourceType}` : undefined,
-        fields.status ? `status=${fields.status}` : undefined,
-        fields.httpStatus ? `http=${fields.httpStatus}` : undefined,
-        fields.contentType ? `contentType=${fields.contentType}` : undefined,
-        fields.itemsParsed ? `itemsParsed=${fields.itemsParsed}` : undefined,
-        fields.itemsMatched ? `itemsMatched=${fields.itemsMatched}` : undefined,
-        fields.candidatesEmitted ? `candidatesEmitted=${fields.candidatesEmitted}` : undefined,
-        fields.reason ? `reason=${fields.reason}` : undefined,
-        fields.url ? `url=${fields.url}` : undefined,
-      ].filter(Boolean).join("，"));
-  });
-  return lines;
-};
-
-const formatNewsReadDiagnostics = (raw: string): string[] => {
-  const chunk = raw
-    .split("||")
-    .map((item) => item.replace(/^.*?debug=/, "").trim())
-    .find((item) => item.includes("newsReadAttempts="));
-  if (!chunk) return [];
-  const parts = chunk.split(";").map((part) => part.trim()).filter(Boolean);
-  const lookup = (key: string) => parts.find((part) => part.startsWith(`${key}=`))?.slice(key.length + 1);
-  return [
-    `newsReadAttempts：${lookup("newsReadAttempts") ?? "0"}`,
-    `newsReadSuccesses：${lookup("newsReadSuccesses") ?? "0"}`,
-    `usableEvidenceCount：${lookup("usableEvidenceCount") ?? "0"}`,
-    `rejectedCount：${lookup("rejectedCount") ?? "0"}`,
-    `excerptChars：${lookup("excerptChars") ?? "0"}`,
-    `queryDiversification：${lookup("queryDiversification") || "single"}`,
-    `eventClusterCount：${lookup("eventClusterCount") ?? "0"}`,
-  ];
-};
-
-const formatSearchPreparationDiagnosticsForDisplay = (raw: string): string[] => {
-  if (!raw.includes("searchPreparationStarted=")) return [];
-  const parts = raw
-    .split("||")
-    .flatMap((chunk) => chunk.replace(/^.*?debug=/, "").split(";"))
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const lookup = (key: string) => parts.find((part) => part.startsWith(`${key}=`))?.slice(key.length + 1);
-  const started = lookup("searchPreparationStarted");
-  if (!started) return [];
-  return [
-    `searchPreparationStarted：${started}`,
-    `searchPreparationTimedOut：${lookup("searchPreparationTimedOut") ?? "no"}`,
-    lookup("timedOutStage") ? `timedOutStage：${lookup("timedOutStage")}` : undefined,
-    `ruleIntent：${lookup("ruleIntent") ?? "unknown"}`,
-    `ruleFreshness：${lookup("ruleFreshness") ?? "none"}`,
-    `plannerStarted：${lookup("plannerStarted") ?? "no"}`,
-    `plannerTimedOut：${lookup("plannerTimedOut") ?? "no"}`,
-    lookup("plannerFailedReason") ? `plannerFailedReason：${lookup("plannerFailedReason")}` : undefined,
-    `ruleFallbackUsed：${lookup("ruleFallbackUsed") ?? "no"}`,
-    `directDiscoveryScheduled：${lookup("directDiscoveryScheduled") ?? "no"}`,
-    `directDiscoveryAttempted：${lookup("directDiscoveryAttempted") ?? "no"}`,
-    `providerSearchScheduled：${lookup("providerSearchScheduled") ?? "no"}`,
-    `providerSearchAttempted：${lookup("providerSearchAttempted") ?? "no"}`,
-    `downgradedToNormalAnswer：${lookup("downgradedToNormalAnswer") ?? "no"}`,
-    lookup("downgradeReason") ? `downgradeReason：${lookup("downgradeReason")}` : undefined,
-  ].filter((line): line is string => Boolean(line));
 };
 
 const buildWebContextDecision = (

@@ -4,6 +4,8 @@ export type WebSearchMode = "off" | "auto";
 
 export type WebSearchProvider = "bing" | "bocha" | "brave";
 
+export type SearchMode = WebSearchMode;
+
 export type WebSourceReliability =
   | "official"
   | "wiki"
@@ -11,6 +13,15 @@ export type WebSourceReliability =
   | "discussion"
   | "blog"
   | "unknown";
+
+export const WEB_SOURCE_RELIABILITIES = [
+  "official",
+  "wiki",
+  "community_solution",
+  "discussion",
+  "blog",
+  "unknown",
+] as const satisfies readonly WebSourceReliability[];
 
 export type WebSourceRelevance = "strong" | "candidate" | "unrelated";
 
@@ -21,7 +32,22 @@ export type WebSourceExcerptStatus =
   | "unavailable"
   | "failed";
 
+export const WEB_SOURCE_EXCERPT_STATUSES = [
+  "not_requested",
+  "fetched",
+  "blocked",
+  "unavailable",
+  "failed",
+] as const satisfies readonly WebSourceExcerptStatus[];
+
 export type WebEvidenceStatus = "candidate" | "fetched" | "usable" | "rejected";
+
+export const WEB_EVIDENCE_STATUSES = [
+  "candidate",
+  "fetched",
+  "usable",
+  "rejected",
+] as const satisfies readonly WebEvidenceStatus[];
 
 export type WebPageType =
   | "article"
@@ -37,6 +63,21 @@ export type WebPageType =
   | "forum"
   | "unknown";
 
+export const WEB_PAGE_TYPES = [
+  "article",
+  "news_article",
+  "docs",
+  "homepage",
+  "search_page",
+  "redirect",
+  "login",
+  "download",
+  "api_docs",
+  "encyclopedia",
+  "forum",
+  "unknown",
+] as const satisfies readonly WebPageType[];
+
 export type WebContentStatus =
   | "not_fetched"
   | "fetched"
@@ -46,9 +87,33 @@ export type WebContentStatus =
   | "blocked"
   | "failed";
 
+export const WEB_CONTENT_STATUSES = [
+  "not_fetched",
+  "fetched",
+  "partial",
+  "unavailable",
+  "needs_js",
+  "blocked",
+  "failed",
+] as const satisfies readonly WebContentStatus[];
+
 export type WebSourceStrength = "strong" | "medium" | "weak" | "rejected";
 
+export const WEB_SOURCE_STRENGTHS = [
+  "strong",
+  "medium",
+  "weak",
+  "rejected",
+] as const satisfies readonly WebSourceStrength[];
+
 export type WebCacheStatus = "miss" | "hit" | "stale" | "disabled";
+
+export const WEB_CACHE_STATUSES = [
+  "miss",
+  "hit",
+  "stale",
+  "disabled",
+] as const satisfies readonly WebCacheStatus[];
 
 export type WebDiscoveryMethod =
   | "local_note"
@@ -56,7 +121,18 @@ export type WebDiscoveryMethod =
   | "direct_rss"
   | "direct_site"
   | "constructed_source"
-  | "search_provider";
+  | "search_provider"
+  | "cached_excerpt";
+
+export const WEB_DISCOVERY_METHODS = [
+  "local_note",
+  "explicit_url",
+  "direct_rss",
+  "direct_site",
+  "constructed_source",
+  "search_provider",
+  "cached_excerpt",
+] as const satisfies readonly WebDiscoveryMethod[];
 
 export type WebSourceKind =
   | "explicit_url"
@@ -65,8 +141,35 @@ export type WebSourceKind =
   | "rss_item"
   | "official_news"
   | "official_blog"
+  | "media_article"
+  | "aggregator_item"
   | "docs_page"
-  | "oi_reference";
+  | "oi_reference"
+  | "github_page";
+
+export const WEB_SOURCE_KINDS = [
+  "explicit_url",
+  "search_result",
+  "constructed_source",
+  "rss_item",
+  "official_news",
+  "official_blog",
+  "media_article",
+  "aggregator_item",
+  "docs_page",
+  "oi_reference",
+  "github_page",
+] as const satisfies readonly WebSourceKind[];
+
+export type SearchIntent =
+  | "explicit_url"
+  | "local_note"
+  | "news_recent"
+  | "docs_technical"
+  | "oi_algorithm"
+  | "github_project"
+  | "general_knowledge"
+  | "general_web";
 
 export type WebReadErrorKind =
   | "invalid_url"
@@ -120,6 +223,21 @@ export type ResearchIntent =
   | "debug_issue"
   | "general_web";
 
+export const mapResearchIntentToSearchIntent = (
+  intent: ResearchIntent,
+  vertical?: SearchVertical,
+  freshness?: AiSearchFreshness,
+): SearchIntent => {
+  if (vertical === "explicit_url") return "explicit_url";
+  if (vertical === "docs") return "docs_technical";
+  if (vertical === "news" || freshness === "news") return "news_recent";
+  if (vertical === "oi" || vertical === "algorithm") return "oi_algorithm";
+  if (intent === "oi_problem" || intent === "oi_discussion" || intent === "algorithm_reference" || intent === "debug_issue") {
+    return "oi_algorithm";
+  }
+  return "general_web";
+};
+
 export type SearchVertical =
   | "news"
   | "oi"
@@ -132,10 +250,46 @@ export type SearchVertical =
 
 export type SearchDepth = "quick" | "normal" | "deep" | "news" | "oi_research";
 
+export type DiscoveryCandidate = Pick<
+  WebSource,
+  | "id"
+  | "title"
+  | "url"
+  | "originalUrl"
+  | "resolvedUrl"
+  | "finalUrl"
+  | "site"
+  | "snippet"
+  | "sourceKind"
+  | "discoveryMethod"
+  | "sourceReliability"
+  | "discoveredBy"
+  | "feedUrl"
+  | "sourceHome"
+  | "directDiscoveryReason"
+>;
+
+export type FetchedSource = WebSource & {
+  excerptStatus: "fetched" | "blocked" | "unavailable" | "failed";
+};
+
+export type EvidenceSource = WebSource & {
+  evidenceStatus: WebEvidenceStatus;
+  usableEvidence: boolean;
+  injectedIntoAnswer: boolean;
+};
+
+export type NewsCluster = Pick<
+  WebSource,
+  "eventCluster" | "clusterReason" | "clusterSize" | "selectedForRoundup" | "droppedAsDuplicateCluster"
+>;
+
 export type WebSource = {
   id: string;
   title: string;
   url: string;
+  originalUrl?: string;
+  resolvedUrl?: string;
   finalUrl?: string;
   site?: string;
   snippet?: string;
@@ -320,6 +474,8 @@ export type WebSearchResult = {
   id: string;
   title: string;
   url: string;
+  originalUrl?: string;
+  resolvedUrl?: string;
   finalUrl?: string;
   site?: string;
   snippet?: string;
@@ -436,6 +592,13 @@ export type SearchDecision = {
   aiPlanner?: AiSearchPlannerState;
   confidence?: number;
   reason?: string;
+};
+
+export type SearchPlan = {
+  decision: SearchDecision;
+  canonicalIntent: SearchIntent;
+  sourceStrategy?: SourceStrategyPlan;
+  readBudget?: WebReadBudgetPlan;
 };
 
 const PROBLEM_PATTERNS = [
