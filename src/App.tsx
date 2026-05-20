@@ -19,7 +19,7 @@ import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from 
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
 import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
@@ -785,6 +785,15 @@ function formatWebSearchTestError(error: unknown): string {
   const lower = message.toLowerCase();
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) {
     return "搜索服务返回限流。可以稍后重试，或检查当前 Provider 的额度。";
+  }
+  if (lower.includes("captcha") || lower.includes("blocked") || lower.includes("verify") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) {
+    return "Bing 公开搜索遇到验证页或访问限制。可以稍后重试，或改用 Bocha / Brave。";
+  }
+  if (lower.includes("rate_limited") || lower.includes("errorkind=rate_limited")) {
+    return "Bing 公开搜索被限流。可以稍后重试，或改用 Bocha / Brave。";
+  }
+  if (lower.includes("parse_failed") || lower.includes("no_results")) {
+    return "Bing 公开搜索没有解析到可用结果。可以稍后重试，或改用 Bocha / Brave。";
   }
   if (lower.includes("json") || message.includes("不是 JSON")) {
     return "搜索服务返回格式不符合预期，请检查 Endpoint 是否填写为 API 地址。";
@@ -1663,7 +1672,7 @@ export default function App() {
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
   const [isUpdatingLuoguLastSubmissionId, setIsUpdatingLuoguLastSubmissionId] = useState(false);
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
-  const [isSavingAiConfig] = useState(false);
+  const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
   const [isTestingWebSearchConnection, setIsTestingWebSearchConnection] = useState(false);
   const [webSearchConnectionMessage, setWebSearchConnectionMessage] = useState<string | null>(null);
   const [isClearingWebCache, setIsClearingWebCache] = useState(false);
@@ -2817,8 +2826,48 @@ export default function App() {
     }));
   };
 
+  const handleSaveAiConfigDraft = async () => {
+    if (!aiConfigDraft || isSavingAiConfig) return;
+    const nextConfig = normalizeAiConfigDraft(aiConfigDraft);
+    setIsSavingAiConfig(true);
+    try {
+      await saveAiConfig(nextConfig);
+      applyAiConfigState(nextConfig);
+      toast.success("AI/API 设置已保存");
+    } catch (e) {
+      toast.error(`AI/API 设置保存失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsSavingAiConfig(false);
+    }
+  };
+
+  const handleDiscardAiConfigDraft = () => {
+    if (!aiConfig) return;
+    setAiConfigDraft(cloneAiConfig(aiConfig));
+    setWebSearchConnectionMessage(null);
+  };
+
   const handleTestWebSearchConnection = async () => {
     const webSearchConfig = normalizeWebSearchConfig(aiConfigDraft?.web_search);
+    if (webSearchConfig.provider === "bing") {
+      setIsTestingWebSearchConnection(true);
+      setWebSearchConnectionMessage(null);
+      try {
+        const result = await withTimeout(
+          testWebSearchConnection({
+            provider: "bing",
+          }),
+          5000,
+          "搜索测试超时",
+        );
+        setWebSearchConnectionMessage(`连接成功：Bing 公开搜索，Endpoint ${result.endpoint}`);
+      } catch (e) {
+        setWebSearchConnectionMessage(formatWebSearchTestError(e));
+      } finally {
+        setIsTestingWebSearchConnection(false);
+      }
+      return;
+    }
     if (webSearchConfig.provider === "bocha" && !webSearchConfig.bochaApiKey.trim()) {
       setWebSearchConnectionMessage("需要先填写博查 API Key。");
       return;
@@ -2842,7 +2891,7 @@ export default function App() {
       );
       setWebSearchConnectionMessage(
         result.endpoint
-          ? `连接成功：${result.provider === "bocha" ? "Bocha" : "Brave Search"}，Endpoint ${result.endpoint}`
+          ? `连接成功：${result.provider === "bocha" ? "Bocha" : result.provider === "bing" ? "Bing 公开搜索" : "Brave Search"}，Endpoint ${result.endpoint}`
           : "连接成功",
       );
     } catch (e) {
@@ -6274,6 +6323,17 @@ export default function App() {
                   : "左侧选择设置页，右侧只显示当前页。"}
               </div>
             </div>
+            {settingsView === "main" && hasAiConfigDraftChanges && (
+              <div className="flex shrink-0 flex-wrap items-center gap-2 pr-1">
+                <Button type="button" variant="outline" size="sm" onClick={handleDiscardAiConfigDraft} disabled={isSavingAiConfig}>
+                  放弃 AI 更改
+                </Button>
+                <Button type="button" size="sm" onClick={() => void handleSaveAiConfigDraft()} disabled={isSavingAiConfig}>
+                  <Save className="h-3.5 w-3.5" />
+                  {isSavingAiConfig ? "保存中..." : "保存 AI 更改"}
+                </Button>
+              </div>
+            )}
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
@@ -6596,22 +6656,25 @@ export default function App() {
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">联网搜索</div>
-                        <div className="text-xs leading-5 text-muted-foreground">Bocha 推荐用于中文搜索；Brave 适合已有配置。</div>
+                        <div className="text-xs leading-5 text-muted-foreground">Bing 公开搜索无需 Key；Bocha 推荐用于稳定中文搜索；Brave 适合已有配置。</div>
                       </div>
                       <SettingRow title="启用联网搜索 Provider" description="关闭后不会请求公开搜索 Provider。">
                         <button type="button" className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", aiConfigDraft?.web_search.enabled ? "border-primary/70 bg-primary" : "border-border bg-muted/40")} onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), enabled: !normalizeWebSearchConfig(config.web_search).enabled } }))} disabled={!aiConfigDraft || isSavingAiConfig} role="switch" aria-checked={aiConfigDraft?.web_search.enabled === true} aria-label="启用联网搜索 Provider"><span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", aiConfigDraft?.web_search.enabled && "translate-x-5")} /></button>
                       </SettingRow>
-                      <SettingRow title="Provider" description="Bocha 推荐；Brave 备用。">
+                      <SettingRow title="Provider" description="Bing 无需 Key，Bocha 推荐 / 稳定，Brave 备用。">
                         <div className="flex flex-wrap gap-2">
-                          {([{ value: "bocha", label: "Bocha" }, { value: "brave", label: "Brave" }] as const).map((option) => (
-                            <Button key={option.value} type="button" variant={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === option.value ? "default" : "outline"} size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: option.value } }))} disabled={!aiConfigDraft || isSavingAiConfig}>{option.label}</Button>
+                          {([{ value: "bing", label: "Bing 公开搜索", badge: "无需 Key" }, { value: "bocha", label: "博查 Bocha", badge: "推荐 / 稳定" }, { value: "brave", label: "Brave Search", badge: "备用" }] as const).map((option) => (
+                            <Button key={option.value} type="button" variant={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === option.value ? "default" : "outline"} size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: option.value } }))} disabled={!aiConfigDraft || isSavingAiConfig}>{option.label}<span className="ml-1 text-[10px] opacity-75">{option.badge}</span></Button>
                           ))}
                         </div>
                       </SettingRow>
-                      <SettingRow title="Bocha API Key" description="推荐，适合中文搜索。"><Input type="password" value={aiConfigDraft?.web_search.bochaApiKey ?? ""} placeholder="sk-..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "bocha", bochaApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="Bocha Endpoint" description="留空使用默认地址。"><Input value={aiConfigDraft?.web_search.bochaEndpoint ?? ""} placeholder="https://api.bochaai.com/v1/web-search" onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "bocha", bochaEndpoint: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="Brave API Key" description="备用，适合已有配置。"><Input type="password" value={aiConfigDraft?.web_search.braveApiKey ?? ""} placeholder="BSA..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: "brave", braveApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="测试连接" description={!normalizeWebSearchConfig(aiConfigDraft?.web_search).bochaApiKey && !normalizeWebSearchConfig(aiConfigDraft?.web_search).braveApiKey ? "需要配置 Provider 后才能联网搜索。" : "发送一个小查询测试当前 Provider。"}>
+                      <SettingRow title="Bing 公开搜索" description="无需 API Key，适合开箱即用。稳定性不如正式 API；如果遇到限流或验证页，可以稍后重试或改用 Bocha / Brave。">
+                        <span className="text-xs text-muted-foreground">无需 Key，但可能被限流或返回验证页。</span>
+                      </SettingRow>
+                      <SettingRow title="Bocha API Key" description="推荐，适合中文搜索。"><Input type="password" value={aiConfigDraft?.web_search.bochaApiKey ?? ""} placeholder="sk-..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), bochaApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="Bocha Endpoint" description="留空使用默认地址。"><Input value={aiConfigDraft?.web_search.bochaEndpoint ?? ""} placeholder="https://api.bochaai.com/v1/web-search" onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), bochaEndpoint: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="Brave API Key" description="备用，适合已有配置。"><Input type="password" value={aiConfigDraft?.web_search.braveApiKey ?? ""} placeholder="BSA..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), braveApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
+                      <SettingRow title="测试连接" description={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "bing" ? "手动发送一个很小的 Bing 公开搜索测试 query。" : !normalizeWebSearchConfig(aiConfigDraft?.web_search).bochaApiKey && !normalizeWebSearchConfig(aiConfigDraft?.web_search).braveApiKey ? "Bing 可无需 Key 使用；Bocha / Brave 需要配置 Key。" : "发送一个小查询测试当前 Provider。"}>
                         <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleTestWebSearchConnection()} disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}>{isTestingWebSearchConnection ? "测试中..." : "测试连接"}</Button>{webSearchConnectionMessage && <span className="text-xs text-muted-foreground">{webSearchConnectionMessage}</span>}</div>
                       </SettingRow>
                       <SettingRow title="清理联网缓存" description="清理搜索结果和网页摘录缓存。"><div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleClearWebCache()} disabled={isClearingWebCache}>{isClearingWebCache ? "清理中..." : "清理联网缓存"}</Button>{webCacheMessage && <span className="text-xs text-muted-foreground">{webCacheMessage}</span>}</div></SettingRow>

@@ -1,11 +1,13 @@
-use std::{
-    collections::HashSet,
+﻿use std::{
+    collections::{BTreeMap, HashSet},
     error::Error,
     fs,
     io::Read,
     net::{IpAddr, ToSocketAddrs},
+    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use chrono::{TimeZone, Utc};
@@ -31,10 +33,15 @@ const DEFAULT_LEGACY_PROVIDER_ID: &str = "default-openai-compatible";
 const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
 const WEB_SEARCH_DEFAULT_PROVIDER: &str = "bocha";
 const WEB_SEARCH_BRAVE_PROVIDER: &str = "brave";
+const WEB_SEARCH_BING_PROVIDER: &str = "bing";
 const WEB_SEARCH_REMOVED_SEARXNG_PROVIDER: &str = "searxng";
 const WEB_SEARCH_MAX_QUERIES: usize = 8;
 const WEB_SEARCH_MAX_RESULTS: usize = 40;
-const WEB_EXTRACT_MAX_SOURCES: usize = 3;
+const BING_PUBLIC_MAX_QUERIES: usize = 3;
+const BING_PUBLIC_MAX_RESULTS: usize = 24;
+const BING_PUBLIC_MAX_RESULTS_PER_QUERY: usize = 8;
+const BING_PUBLIC_FAILURE_TTL_SECONDS: i64 = 15 * 60;
+const WEB_EXTRACT_MAX_SOURCES: usize = 12;
 const WEB_EXTRACT_MAX_CHARS_PER_SOURCE: usize = 5000;
 const WEB_EXTRACT_TOTAL_CONTEXT_CHARS: usize = 15000;
 const WEB_EXTRACT_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -46,6 +53,10 @@ const WEB_EXCERPT_FAILURE_TTL_SECONDS: i64 = 20 * 60;
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BOCHA_SEARCH_ENDPOINT: &str = "https://api.bochaai.com/v1/web-search";
 const BOCHA_SEARCH_FALLBACK_ENDPOINT: &str = "https://api.bocha.cn/v1/web-search";
+const BING_SEARCH_ENDPOINT: &str = "https://www.bing.com/search";
+const BING_NEWS_SEARCH_ENDPOINT: &str = "https://www.bing.com/news/search";
+const BING_PUBLIC_USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -188,16 +199,83 @@ pub struct WebSearchRequestInput {
     pub queries: Vec<String>,
     pub intent: String,
     #[serde(default)]
+    pub vertical: Option<String>,
+    #[serde(default)]
+    pub freshness: Option<String>,
+    #[serde(default)]
     pub problem_id: Option<String>,
     #[serde(default)]
     pub algorithm_keywords: Vec<String>,
+    #[serde(default)]
+    pub topic_keywords: Vec<String>,
     #[serde(default)]
     pub max_results: Option<usize>,
     #[serde(default)]
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSearchQueryPlanInput {
+    pub user_input: String,
+    pub intent: String,
+    pub provider: String,
+    #[serde(default)]
+    pub max_queries: Option<usize>,
+    #[serde(default)]
+    pub rule_based_queries: Vec<String>,
+    #[serde(default)]
+    pub topic_keywords: Vec<String>,
+    #[serde(default)]
+    pub news_intent: bool,
+    #[serde(default)]
+    pub recency_intent: bool,
+    #[serde(default)]
+    pub current_date: Option<String>,
+    #[serde(default)]
+    pub current_date_text: Option<String>,
+    #[serde(default)]
+    pub current_time_zone: Option<String>,
+    #[serde(default)]
+    pub locale: Option<String>,
+    #[serde(default)]
+    pub recency_window_hint: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSearchQueryPlan {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_goal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertical: Option<String>,
+    pub rewritten_intent: String,
+    pub queries: Vec<String>,
+    pub topic_keywords: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub required_keywords: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub negative_keywords: Vec<String>,
+    pub freshness: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_budget: Option<usize>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preferred_source_types: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preferred_domains: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub avoid_source_types: Vec<String>,
+    pub reason: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchResult {
     pub id: String,
@@ -207,6 +285,50 @@ pub struct WebSearchResult {
     pub site: Option<String>,
     pub snippet: Option<String>,
     pub source_kind: Option<String>,
+    #[serde(default)]
+    pub discovery_method: Option<String>,
+    #[serde(default)]
+    pub source_reliability: Option<String>,
+    #[serde(default)]
+    pub discovered_by: Option<String>,
+    #[serde(default)]
+    pub feed_url: Option<String>,
+    #[serde(default)]
+    pub source_home: Option<String>,
+    #[serde(default)]
+    pub direct_discovery_reason: Option<String>,
+    #[serde(default)]
+    pub search_provider: Option<String>,
+    #[serde(default)]
+    pub search_stage: Option<String>,
+    #[serde(default)]
+    pub date_hint: Option<String>,
+    #[serde(default)]
+    pub freshness_score: Option<i64>,
+    #[serde(default)]
+    pub search_diagnostics: Option<String>,
+    #[serde(default)]
+    pub news_like: Option<bool>,
+    #[serde(default)]
+    pub filtered_reason: Option<String>,
+    #[serde(default)]
+    pub final_included_in_prompt: Option<bool>,
+    #[serde(default)]
+    pub evidence_status: Option<String>,
+    #[serde(default)]
+    pub usable_evidence: Option<bool>,
+    #[serde(default)]
+    pub injected_into_answer: Option<bool>,
+    #[serde(default)]
+    pub evidence_reason: Option<String>,
+    #[serde(default)]
+    pub rejected_reason: Option<String>,
+    #[serde(default)]
+    pub page_type: Option<String>,
+    #[serde(default)]
+    pub content_status: Option<String>,
+    #[serde(default)]
+    pub source_strength: Option<String>,
     pub source_type: Option<String>,
     pub reliability: Option<String>,
     pub reliability_label: Option<String>,
@@ -233,6 +355,11 @@ pub struct WebSearchResult {
     pub constructed_reason: Option<String>,
     pub selected: Option<bool>,
     pub citation_id: Option<String>,
+    pub event_cluster: Option<String>,
+    pub cluster_reason: Option<String>,
+    pub cluster_size: Option<i64>,
+    pub selected_for_roundup: Option<bool>,
+    pub dropped_as_duplicate_cluster: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -259,7 +386,7 @@ pub struct FetchWebSourceExcerptsInput {
     pub queries: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSourceExcerptResult {
     pub id: String,
@@ -279,6 +406,20 @@ pub struct WebSourceExcerptResult {
     pub extractor: Option<String>,
     pub excerpt_reason: Option<String>,
     pub code_blocks_truncated: Option<bool>,
+    #[serde(default)]
+    pub evidence_status: Option<String>,
+    #[serde(default)]
+    pub usable_evidence: Option<bool>,
+    #[serde(default)]
+    pub evidence_reason: Option<String>,
+    #[serde(default)]
+    pub rejected_reason: Option<String>,
+    #[serde(default)]
+    pub page_type: Option<String>,
+    #[serde(default)]
+    pub content_status: Option<String>,
+    #[serde(default)]
+    pub source_strength: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -349,6 +490,14 @@ pub struct TestWebSearchConnectionResult {
     pub ok: bool,
     pub provider: String,
     pub endpoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -429,7 +578,7 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
 
     if base_url.is_empty() {
         return Err(
-            "AI connection failed: base_url is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+            "AI connection failed: base_url is missing in .oinb/config.json. Please open AI settings and configure base_url / api_key / model."
                 .to_string(),
         );
     }
@@ -440,7 +589,7 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
     }
     if api_key.is_empty() {
         return Err(
-            "AI connection failed: api_key is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+            "AI connection failed: api_key is missing in .oinb/config.json. Please open AI settings and configure base_url / api_key / model."
                 .to_string(),
         );
     }
@@ -449,7 +598,7 @@ fn require_ai_config(config: &AiConfigFields) -> Result<(&str, &str, &str), Stri
     }
     if model.is_empty() {
         return Err(
-            "AI connection failed: model is missing in .oinb/config.json. 当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json；release/安装版不会读取开发目录里的 .oinb/config.json，需要重新配置。请打开 AI 设置填写 base_url / api_key / model。"
+            "AI connection failed: model is missing in .oinb/config.json. Please open AI settings and configure base_url / api_key / model."
                 .to_string(),
         );
     }
@@ -589,7 +738,7 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
                 .filter(|id| !id.is_empty())
                 .unwrap_or(DEFAULT_LEGACY_PROVIDER_ID)
                 .to_string(),
-            name: "默认 OpenAI Compatible".to_string(),
+            name: "榛樿 OpenAI Compatible".to_string(),
             kind: OPENAI_COMPATIBLE_PROVIDER_KIND.to_string(),
             base_url: legacy_base_url.clone(),
             api_key: legacy_api_key.clone(),
@@ -679,15 +828,15 @@ fn normalize_web_search_config(
     let provider = match config.provider.trim() {
         WEB_SEARCH_DEFAULT_PROVIDER => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
         WEB_SEARCH_BRAVE_PROVIDER => WEB_SEARCH_BRAVE_PROVIDER.to_string(),
+        WEB_SEARCH_BING_PROVIDER => WEB_SEARCH_BING_PROVIDER.to_string(),
         WEB_SEARCH_REMOVED_SEARXNG_PROVIDER if !config.bocha_api_key.trim().is_empty() => {
             WEB_SEARCH_DEFAULT_PROVIDER.to_string()
         }
         WEB_SEARCH_REMOVED_SEARXNG_PROVIDER if !config.brave_api_key.trim().is_empty() => {
             WEB_SEARCH_BRAVE_PROVIDER.to_string()
         }
-        _ if !config.bocha_api_key.trim().is_empty() => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
-        _ if !config.brave_api_key.trim().is_empty() => WEB_SEARCH_BRAVE_PROVIDER.to_string(),
-        _ => WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
+        WEB_SEARCH_REMOVED_SEARXNG_PROVIDER => WEB_SEARCH_BING_PROVIDER.to_string(),
+        _ => WEB_SEARCH_BING_PROVIDER.to_string(),
     };
     crate::luogu::WebSearchConfigFields {
         enabled: config.enabled,
@@ -899,10 +1048,7 @@ fn cache_time_string(timestamp_ms: i64) -> String {
         .to_rfc3339()
 }
 
-fn is_news_like_web_request(intent: &str, queries: &[String]) -> bool {
-    if intent == "general_web" {
-        return true;
-    }
+fn is_news_like_web_request(_intent: &str, queries: &[String]) -> bool {
     let haystack = queries.join("\n").to_ascii_lowercase();
     [
         "recent", "latest", "news", "today", "最近", "最新", "新闻", "今日", "今天",
@@ -912,7 +1058,7 @@ fn is_news_like_web_request(intent: &str, queries: &[String]) -> bool {
 }
 
 fn search_cache_ttl_seconds(request: &WebSearchRequestInput) -> i64 {
-    if is_news_like_web_request(&request.intent, &request.queries) {
+    if is_bing_news_request(request) {
         WEB_SEARCH_NEWS_TTL_SECONDS
     } else {
         WEB_SEARCH_OI_TTL_SECONDS
@@ -959,13 +1105,23 @@ fn build_web_search_cache_key(
         .filter(|keyword| !keyword.is_empty())
         .take(12)
         .collect::<Vec<_>>();
+    let normalized_topic_keywords = request
+        .topic_keywords
+        .iter()
+        .map(|keyword| keyword.trim())
+        .filter(|keyword| !keyword.is_empty())
+        .take(12)
+        .collect::<Vec<_>>();
     let key_json = json!({
         "version": web_cache::cache_version(),
         "provider": provider,
         "queries": normalized_queries,
         "intent": request.intent.trim(),
+        "vertical": request.vertical.as_deref().unwrap_or("").trim(),
+        "freshness": request.freshness.as_deref().unwrap_or("").trim(),
         "problemId": request.problem_id.as_deref().unwrap_or("").trim(),
         "algorithmKeywords": normalized_keywords,
+        "topicKeywords": normalized_topic_keywords,
         "maxResults": max_results,
         "endpointHash": endpoint_hint
             .map(str::trim)
@@ -1118,6 +1274,66 @@ fn sanitize_ai_detail(text: &str) -> String {
 fn decode_response_body(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes).into_owned();
     text.trim_start_matches('\u{feff}').to_string()
+}
+
+fn take_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+fn char_boundary_at_or_after(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    if text.is_char_boundary(index) {
+        return index;
+    }
+    let mut next = index + 1;
+    while next < text.len() && !text.is_char_boundary(next) {
+        next += 1;
+    }
+    next
+}
+
+fn char_boundary_at_or_before(text: &str, index: usize) -> usize {
+    let mut current = index.min(text.len());
+    while current > 0 && !text.is_char_boundary(current) {
+        current -= 1;
+    }
+    current
+}
+
+fn safe_slice_by_byte_range(text: &str, start: usize, end: usize) -> &str {
+    let safe_start = char_boundary_at_or_after(text, start.min(text.len()));
+    let safe_end = char_boundary_at_or_before(text, end.min(text.len()));
+    if safe_start >= safe_end {
+        ""
+    } else {
+        &text[safe_start..safe_end]
+    }
+}
+
+fn safe_context_around_byte(text: &str, byte_index: usize, before: usize, after: usize) -> String {
+    let safe_index = char_boundary_at_or_before(text, byte_index.min(text.len()));
+    let char_pos = text[..safe_index].chars().count();
+    let start_char = char_pos.saturating_sub(before);
+    let end_char = char_pos.saturating_add(after).min(text.chars().count());
+    text.chars()
+        .skip(start_char)
+        .take(end_char.saturating_sub(start_char))
+        .collect()
+}
+
+fn safe_preview(text: &str, max_chars: usize) -> String {
+    take_chars(
+        &text
+            .chars()
+            .filter(|ch| *ch == '\n' || *ch == '\t' || !ch.is_control())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        max_chars,
+    )
 }
 
 fn looks_like_html(text: &str) -> bool {
@@ -1289,6 +1505,153 @@ fn parse_json_object_from_ai_content(content: &str, scope: &str) -> Result<JsonV
     })
 }
 
+fn clean_planner_text(value: &str, max_chars: usize) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .chars()
+        .take(max_chars)
+        .collect::<String>()
+}
+
+fn has_url_like_text(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("www.")
+}
+
+fn json_string_array(value: Option<&JsonValue>, max_items: usize, max_chars: usize) -> Vec<String> {
+    let Some(items) = value.and_then(JsonValue::as_array) else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    let mut output = Vec::new();
+    for item in items {
+        let Some(text) = item.as_str() else {
+            continue;
+        };
+        let cleaned = clean_planner_text(text, max_chars);
+        if cleaned.is_empty() || has_url_like_text(&cleaned) {
+            continue;
+        }
+        let key = cleaned.to_ascii_lowercase();
+        if seen.insert(key) {
+            output.push(cleaned);
+        }
+        if output.len() >= max_items {
+            break;
+        }
+    }
+    output
+}
+
+fn is_generic_planner_query(query: &str) -> bool {
+    let compact = query
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<String>();
+    if compact.is_empty() {
+        return true;
+    }
+    let generic = [
+        "recently",
+        "latest",
+        "news",
+        "update",
+        "today",
+        "最近",
+        "最新",
+        "近期",
+        "新闻",
+        "动态",
+        "消息",
+        "有什么",
+        "发生了什么",
+    ];
+    generic.iter().any(|word| compact == *word)
+}
+
+fn parse_ai_search_query_plan(
+    content: &str,
+    max_queries: usize,
+    scope: &str,
+) -> Result<AiSearchQueryPlan, String> {
+    let value = parse_json_object_from_ai_content(content, scope)?;
+    let max_queries = max_queries.clamp(1, 3);
+    let queries = json_string_array(value.get("queries"), max_queries, 90)
+        .into_iter()
+        .filter(|query| !is_generic_planner_query(query))
+        .collect::<Vec<_>>();
+    if queries.is_empty() {
+        return Err(format!("{scope}: planner returned no usable query"));
+    }
+
+    let freshness = value
+        .get("freshness")
+        .and_then(JsonValue::as_str)
+        .map(|text| text.trim().to_ascii_lowercase())
+        .filter(|text| matches!(text.as_str(), "none" | "recent" | "latest" | "news"))
+        .unwrap_or_else(|| "none".to_string());
+    let vertical = value
+        .get("vertical")
+        .and_then(JsonValue::as_str)
+        .map(|text| text.trim().to_ascii_lowercase())
+        .filter(|text| {
+            matches!(
+                text.as_str(),
+                "news" | "oi" | "algorithm" | "general_web" | "product" | "docs" | "explicit_url" | "no_search"
+            )
+        });
+    let depth = value
+        .get("depth")
+        .and_then(JsonValue::as_str)
+        .map(|text| text.trim().to_ascii_lowercase())
+        .filter(|text| matches!(text.as_str(), "quick" | "normal" | "deep" | "news" | "oi_research"));
+    let read_budget = value
+        .get("readBudget")
+        .and_then(JsonValue::as_u64)
+        .map(|value| value.clamp(1, 12) as usize);
+    let confidence = value
+        .get("confidence")
+        .and_then(JsonValue::as_f64)
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+
+    Ok(AiSearchQueryPlan {
+        search_goal: value
+            .get("searchGoal")
+            .and_then(JsonValue::as_str)
+            .map(|text| clean_planner_text(text, 180))
+            .filter(|text| !text.is_empty()),
+        vertical,
+        rewritten_intent: value
+            .get("rewrittenIntent")
+            .and_then(JsonValue::as_str)
+            .map(|text| clean_planner_text(text, 160))
+            .unwrap_or_default(),
+        queries,
+        topic_keywords: json_string_array(value.get("topicKeywords"), 10, 40),
+        required_keywords: json_string_array(value.get("requiredKeywords"), 10, 40),
+        negative_keywords: json_string_array(value.get("negativeKeywords"), 12, 40),
+        freshness,
+        depth,
+        read_budget,
+        preferred_source_types: json_string_array(value.get("preferredSourceTypes"), 8, 40),
+        preferred_domains: json_string_array(value.get("preferredDomains"), 8, 80),
+        avoid_source_types: json_string_array(value.get("avoidSourceTypes"), 8, 40),
+        reason: value
+            .get("reason")
+            .and_then(JsonValue::as_str)
+            .map(|text| clean_planner_text(text, 260))
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| "AI query planner generated search queries.".to_string()),
+        confidence,
+    })
+}
+
 fn request_chat_completion(
     config: &AiConfigFields,
     messages: JsonValue,
@@ -1386,7 +1749,7 @@ fn request_chat_completion_with_options(
     Err(last_issue
         .unwrap_or_else(|| {
             AiResponseIssue::retryable(
-                "AI 服务返回了无法解析的响应，请重试。",
+                "AI service returned an unparseable response; please retry.",
                 "debug=retry-exhausted",
             )
         })
@@ -1401,12 +1764,12 @@ fn parse_chat_completion_response(
     let bytes = response.bytes().map_err(|e| {
         if status.is_success() {
             AiResponseIssue::retryable(
-                "AI 服务响应体读取失败，请重试。",
+                "AI service response body could not be read; please retry.",
                 format!("debug=http_status={status_code}; read_error={e}"),
             )
         } else {
             AiResponseIssue::non_retryable(
-                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!("AI service returned HTTP {status_code}."),
                 format!("debug=http_status={status_code}; error_body_read_failed={e}"),
             )
         }
@@ -1417,14 +1780,14 @@ fn parse_chat_completion_response(
     if !status.is_success() {
         if body_trimmed.is_empty() {
             return Err(AiResponseIssue::non_retryable(
-                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!("AI service returned HTTP {status_code}."),
                 format!("debug=http_status={status_code}; error_body=empty"),
             ));
         }
 
         if looks_like_html(body_trimmed) {
             return Err(AiResponseIssue::non_retryable(
-                format!("AI 服务返回了 HTTP {status_code}，且错误响应不是 JSON。"),
+                format!("AI service returned HTTP {status_code}, and the error response was not JSON."),
                 format!(
                     "debug=http_status={status_code}; error_body_preview={}",
                     sanitize_ai_detail(body_trimmed)
@@ -1440,7 +1803,7 @@ fn parse_chat_completion_response(
                 ));
             }
             return Err(AiResponseIssue::non_retryable(
-                format!("AI 服务返回了 HTTP {status_code}。"),
+                format!("AI service returned HTTP {status_code}."),
                 format!(
                     "debug=http_status={status_code}; error_json_preview={}",
                     diagnostic_json_preview(&value)
@@ -1449,7 +1812,7 @@ fn parse_chat_completion_response(
         }
 
         return Err(AiResponseIssue::non_retryable(
-            format!("AI 服务返回了 HTTP {status_code}。"),
+            format!("AI service returned HTTP {status_code}."),
             format!(
                 "debug=http_status={status_code}; error_body_preview={}",
                 sanitize_ai_detail(body_trimmed)
@@ -1459,14 +1822,14 @@ fn parse_chat_completion_response(
 
     if body_trimmed.is_empty() {
         return Err(AiResponseIssue::retryable(
-            "AI 服务返回空响应，请重试。",
+            "AI service returned an empty response; please retry.",
             format!("debug=http_status={status_code}; body=empty"),
         ));
     }
 
     if looks_like_html(body_trimmed) {
         return Err(AiResponseIssue::retryable(
-            "AI 服务返回了非 JSON 响应，请重试。",
+            "AI service returned a non-JSON response; please retry.",
             format!(
                 "debug=http_status={status_code}; html_body_preview={}",
                 sanitize_ai_detail(body_trimmed)
@@ -1476,7 +1839,7 @@ fn parse_chat_completion_response(
 
     let value = serde_json::from_str::<JsonValue>(body_trimmed).map_err(|e| {
         AiResponseIssue::retryable(
-            "AI 服务返回了无法解析的响应，请重试。",
+            "AI service returned an unparseable response; please retry.",
             format!(
                 "debug=http_status={status_code}; json_parse_error={e}; body_preview={}",
                 sanitize_ai_detail(body_trimmed)
@@ -1494,7 +1857,7 @@ fn parse_chat_completion_response(
     let shape = chat_response_shape(&value);
     extract_chat_content(&value).ok_or_else(|| {
         AiResponseIssue::retryable(
-            "AI 服务响应格式不符合预期，请重试。",
+            "AI service response format was unexpected; please retry.",
             format!(
                 "debug=http_status={status_code}; {shape}; body_preview={}",
                 diagnostic_json_preview(&value)
@@ -1600,21 +1963,52 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
     let mut citation_ids = Vec::new();
     let selected_sources = sources
         .iter()
-        .filter(|source| source.selected.unwrap_or(false))
+        .filter(|source| {
+            source.usable_evidence.unwrap_or(false)
+                && source.evidence_status.as_deref() == Some("usable")
+                && source.injected_into_answer.unwrap_or(false)
+                && source.final_included_in_prompt.unwrap_or(false)
+        })
         .collect::<Vec<_>>();
     let context_sources = if selected_sources.is_empty() {
-        sources
-            .iter()
-            .filter(|source| {
-                source
-                    .relevance
-                    .as_deref()
-                    .map(|value| value != "unrelated")
-                    .unwrap_or(true)
-            })
-            .collect::<Vec<_>>()
+        Vec::new()
     } else {
         selected_sources
+    };
+    let news_roundup_source_count = context_sources
+        .iter()
+        .filter(|source| {
+            matches!(
+                source.page_type.as_deref(),
+                Some("news_article") | Some("article")
+            ) || source.news_like == Some(true)
+                || source.search_stage.as_deref().is_some_and(|stage| stage.starts_with("news"))
+        })
+        .count();
+    let mut news_event_clusters = context_sources
+        .iter()
+        .filter(|source| {
+            matches!(
+                source.page_type.as_deref(),
+                Some("news_article") | Some("article")
+            ) || source.news_like == Some(true)
+                || source.search_stage.as_deref().is_some_and(|stage| stage.starts_with("news"))
+        })
+        .filter_map(|source| source.event_cluster.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    news_event_clusters.sort();
+    news_event_clusters.dedup();
+    let news_event_cluster_count = news_event_clusters.len();
+    let news_roundup_guidance = if news_roundup_source_count >= 3 {
+        if news_event_cluster_count <= 1 {
+            "News roundup mode is active, but the usable news evidence appears to cover only one event cluster. For news/recent questions, answer in Chinese based only on successfully read public sources. Do not split one launch, conference, or company event into many fake news items. Start with one overview sentence that says the readable sources are concentrated in one cluster, then write 1-3 event-level points. Merge product details from the same event under one point. Do not use rejected candidates or model memory to add unverified news."
+        } else {
+            "News roundup mode is active with multiple event clusters. For news/recent questions, answer in Chinese as a concise event-level roundup based only on successfully read public sources. Start with one overview sentence, then cover 3-6 independent events when evidence supports them, or fewer with a source-scope note if coverage is narrow. Each point should explain what happened, why it matters, and likely impact. Do not split one launch, conference, or company event into many fake news items; merge same-cluster product details under one point. Do not use rejected candidates or model memory to add unverified news."
+        }
+    } else {
+        "News roundup mode is inactive or evidence is limited. For news/recent questions, keep the answer cautious and avoid padding beyond the successfully read sources."
     };
 
     for (index, source) in context_sources.into_iter().take(8).enumerate() {
@@ -1736,6 +2130,72 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_search_context_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "not ranked".to_string());
+        let date_hint = source
+            .date_hint
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let discovery_method = source
+            .search_stage
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let news_like = source
+            .news_like
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let evidence_status = source
+            .evidence_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("candidate");
+        let usable_evidence = source.usable_evidence.unwrap_or(false);
+        let injected_into_answer = source.injected_into_answer.unwrap_or(false);
+        let page_type = source
+            .page_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let content_status = source
+            .content_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("not_fetched");
+        let source_strength = source
+            .source_strength
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("rejected");
+        let evidence_reason = source
+            .evidence_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "passed evidence gate".to_string());
+        let event_cluster = source
+            .event_cluster
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let cluster_reason = source
+            .cluster_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let cluster_size = source
+            .cluster_size
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let selected_for_roundup = source.selected_for_roundup.unwrap_or(false);
+        let dropped_as_duplicate_cluster = source.dropped_as_duplicate_cluster.unwrap_or(false);
         let source_origin = if source.source_kind.as_deref() == Some("explicit_url") {
             "user-provided explicit public URL"
         } else if source.is_constructed == Some(true) {
@@ -1764,7 +2224,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         citation_ids.push(citation_id.clone());
 
         entries.push(format!(
-            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             citation_id,
             citation_id,
             citation_id,
@@ -1775,6 +2235,21 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             snippet,
             source_origin,
             constructed_reason,
+            discovery_method,
+            date_hint,
+            news_like,
+            evidence_status,
+            usable_evidence,
+            injected_into_answer,
+            page_type,
+            content_status,
+            source_strength,
+            evidence_reason,
+            event_cluster,
+            cluster_reason,
+            cluster_size,
+            selected_for_roundup,
+            dropped_as_duplicate_cluster,
             source_type,
             reliability,
             reliability_label,
@@ -1816,12 +2291,13 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
 - Do not say a webpage excerpt states something unless that excerpt contains it.\n\
 - Sources marked as constructed public OI sources are public entry points only. If their Web excerpt status is not fetched, do not infer their page content; say they are available to open but current summaries are insufficient.\n\
-- If a user-provided explicit URL failed, is blocked, or has no fetched excerpt, do not summarize that page from the URL, title, or general memory; say the public正文 could not be read.\n\
+- If a user-provided explicit URL failed, is blocked, or has no fetched excerpt, do not summarize that page from the URL, title, or general memory; say the public姝ｆ枃 could not be read.\n\
 - When a point comes only from a title or snippet, use cautious wording such as \"from the search result summaries\" or \"these sources may be related\".\n\
 - If the summaries are insufficient, say that the details require opening and reading the full page.\n\
 - If Cache status is stale, treat that source as potentially outdated and state time-sensitive claims cautiously.\n\
 - Sources are already ordered by relevance, reliability, freshness, quality, and excerpt availability. Prefer higher-ranked sources when deciding what to use, and avoid relying on weak candidate sources unless they contain concrete evidence.\n\
 - For time-sensitive or news-like questions, the search results may be incomplete. Pay attention to explicit publication dates or date hints in titles/snippets/excerpts; if a source lacks dates, do not present its claims as definitely latest.\n\
+- For recent/news questions, if there are no fetched, clearly news-like recent web sources in this context, do not answer from model memory or historical knowledge. Do not mention old training cutoffs or substitute older events; say that no sufficiently recent public source was successfully read.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
 - Strongly related sources may be used cautiously for the target problem. Candidate or related-algorithm sources are only background algorithm material and must not be presented as target-problem-specific evidence.\n\
 - If there are not enough strongly related editorial, discussion, or pitfall summaries, explicitly say the search result summaries are insufficient to directly summarize this problem's common pitfalls. You may add general OI troubleshooting advice, but label it as general experience rather than search-result evidence.\n\
@@ -1842,7 +2318,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Do not use emoji by default. Do not use tables by default unless the user requests one or the content is naturally comparative.\n\
 - Avoid both over-formal report language and overly casual mentor-style language. The answer should feel thoughtful, measured, and easy to follow.\n\
 - For OI questions, focus on the implementation details that actually fail in practice instead of replaying search summaries. A good answer can start with a short judgment, then explain why, then give a practical inspection order.\n\
-- For news or recent-event questions, do not present search results as a complete news panorama. Say that the current sources highlight several items, and treat undated sources cautiously.\n\
+- For news or recent-event questions, follow this current synthesis instruction: {} Treat undated sources cautiously.\n\
 - When a point is directly supported by sources, cite it sparingly with the marker. When a point is general reasoning or OI experience, make that distinction naturally instead of pretending it came from a source.\n\
 - Let reliability guide your tone: official can be more certain, wiki is algorithm reference, community_solution is community solution material, discussion is discussion or experience, blog is a personal blog view, unknown needs extra caution.\n\
 - Use citation markers only to support key conclusions, concrete facts, problem-specific details, or claims directly backed by webpage excerpts. Citations are evidence, not decoration.\n\
@@ -1851,23 +2327,24 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - When web sources and local notes are both available, the same sentence should usually have at most one web marker and one local-note marker. If several sources support the same point, cite the strongest one instead of stacking markers such as [[S1]][[S2]][[N1]].\n\
 - Use web markers for webpage facts, recent facts, official pages, or search-result evidence. Use local-note markers only when the point specifically relies on the user's local notes or when saying the user's notes also mention it.\n\
 - If the same point is supported by both web sources and local notes, prefer splitting it into two natural sentences instead of putting several markers at one sentence end.\n\
-- Correct web citation example: \"倍增循环方向写反时，容易跳过应检查的祖先。[[S1]]\" Incorrect examples: \"根据 S1，倍增循环方向写反。\" \"S1 中提到倍增循环方向。\" \"倍增循环方向写反。[S1]\"\n\
+- Correct web citation example: put [[S1]] at the end of the supported sentence. Incorrect examples: prose that says according to S1, S1 says, or a single-bracket [S1] marker.\n\
 - Do not put citation markers on headings. Do not mechanically cite every list item. If a whole subsection relies on one source, cite only the first key claim or the subsection's final summary sentence.\n\
 - Only use the web citation IDs explicitly listed above, such as [[S1]] or [[S2]], for claims supported by web sources. Never invent IDs, never cite sources that are not listed, and never use unrelated or non-injected sources.\n\
 - The only valid web citation syntax is the double-bracket token [[S1]] at the end of a sentence. Never write plain single-bracket tokens like [S1], [S2], or [S3].\n\
 - Treat web citation IDs as invisible control tokens, not user-facing source names. A web citation ID may appear only inside a marker exactly like [[S1]] at the end of a supporting sentence.\n\
-- Never expose citation IDs as prose. Do not write phrases such as \"S4\", \"S4 摘要\", \"S4 片段\", \"S4 提到\", \"S4 摘要明确提醒\", \"S4 同样提到\", \"摘自 S4\", \"来自 S4 片段\", \"根据 S4\", \"S4 中提到\", \"S4 says\", \"the S4 excerpt\", or \"mainly from S4\" in the answer body.\n\
-- Also avoid source-report phrases such as \"搜索源 S1\", \"来源 S1\", \"S1、S2、S3\", \"S4 标题\", \"S4 snippet\", \"source S4\", \"from S4\", or any sentence that names an internal ID as if it were visible to the user.\n\
-- Do not explain that a claim \"comes from S4\" or any other numbered source. Write the claim naturally, then add the marker if it needs support, for example: \"位运算和比较运算混用时要加括号，否则可能因优先级导致判断错误。[[S4]]\"\n\
-- Do not introduce the answer by saying it is based on \"搜索源 S1/S2/S3\" or any numbered source. If you need to describe source scope, use natural language such as \"从当前能读取到的来源看……\" or \"这些来源主要覆盖最近几天的新闻……\" Never mention S1, S2, S3, or S4 in that prose.\n\
+- Never expose citation IDs as prose. Do not write phrases such as S4, S4 summary, S4 says, the S4 excerpt, or mainly from S4 in the answer body.\n\
+- Also avoid source-report phrases such as \"鎼滅储婧?S1\", \"鏉ユ簮 S1\", \"S1銆丼2銆丼3\", \"S4 鏍囬\", \"S4 snippet\", \"source S4\", \"from S4\", or any sentence that names an internal ID as if it were visible to the user.\n\
+- Do not explain that a claim \"comes from S4\" or any other numbered source. Write the claim naturally, then add the marker if it needs support, for example: \"浣嶈繍绠楀拰姣旇緝杩愮畻娣风敤鏃惰鍔犳嫭鍙凤紝鍚﹀垯鍙兘鍥犱紭鍏堢骇瀵艰嚧鍒ゆ柇閿欒銆俒[S4]]\"\n\
+- Do not introduce the answer by saying it is based on numbered sources. If you need to describe source scope, use natural language and never mention S1, S2, S3, or S4 in that prose.\n\
 - Prefer paraphrasing source content. Do not quote long source text, and do not wrap claims in source-report phrasing like \"the excerpt says\" unless necessary.\n\
 - Do not output bare URLs or long URLs in the answer body. The frontend source list will show source links.\n\
-- Do not use paper-style citations such as [1], footnote lists, \"来源：...\", APA, MLA, BibTeX, references sections, or copied URL lists. The frontend will generate a compact citation source list automatically.\n\
+- Do not use paper-style citations such as [1], footnote lists, \"鏉ユ簮锛?..\", APA, MLA, BibTeX, references sections, or copied URL lists. The frontend will generate a compact citation source list automatically.\n\
 - If a point is general OI experience rather than directly supported by a listed source, it may omit a citation and should be phrased as experience.\n\
 - Constructed public OI source entries without fetched webpage excerpts may only support \"entry point for further reading\" statements. Do not cite them for concrete page content.\n\
 - If source evidence is insufficient, use fewer citations or none. Do not force citations or invent cited content.\n\
 -- You may briefly mention that the source cards above can be opened for confirmation.\n\n{}",
         citation_id_list,
+        news_roundup_guidance,
         entries.join("\n\n")
     ))
 }
@@ -1937,8 +2414,8 @@ Use it only when relevant to the user's question, and follow these rules:\n\
 - Local note citations must use [[N1]] style markers. Do not use web markers such as [[S1]] for local notes, and do not use local markers for web sources.\n\
 - When web search context is also present, do not pile local and web markers together. A sentence should usually have at most one local note marker and one web marker; if multiple sources support the same point, cite the strongest source or split the idea into separate sentences.\n\
 - Do not output plain [N1] or [S1]. The frontend tolerates single brackets only as a legacy fallback; the answer must use [[N1]] or [[S1]] control tokens.\n\
-- Treat N IDs as invisible control tokens. Never write prose such as \"N1 笔记\", \"根据 N1\", \"N1 中提到\", \"来自 N1\", or plain [N1]. Put [[N1]] only at the end of the supported sentence.\n\
-- Correct local-note citation example: \"你的本地笔记里也强调，点分树查询距离必须使用原树距离。[[N1]]\" Incorrect examples: \"根据 N1，点分树查询距离要用原树距离。\" \"N1 笔记提到原树距离。\" \"点分树查询距离要用原树距离。[N1]\"\n\
+- Treat N IDs as invisible control tokens. Never write prose such as N1 note, according to N1, N1 says, from N1, or plain [N1]. Put [[N1]] only at the end of the supported sentence.\n\
+- Correct local-note citation example: put [[N1]] at the end of the supported sentence. Incorrect examples: prose that says according to N1, N1 note says, or a single-bracket [N1] marker.\n\
 - Do not expose absolute local paths. If you mention a note, use its title or relative path only.\n\
 - Local notes may be incomplete, outdated, or personal draft material. If they conflict with web sources, state the difference cautiously.\n\
 - Do not repeat long note passages. Summarize the useful point and only mention the note when it helps the user understand why.\n\
@@ -2473,7 +2950,7 @@ fn validate_note_tag_suggestion(
         .and_then(JsonValue::as_str)
         .map(str::trim)
         .filter(|reason| !reason.is_empty())
-        .unwrap_or("这些标签来自当前笔记的标题、摘要、已有标签和正文内容。")
+        .unwrap_or("These tags come from the current note title, summary, existing tags, and body.")
         .to_string();
 
     Ok(NoteTagSuggestion {
@@ -2822,7 +3299,7 @@ fn suggest_note_tags_blocking(
     let selected_config = config_from_resolved(resolved.clone());
 
     let tags_text = if context.tags.is_empty() {
-        "未填写".to_string()
+        "Not filled.".to_string()
     } else {
         context
             .tags
@@ -2833,40 +3310,40 @@ fn suggest_note_tags_blocking(
             .join(", ")
     };
     let summary_text = if context.summary.trim().is_empty() {
-        "未填写".to_string()
+        "Not filled.".to_string()
     } else {
         context.summary.trim().to_string()
     };
     let selected_text = context.selected_text.trim();
     let selection_section = if selected_text.is_empty() {
-        "用户当前没有选中文段。".to_string()
+        "The user has no selected text.".to_string()
     } else {
-        format!("用户当前选中的内容如下，可参考但不要只围绕选区生成标签：\n{selected_text}")
+        format!("The user selected the following text. Use it as a hint, but do not tag only the selection:\n{selected_text}")
     };
     let markdown = context.markdown.trim();
     let body_note = if markdown.is_empty() {
-        "当前正文为空或上下文很少，请主要基于标题、路径和 summary 谨慎建议。"
+        "Current body is empty or very short; rely mainly on title, path, and summary."
     } else if context.markdown_truncated {
-        "正文是截断后的节选，不是整篇全文。"
+        "Body is a truncated excerpt, not the full note."
     } else {
-        "正文是当前笔记的完整内容。"
+        "Body is the full current note."
     };
 
     let user_prompt = format!(
-        "你要为一篇 OI / 算法 / Markdown 学习笔记建议 frontmatter tags。\n\
-请结合标题、路径、已有 tags、summary、正文 Markdown 和选中文段。\n\
-不要重复已有 tags。不要生成太泛的标签，例如“学习”“笔记”“算法”，除非确实必要。\n\
-优先生成具体标签，例如：动态规划、单调队列、最短路、树形 DP、数学、洛谷、题解、模板、调试、复杂度分析。\n\
-tags 应简短，建议 2 到 8 个。保留中文标签风格，除非正文里明显使用英文术语。\n\
-只输出严格 JSON，不要使用 markdown code fence，不要输出额外文本。\n\
-JSON 格式必须是：{{\"suggestedTags\":[\"动态规划\",\"单调队列\"],\"reason\":\"这些标签对应笔记中的状态转移和队列优化内容。\"}}\n\n\
-【标题】\n{note_title}\n\n\
-【路径】\n{note_path}\n\n\
-【已有 tags】\n{tags_text}\n\n\
-【summary】\n{summary_text}\n\n\
-【选中文段】\n{selection_section}\n\n\
-【正文说明】\n{body_note}\n\n\
-【正文 Markdown】\n{markdown}",
+        "Suggest frontmatter tags for an OI / algorithm / Markdown study note.\n\
+Use the title, path, existing tags, summary, Markdown body, and selected text.\n\
+Do not repeat existing tags. Avoid generic tags unless truly necessary.\n\
+Prefer concrete tags such as dynamic programming, monotonic queue, shortest path, tree DP, math, Luogu, solution, template, debugging, or complexity analysis.\n\
+Tags should be short, usually 2 to 8 items. Preserve the note's language style when possible.\n\
+Output strict JSON only, without markdown fences or extra text.\n\
+The JSON shape must be: {{\"suggestedTags\":[\"dynamic programming\",\"monotonic queue\"],\"reason\":\"These tags match the note content.\"}}\n\n\
+Title:\n{note_title}\n\n\
+Path:\n{note_path}\n\n\
+Existing tags:\n{tags_text}\n\n\
+Summary:\n{summary_text}\n\n\
+Selected text:\n{selection_section}\n\n\
+Body note:\n{body_note}\n\n\
+Markdown body:\n{markdown}",
         note_title = context.note_title.trim(),
     );
     let messages = json!([
@@ -3175,6 +3652,147 @@ pub async fn polish_ai_prompt_template(
     .map_err(|e| format!("AI prompt polish failed: task join failed: {e}"))?
 }
 
+fn plan_search_queries_blocking(input: AiSearchQueryPlanInput) -> Result<AiSearchQueryPlan, String> {
+    let user_input = input.user_input.trim();
+    if user_input.is_empty() {
+        return Err("AI query planner failed: user input is empty".to_string());
+    }
+    if has_url_like_text(user_input) {
+        return Err("AI query planner skipped: explicit URL reading does not need query planning".to_string());
+    }
+
+    let config = read_config()?.ai;
+    let resolved = resolve_ai_config(
+        &config,
+        input.provider_id.as_deref(),
+        input.model_id.as_deref(),
+    )?;
+    let selected_config = config_from_resolved(resolved.clone());
+    let max_queries = input
+        .max_queries
+        .unwrap_or(if input.provider.trim() == WEB_SEARCH_BING_PROVIDER { 2 } else { 3 })
+        .clamp(1, 3);
+    let rule_queries = input
+        .rule_based_queries
+        .iter()
+        .take(6)
+        .map(|query| clean_planner_text(query, 90))
+        .filter(|query| !query.is_empty())
+        .collect::<Vec<_>>();
+    let topic_keywords = input
+        .topic_keywords
+        .iter()
+        .take(10)
+        .map(|keyword| clean_planner_text(keyword, 40))
+        .filter(|keyword| !keyword.is_empty())
+        .collect::<Vec<_>>();
+    let current_date = input
+        .current_date
+        .as_deref()
+        .map(|value| clean_planner_text(value, 32))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
+    let current_date_text = input
+        .current_date_text
+        .as_deref()
+        .map(|value| clean_planner_text(value, 48))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| current_date.clone());
+    let current_month_text = current_date
+        .split_once('-')
+        .and_then(|(year, rest)| rest.split_once('-').map(|(month, _)| (year, month)))
+        .and_then(|(year, month)| month.parse::<u32>().ok().map(|month| format!("{year}-{month:02}")))
+        .unwrap_or_else(|| current_date_text.clone());
+    let current_time_zone = input
+        .current_time_zone
+        .as_deref()
+        .map(|value| clean_planner_text(value, 64))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "local".to_string());
+    let locale = input
+        .locale
+        .as_deref()
+        .map(|value| clean_planner_text(value, 24))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "zh-CN".to_string());
+    let recency_window_hint = input
+        .recency_window_hint
+        .as_deref()
+        .map(|value| clean_planner_text(value, 80))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            if input.news_intent || input.recency_intent {
+                "last 7 days".to_string()
+            } else {
+                "no explicit freshness window".to_string()
+            }
+        });
+    let user_prompt = format!(
+        "User question:\n{user_input}\n\n\
+Current time context:\n\
+- currentDate: {current_date}\n\
+- currentDateText: {current_date_text}\n\
+- timeZone: {current_time_zone}\n\
+- locale: {locale}\n\
+- recencyWindowHint: {recency_window_hint}\n\n\
+Current rule-based decision:\n\
+- intent: {}\n\
+- provider: {}\n\
+- maxQueries: {max_queries}\n\
+- newsIntent: {}\n\
+- recencyIntent: {}\n\
+- topicKeywords: {}\n\
+- ruleBasedQueries: {}\n\n\
+Planner hints:\n\
+- The current date is {current_date_text}. When the user asks for recent/latest/current information, prefer the last few days to one week unless the user says otherwise.\n\
+- For Chinese users, prefer short Chinese search queries first. Avoid long English concept strings unless the question is English.\n\
+- For broad Chinese AI news, good queries look like AI news, artificial intelligence news {current_month_text}, AI model latest news.\n\
+- For OpenAI news, good queries look like OpenAI news, OpenAI latest news {current_month_text}, OpenAI latest news.\n\
+- If this is a news request, prefer event-like queries over definition or homepage queries.\n\
+- For broad AI news, include company/event terms such as OpenAI, Anthropic, Google DeepMind, DeepSeek, Gemini, Claude, launches, releases, funding, regulation, model.\n\
+- Do not generate what-is, definition, docs, tutorial, guide, wiki, or homepage-style queries for news.\n\n\
+Return a strict JSON object with keys: searchGoal, vertical, rewrittenIntent, queries, topicKeywords, requiredKeywords, negativeKeywords, freshness, depth, readBudget, preferredSourceTypes, preferredDomains, avoidSourceTypes, reason, confidence.\n\
+Do not include URLs. Do not request cookies, login, browser history, CAPTCHA solving, proxies, paging, or crawling.",
+        input.intent.trim(),
+        input.provider.trim(),
+        input.news_intent,
+        input.recency_intent,
+        if topic_keywords.is_empty() { "none".to_string() } else { topic_keywords.join(", ") },
+        if rule_queries.is_empty() { "none".to_string() } else { rule_queries.join(" | ") },
+    );
+    let messages = json!([
+        {
+            "role": "system",
+            "content": "You are a search query planner for NoteX. Convert the user's question into a few search-engine queries. Output only strict JSON.\n\nRules:\n- Preserve the core topic.\n- Use the current date/time context provided by the user message.\n- Time words such as recent, latest, news, update, and today must never be the only query.\n- News questions must include topic plus news/latest/update/progress wording.\n- Prefer natural human search queries, not the full user sentence and not long concept strings.\n- Include negativeKeywords for obvious drift such as dictionary, translate, meaning, Wikipedia, encyclopedia, lyrics, song, or video when useful.\n- Output at most 3 queries.\n- Never output a URL.\n- Never ask for cookies, login state, browser history, CAPTCHA solving, proxies, paging, or crawling.\n- If the question is writing, translation, polishing, or explicit URL reading, keep queries empty.\n\nExample for recent AI news on 2026-05-19:\n{\"rewrittenIntent\":\"Find recent AI industry news and model announcements\",\"queries\":[\"AI news\",\"artificial intelligence news 2026-05\",\"AI model latest news\"],\"topicKeywords\":[\"AI\",\"artificial intelligence\",\"models\",\"OpenAI\",\"DeepSeek\",\"Gemini\",\"Claude\"],\"requiredKeywords\":[\"AI\",\"news\"],\"negativeKeywords\":[\"dictionary\",\"translate\",\"meaning\",\"Wikipedia\",\"encyclopedia\"],\"freshness\":\"news\",\"preferredSourceTypes\":[\"news\",\"official blog\",\"company announcement\"],\"avoidSourceTypes\":[\"dictionary\",\"translation\",\"definition\",\"lyrics\",\"video\"],\"reason\":\"The user asks for recent AI news, so use current-date-aware news queries.\",\"confidence\":0.85}"
+        },
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    ]);
+    let content = request_chat_completion_with_options(
+        &selected_config,
+        messages,
+        0.1,
+        "AI query planner failed",
+        ChatCompletionRequestOptions {
+            timeout_secs: 8,
+            json_response: true,
+            max_tokens: Some(700),
+        },
+    )?;
+    parse_ai_search_query_plan(&content, max_queries, "AI query planner failed")
+}
+
+#[tauri::command]
+pub async fn plan_search_queries(
+    input: AiSearchQueryPlanInput,
+) -> Result<AiSearchQueryPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || plan_search_queries_blocking(input))
+        .await
+        .map_err(|e| format!("AI query planner failed: task join failed: {e}"))?
+}
+
 #[tauri::command]
 pub fn chat_with_current_note(
     question: String,
@@ -3207,7 +3825,7 @@ pub fn chat_with_current_note(
     let selected_config = config_from_resolved(resolved.clone());
     let selected_text = context.selected_text.trim();
     let tags_text = if context.tags.is_empty() {
-        "未填写".to_string()
+        "Not filled.".to_string()
     } else {
         context
             .tags
@@ -3218,35 +3836,35 @@ pub fn chat_with_current_note(
             .join(", ")
     };
     let summary_text = if context.summary.trim().is_empty() {
-        "未填写".to_string()
+        "Not filled.".to_string()
     } else {
         context.summary.trim().to_string()
     };
     let selection_section = if selected_text.is_empty() {
-        "用户当前没有选中文段。".to_string()
+        "The user has no selected text.".to_string()
     } else {
-        format!("这是用户当前选中的内容，请优先参考：\n{selected_text}")
+        format!("The user selected this text. Prefer it when answering:\n{selected_text}")
     };
     let truncation_note = if context.markdown_truncated {
-        "正文是截断后的节选，不是整篇全文。若信息不足，请明确说明。"
+        "Body is a truncated excerpt, not the full note. Say so if information is insufficient."
     } else {
-        "正文是当前笔记的完整内容。"
+        "Body is the full current note."
     };
 
     let user_prompt = format!(
-        "你正在帮助用户理解当前 OI Notebook 笔记。\n\
-请基于下面的笔记上下文回答最后的问题；如果笔记里没有足够信息，请明确说不知道或信息不足，不要编造。\n\
-除非用户明确要求，而且当前阶段也只能给建议，不要自动改写原文或声称已经修改文件。\n\
-你可以回答算法、题解、Markdown 表达、写作建议，但都要尽量贴合当前笔记。\n\
-请只返回 JSON，格式为 {{\"answer\":\"...\"}}。\n\n\
-【笔记标题】\n{note_title}\n\n\
-【笔记路径】\n{note_path}\n\n\
-【tags】\n{tags_text}\n\n\
-【summary】\n{summary_text}\n\n\
-【选中文段】\n{selection_section}\n\n\
-【正文说明】\n{truncation_note}\n\n\
-【当前正文 Markdown】\n{markdown}\n\n\
-【用户问题】\n{question}"
+        "浣犳鍦ㄥ府鍔╃敤鎴风悊瑙ｅ綋鍓?OI Notebook 绗旇銆俓n\
+璇峰熀浜庝笅闈㈢殑绗旇涓婁笅鏂囧洖绛旀渶鍚庣殑闂锛涘鏋滅瑪璁伴噷娌℃湁瓒冲淇℃伅锛岃鏄庣‘璇翠笉鐭ラ亾鎴栦俊鎭笉瓒筹紝涓嶈缂栭€犮€俓n\
+闄ら潪鐢ㄦ埛鏄庣‘瑕佹眰锛岃€屼笖褰撳墠闃舵涔熷彧鑳界粰寤鸿锛屼笉瑕佽嚜鍔ㄦ敼鍐欏師鏂囨垨澹扮О宸茬粡淇敼鏂囦欢銆俓n\
+浣犲彲浠ュ洖绛旂畻娉曘€侀瑙ｃ€丮arkdown 琛ㄨ揪銆佸啓浣滃缓璁紝浣嗛兘瑕佸敖閲忚创鍚堝綋鍓嶇瑪璁般€俓n\
+璇峰彧杩斿洖 JSON锛屾牸寮忎负 {{\"answer\":\"...\"}}銆俓n\n\
+銆愮瑪璁版爣棰樸€慭n{note_title}\n\n\
+銆愮瑪璁拌矾寰勩€慭n{note_path}\n\n\
+銆恡ags銆慭n{tags_text}\n\n\
+銆恠ummary銆慭n{summary_text}\n\n\
+銆愰€変腑鏂囨銆慭n{selection_section}\n\n\
+銆愭鏂囪鏄庛€慭n{truncation_note}\n\n\
+銆愬綋鍓嶆鏂?Markdown銆慭n{markdown}\n\n\
+銆愮敤鎴烽棶棰樸€慭n{question}"
     );
     let messages = json!([
         {
@@ -3485,13 +4103,13 @@ fn infer_web_source_type(title: &str, url: &str, snippet: &str) -> String {
         return "problem".to_string();
     }
     if haystack.contains("luogu.com.cn/discuss")
-        || text.contains("讨论")
-        || text.contains("警示后人")
-        || text.contains("常见坑")
+        || text.contains("discussion")
+        || text.contains("warning")
+        || text.contains("pitfall")
     {
         return "discussion".to_string();
     }
-    if text.contains("题解") || haystack.contains("solution") {
+    if text.contains("solution") || haystack.contains("solution") {
         return "solution".to_string();
     }
     if haystack.contains("blog")
@@ -3510,8 +4128,8 @@ fn infer_web_reliability(title: &str, url: &str, snippet: &str) -> (String, Stri
     if haystack.contains("oi-wiki.org") {
         return (
             "wiki".to_string(),
-            "知识库".to_string(),
-            "来自 OI Wiki 这类公开算法知识库".to_string(),
+            "Knowledge base".to_string(),
+            "From an OI Wiki style public algorithm knowledge base.".to_string(),
         );
     }
     if haystack.contains("codeforces.com/problemset/problem")
@@ -3520,26 +4138,26 @@ fn infer_web_reliability(title: &str, url: &str, snippet: &str) -> (String, Stri
     {
         return (
             "official".to_string(),
-            "官方".to_string(),
-            "看起来是题面或官方站点页面".to_string(),
+            "Official".to_string(),
+            "Looks like a problem statement or official site page.".to_string(),
         );
     }
     if haystack.contains("luogu.com.cn/discuss")
-        || combined.contains("讨论")
-        || combined.contains("警示后人")
-        || combined.contains("常见坑")
+        || combined.contains("discussion")
+        || combined.contains("warning")
+        || combined.contains("pitfall")
     {
         return (
             "discussion".to_string(),
-            "讨论".to_string(),
-            "更像讨论区或经验反馈内容".to_string(),
+            "Discussion".to_string(),
+            "Looks like discussion or experience feedback content.".to_string(),
         );
     }
-    if combined.contains("题解") {
+    if combined.contains("solution") {
         return (
             "community_solution".to_string(),
-            "社区题解".to_string(),
-            "更像社区整理的题解内容".to_string(),
+            "Community solution".to_string(),
+            "Looks like a community solution write-up.".to_string(),
         );
     }
     if haystack.contains("blog")
@@ -3549,22 +4167,22 @@ fn infer_web_reliability(title: &str, url: &str, snippet: &str) -> (String, Stri
     {
         return (
             "blog".to_string(),
-            "博客".to_string(),
-            "来自个人或社区博客页面".to_string(),
+            "Blog".to_string(),
+            "From a personal or community blog page.".to_string(),
         );
     }
     (
         "unknown".to_string(),
-        "未知".to_string(),
-        "仅能判断为公开搜索结果，暂时无法可靠归类".to_string(),
+        "Unknown".to_string(),
+        "Only identifiable as a public search result for now.".to_string(),
     )
 }
 
 fn brave_search_status_error(status: reqwest::StatusCode, body: &str) -> String {
     let status_code = status.as_u16();
     match status_code {
-        401 | 403 => "联网搜索失败：Brave Search API Key 无效或没有权限".to_string(),
-        429 => "联网搜索失败：搜索服务配额不足或请求过快".to_string(),
+        401 | 403 => "联网搜索失败：Brave Search API Key 无效或未授权。".to_string(),
+        429 => "联网搜索失败：搜索服务额度耗尽或请求过于频繁。".to_string(),
         _ => format!(
             "联网搜索失败：搜索服务返回 HTTP {status_code}; debug=body_preview={}",
             sanitize_ai_detail(body)
@@ -3620,10 +4238,10 @@ fn is_bocha_connectivity_retryable(error: &reqwest::Error) -> bool {
 fn bocha_request_error(error: &reqwest::Error) -> String {
     let detail = bocha_error_chain(error);
     if error.is_timeout() {
-        return "连接博查搜索服务超时，请检查网络或稍后重试".to_string();
+        return "Bocha 搜索请求超时，请稍后重试。".to_string();
     }
     if detail.contains("certificate") || detail.contains("tls") || detail.contains("ssl") {
-        return "连接博查搜索服务时出现安全连接错误".to_string();
+        return "Bocha 搜索失败：TLS 或证书错误。".to_string();
     }
     if detail.contains("dns")
         || detail.contains("failed to lookup address")
@@ -3631,20 +4249,20 @@ fn bocha_request_error(error: &reqwest::Error) -> String {
         || detail.contains("temporary failure in name resolution")
         || detail.contains("no such host")
     {
-        return "无法解析博查搜索服务域名，请检查网络或 API Endpoint".to_string();
+        return "无法解析 Bocha 搜索端点，请检查网络或 API endpoint。".to_string();
     }
-    "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()
+    "无法连接 Bocha 搜索服务，请检查网络或 API endpoint。".to_string()
 }
 
 fn bocha_search_status_error(status: reqwest::StatusCode, body: &str) -> String {
     let status_code = status.as_u16();
     match status_code {
-        401 | 403 => "联网搜索失败：博查 API Key 无效或没有权限".to_string(),
-        429 => "联网搜索失败：博查搜索额度不足或请求过快".to_string(),
-        404 => "博查搜索接口地址可能不正确，请检查 API Endpoint".to_string(),
-        500..=599 => "博查搜索服务暂时不可用".to_string(),
+        401 | 403 => "联网搜索失败：Bocha API Key 无效或未授权。".to_string(),
+        429 => "联网搜索失败：Bocha 搜索额度耗尽或请求过于频繁。".to_string(),
+        404 => "Bocha 搜索端点可能不正确，请检查 API endpoint。".to_string(),
+        500..=599 => "Bocha 搜索服务暂时不可用。".to_string(),
         _ => format!(
-            "联网搜索失败：博查搜索服务返回 HTTP {status_code}; debug=body_preview={}",
+            "联网搜索失败：Bocha 服务返回 HTTP {status_code}; debug=body_preview={}",
             sanitize_ai_detail(body)
         ),
     }
@@ -3680,6 +4298,28 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
             Some(snippet_text)
         },
         source_kind: Some("search_result".to_string()),
+        discovery_method: Some("search_provider".to_string()),
+        source_reliability: None,
+        discovered_by: Some(WEB_SEARCH_BRAVE_PROVIDER.to_string()),
+        feed_url: None,
+        source_home: None,
+        direct_discovery_reason: None,
+        search_provider: Some(WEB_SEARCH_BRAVE_PROVIDER.to_string()),
+        search_stage: Some("api".to_string()),
+        date_hint: None,
+        freshness_score: None,
+        search_diagnostics: None,
+        news_like: None,
+        filtered_reason: None,
+        final_included_in_prompt: None,
+        evidence_status: Some("candidate".to_string()),
+        usable_evidence: Some(false),
+        injected_into_answer: Some(false),
+        evidence_reason: None,
+        rejected_reason: None,
+        page_type: None,
+        content_status: Some("not_fetched".to_string()),
+        source_strength: None,
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3706,6 +4346,11 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         constructed_reason: None,
         selected: None,
         citation_id: None,
+        event_cluster: None,
+        cluster_reason: None,
+        cluster_size: None,
+        selected_for_roundup: None,
+        dropped_as_duplicate_cluster: None,
     })
 }
 
@@ -3751,6 +4396,28 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
             Some(snippet_text)
         },
         source_kind: Some("search_result".to_string()),
+        discovery_method: Some("search_provider".to_string()),
+        source_reliability: None,
+        discovered_by: Some(WEB_SEARCH_DEFAULT_PROVIDER.to_string()),
+        feed_url: None,
+        source_home: None,
+        direct_discovery_reason: None,
+        search_provider: Some(WEB_SEARCH_DEFAULT_PROVIDER.to_string()),
+        search_stage: Some("api".to_string()),
+        date_hint: None,
+        freshness_score: None,
+        search_diagnostics: None,
+        news_like: None,
+        filtered_reason: None,
+        final_included_in_prompt: None,
+        evidence_status: Some("candidate".to_string()),
+        usable_evidence: Some(false),
+        injected_into_answer: Some(false),
+        evidence_reason: None,
+        rejected_reason: None,
+        page_type: None,
+        content_status: Some("not_fetched".to_string()),
+        source_strength: None,
         source_type: Some(source_type),
         reliability: Some(reliability),
         reliability_label: Some(reliability_label),
@@ -3777,6 +4444,11 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         constructed_reason: None,
         selected: None,
         citation_id: None,
+        event_cluster: None,
+        cluster_reason: None,
+        cluster_size: None,
+        selected_for_roundup: None,
+        dropped_as_duplicate_cluster: None,
     })
 }
 
@@ -3788,6 +4460,2461 @@ fn bocha_response_items(response: BochaSearchResponse) -> Vec<BochaWebResult> {
         .unwrap_or_default()
 }
 
+fn bing_public_error(kind: &str, detail: &str) -> String {
+    let user_message =
+        "Bing public search is temporarily unavailable. Try again later, or configure Bocha / Brave in settings.";
+    let safe_detail = sanitize_ai_detail(detail);
+    if safe_detail.is_empty() {
+        format!("{user_message}; debug=provider=bing; errorKind={kind}")
+    } else {
+        format!("{user_message}; debug=provider=bing; errorKind={kind}; {safe_detail}")
+    }
+}
+
+fn bing_public_request_error(error: &reqwest::Error, stage: &str) -> String {
+    if error.is_timeout() {
+        return bing_public_error("timeout", &format!("stage={stage}"));
+    }
+    let detail = error.to_string().to_ascii_lowercase();
+    if detail.contains("dns") || detail.contains("lookup") {
+        return bing_public_error("dns_failed", &format!("stage={stage}"));
+    }
+    if detail.contains("tls") || detail.contains("certificate") || detail.contains("ssl") {
+        return bing_public_error("tls_error", &format!("stage={stage}"));
+    }
+    bing_public_error("network_error", &format!("stage={stage}"))
+}
+
+fn is_bing_transient_error(error: &str) -> bool {
+    error.contains("errorKind=timeout")
+        || error.contains("errorKind=network_error")
+        || error.contains("errorKind=dns_failed")
+        || error.contains("errorKind=tls_error")
+        || error.contains("errorKind=connect_error")
+}
+
+fn is_bing_non_retryable_error(error: &str) -> bool {
+    error.contains("errorKind=rate_limited")
+        || error.contains("errorKind=blocked_or_captcha")
+        || error.contains("errorKind=http_status")
+}
+
+fn is_bing_block_page(status: reqwest::StatusCode, body: &str) -> Option<&'static str> {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Some("rate_limited");
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Some("blocked_or_captcha");
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("captcha")
+        || lower.contains("verify you are a human")
+        || lower.contains("unusual traffic")
+        || lower.contains("automated queries")
+        || lower.contains("our systems have detected")
+        || lower.contains("b_captcha")
+    {
+        return Some("blocked_or_captcha");
+    }
+    None
+}
+
+fn compact_bing_query(query: &str) -> String {
+    let mut text = query
+        .replace("what is", " ")
+        .replace("tell me", " ");
+    text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    text.chars().take(100).collect()
+}
+
+fn bing_query_limit(request: &WebSearchRequestInput) -> usize {
+    if is_bing_news_request(request) {
+        5
+    } else {
+        BING_PUBLIC_MAX_QUERIES
+    }
+}
+
+fn is_bing_news_request(request: &WebSearchRequestInput) -> bool {
+    request
+        .vertical
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| value == "news")
+        || request
+            .freshness
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| value == "news" || value == "latest")
+        || is_news_like_web_request(&request.intent, &request.queries)
+}
+
+fn bing_public_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        .user_agent(BING_PUBLIC_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| bing_public_error("client_error", &format!("stage=client; {e}")))
+}
+
+fn build_bing_public_headers(locale: Option<&str>) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static(BING_PUBLIC_USER_AGENT),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        ),
+    );
+    let accept_language = match locale {
+        Some(value) if value.eq_ignore_ascii_case("zh-CN") => "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7",
+        Some(value) if value.to_ascii_lowercase().starts_with("en") => "en-US,en;q=0.9,zh-CN;q=0.6",
+        _ => "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7",
+    };
+    headers.insert(
+        reqwest::header::ACCEPT_LANGUAGE,
+        reqwest::header::HeaderValue::from_static(accept_language),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT_ENCODING,
+        reqwest::header::HeaderValue::from_static("identity"),
+    );
+    headers.insert(
+        reqwest::header::CACHE_CONTROL,
+        reqwest::header::HeaderValue::from_static("no-cache"),
+    );
+    headers.insert(
+        reqwest::header::PRAGMA,
+        reqwest::header::HeaderValue::from_static("no-cache"),
+    );
+    headers.insert(
+        reqwest::header::UPGRADE_INSECURE_REQUESTS,
+        reqwest::header::HeaderValue::from_static("1"),
+    );
+    headers.insert(
+        reqwest::header::REFERER,
+        reqwest::header::HeaderValue::from_static("https://www.bing.com/"),
+    );
+    headers.insert(
+        reqwest::header::HeaderName::from_static("sec-fetch-site"),
+        reqwest::header::HeaderValue::from_static("none"),
+    );
+    headers.insert(
+        reqwest::header::HeaderName::from_static("sec-fetch-mode"),
+        reqwest::header::HeaderValue::from_static("navigate"),
+    );
+    headers.insert(
+        reqwest::header::HeaderName::from_static("sec-fetch-user"),
+        reqwest::header::HeaderValue::from_static("?1"),
+    );
+    headers.insert(
+        reqwest::header::HeaderName::from_static("sec-fetch-dest"),
+        reqwest::header::HeaderValue::from_static("document"),
+    );
+    headers
+}
+
+fn clean_bing_result_url(raw_url: &str) -> Option<String> {
+    let trimmed = sanitize_search_text(&decode_html_entities(raw_url), 2000);
+    let parsed = reqwest::Url::parse(&trimmed).ok()?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let path = parsed.path().to_ascii_lowercase();
+    if host.ends_with("bing.com") && path.contains("/news/apiclick.aspx") {
+        return unwrap_bing_news_apiclick_url(parsed.as_str())
+            .and_then(|target| clean_bing_result_url(&target));
+    }
+    if host.ends_with("bing.com") && parsed.path().starts_with("/ck/") {
+        for key in ["u", "url", "r"] {
+            if let Some(value) = parsed.query_pairs().find_map(|(name, value)| {
+                if name == key {
+                    Some(value.into_owned())
+                } else {
+                    None
+                }
+            }) {
+                if let Ok(target) = reqwest::Url::parse(&value) {
+                    if target.scheme() == "http" || target.scheme() == "https" {
+                        return clean_bing_result_url(target.as_str());
+                    }
+                }
+                if let Some(decoded) = decode_bing_redirect_target(&value) {
+                    if let Some(cleaned) = clean_bing_result_url(&decoded) {
+                        return Some(cleaned);
+                    }
+                }
+            }
+        }
+        return None;
+    }
+    if should_skip_bing_result_url(&parsed) {
+        return None;
+    }
+    Some(strip_common_tracking_params(parsed).to_string())
+}
+
+fn unwrap_bing_news_apiclick_url(raw_url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(raw_url).ok()?;
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let path = parsed.path().to_ascii_lowercase();
+    if !host.ends_with("bing.com") || !path.contains("/news/apiclick.aspx") {
+        return None;
+    }
+    let target = parsed.query_pairs().find_map(|(name, value)| {
+        if name.eq_ignore_ascii_case("url") {
+            Some(value.into_owned())
+        } else {
+            None
+        }
+    })?;
+    let target = reqwest::Url::parse(&target).ok()?;
+    if target.scheme() == "http" || target.scheme() == "https" {
+        Some(strip_common_tracking_params(target).to_string())
+    } else {
+        None
+    }
+}
+
+fn decode_bing_redirect_target(value: &str) -> Option<String> {
+    let trimmed = decode_html_entities(value.trim());
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Some(trimmed);
+    }
+    let candidate = trimmed.strip_prefix("a1").unwrap_or(&trimmed);
+    decode_base64_urlsafe(candidate)
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .filter(|decoded| decoded.starts_with("http://") || decoded.starts_with("https://"))
+}
+
+fn unwrap_bing_redirect_url(raw_href: &str) -> Option<String> {
+    let trimmed = decode_html_entities(raw_href.trim());
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.to_ascii_lowercase().starts_with("javascript:")
+        || trimmed.to_ascii_lowercase().starts_with("mailto:")
+    {
+        return None;
+    }
+    let base = reqwest::Url::parse("https://www.bing.com/").ok()?;
+    let parsed = reqwest::Url::parse(&trimmed).or_else(|_| base.join(&trimmed)).ok()?;
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let path = parsed.path().to_ascii_lowercase();
+    if host.ends_with("bing.com") && (path.starts_with("/ck/") || path.starts_with("/aclick")) {
+        for key in ["url", "r", "u"] {
+            if let Some(value) = parsed.query_pairs().find_map(|(name, value)| {
+                if name == key {
+                    Some(value.into_owned())
+                } else {
+                    None
+                }
+            }) {
+                if value.starts_with("http://") || value.starts_with("https://") {
+                    if let Some(cleaned) = clean_bing_result_url(&value) {
+                        return Some(cleaned);
+                    }
+                }
+                if let Some(decoded) = decode_bing_redirect_target(&value) {
+                    if let Some(cleaned) = clean_bing_result_url(&decoded) {
+                        return Some(cleaned);
+                    }
+                }
+            }
+        }
+        return None;
+    }
+    clean_bing_result_url(parsed.as_str())
+}
+
+fn decode_base64_urlsafe(input: &str) -> Option<Vec<u8>> {
+    let mut buffer: u32 = 0;
+    let mut bits: u8 = 0;
+    let mut output = Vec::new();
+    for ch in input.chars().filter(|ch| *ch != '=') {
+        let value = match ch {
+            'A'..='Z' => ch as u32 - 'A' as u32,
+            'a'..='z' => ch as u32 - 'a' as u32 + 26,
+            '0'..='9' => ch as u32 - '0' as u32 + 52,
+            '+' | '-' => 62,
+            '/' | '_' => 63,
+            _ => return None,
+        };
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        while bits >= 8 {
+            bits -= 8;
+            output.push(((buffer >> bits) & 0xff) as u8);
+        }
+    }
+    Some(output)
+}
+
+fn should_skip_bing_result_url(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str().map(|host| host.to_ascii_lowercase()) else {
+        return true;
+    };
+    if host.ends_with("bing.com") {
+        let path = url.path().to_ascii_lowercase();
+        return path == "/search"
+            || path.starts_with("/images")
+            || path.starts_with("/videos")
+            || path.starts_with("/maps")
+            || path.starts_with("/shop")
+            || path.starts_with("/travel")
+            || path.starts_with("/aclick")
+            || path.starts_with("/ck/")
+            || path.starts_with("/news/search");
+    }
+    if host.ends_with("microsoft.com") {
+        let path = url.path().to_ascii_lowercase();
+        if path.contains("/privacy") || path.contains("/help") || path.contains("/support") {
+            return true;
+        }
+    }
+    false
+}
+
+fn strip_common_tracking_params(mut url: reqwest::Url) -> reqwest::Url {
+    let pairs = url
+        .query_pairs()
+        .filter(|(key, _)| {
+            let lower = key.to_ascii_lowercase();
+            !lower.starts_with("utm_")
+                && lower != "msclkid"
+                && lower != "fbclid"
+                && lower != "gclid"
+                && lower != "yclid"
+        })
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    url.query_pairs_mut().clear().extend_pairs(pairs);
+    url
+}
+
+fn site_title_from_url(url: &str) -> Option<String> {
+    site_from_url(url).map(|site| site.trim_start_matches("www.").to_string())
+}
+
+fn host_and_path(url: &str) -> (String, String) {
+    reqwest::Url::parse(url)
+        .ok()
+        .map(|parsed| {
+            (
+                parsed
+                    .host_str()
+                    .unwrap_or("")
+                    .trim_start_matches("www.")
+                    .to_ascii_lowercase(),
+                parsed.path().to_ascii_lowercase(),
+            )
+        })
+        .unwrap_or_else(|| ("".to_string(), "".to_string()))
+}
+
+fn is_known_news_domain(host: &str) -> bool {
+    [
+        "openai.com",
+        "anthropic.com",
+        "deepmind.google",
+        "blog.google",
+        "techcrunch.com",
+        "theverge.com",
+        "wired.com",
+        "arstechnica.com",
+        "reuters.com",
+        "apnews.com",
+        "bloomberg.com",
+        "technologyreview.com",
+        "36kr.com",
+        "qbitai.com",
+        "jiqizhixin.com",
+        "leiphone.com",
+        "finance.sina.com.cn",
+        "tech.sina.com.cn",
+        "new.qq.com",
+        "thepaper.cn",
+    ]
+    .iter()
+    .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+fn bing_news_filter_reason(source: &WebSearchResult, strict: bool) -> Option<&'static str> {
+    let (host, path) = host_and_path(&source.url);
+    let text = format!(
+        "{}\n{}\n{}\n{}",
+        source.title,
+        source.snippet.as_deref().unwrap_or(""),
+        source.site.as_deref().unwrap_or(""),
+        source.url
+    )
+    .to_ascii_lowercase();
+    if host.contains("wikipedia.org") || host.contains("britannica.com") {
+        return Some("wiki_or_reference");
+    }
+    if host.contains("github.com")
+        || host.contains("github.io")
+        || host.contains("youtube.com")
+        || host.contains("youtu.be")
+        || host.contains("bilibili.com")
+    {
+        return Some("not_news_like");
+    }
+    let official_company_host = host == "openai.com" || host == "anthropic.com";
+    let official_company_news_path =
+        official_company_host && (path.contains("/news") || path.contains("/blog") || path.contains("/announcement"));
+    if official_company_host && !official_company_news_path {
+        return Some("docs_or_homepage");
+    }
+    if path.contains("/docs")
+        || path.contains("/documentation")
+        || path.contains("/learn/what-is")
+        || text.contains("api documentation")
+        || text.contains("github repository")
+        || text.contains("what is ai")
+        || text.contains("artificial intelligence definition")
+        || text.contains("definition, examples")
+        || text.contains("dictionary")
+        || text.contains("translate")
+        || text.contains("meaning")
+        || text.contains("tutorial")
+        || text.contains("guide")
+        || text.contains("pricing")
+        || text.contains("login")
+        || text.contains("download")
+    {
+        return Some("docs_or_homepage");
+    }
+
+    let known_news = is_known_news_domain(&host)
+        && (path.contains("/news")
+            || path.contains("/blog")
+            || path.contains("/technology")
+            || path.contains("/article")
+            || !official_company_host);
+    let has_date = source.date_hint.as_deref().is_some_and(|value| !value.trim().is_empty());
+    let event_like = [
+        "announces",
+        "launches",
+        "releases",
+        "unveils",
+        "raises",
+        "funding",
+        "partnership",
+        "acquisition",
+        "regulation",
+        "lawsuit",
+        "report",
+        "update",
+        "model",
+        "open-source",
+        "chip",
+    ]
+    .iter()
+    .any(|keyword| text.contains(keyword));
+
+    if known_news || (has_date && event_like) || (!strict && has_date && is_known_news_domain(&host)) {
+        return None;
+    }
+    Some("not_news_like")
+}
+
+fn parse_bing_date_hint(value: &str) -> Option<chrono::DateTime<Utc>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc2822(trimmed)
+        .map(|date| date.with_timezone(&Utc))
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(trimmed).map(|date| date.with_timezone(&Utc)))
+        .ok()
+}
+
+fn bing_news_freshness_score(source: &WebSearchResult) -> i64 {
+    let Some(date) = source
+        .date_hint
+        .as_deref()
+        .and_then(parse_bing_date_hint)
+    else {
+        let (host, _) = host_and_path(&source.url);
+        return if is_known_news_domain(&host) { 4 } else { -3 };
+    };
+    let age = Utc::now().signed_duration_since(date);
+    if age.num_seconds() < 0 && age.num_hours().abs() <= 48 {
+        return 24;
+    }
+    if age.num_hours() <= 24 {
+        34
+    } else if age.num_days() <= 7 {
+        24
+    } else if age.num_days() <= 30 {
+        8
+    } else if age.num_days() <= 180 {
+        -10
+    } else {
+        -24
+    }
+}
+
+fn filter_bing_news_results(
+    sources: Vec<WebSearchResult>,
+    strict: bool,
+) -> Vec<WebSearchResult> {
+    let mut filtered = sources
+        .into_iter()
+        .filter_map(|mut source| {
+            source.freshness_score = Some(bing_news_freshness_score(&source));
+            if let Some(reason) = bing_news_filter_reason(&source, strict) {
+                source.news_like = Some(false);
+                source.filtered_reason = Some(reason.to_string());
+                None
+            } else {
+                source.news_like = Some(true);
+                Some(source)
+            }
+        })
+        .collect::<Vec<_>>();
+    filtered.sort_by(|left, right| {
+        right
+            .freshness_score
+            .unwrap_or(0)
+            .cmp(&left.freshness_score.unwrap_or(0))
+    });
+    filtered
+}
+
+fn bing_result_to_web_source(
+    title: &str,
+    url: &str,
+    snippet: &str,
+    stage: &str,
+    date_hint: Option<String>,
+) -> Option<WebSearchResult> {
+    let discovered_url = sanitize_search_text(&decode_html_entities(url), 2000);
+    let url = clean_bing_result_url(&discovered_url)?;
+    let unwrapped_bing_apiclick = discovered_url != url
+        && reqwest::Url::parse(&discovered_url)
+            .ok()
+            .is_some_and(|parsed| {
+                parsed
+                    .host_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .ends_with("bing.com")
+                    && parsed.path().to_ascii_lowercase().contains("/news/apiclick.aspx")
+            });
+    if url.contains("bing.com/search") {
+        return None;
+    }
+    let title = sanitize_search_text(title, 120);
+    let snippet_text = sanitize_search_text(snippet, 220);
+    let site = site_title_from_url(&url);
+    let source_type = infer_web_source_type(&title, &url, &snippet_text);
+    let (reliability, reliability_label, reliability_reason) =
+        infer_web_reliability(&title, &url, &snippet_text);
+    Some(WebSearchResult {
+        id: format!("web-{}", &stable_hash_hex(&url)[..12]),
+        title: if title.is_empty() { url.clone() } else { title },
+        url,
+        final_url: None,
+        site,
+        snippet: if snippet_text.is_empty() {
+            None
+        } else {
+            Some(snippet_text)
+        },
+        source_kind: Some("search_result".to_string()),
+        discovery_method: Some("search_provider".to_string()),
+        source_reliability: None,
+        discovered_by: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
+        feed_url: None,
+        source_home: if unwrapped_bing_apiclick { Some(discovered_url.clone()) } else { None },
+        direct_discovery_reason: None,
+        search_provider: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
+        search_stage: Some(stage.to_string()),
+        date_hint,
+        freshness_score: None,
+        search_diagnostics: None,
+        news_like: None,
+        filtered_reason: None,
+        final_included_in_prompt: None,
+        evidence_status: Some("candidate".to_string()),
+        usable_evidence: Some(false),
+        injected_into_answer: Some(false),
+        evidence_reason: None,
+        rejected_reason: None,
+        page_type: None,
+        content_status: Some("not_fetched".to_string()),
+        source_strength: None,
+        source_type: Some(source_type),
+        reliability: Some(reliability),
+        reliability_label: Some(reliability_label),
+        reliability_reason: Some(format!(
+            "{reliability_reason} Bing public search stage={stage}.{}",
+            if unwrapped_bing_apiclick { " Unwrapped Bing news apiclick URL before URL Reader." } else { "" }
+        )),
+        relevance: None,
+        relevance_label: None,
+        relevance_reason: None,
+        excerpt_status: None,
+        excerpt: None,
+        excerpt_error: None,
+        fetched_at: None,
+        cache_status: None,
+        read_status: None,
+        error_kind: None,
+        cached_at: None,
+        cache_ttl_seconds: None,
+        excerpt_quality: None,
+        extractor: None,
+        excerpt_reason: None,
+        code_blocks_truncated: None,
+        rank_score: None,
+        rank_reason: None,
+        is_constructed: None,
+        constructed_reason: None,
+        selected: None,
+        citation_id: None,
+        event_cluster: None,
+        cluster_reason: None,
+        cluster_size: None,
+        selected_for_roundup: None,
+        dropped_as_duplicate_cluster: None,
+    })
+}
+
+fn text_between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let start_index = text.find(start)? + start.len();
+    let rest = &text[start_index..];
+    let end_index = rest.find(end)?;
+    Some(&rest[..end_index])
+}
+
+fn clean_bing_markup_text(text: &str, max_chars: usize) -> String {
+    let trimmed = text
+        .trim()
+        .strip_prefix("<![CDATA[")
+        .unwrap_or(text.trim())
+        .strip_suffix("]]>")
+        .unwrap_or_else(|| {
+            text.trim()
+                .strip_prefix("<![CDATA[")
+                .unwrap_or(text.trim())
+        });
+    sanitize_search_text(trimmed, max_chars)
+}
+
+#[derive(Debug, Clone)]
+struct BingParseReport {
+    results: Vec<WebSearchResult>,
+    parser_used: String,
+    matched_selectors: Vec<String>,
+    rejected_count: usize,
+    parse_failure_hint: Option<String>,
+    raw_anchor_count: usize,
+    raw_href_count: usize,
+    decoded_url_candidate_count: usize,
+    external_anchor_count: usize,
+    kept_candidate_count: usize,
+    filtered_reason_counts: Vec<(String, usize)>,
+    first_links_preview: Vec<String>,
+    visible_text_preview: Option<String>,
+}
+
+fn sanitize_bing_diag_value(value: &str, max_chars: usize) -> String {
+    let cleaned = sanitize_search_text(value, max_chars)
+        .replace([':', ';', '|', '\n', '\r'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_");
+    if cleaned.is_empty() { "-".to_string() } else { cleaned }
+}
+
+fn decode_numeric_html_entities(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find("&#") {
+        output.push_str(&rest[..index]);
+        let after = &rest[index + 2..];
+        let Some(end) = after.find(';') else {
+            output.push_str(&rest[index..]);
+            return output;
+        };
+        let entity = &after[..end];
+        let parsed = if let Some(hex) = entity.strip_prefix(['x', 'X']) {
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            entity.parse::<u32>().ok()
+        };
+        if let Some(ch) = parsed.and_then(char::from_u32) {
+            output.push(ch);
+        } else {
+            output.push_str(&rest[index..index + end + 3]);
+        }
+        rest = &after[end + 1..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn clean_bing_feed_text(text: &str, max_chars: usize) -> String {
+    let trimmed = text
+        .trim()
+        .strip_prefix("<![CDATA[")
+        .unwrap_or(text.trim())
+        .strip_suffix("]]>")
+        .unwrap_or_else(|| text.trim().strip_prefix("<![CDATA[").unwrap_or(text.trim()));
+    sanitize_search_text(&decode_numeric_html_entities(&decode_html_entities(trimmed)), max_chars)
+}
+
+fn detect_bing_body_kind(content_type: &str, body: &str) -> String {
+    let trimmed = body.trim_start();
+    if trimmed.is_empty() {
+        return "empty".to_string();
+    }
+    if is_bing_block_page(reqwest::StatusCode::OK, body).is_some() {
+        return "captcha_or_block_page".to_string();
+    }
+    let lower_type = content_type.to_ascii_lowercase();
+    let lower_prefix = trimmed
+        .chars()
+        .take(4096)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if lower_type.contains("rss")
+        || lower_type.contains("xml")
+        || lower_prefix.starts_with("<?xml")
+        || lower_prefix.starts_with("<rss")
+        || lower_prefix.starts_with("<feed")
+    {
+        return "rss_xml".to_string();
+    }
+    if lower_type.contains("html")
+        || lower_prefix.contains("<!doctype html")
+        || lower_prefix.contains("<html")
+        || lower_prefix.contains("<head")
+        || lower_prefix.contains("<body")
+    {
+        if lower_prefix.contains("bing")
+            || lower_prefix.contains("b_algo")
+            || lower_prefix.contains("b_news")
+            || lower_prefix.contains("microsoft")
+        {
+            "bing_html".to_string()
+        } else {
+            "html".to_string()
+        }
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn visible_text_preview(body: &str) -> String {
+    safe_preview(&sanitize_search_text(
+        &strip_html_tags_to_text(body)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        300,
+    ), 300)
+}
+
+#[derive(Debug, Clone)]
+struct BingBodyTextQuality {
+    body_quality: String,
+    body_looks_binary: bool,
+    replacement_char_count: usize,
+    control_char_count: usize,
+    decode_hint: Option<String>,
+}
+
+fn detect_bing_body_text_quality(bytes: &[u8], text: &str) -> BingBodyTextQuality {
+    if bytes.is_empty() || text.trim().is_empty() {
+        return BingBodyTextQuality {
+            body_quality: "empty".to_string(),
+            body_looks_binary: false,
+            replacement_char_count: 0,
+            control_char_count: 0,
+            decode_hint: Some("empty_body".to_string()),
+        };
+    }
+    let compressed_magic = bytes.starts_with(&[0x1f, 0x8b])
+        || bytes.starts_with(&[0x78, 0x9c])
+        || bytes.starts_with(&[0x78, 0xda])
+        || bytes.starts_with(&[0x78, 0x01]);
+    let nul_count = bytes.iter().take(4096).filter(|byte| **byte == 0).count();
+    let replacement_char_count = text.chars().filter(|ch| *ch == '\u{fffd}').count();
+    let control_char_count = text
+        .chars()
+        .filter(|ch| ch.is_control() && *ch != '\n' && *ch != '\r' && *ch != '\t')
+        .count();
+    let total_chars = text.chars().count().max(1);
+    let body_looks_binary = compressed_magic
+        || nul_count > 0
+        || control_char_count > total_chars / 20
+        || replacement_char_count > total_chars / 10;
+    let (body_quality, decode_hint) = if compressed_magic {
+        ("compressed_or_binary", Some("compressed_magic"))
+    } else if nul_count > 0 || control_char_count > total_chars / 20 {
+        ("compressed_or_binary", Some("binary_or_control_chars"))
+    } else if replacement_char_count > total_chars / 10 || replacement_char_count > 256 {
+        ("corrupt_text", Some("too_many_replacement_chars"))
+    } else {
+        ("text", None)
+    };
+    BingBodyTextQuality {
+        body_quality: body_quality.to_string(),
+        body_looks_binary,
+        replacement_char_count,
+        control_char_count,
+        decode_hint: decode_hint.map(str::to_string),
+    }
+}
+
+fn clean_bing_anchor_url(href: &str) -> Option<String> {
+    unwrap_bing_redirect_url(href)
+}
+
+#[derive(Debug, Clone)]
+struct BingAnchorCandidate {
+    title: String,
+    url: String,
+    snippet: String,
+    date_hint: Option<String>,
+    score: i32,
+}
+
+#[derive(Debug, Clone)]
+struct BingAnchorFallbackReport {
+    candidates: Vec<WebSearchResult>,
+    raw_anchor_count: usize,
+    raw_href_count: usize,
+    decoded_url_candidate_count: usize,
+    external_count: usize,
+    kept_count: usize,
+    rejected_count: usize,
+    filtered_reason_counts: Vec<(String, usize)>,
+    first_links_preview: Vec<String>,
+}
+
+fn score_bing_anchor_candidate(title: &str, url: &str, context: &str, news_mode: bool) -> i32 {
+    let (host, path) = host_and_path(url);
+    let text = format!("{title}\n{context}").to_ascii_lowercase();
+    let mut score = 0;
+    for keyword in [
+        "ai",
+        "artificial intelligence",
+        "openai",
+        "chatgpt",
+        "deepseek",
+        "gemini",
+        "claude",
+        "anthropic",
+        "llm",
+        "model",
+        "chip",
+    ] {
+        if text.contains(keyword) {
+            score += 2;
+        }
+    }
+    for keyword in [
+        "announces",
+        "launches",
+        "releases",
+        "unveils",
+        "raises",
+        "funding",
+        "partnership",
+        "acquisition",
+        "regulation",
+        "lawsuit",
+        "report",
+        "update",
+        "open-source",
+        "news",
+    ] {
+        if text.contains(keyword) {
+            score += 2;
+        }
+    }
+    for keyword in ["minutes ago", "minute ago", "hours ago", "hour ago", "today", "yesterday", "may 2026", "2026"] {
+        if text.contains(keyword) {
+            score += 3;
+        }
+    }
+    for keyword in ["AI", "OpenAI", "ChatGPT", "DeepSeek", "Gemini", "Claude"] {
+        if title.contains(keyword) || context.contains(keyword) {
+            score += 2;
+        }
+    }
+    for keyword in ["news", "announcement", "release", "launch", "funding", "partnership", "report", "update", "today", "yesterday"] {
+        if title.contains(keyword) || context.contains(keyword) {
+            score += 2;
+        }
+    }
+    if is_known_news_domain(&host) {
+        score += 5;
+    }
+    if path.contains("/news") || path.contains("/technology") || path.contains("/article") || path.contains("/blog") {
+        score += 3;
+    }
+    if news_mode && (host.contains("wikipedia.org") || host.contains("britannica.com") || host.contains("github.com") || path.contains("/docs") || path.contains("/learn/what-is")) {
+        score -= 8;
+    }
+    score
+}
+
+#[allow(dead_code)]
+fn parse_all_anchors_fallback(body: &str, max_results: usize, stage: &str) -> BingAnchorFallbackReport {
+    let lower = body.to_ascii_lowercase();
+    let news_mode = stage.starts_with("news") || lower.contains("news");
+    let mut scanned_count = 0;
+    let mut external_count = 0;
+    let mut rejected_count = 0;
+    let mut previews = Vec::new();
+    let mut candidates = Vec::<BingAnchorCandidate>::new();
+    let mut cursor = 0;
+    while cursor < lower.len() {
+        cursor = char_boundary_at_or_after(&lower, cursor);
+        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a") else {
+            break;
+        };
+        let start = cursor + relative_start;
+        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>') else {
+            break;
+        };
+        let tag_end = start + tag_end_relative;
+        let Some(close_relative) = safe_slice_by_byte_range(&lower, tag_end + 1, lower.len()).find("</a>") else {
+            cursor = char_boundary_at_or_after(&lower, tag_end.saturating_add(1));
+            continue;
+        };
+        let close = tag_end + 1 + close_relative;
+        scanned_count += 1;
+        let tag = safe_slice_by_byte_range(body, start, tag_end.saturating_add(1));
+        let inner = safe_slice_by_byte_range(body, tag_end.saturating_add(1), close);
+        let title = clean_bing_markup_text(&strip_html_tags_to_text(inner), 160);
+        let Some(href) = html_attr_value(tag, "href") else {
+            rejected_count += 1;
+            cursor = close + 4;
+            continue;
+        };
+        let Some(url) = clean_bing_anchor_url(&href) else {
+            rejected_count += 1;
+            cursor = close + 4;
+            continue;
+        };
+        external_count += 1;
+        let context = clean_bing_markup_text(&strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)), 360);
+        let date_hint = extract_bing_relative_date_hint(&format!("{title} {context}"));
+        let score = score_bing_anchor_candidate(&title, &url, &context, news_mode);
+        if previews.len() < 5 {
+            let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
+            previews.push(format!("{}@{}", sanitize_bing_diag_value(&title, 72), sanitize_bing_diag_value(&host, 48)));
+        }
+        if title.len() < 4 || (news_mode && score < 2) {
+            rejected_count += 1;
+            cursor = close + 4;
+            continue;
+        }
+        candidates.push(BingAnchorCandidate {
+            title,
+            url,
+            snippet: context,
+            date_hint,
+            score,
+        });
+        cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+    }
+    candidates.sort_by(|left, right| right.score.cmp(&left.score));
+    let mut seen = HashSet::new();
+    let mut results = Vec::new();
+    for candidate in candidates {
+        if results.len() >= max_results {
+            break;
+        }
+        if !seen.insert(candidate.url.clone()) {
+            continue;
+        }
+        if let Some(source) = bing_result_to_web_source(
+            &candidate.title,
+            &candidate.url,
+            &candidate.snippet,
+            stage,
+            candidate.date_hint,
+        ) {
+            results.push(source);
+        }
+    }
+    let kept_count = results.len();
+    BingAnchorFallbackReport {
+        candidates: results,
+        raw_anchor_count: scanned_count,
+        raw_href_count: external_count + rejected_count,
+        decoded_url_candidate_count: external_count,
+        external_count,
+        kept_count,
+        rejected_count,
+        filtered_reason_counts: Vec::new(),
+        first_links_preview: previews,
+    }
+}
+
+fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) -> BingAnchorFallbackReport {
+    let lower = body.to_ascii_lowercase();
+    let news_mode = stage.starts_with("news") || lower.contains("news");
+    let mut raw_anchor_count = 0;
+    let mut raw_href_count = 0;
+    let mut decoded_url_candidate_count = 0;
+    let mut external_count = 0;
+    let mut rejected_count = 0;
+    let mut filtered_counts = BTreeMap::<String, usize>::new();
+    let mut previews = Vec::new();
+    let mut candidates = Vec::<BingAnchorCandidate>::new();
+    let mut cursor = 0;
+    while cursor < lower.len() {
+        cursor = char_boundary_at_or_after(&lower, cursor);
+        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a") else {
+            break;
+        };
+        let start = cursor + relative_start;
+        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>') else {
+            break;
+        };
+        let tag_end = start + tag_end_relative;
+        let close = safe_slice_by_byte_range(&lower, tag_end.saturating_add(1), lower.len())
+            .find("</a>")
+            .map(|relative| tag_end + 1 + relative)
+            .unwrap_or(tag_end + 1);
+        raw_anchor_count += 1;
+        let tag = safe_slice_by_byte_range(body, start, tag_end.saturating_add(1));
+        let inner = if close > tag_end + 1 {
+            safe_slice_by_byte_range(body, tag_end.saturating_add(1), close)
+        } else {
+            ""
+        };
+        let title = clean_bing_markup_text(&strip_html_tags_to_text(inner), 160);
+        let Some(href) = html_attr_value(tag, "href") else {
+            rejected_count += 1;
+            *filtered_counts.entry("missing_href".to_string()).or_insert(0) += 1;
+            cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+            continue;
+        };
+        raw_href_count += 1;
+        let Some(url) = clean_bing_anchor_url(&href) else {
+            rejected_count += 1;
+            *filtered_counts.entry("url_decode_or_internal".to_string()).or_insert(0) += 1;
+            cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+            continue;
+        };
+        decoded_url_candidate_count += 1;
+        external_count += 1;
+        let context = clean_bing_markup_text(&strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)), 360);
+        let date_hint = extract_bing_relative_date_hint(&format!("{title} {context}"));
+        let score = score_bing_anchor_candidate(&title, &url, &context, news_mode);
+        if previews.len() < 5 {
+            let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
+            previews.push(format!("{}@{}", sanitize_bing_diag_value(&title, 72), sanitize_bing_diag_value(&host, 48)));
+        }
+        let (host, path) = host_and_path(&url);
+        let path_looks_news = path.contains("/news")
+            || path.contains("/blog")
+            || path.contains("/article")
+            || path.contains("/202")
+            || path.contains("/technology");
+        let keep_without_snippet = news_mode && (is_known_news_domain(&host) || path_looks_news);
+        if title.len() < 4 && !keep_without_snippet {
+            rejected_count += 1;
+            *filtered_counts.entry("empty_title".to_string()).or_insert(0) += 1;
+            cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+            continue;
+        }
+        if news_mode && score < 2 && !keep_without_snippet {
+            rejected_count += 1;
+            *filtered_counts.entry("low_news_score".to_string()).or_insert(0) += 1;
+            cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+            continue;
+        }
+        candidates.push(BingAnchorCandidate {
+            title: if title.is_empty() { url.clone() } else { title },
+            url,
+            snippet: context,
+            date_hint,
+            score,
+        });
+        cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
+    }
+
+    for raw_url in extract_http_urls_from_text(body)
+        .into_iter()
+        .chain(extract_http_urls_from_text(&decode_html_entities(body)).into_iter())
+    {
+        raw_href_count += 1;
+        let Some(url) = clean_bing_anchor_url(&raw_url) else {
+            rejected_count += 1;
+            *filtered_counts.entry("url_decode_or_internal".to_string()).or_insert(0) += 1;
+            continue;
+        };
+        decoded_url_candidate_count += 1;
+        external_count += 1;
+        if previews.len() < 5 {
+            let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
+            previews.push(format!("{}@{}", sanitize_bing_diag_value(&url, 72), sanitize_bing_diag_value(&host, 48)));
+        }
+        let (host, path) = host_and_path(&url);
+        if news_mode
+            && !is_known_news_domain(&host)
+            && !path.contains("/news")
+            && !path.contains("/article")
+            && !path.contains("/202")
+            && !path.contains("/blog")
+        {
+            rejected_count += 1;
+            *filtered_counts.entry("raw_url_not_news_like".to_string()).or_insert(0) += 1;
+            continue;
+        }
+        candidates.push(BingAnchorCandidate {
+            title: site_title_from_url(&url).unwrap_or_else(|| url.clone()),
+            url,
+            snippet: String::new(),
+            date_hint: None,
+            score: 0,
+        });
+    }
+
+    candidates.sort_by(|left, right| right.score.cmp(&left.score));
+    let mut seen = HashSet::new();
+    let mut results = Vec::new();
+    for candidate in candidates {
+        if results.len() >= max_results {
+            break;
+        }
+        if !seen.insert(candidate.url.clone()) {
+            continue;
+        }
+        if let Some(source) = bing_result_to_web_source(
+            &candidate.title,
+            &candidate.url,
+            &candidate.snippet,
+            stage,
+            candidate.date_hint,
+        ) {
+            results.push(source);
+        } else {
+            rejected_count += 1;
+            *filtered_counts.entry("result_url_rejected".to_string()).or_insert(0) += 1;
+        }
+    }
+    let kept_count = results.len();
+    BingAnchorFallbackReport {
+        candidates: results,
+        raw_anchor_count,
+        raw_href_count,
+        decoded_url_candidate_count,
+        external_count,
+        kept_count,
+        rejected_count,
+        filtered_reason_counts: filtered_counts.into_iter().collect(),
+        first_links_preview: previews,
+    }
+}
+
+fn extract_http_urls_from_text(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        cursor = char_boundary_at_or_after(text, cursor);
+        let Some(relative) = safe_slice_by_byte_range(text, cursor, text.len()).find("http") else {
+            break;
+        };
+        let start = cursor + relative;
+        let rest = safe_slice_by_byte_range(text, start, text.len());
+        if !rest.starts_with("http://") && !rest.starts_with("https://") {
+            cursor = char_boundary_at_or_after(text, start.saturating_add(4));
+            continue;
+        }
+        let end = rest
+            .find(|ch: char| {
+                ch.is_whitespace()
+                    || ch == '"'
+                    || ch == '\''
+                    || ch == '<'
+                    || ch == '>'
+                    || ch == ')'
+                    || ch == ']'
+            })
+            .unwrap_or(rest.len());
+        let candidate = safe_slice_by_byte_range(rest, 0, end).trim_end_matches(['.', ',', ';', ':']).to_string();
+        if !candidate.is_empty() && urls.len() < 24 && !urls.contains(&candidate) {
+            urls.push(candidate);
+        }
+        cursor = char_boundary_at_or_after(text, start.saturating_add(end.max(4)));
+    }
+    urls
+}
+
+fn lower_find_from(haystack_lower: &str, needle: &str, start: usize) -> Option<usize> {
+    haystack_lower.get(start..)?.find(needle).map(|index| start + index)
+}
+
+fn xml_elements_by_tag(text: &str, tag: &str) -> Vec<String> {
+    let lower = text.to_ascii_lowercase();
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut output = Vec::new();
+    let mut cursor = 0;
+    while let Some(start) = lower_find_from(&lower, &open, cursor) {
+        let Some(open_end) = lower_find_from(&lower, ">", start) else {
+            break;
+        };
+        let Some(close_start) = lower_find_from(&lower, &close, open_end + 1) else {
+            break;
+        };
+        let end = close_start + close.len();
+        output.push(text[start..end].to_string());
+        cursor = end;
+    }
+    output
+}
+
+fn xml_tag_text(text: &str, tag: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let start = lower.find(&open)?;
+    let open_end = lower_find_from(&lower, ">", start)?;
+    let close_start = lower_find_from(&lower, &close, open_end + 1)?;
+    Some(text[open_end + 1..close_start].to_string())
+}
+
+fn xml_link_text(item: &str) -> String {
+    if let Some(link) = xml_tag_text(item, "link") {
+        let cleaned = clean_bing_feed_text(&link, 2000);
+        if cleaned.starts_with("http://") || cleaned.starts_with("https://") {
+            return cleaned;
+        }
+    }
+    let lower = item.to_ascii_lowercase();
+    let mut cursor = 0;
+    while let Some(start) = lower_find_from(&lower, "<link", cursor) {
+        let Some(end) = lower_find_from(&lower, ">", start) else {
+            break;
+        };
+        let tag = &item[start..=end];
+        if let Some(href) = html_attr_value(tag, "href") {
+            return clean_bing_feed_text(&href, 2000);
+        }
+        cursor = end + 1;
+    }
+    String::new()
+}
+
+fn parse_bing_rss_report(body: &str, max_results: usize, stage: &str) -> BingParseReport {
+    let body_kind = detect_bing_body_kind("", body);
+    if body_kind == "html" || body_kind == "bing_html" {
+        let mut report = parse_bing_html_report(body, max_results, stage);
+        report.parser_used = "rss-returned-html->html".to_string();
+        if report.parse_failure_hint.is_none() && report.results.is_empty() {
+            report.parse_failure_hint = Some("rss_returned_html_no_html_candidates".to_string());
+        }
+        return report;
+    } else if body_kind == "captcha_or_block_page" {
+        return BingParseReport {
+            results: Vec::new(),
+            parser_used: "blocked-page".to_string(),
+            matched_selectors: Vec::new(),
+            rejected_count: 0,
+            parse_failure_hint: Some("captcha_or_block_page".to_string()),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_anchor_count: 0,
+            kept_candidate_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+            visible_text_preview: Some(visible_text_preview(body)),
+        };
+    } else if body_kind != "rss_xml" && body_kind != "unknown" {
+        return BingParseReport {
+            results: Vec::new(),
+            parser_used: "body-kind-unsupported".to_string(),
+            matched_selectors: Vec::new(),
+            rejected_count: 0,
+            parse_failure_hint: Some(format!("{body_kind}_not_rss")),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_anchor_count: 0,
+            kept_candidate_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+            visible_text_preview: Some(visible_text_preview(body)),
+        };
+    }
+    let mut matched_selectors = Vec::new();
+    let mut rejected_count = 0;
+    let mut results = Vec::new();
+    let mut items = xml_elements_by_tag(body, "item");
+    if !items.is_empty() {
+        matched_selectors.push("rss item".to_string());
+    }
+    let entries = xml_elements_by_tag(body, "entry");
+    if !entries.is_empty() {
+        matched_selectors.push("atom entry".to_string());
+        items.extend(entries);
+    }
+    for item in items {
+        if results.len() >= max_results {
+            break;
+        }
+        let title = clean_bing_feed_text(&xml_tag_text(&item, "title").unwrap_or_default(), 140);
+        let link = xml_link_text(&item);
+        let description = clean_bing_feed_text(
+            &xml_tag_text(&item, "description")
+                .or_else(|| xml_tag_text(&item, "summary"))
+                .or_else(|| xml_tag_text(&item, "content"))
+                .unwrap_or_default(),
+            240,
+        );
+        let date_hint = clean_bing_feed_text(
+            &xml_tag_text(&item, "pubdate")
+                .or_else(|| xml_tag_text(&item, "published"))
+                .or_else(|| xml_tag_text(&item, "updated"))
+                .unwrap_or_default(),
+            80,
+        );
+        if let Some(source) = bing_result_to_web_source(
+            &title,
+            &link,
+            &description,
+            stage,
+            if date_hint.is_empty() { None } else { Some(date_hint) },
+        ) {
+            results.push(source);
+        } else {
+            rejected_count += 1;
+        }
+    }
+    let parse_failure_hint = if results.is_empty() {
+        if body.trim().is_empty() {
+            Some("rss_empty_body".to_string())
+        } else if matched_selectors.is_empty() {
+            Some("rss_no_item_or_entry".to_string())
+        } else {
+            Some("rss_items_missing_usable_title_or_link".to_string())
+        }
+    } else {
+        None
+    };
+    BingParseReport {
+        results,
+        parser_used: "rss-xml".to_string(),
+        matched_selectors,
+        rejected_count,
+        parse_failure_hint,
+        raw_anchor_count: 0,
+        raw_href_count: 0,
+        decoded_url_candidate_count: 0,
+        external_anchor_count: 0,
+        kept_candidate_count: 0,
+        filtered_reason_counts: Vec::new(),
+        first_links_preview: Vec::new(),
+        visible_text_preview: Some(visible_text_preview(body)),
+    }
+}
+
+fn parse_bing_response_report(
+    page: &BingFetchedPage,
+    max_results: usize,
+    stage: &str,
+    prefer_rss: bool,
+) -> BingParseReport {
+    if page.body_quality != "text" {
+        return BingParseReport {
+            results: Vec::new(),
+            parser_used: "body-quality-gate".to_string(),
+            matched_selectors: Vec::new(),
+            rejected_count: 0,
+            parse_failure_hint: Some(
+                page.decode_hint
+                    .clone()
+                    .unwrap_or_else(|| page.body_quality.clone()),
+            ),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_anchor_count: 0,
+            kept_candidate_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+            visible_text_preview: None,
+        };
+    }
+    let parsed = catch_unwind(AssertUnwindSafe(|| match page.body_kind.as_str() {
+        "rss_xml" if prefer_rss => parse_bing_rss_report(&page.body, max_results, stage),
+        "html" | "bing_html" => {
+            let mut report = parse_bing_html_report(&page.body, max_results, stage);
+            if prefer_rss {
+                report.parser_used = "rss-returned-html->html".to_string();
+                if report.parse_failure_hint.is_none() {
+                    report.parse_failure_hint = Some("rss_returned_html".to_string());
+                } else {
+                    report.parse_failure_hint = report
+                        .parse_failure_hint
+                        .map(|hint| format!("rss_returned_html_{hint}"));
+                }
+            }
+            report
+        }
+        "captcha_or_block_page" => BingParseReport {
+            results: Vec::new(),
+            parser_used: "blocked-page".to_string(),
+            matched_selectors: Vec::new(),
+            rejected_count: 0,
+            parse_failure_hint: Some("captcha_or_block_page".to_string()),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_anchor_count: 0,
+            kept_candidate_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+            visible_text_preview: Some(visible_text_preview(&page.body)),
+        },
+        "empty" => BingParseReport {
+            results: Vec::new(),
+            parser_used: "empty-body".to_string(),
+            matched_selectors: Vec::new(),
+            rejected_count: 0,
+            parse_failure_hint: Some("empty_body".to_string()),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_anchor_count: 0,
+            kept_candidate_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+            visible_text_preview: None,
+        },
+        _ if prefer_rss => parse_bing_rss_report(&page.body, max_results, stage),
+        _ => parse_bing_html_report(&page.body, max_results, stage),
+    }));
+    parsed.unwrap_or_else(|_| BingParseReport {
+        results: Vec::new(),
+        parser_used: "parser-panic-caught".to_string(),
+        matched_selectors: Vec::new(),
+        rejected_count: 0,
+        parse_failure_hint: Some("parser_panic_caught".to_string()),
+        raw_anchor_count: 0,
+        raw_href_count: 0,
+        decoded_url_candidate_count: 0,
+        external_anchor_count: 0,
+        kept_candidate_count: 0,
+        filtered_reason_counts: Vec::new(),
+        first_links_preview: Vec::new(),
+        visible_text_preview: None,
+    })
+}
+
+#[allow(dead_code)]
+fn parse_bing_rss_results(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+    parse_bing_rss_report(body, max_results, stage).results
+}
+
+fn html_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let pattern = format!("{attr}=");
+    let index = tag.to_ascii_lowercase().find(&pattern)?;
+    let after = &tag[index + pattern.len()..];
+    let quote = after.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let rest = &after[quote.len_utf8()..];
+        let end = rest.find(quote)?;
+        return Some(rest[..end].to_string());
+    }
+    let end = after
+        .find(|ch: char| ch.is_whitespace() || ch == '>')
+        .unwrap_or(after.len());
+    let value = after[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn parse_anchor_from_html(fragment: &str) -> Option<(String, String)> {
+    let anchor_start = fragment.find("<a ")?;
+    let after = &fragment[anchor_start..];
+    let tag_end = after.find('>')?;
+    let tag = &after[..=tag_end];
+    let href = html_attr_value(tag, "href")?;
+    let title = text_between(&after[tag_end + 1..], "", "</a>").unwrap_or("");
+    Some((clean_bing_markup_text(title, 140), href))
+}
+
+fn first_paragraph_text(fragment: &str) -> &str {
+    let Some(p_start) = fragment.find("<p") else {
+        return "";
+    };
+    let after_p = &fragment[p_start..];
+    let Some(tag_end) = after_p.find('>') else {
+        return "";
+    };
+    text_between(&after_p[tag_end + 1..], "", "</p>").unwrap_or("")
+}
+
+fn safe_text_window(text: &str, byte_index: usize, before: usize, after: usize) -> String {
+    safe_context_around_byte(text, byte_index, before, after)
+}
+
+fn extract_bing_relative_date_hint(text: &str) -> Option<String> {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = compact.to_ascii_lowercase();
+    for marker in ["minutes ago", "minute ago", "hours ago", "hour ago", "today", "yesterday"] {
+        if let Some(index) = lower.find(&marker.to_ascii_lowercase()) {
+            return Some(sanitize_search_text(&safe_text_window(&compact, index, 12, 18), 80));
+        }
+    }
+    if let Some(year_index) = compact.find("202") {
+        return Some(sanitize_search_text(&safe_text_window(&compact, year_index, 2, 18), 80));
+    }
+    for month in [
+        "January", "February", "March", "April", "May", "June", "July", "August",
+        "September", "October", "November", "December",
+    ] {
+        if let Some(index) = compact.find(month) {
+            return Some(sanitize_search_text(&safe_text_window(&compact, index, 0, 22), 80));
+        }
+    }
+    None
+}
+
+fn looks_like_bing_news_block(fragment: &str) -> bool {
+    let lower = fragment.to_ascii_lowercase();
+    lower.contains("news")
+        || lower.contains("b_tpcn")
+        || lower.contains("b_news")
+        || lower.contains("news-card")
+        || lower.contains("newsitem")
+        || lower.contains("minutes ago")
+        || lower.contains("hours ago")
+}
+
+#[allow(dead_code)]
+fn parse_bing_news_card_results(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+    let mut results: Vec<WebSearchResult> = Vec::new();
+    for chunk in body.split("<div").filter(|chunk| looks_like_bing_news_block(chunk)) {
+        if results.len() >= max_results {
+            break;
+        }
+        let mut local_count = 0;
+        for anchor_chunk in chunk.split("<a ").skip(1) {
+            if results.len() >= max_results || local_count >= 4 {
+                break;
+            }
+            let fragment = format!("<a {anchor_chunk}");
+            let Some((title, href)) = parse_anchor_from_html(&fragment) else {
+                continue;
+            };
+            let title = title.trim();
+            if title.len() < 6 || title.eq_ignore_ascii_case("more") || title.contains("鍥剧墖") || title.contains("瑙嗛") {
+                continue;
+            }
+            let block_text = strip_html_tags_to_text(chunk);
+            let snippet = clean_bing_markup_text(&block_text, 240);
+            let date_hint = extract_bing_relative_date_hint(&snippet);
+            if let Some(source) = bing_result_to_web_source(title, &href, &snippet, stage, date_hint) {
+                if !results.iter().any(|item| item.url == source.url) {
+                    results.push(source);
+                    local_count += 1;
+                }
+            }
+        }
+    }
+    results
+}
+
+#[allow(dead_code)]
+fn parse_bing_html_results(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+    let mut results = Vec::new();
+    if stage.starts_with("news") || body.contains("璧勮") || body.to_ascii_lowercase().contains("b_news") {
+        results.extend(parse_bing_news_card_results(body, max_results, stage));
+    }
+    for chunk in body.split("<li").filter(|chunk| chunk.contains("b_algo")) {
+        if results.len() >= max_results {
+            break;
+        }
+        let Some(h2_start) = chunk.find("<h2") else {
+            continue;
+        };
+        let h2_fragment = &chunk[h2_start..];
+        let Some((title, href)) = parse_anchor_from_html(h2_fragment) else {
+            continue;
+        };
+        let snippet = if let Some(caption_start) = chunk.find("b_caption") {
+            first_paragraph_text(&chunk[caption_start..])
+        } else {
+            ""
+        };
+        let date_hint = extract_bing_relative_date_hint(&strip_html_tags_to_text(chunk));
+        if let Some(source) = bing_result_to_web_source(&title, &href, snippet, stage, date_hint) {
+            if !results.iter().any(|item| item.url == source.url) {
+                results.push(source);
+            }
+        }
+    }
+    if results.len() < max_results {
+        for chunk in body.split("<h2").skip(1) {
+            if results.len() >= max_results {
+                break;
+            }
+            let Some((title, href)) = parse_anchor_from_html(chunk) else {
+                continue;
+            };
+            let fallback_stage = if stage.starts_with("news") {
+                "news-html-fallback"
+            } else {
+                "web-html-fallback"
+            };
+            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None) {
+                if !results.iter().any(|item| item.url == source.url) {
+                    results.push(source);
+                }
+            }
+        }
+    }
+    results
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BingPublicRoute {
+    Web,
+    News,
+}
+
+impl BingPublicRoute {
+    fn endpoint(self) -> &'static str {
+        match self {
+            BingPublicRoute::Web => BING_SEARCH_ENDPOINT,
+            BingPublicRoute::News => BING_NEWS_SEARCH_ENDPOINT,
+        }
+    }
+
+    fn stage(self, rss: bool) -> &'static str {
+        match (self, rss) {
+            (BingPublicRoute::Web, true) => "web-rss",
+            (BingPublicRoute::Web, false) => "web-html",
+            (BingPublicRoute::News, true) => "news-rss",
+            (BingPublicRoute::News, false) => "news-html",
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn parse_bing_news_html_results(body: &str, max_results: usize) -> Vec<WebSearchResult> {
+    let mut results = parse_bing_html_results(body, max_results, "news-html");
+    if results.len() >= max_results {
+        return results;
+    }
+    for chunk in body.split("<a ").skip(1) {
+        if results.len() >= max_results {
+            break;
+        }
+        let fragment = format!("<a {chunk}");
+        let Some((title, href)) = parse_anchor_from_html(&fragment) else {
+            continue;
+        };
+        if title.trim().len() < 8 {
+            continue;
+        }
+        let snippet = clean_bing_markup_text(&strip_html_tags_to_text(chunk), 240);
+        if let Some(source) = bing_result_to_web_source(&title, &href, &snippet, "news-html", None) {
+            if !results.iter().any(|item| item.url == source.url) {
+                results.push(source);
+            }
+        }
+    }
+    results
+}
+
+fn parse_bing_news_card_results_v2(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+    let mut results: Vec<WebSearchResult> = Vec::new();
+    let mut blocks = body
+        .split("<div")
+        .filter(|chunk| looks_like_bing_news_block(chunk))
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        blocks = body
+            .split("<li")
+            .filter(|chunk| looks_like_bing_news_block(chunk))
+            .collect::<Vec<_>>();
+    }
+    for chunk in blocks {
+        if results.len() >= max_results {
+            break;
+        }
+        let block_text = strip_html_tags_to_text(chunk);
+        let snippet = clean_bing_markup_text(&block_text, 240);
+        let date_hint = extract_bing_relative_date_hint(&snippet);
+        for anchor_chunk in chunk.split("<a ").skip(1).take(6) {
+            if results.len() >= max_results {
+                break;
+            }
+            let fragment = format!("<a {anchor_chunk}");
+            let Some((title, href)) = parse_anchor_from_html(&fragment) else {
+                continue;
+            };
+            let title = title.trim();
+            if title.len() < 6
+                || title.eq_ignore_ascii_case("more")
+                || title.contains("鍥剧墖")
+                || title.contains("瑙嗛")
+            {
+                continue;
+            }
+            if let Some(source) = bing_result_to_web_source(title, &href, &snippet, stage, date_hint.clone()) {
+                if !results.iter().any(|item| item.url == source.url) {
+                    results.push(source);
+                }
+            }
+        }
+    }
+    results
+}
+
+fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingParseReport {
+    let mut results = Vec::new();
+    let mut matched_selectors = Vec::new();
+    let mut rejected_count = 0;
+    let lower = body.to_ascii_lowercase();
+    if stage.starts_with("news")
+        || body.contains("璧勮")
+        || body.contains("鏂伴椈")
+        || lower.contains("b_news")
+        || lower.contains("news-card")
+        || lower.contains("newsitem")
+    {
+        let news_results = parse_bing_news_card_results_v2(body, max_results, stage);
+        if !news_results.is_empty() {
+            matched_selectors.push("news-card anchors".to_string());
+        }
+        results.extend(news_results);
+    }
+    for chunk in body.split("<li").filter(|chunk| chunk.contains("b_algo")) {
+        if results.len() >= max_results {
+            break;
+        }
+        let Some(h2_start) = chunk.find("<h2") else {
+            continue;
+        };
+        let h2_fragment = &chunk[h2_start..];
+        let Some((title, href)) = parse_anchor_from_html(h2_fragment) else {
+            continue;
+        };
+        let snippet = if let Some(caption_start) = chunk.find("b_caption") {
+            first_paragraph_text(&chunk[caption_start..])
+        } else {
+            ""
+        };
+        let date_hint = extract_bing_relative_date_hint(&strip_html_tags_to_text(chunk));
+        if let Some(source) = bing_result_to_web_source(&title, &href, snippet, stage, date_hint) {
+            if !results.iter().any(|item| item.url == source.url) {
+                if !matched_selectors.iter().any(|value| value == "li.b_algo h2 a") {
+                    matched_selectors.push("li.b_algo h2 a".to_string());
+                }
+                results.push(source);
+            }
+        } else {
+            rejected_count += 1;
+        }
+    }
+    if results.len() < max_results {
+        for chunk in body.split("<h2").skip(1) {
+            if results.len() >= max_results {
+                break;
+            }
+            let Some((title, href)) = parse_anchor_from_html(chunk) else {
+                continue;
+            };
+            let fallback_stage = if stage.starts_with("news") {
+                "news-html-fallback"
+            } else {
+                "web-html-fallback"
+            };
+            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None) {
+                if !results.iter().any(|item| item.url == source.url) {
+                    if !matched_selectors.iter().any(|value| value == "h2 a fallback") {
+                        matched_selectors.push("h2 a fallback".to_string());
+                    }
+                    results.push(source);
+                }
+            } else {
+                rejected_count += 1;
+            }
+        }
+    }
+    if results.len() < max_results && (stage.starts_with("news") || lower.contains("news") || body.contains("璧勮")) {
+        for chunk in body.split("<a ").skip(1) {
+            if results.len() >= max_results {
+                break;
+            }
+            let fragment = format!("<a {chunk}");
+            let Some((title, href)) = parse_anchor_from_html(&fragment) else {
+                continue;
+            };
+            if title.trim().len() < 6 {
+                rejected_count += 1;
+                continue;
+            }
+            let snippet = clean_bing_markup_text(&strip_html_tags_to_text(chunk), 240);
+            let date_hint = extract_bing_relative_date_hint(&snippet);
+            if let Some(source) = bing_result_to_web_source(&title, &href, &snippet, stage, date_hint) {
+                if !results.iter().any(|item| item.url == source.url) {
+                    if !matched_selectors.iter().any(|value| value == "all anchors news fallback") {
+                        matched_selectors.push("all anchors news fallback".to_string());
+                    }
+                    results.push(source);
+                }
+            } else {
+                rejected_count += 1;
+            }
+        }
+    }
+    let anchor_report = if results.len() < max_results {
+        let report = parse_all_bing_anchors_fallback(body, max_results.saturating_sub(results.len()), stage);
+        if report.raw_anchor_count > 0
+            && !matched_selectors
+                .iter()
+                .any(|value| value == "all anchors fallback")
+        {
+            matched_selectors.push("all anchors fallback".to_string());
+        }
+        rejected_count += report.rejected_count;
+        for source in &report.candidates {
+            if results.len() >= max_results {
+                break;
+            }
+            if !results.iter().any(|item| item.url == source.url) {
+                results.push(source.clone());
+            }
+        }
+        report
+    } else {
+        BingAnchorFallbackReport {
+            candidates: Vec::new(),
+            raw_anchor_count: 0,
+            raw_href_count: 0,
+            decoded_url_candidate_count: 0,
+            external_count: 0,
+            kept_count: 0,
+            rejected_count: 0,
+            filtered_reason_counts: Vec::new(),
+            first_links_preview: Vec::new(),
+        }
+    };
+    let parse_failure_hint = if results.is_empty() {
+        if body.trim().is_empty() {
+            Some("html_empty_body".to_string())
+        } else if !looks_like_html(body) {
+            Some("html_body_not_html".to_string())
+        } else if matched_selectors.is_empty() {
+            Some("html_no_supported_result_selector_matched".to_string())
+        } else {
+            Some("html_selectors_matched_but_no_usable_external_links".to_string())
+        }
+    } else {
+        None
+    };
+    BingParseReport {
+        results,
+        parser_used: if stage.starts_with("news") { "news-html" } else { "web-html" }.to_string(),
+        matched_selectors,
+        rejected_count,
+        parse_failure_hint,
+        raw_anchor_count: anchor_report.raw_anchor_count,
+        raw_href_count: anchor_report.raw_href_count,
+        decoded_url_candidate_count: anchor_report.decoded_url_candidate_count,
+        external_anchor_count: anchor_report.external_count,
+        kept_candidate_count: anchor_report.kept_count,
+        filtered_reason_counts: anchor_report.filtered_reason_counts,
+        first_links_preview: anchor_report.first_links_preview,
+        visible_text_preview: Some(visible_text_preview(body)),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BingFetchedPage {
+    body: String,
+    http_status: u16,
+    duration_ms: i64,
+    used_locale: bool,
+    final_url_host: String,
+    content_type: String,
+    content_encoding: String,
+    body_bytes: usize,
+    body_quality: String,
+    body_looks_binary: bool,
+    replacement_char_count: usize,
+    control_char_count: usize,
+    decode_hint: Option<String>,
+    body_kind: String,
+    page_title: Option<String>,
+}
+
+fn extract_html_page_title(body: &str) -> Option<String> {
+    if let Some(title) = xml_tag_text(body, "title")
+        .map(|value| clean_bing_markup_text(&decode_html_entities(&value), 120))
+        .filter(|value| !value.is_empty())
+    {
+        return Some(title);
+    }
+    let lower = body.to_ascii_lowercase();
+    for marker in ["property=\"og:title\"", "property='og:title'", "name=\"description\"", "name='description'"] {
+        let Some(marker_start) = lower.find(marker) else {
+            continue;
+        };
+        let tag_start = safe_slice_by_byte_range(&lower, 0, marker_start).rfind('<').unwrap_or(marker_start);
+        let tag_end = safe_slice_by_byte_range(&lower, marker_start, lower.len())
+            .find('>')
+            .map(|offset| marker_start + offset)
+            .unwrap_or(marker_start);
+        let tag = safe_slice_by_byte_range(body, tag_start, tag_end.saturating_add(1));
+        if let Some(content) = html_attr_value(tag, "content") {
+            let cleaned = clean_bing_markup_text(&decode_html_entities(&content), 120);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    None
+}
+
+fn classify_bing_body_kind(status: reqwest::StatusCode, content_type: &str, body: &str) -> String {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return "captcha_or_block_page".to_string();
+    }
+    if is_bing_block_page(status, body).is_some() {
+        return "captcha_or_block_page".to_string();
+    }
+    detect_bing_body_kind(content_type, body)
+}
+
+fn bing_error_kind(error: &str) -> String {
+    error
+        .split("errorKind=")
+        .nth(1)
+        .and_then(|rest| rest.split([';', ',']).next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn bing_error_http_status(error: &str) -> Option<u16> {
+    error
+        .split("httpStatus=")
+        .nth(1)
+        .and_then(|rest| rest.split([';', ',']).next())
+        .and_then(|value| value.trim().parse::<u16>().ok())
+}
+
+fn bing_stage_diag(
+    stage: &str,
+    status: &str,
+    http_status: Option<u16>,
+    error_kind: Option<&str>,
+    parsed: usize,
+    filtered: usize,
+    final_count: usize,
+    duration_ms: i64,
+    cache_status: Option<&str>,
+    parse_meta: Option<&str>,
+) -> String {
+    let meta = parse_meta
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!(":{value}"))
+        .unwrap_or_default();
+    format!(
+        "{stage}:{status}:http={}:error={}:parsed={parsed}:filtered={filtered}:final={final_count}:cache={}:ms={duration_ms}{meta}",
+        http_status.map(|value| value.to_string()).unwrap_or_else(|| "-".to_string()),
+        error_kind.unwrap_or("-"),
+        cache_status.unwrap_or("miss"),
+    )
+}
+
+fn bing_stage_parse_meta(page: &BingFetchedPage, report: &BingParseReport) -> String {
+    let selectors = if report.matched_selectors.is_empty() {
+        "-".to_string()
+    } else {
+        report
+            .matched_selectors
+            .iter()
+            .map(|value| sanitize_bing_diag_value(value, 48))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let first_links = if report.first_links_preview.is_empty() {
+        "-".to_string()
+    } else {
+        report
+            .first_links_preview
+            .iter()
+            .map(|value| sanitize_bing_diag_value(value, 96))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let visible_preview = sanitize_bing_diag_value(
+        report.visible_text_preview.as_deref().unwrap_or("-"),
+        180,
+    );
+    let filtered_reasons = if report.filtered_reason_counts.is_empty() {
+        "-".to_string()
+    } else {
+        report
+            .filtered_reason_counts
+            .iter()
+            .map(|(reason, count)| format!("{}={count}", sanitize_bing_diag_value(reason, 40)))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "host={}:ct={}:enc={}:bytes={}:quality={}:binary={}:replacement={}:controls={}:kind={}:title={}:parser={}:panic={}:selectors={}:rawAnchors={}:rawHrefs={}:decodedUrls={}:external={}:kept={}:rejected={}:filterReasons={}:hint={}:text={}:links={}",
+        sanitize_bing_diag_value(&page.final_url_host, 80),
+        sanitize_bing_diag_value(&page.content_type, 80),
+        sanitize_bing_diag_value(&page.content_encoding, 40),
+        page.body_bytes,
+        sanitize_bing_diag_value(&page.body_quality, 40),
+        if page.body_looks_binary { "yes" } else { "no" },
+        page.replacement_char_count,
+        page.control_char_count,
+        sanitize_bing_diag_value(&page.body_kind, 40),
+        sanitize_bing_diag_value(page.page_title.as_deref().unwrap_or("-"), 80),
+        sanitize_bing_diag_value(&report.parser_used, 48),
+        if report.parser_used == "parser-panic-caught" { "yes" } else { "no" },
+        selectors,
+        report.raw_anchor_count,
+        report.raw_href_count,
+        report.decoded_url_candidate_count,
+        report.external_anchor_count,
+        report.kept_candidate_count,
+        report.rejected_count,
+        filtered_reasons,
+        sanitize_bing_diag_value(report.parse_failure_hint.as_deref().unwrap_or("-"), 80),
+        visible_preview,
+        first_links,
+    )
+}
+
+fn bing_diagnostics_summary(provider: &str, vertical: &str, stages: &[String], final_reason: &str) -> String {
+    format!(
+        "provider={provider}; vertical={vertical}; browserHeaders=enabled; attemptedStages={}; finalFailureReason={final_reason}",
+        stages.join(" | ")
+    )
+}
+
+fn fetch_bing_public_page_once(
+    client: &reqwest::blocking::Client,
+    query: &str,
+    rss: bool,
+    route: BingPublicRoute,
+    use_locale: bool,
+) -> Result<BingFetchedPage, String> {
+    let mut url = reqwest::Url::parse(route.endpoint())
+        .map_err(|e| bing_public_error("invalid_endpoint", &format!("stage=url; {e}")))?;
+    url.query_pairs_mut().append_pair("q", query);
+    if rss {
+        url.query_pairs_mut().append_pair("format", "rss");
+    }
+    let locale = if use_locale {
+        if query.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)) {
+            url.query_pairs_mut()
+                .append_pair("mkt", "zh-CN")
+                .append_pair("setlang", "zh-CN")
+                .append_pair("cc", "CN");
+            Some("zh-CN")
+        } else {
+            url.query_pairs_mut()
+                .append_pair("mkt", "en-US")
+                .append_pair("setlang", "en-US");
+            Some("en-US")
+        }
+    } else {
+        None
+    };
+    let stage = route.stage(rss);
+    let started_at = Instant::now();
+    let response = client
+        .get(url)
+        .headers(build_bing_public_headers(locale))
+        .send()
+        .map_err(|e| bing_public_request_error(&e, stage))?;
+    let duration_ms = started_at.elapsed().as_millis().min(i64::MAX as u128) as i64;
+    let final_url_host = response
+        .url()
+        .host_str()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let content_encoding = response
+        .headers()
+        .get(reqwest::header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body = response
+        .bytes()
+        .map(|bytes| {
+            let body_bytes = bytes.len();
+            let body = decode_response_body(&bytes);
+            let quality = detect_bing_body_text_quality(&bytes, &body);
+            (body, body_bytes, quality)
+        })
+        .map_err(|_| bing_public_error("read_failed", &format!("stage={stage}")))?;
+    let (body, body_bytes, body_quality) = body;
+    let body_kind = if body_quality.body_quality == "text" {
+        classify_bing_body_kind(status, &content_type, &body)
+    } else {
+        body_quality.body_quality.clone()
+    };
+    let page_title = if body_quality.body_quality == "text" {
+        extract_html_page_title(&body)
+    } else {
+        None
+    };
+    if let Some(kind) = is_bing_block_page(status, &body) {
+        return Err(bing_public_error(
+            kind,
+            &format!("stage={stage}; httpStatus={}", status.as_u16()),
+        ));
+    }
+    if !status.is_success() {
+        return Err(bing_public_error(
+            "http_status",
+            &format!("stage={stage}; httpStatus={}", status.as_u16()),
+        ));
+    }
+    Ok(BingFetchedPage {
+        body,
+        http_status: status.as_u16(),
+        duration_ms,
+        used_locale: use_locale,
+        final_url_host,
+        content_type,
+        content_encoding,
+        body_bytes,
+        body_quality: body_quality.body_quality,
+        body_looks_binary: body_quality.body_looks_binary,
+        replacement_char_count: body_quality.replacement_char_count,
+        control_char_count: body_quality.control_char_count,
+        decode_hint: body_quality.decode_hint,
+        body_kind,
+        page_title,
+    })
+}
+
+fn fetch_bing_public_page(
+    client: &reqwest::blocking::Client,
+    query: &str,
+    rss: bool,
+    route: BingPublicRoute,
+) -> Result<BingFetchedPage, String> {
+    let first_error = match fetch_bing_public_page_once(client, query, rss, route, true) {
+        Ok(body) => return Ok(body),
+        Err(error) if is_bing_non_retryable_error(&error) => return Err(error),
+        Err(error) => error,
+    };
+    if let Ok(body) = fetch_bing_public_page_once(client, query, rss, route, false) {
+        return Ok(body);
+    }
+    if !is_bing_transient_error(&first_error) {
+        return Err(first_error);
+    }
+    thread::sleep(Duration::from_millis(300));
+    match fetch_bing_public_page_once(client, query, rss, route, true) {
+        Ok(body) => Ok(body),
+        Err(second_error) if is_bing_non_retryable_error(&second_error) => Err(second_error),
+        Err(second_error) => match fetch_bing_public_page_once(client, query, rss, route, false) {
+            Ok(body) => Ok(body),
+            Err(_) if is_bing_transient_error(&second_error) => Err(second_error),
+            Err(_) => Err(first_error),
+        },
+    }
+}
+
+fn search_bing_public_sources(
+    request: &WebSearchRequestInput,
+    max_results: usize,
+) -> Result<Vec<WebSearchResult>, String> {
+    let client = bing_public_client()?;
+    let mut seen_urls = HashSet::new();
+    let mut results = Vec::new();
+    let query_limit = bing_query_limit(request);
+    let total_limit = max_results.clamp(1, BING_PUBLIC_MAX_RESULTS);
+    let news_mode = is_bing_news_request(request);
+    let mut fallback_notes = Vec::new();
+    let mut stage_diags = Vec::new();
+
+    for (index, query) in request
+        .queries
+        .iter()
+        .map(|query| compact_bing_query(query))
+        .filter(|query| !query.is_empty())
+        .take(query_limit)
+        .enumerate()
+    {
+        if results.len() >= total_limit {
+            break;
+        }
+        if index > 0 {
+            let jitter_ms = 250 + (web_cache::now_ms().rem_euclid(250) as u64);
+            thread::sleep(Duration::from_millis(jitter_ms));
+        }
+
+        let query_remaining = (total_limit - results.len()).min(BING_PUBLIC_MAX_RESULTS_PER_QUERY);
+        let mut query_results = Vec::new();
+
+        if news_mode {
+            match fetch_bing_public_page(&client, &query, true, BingPublicRoute::News) {
+                Ok(page) => {
+                    let report = parse_bing_response_report(&page, query_remaining, "news-rss", true);
+                    let parsed = report.results.clone();
+                    let parsed_count = parsed.len();
+                    query_results = filter_bing_news_results(parsed, false);
+                    let parse_meta = bing_stage_parse_meta(&page, &report);
+                    stage_diags.push(bing_stage_diag(
+                        "news-rss",
+                        "success",
+                        Some(page.http_status),
+                        None,
+                        parsed_count,
+                        parsed_count.saturating_sub(query_results.len()),
+                        query_results.len(),
+                        page.duration_ms,
+                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(&parse_meta),
+                    ));
+                    if query_results.is_empty() {
+                        fallback_notes.push("news_rss_filtered_all");
+                    }
+                }
+                Err(error) => {
+                    if error.contains("errorKind=rate_limited")
+                        || error.contains("errorKind=blocked_or_captcha")
+                    {
+                        return Err(error);
+                    }
+                    stage_diags.push(bing_stage_diag(
+                        "news-rss",
+                        "failed",
+                        bing_error_http_status(&error),
+                        Some(&bing_error_kind(&error)),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some("miss"),
+                        None,
+                    ));
+                    fallback_notes.push("news_rss_failed");
+                }
+            }
+
+            if query_results.is_empty() {
+                match fetch_bing_public_page(&client, &query, false, BingPublicRoute::News) {
+                    Ok(page) => {
+                        let report = parse_bing_response_report(&page, query_remaining, "news-html", false);
+                        let parsed = report.results.clone();
+                        let parsed_count = parsed.len();
+                        query_results = filter_bing_news_results(parsed, false);
+                        let parse_meta = bing_stage_parse_meta(&page, &report);
+                        stage_diags.push(bing_stage_diag(
+                            "news-html",
+                            "success",
+                            Some(page.http_status),
+                            None,
+                            parsed_count,
+                            parsed_count.saturating_sub(query_results.len()),
+                            query_results.len(),
+                            page.duration_ms,
+                            Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                            Some(&parse_meta),
+                        ));
+                        if query_results.is_empty() {
+                            fallback_notes.push("news_html_filtered_all");
+                        }
+                    }
+                    Err(error) => {
+                        if error.contains("errorKind=rate_limited")
+                            || error.contains("errorKind=blocked_or_captcha")
+                        {
+                            return Err(error);
+                        }
+                        stage_diags.push(bing_stage_diag(
+                            "news-html",
+                            "failed",
+                            bing_error_http_status(&error),
+                            Some(&bing_error_kind(&error)),
+                            0,
+                            0,
+                            0,
+                            0,
+                            Some("miss"),
+                            None,
+                        ));
+                        fallback_notes.push("news_html_failed");
+                    }
+                }
+            }
+        }
+
+        if query_results.is_empty() {
+            let rss_body = fetch_bing_public_page(&client, &query, true, BingPublicRoute::Web);
+            query_results = match rss_body {
+                Ok(page) => {
+                    let report = parse_bing_response_report(&page, query_remaining, "web-rss", true);
+                    let parsed = report.results.clone();
+                    let parsed_count = parsed.len();
+                    let filtered = if news_mode {
+                        filter_bing_news_results(parsed, true)
+                    } else {
+                        parsed
+                    };
+                    let parse_meta = bing_stage_parse_meta(&page, &report);
+                    stage_diags.push(bing_stage_diag(
+                        "web-rss",
+                        "success",
+                        Some(page.http_status),
+                        None,
+                        parsed_count,
+                        parsed_count.saturating_sub(filtered.len()),
+                        filtered.len(),
+                        page.duration_ms,
+                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(&parse_meta),
+                    ));
+                    filtered
+                }
+                Err(error) => {
+                    if error.contains("errorKind=rate_limited")
+                        || error.contains("errorKind=blocked_or_captcha")
+                    {
+                        return Err(error);
+                    }
+                    stage_diags.push(bing_stage_diag(
+                        "web-rss",
+                        "failed",
+                        bing_error_http_status(&error),
+                        Some(&bing_error_kind(&error)),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some("miss"),
+                        None,
+                    ));
+                    Vec::new()
+                }
+            };
+            if news_mode {
+                fallback_notes.push("fallback_to_web");
+                if query_results.is_empty() {
+                    fallback_notes.push("fallback_web_filtered_all");
+                }
+            }
+        }
+
+        if query_results.is_empty() {
+            match fetch_bing_public_page(&client, &query, false, BingPublicRoute::Web) {
+                Ok(page) => {
+                    let report = parse_bing_response_report(&page, query_remaining, "web-html", false);
+                    let parsed = report.results.clone();
+                    let parsed_count = parsed.len();
+                    query_results = if news_mode {
+                        fallback_notes.push("fallback_to_web_html");
+                        filter_bing_news_results(parsed, true)
+                    } else {
+                        parsed
+                    };
+                    let parse_meta = bing_stage_parse_meta(&page, &report);
+                    stage_diags.push(bing_stage_diag(
+                        "web-html",
+                        "success",
+                        Some(page.http_status),
+                        None,
+                        parsed_count,
+                        parsed_count.saturating_sub(query_results.len()),
+                        query_results.len(),
+                        page.duration_ms,
+                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(&parse_meta),
+                    ));
+                }
+                Err(error) => {
+                    stage_diags.push(bing_stage_diag(
+                        "web-html",
+                        "failed",
+                        bing_error_http_status(&error),
+                        Some(&bing_error_kind(&error)),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some("miss"),
+                        None,
+                    ));
+                    return Err(error);
+                }
+            }
+            if query_results.is_empty() {
+                let detail = if fallback_notes.is_empty() {
+                    format!("stage=complete; resultCount=0; diagnostics={}", bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "no_candidates"))
+                } else {
+                    format!("stage=complete; resultCount=0; fallbackReason={}; diagnostics={}", fallback_notes.join(","), bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "all_filtered"))
+                };
+                return Err(bing_public_error("parse_failed", &detail));
+            }
+        }
+
+        let diagnostics = bing_diagnostics_summary(
+            WEB_SEARCH_BING_PROVIDER,
+            if news_mode { "news" } else { "web" },
+            &stage_diags,
+            "ok",
+        );
+        for source in query_results {
+            if results.len() >= total_limit {
+                break;
+            }
+            if seen_urls.insert(source.url.clone()) {
+                let mut source = source;
+                source.search_diagnostics = Some(diagnostics.clone());
+                results.push(source);
+            }
+        }
+    }
+
+    if results.is_empty() {
+        let detail = if fallback_notes.is_empty() {
+            format!("stage=complete; diagnostics={}", bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "no_candidates"))
+        } else {
+            format!("stage=complete; fallbackReason={}; diagnostics={}", fallback_notes.join(","), bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "all_filtered"))
+        };
+        return Err(bing_public_error("no_results", &detail));
+    }
+    Ok(results)
+}
+
 fn search_brave_sources(
     request: &WebSearchRequestInput,
     api_key: &str,
@@ -3797,7 +6924,7 @@ fn search_brave_sources(
         .timeout(Duration::from_secs(12))
         .user_agent("oi-notebook/0.1")
         .build()
-        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP 客户端：{e}"))?;
     let mut seen_urls = HashSet::new();
     let mut results = Vec::new();
     let per_query_count = max_results.clamp(1, 10).to_string();
@@ -3813,7 +6940,7 @@ fn search_brave_sources(
             break;
         }
         let mut url = reqwest::Url::parse(BRAVE_SEARCH_ENDPOINT)
-            .map_err(|e| format!("联网搜索失败：搜索服务 URL 无效: {e}"))?;
+            .map_err(|e| format!("联网搜索失败：搜索服务 URL 无效：{e}"))?;
         url.query_pairs_mut()
             .append_pair("q", query)
             .append_pair("count", per_query_count.as_str())
@@ -3826,9 +6953,9 @@ fn search_brave_sources(
             .send()
             .map_err(|e| {
                 if e.is_timeout() {
-                    "联网搜索失败：搜索服务请求超时".to_string()
+                    "联网搜索失败：搜索服务请求超时。".to_string()
                 } else {
-                    "联网搜索失败：网络请求失败".to_string()
+                    "联网搜索失败：无法连接搜索服务。".to_string()
                 }
             })?;
 
@@ -3836,14 +6963,14 @@ fn search_brave_sources(
         let body = response
             .bytes()
             .map(|bytes| decode_response_body(&bytes))
-            .map_err(|_| "联网搜索失败：搜索服务响应读取失败".to_string())?;
+            .map_err(|_| "联网搜索失败：无法读取搜索服务响应。".to_string())?;
         let body_trimmed = body.trim();
         if !status.is_success() {
             return Err(brave_search_status_error(status, body_trimmed));
         }
 
         let parsed = serde_json::from_str::<BraveSearchResponse>(body_trimmed)
-            .map_err(|_| "联网搜索失败：搜索服务返回格式异常".to_string())?;
+            .map_err(|_| "联网搜索失败：搜索服务返回了无法识别的格式。".to_string())?;
         let items = parsed.web.map(|web| web.results).unwrap_or_default();
         for item in items {
             if results.len() >= max_results {
@@ -3872,7 +6999,7 @@ fn search_bocha_sources(
         .timeout(Duration::from_secs(12))
         .user_agent("oi-notebook/0.1")
         .build()
-        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP 客户端：{e}"))?;
     let mut seen_urls = HashSet::new();
     let mut results = Vec::new();
     let per_query_count = max_results.clamp(1, 10);
@@ -3903,9 +7030,9 @@ fn search_bocha_sources(
             .send()
             .map_err(|e| {
                 if e.is_timeout() {
-                    "联网搜索失败：博查搜索请求超时".to_string()
+                    "联网搜索失败：Bocha 搜索请求超时。".to_string()
                 } else {
-                    "联网搜索失败：无法连接博查搜索服务".to_string()
+                    "联网搜索失败：无法连接 Bocha 搜索服务。".to_string()
                 }
             })?;
 
@@ -3913,14 +7040,14 @@ fn search_bocha_sources(
         let body = response
             .bytes()
             .map(|bytes| decode_response_body(&bytes))
-            .map_err(|_| "联网搜索失败：博查搜索响应读取失败".to_string())?;
+            .map_err(|_| "联网搜索失败：无法读取 Bocha 搜索响应。".to_string())?;
         let body_trimmed = body.trim();
         if !status.is_success() {
             return Err(bocha_search_status_error(status, body_trimmed));
         }
 
         let parsed = serde_json::from_str::<BochaSearchResponse>(body_trimmed)
-            .map_err(|_| "联网搜索失败：博查搜索返回格式异常".to_string())?;
+            .map_err(|_| "联网搜索失败：Bocha 搜索返回了无法识别的格式。".to_string())?;
         let items = parsed
             .web_pages
             .map(|web_pages| web_pages.value)
@@ -3951,7 +7078,7 @@ fn search_bocha_sources_with_fallback(
         .timeout(Duration::from_secs(12))
         .user_agent("oi-notebook/0.1")
         .build()
-        .map_err(|e| format!("联网搜索失败：无法创建 HTTP client: {e}"))?;
+        .map_err(|e| format!("联网搜索失败：无法创建 HTTP 客户端：{e}"))?;
     let mut seen_urls = HashSet::new();
     let mut results = Vec::new();
     let per_query_count = max_results.clamp(1, 10);
@@ -3992,7 +7119,7 @@ fn search_bocha_sources_with_fallback(
                         continue;
                     }
                     return Err(last_error.unwrap_or_else(|| {
-                        "无法连接博查搜索服务，请检查网络或 API Endpoint".to_string()
+                        "无法连接 Bocha 搜索服务，请检查网络或 API endpoint。".to_string()
                     }));
                 }
             };
@@ -4001,18 +7128,18 @@ fn search_bocha_sources_with_fallback(
             let body = response
                 .bytes()
                 .map(|bytes| decode_response_body(&bytes))
-                .map_err(|_| "博查搜索响应读取失败".to_string())?;
+                .map_err(|_| "无法读取 Bocha 搜索响应。".to_string())?;
             let body_trimmed = body.trim();
             if !status.is_success() {
                 last_error = Some(bocha_search_status_error(status, body_trimmed));
                 if is_bocha_endpoint_retryable(status) && index + 1 < endpoints.len() {
                     continue;
                 }
-                return Err(last_error.unwrap_or_else(|| "博查搜索服务暂时不可用".to_string()));
+                return Err(last_error.unwrap_or_else(|| "Bocha 搜索服务暂时不可用。".to_string()));
             }
 
             let parsed = serde_json::from_str::<BochaSearchResponse>(body_trimmed)
-                .map_err(|_| "博查搜索返回格式异常，可能是接口版本变化".to_string())?;
+                .map_err(|_| "Bocha 搜索返回了无法识别的格式，API 版本可能已变化。".to_string())?;
             let items = bocha_response_items(parsed);
             for item in items {
                 if results.len() >= max_results {
@@ -4080,13 +7207,13 @@ fn validate_public_web_url_for_read(url: &str) -> Result<reqwest::Url, WebReadFa
             let kind = if message.contains("http / https") {
                 "unsupported_scheme"
             } else if message.contains("localhost")
-                || message.contains("内网")
-                || message.contains("本地")
+                || message.contains("private")
+                || message.contains("local")
             {
                 "private_network"
             } else if message.contains("search engine") {
                 "blocked_or_unreadable"
-            } else if message.contains("解析") {
+            } else if message.contains("resolve") {
                 "dns_failed"
             } else {
                 "invalid_url"
@@ -4098,17 +7225,17 @@ fn validate_public_web_url_for_read(url: &str) -> Result<reqwest::Url, WebReadFa
 
 fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
     let parsed =
-        reqwest::Url::parse(url.trim()).map_err(|_| "网页地址无效，无法读取正文".to_string())?;
+        reqwest::Url::parse(url.trim()).map_err(|_| "Web page URL is invalid and cannot be read.".to_string())?;
     match parsed.scheme() {
         "http" | "https" => {}
-        _ => return Err("只允许读取公开 http / https 网页".to_string()),
+        _ => return Err("Only public http / https web pages can be read.".to_string()),
     }
     if parsed.username() != "" || parsed.password().is_some() {
-        return Err("网页地址包含认证信息，已跳过读取".to_string());
+        return Err("Web page URL contains credentials and was skipped.".to_string());
     }
     let host = parsed
         .host_str()
-        .ok_or_else(|| "网页地址缺少域名，无法读取正文".to_string())?
+        .ok_or_else(|| "Web page URL is missing a host and cannot be read.".to_string())?
         .trim()
         .trim_end_matches('.')
         .to_ascii_lowercase();
@@ -4118,29 +7245,29 @@ fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
         || host.ends_with(".internal")
         || host.ends_with(".lan")
     {
-        return Err("不会访问 localhost、内网或本地域名".to_string());
+        return Err("Refusing to access localhost, private network, or local hostnames.".to_string());
     }
     if is_search_engine_results_url(&host, parsed.path(), parsed.query()) {
         return Err("search engine result pages are not read".to_string());
     }
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_or_local_ip(ip) {
-            return Err("不会访问 localhost、内网或本地地址".to_string());
+            return Err("Refusing to access localhost, private network, or local addresses.".to_string());
         }
     } else {
         let port = parsed.port_or_known_default().unwrap_or(443);
         let addrs = (host.as_str(), port)
             .to_socket_addrs()
-            .map_err(|_| "无法解析网页域名，已跳过正文读取".to_string())?;
+            .map_err(|_| "Could not resolve the web page host; skipped body read.".to_string())?;
         let mut resolved_any = false;
         for addr in addrs {
             resolved_any = true;
             if is_private_or_local_ip(addr.ip()) {
-                return Err("网页域名解析到内网或本地地址，已跳过读取".to_string());
+                return Err("Web page host resolved to a private or local address; skipped read.".to_string());
             }
         }
         if !resolved_any {
-            return Err("无法解析网页域名，已跳过正文读取".to_string());
+            return Err("Could not resolve the web page host; skipped body read.".to_string());
         }
     }
     Ok(parsed)
@@ -4243,8 +7370,7 @@ fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
-        if lower.contains("广告") || lower.contains("copyright") || lower.contains("版权所有")
-        {
+        if lower.contains("advertisement") || lower.contains("copyright") || lower.contains("all rights reserved") {
             continue;
         }
         lines.push(trimmed.to_string());
@@ -4288,6 +7414,7 @@ fn fetch_single_web_source_excerpt(
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("URL failed public web safety validation".to_string()),
                 code_blocks_truncated: Some(false),
+            ..Default::default()
             };
         }
     };
@@ -4321,9 +7448,9 @@ fn fetch_single_web_source_excerpt(
         Ok(response) => response,
         Err(error) => {
             let message = if error.is_timeout() {
-                "读取网页正文超时".to_string()
+                "璇诲彇缃戦〉姝ｆ枃瓒呮椂".to_string()
             } else {
-                "读取网页正文失败".to_string()
+                "璇诲彇缃戦〉姝ｆ枃澶辫触".to_string()
             };
             let result = WebSourceExcerptResult {
                 id,
@@ -4343,6 +7470,7 @@ fn fetch_single_web_source_excerpt(
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("HTTP request failed".to_string()),
                 code_blocks_truncated: Some(false),
+            ..Default::default()
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
@@ -4368,6 +7496,7 @@ fn fetch_single_web_source_excerpt(
             extractor: Some("none".to_string()),
             excerpt_reason: Some("Final URL failed public web safety validation".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4380,7 +7509,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("网页正文不可用或需要登录".to_string()),
+            error: Some("Web page body is unavailable or requires login.".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4392,6 +7521,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some("HTTP status requires authorization".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4402,7 +7532,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("网页不存在或地址不可用".to_string()),
+            error: Some("Web page does not exist or URL is unavailable.".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4414,6 +7544,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not found".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4424,7 +7555,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("网页暂时不可读取".to_string()),
+            error: Some("Web page is temporarily unreadable.".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4436,6 +7567,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not successful".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4458,7 +7590,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("当前来源不是可直接提取的网页正文".to_string()),
+            error: Some("褰撳墠鏉ユ簮涓嶆槸鍙洿鎺ユ彁鍙栫殑缃戦〉姝ｆ枃".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4470,6 +7602,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("content_type_unsupported".to_string()),
             excerpt_reason: Some("Content type is not extractable text or HTML".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4484,7 +7617,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("网页正文过大，已跳过读取".to_string()),
+            error: Some("缃戦〉姝ｆ枃杩囧ぇ锛屽凡璺宠繃璇诲彇".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4496,6 +7629,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("too_large".to_string()),
             excerpt_reason: Some("Response body is too large".to_string()),
             code_blocks_truncated: Some(false),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -4514,7 +7648,7 @@ fn fetch_single_web_source_excerpt(
                     title,
                     fetched: false,
                     excerpt: None,
-                    error: Some("网页正文过大，已跳过读取".to_string()),
+                    error: Some("缃戦〉姝ｆ枃杩囧ぇ锛屽凡璺宠繃璇诲彇".to_string()),
                     fetched_at,
                     cache_status: Some("miss".to_string()),
                     cached_at: None,
@@ -4526,6 +7660,7 @@ fn fetch_single_web_source_excerpt(
                     error_kind: Some("too_large".to_string()),
                     excerpt_reason: Some("Response body exceeded size limit".to_string()),
                     code_blocks_truncated: Some(false),
+                ..Default::default()
                 };
                 return finish_web_excerpt_result(result, &cache_key, cached);
             }
@@ -4538,7 +7673,7 @@ fn fetch_single_web_source_excerpt(
                 title,
                 fetched: false,
                 excerpt: None,
-                error: Some("网页正文读取失败".to_string()),
+                error: Some("Web page body read failed.".to_string()),
                 fetched_at,
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
@@ -4550,6 +7685,7 @@ fn fetch_single_web_source_excerpt(
                 error_kind: Some("unknown".to_string()),
                 excerpt_reason: Some("Response body read failed".to_string()),
                 code_blocks_truncated: Some(false),
+            ..Default::default()
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
@@ -4583,7 +7719,7 @@ fn fetch_single_web_source_excerpt(
             title,
             fetched: false,
             excerpt: None,
-            error: Some("网页正文不可用或需要登录".to_string()),
+            error: Some("Web page body is unavailable or requires login.".to_string()),
             fetched_at,
             cache_status: Some("miss".to_string()),
             cached_at: None,
@@ -4595,6 +7731,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some(extracted.reason),
             code_blocks_truncated: Some(extracted.code_blocks_truncated),
+        ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     };
@@ -4617,6 +7754,7 @@ fn fetch_single_web_source_excerpt(
         extractor: Some(extracted.extractor.to_string()),
         excerpt_reason: Some(extracted.reason),
         code_blocks_truncated: Some(extracted.code_blocks_truncated),
+    ..Default::default()
     };
     finish_web_excerpt_result(result, &cache_key, cached)
 }
@@ -4656,6 +7794,28 @@ fn finish_web_excerpt_result(
             site: site_from_url(&result.url),
             snippet: None,
             source_kind: None,
+            discovery_method: None,
+            source_reliability: None,
+            discovered_by: None,
+            feed_url: None,
+            source_home: None,
+            direct_discovery_reason: None,
+            search_provider: None,
+            search_stage: None,
+            date_hint: None,
+            freshness_score: None,
+            search_diagnostics: None,
+            news_like: None,
+            filtered_reason: None,
+            final_included_in_prompt: None,
+            evidence_status: None,
+            usable_evidence: None,
+            injected_into_answer: None,
+            evidence_reason: None,
+            rejected_reason: None,
+            page_type: None,
+            content_status: None,
+            source_strength: None,
             source_type: None,
             reliability: None,
             reliability_label: None,
@@ -4682,6 +7842,11 @@ fn finish_web_excerpt_result(
             constructed_reason: None,
             selected: None,
             citation_id: None,
+            event_cluster: None,
+            cluster_reason: None,
+            cluster_size: None,
+            selected_for_roundup: None,
+            dropped_as_duplicate_cluster: None,
         })
     } else {
         WEB_EXCERPT_FAILURE_TTL_SECONDS
@@ -4701,7 +7866,7 @@ fn fetch_web_source_excerpts_blocking(
 ) -> Result<Vec<WebSourceExcerptResult>, String> {
     let config = normalize_web_search_config(&read_config()?.ai.web_search);
     if !config.public_search_consent {
-        return Err("需要先授权公开网页搜索".to_string());
+        return Err("读取公开网页前需要先启用公开网页搜索授权。".to_string());
     }
 
     let max_sources = input
@@ -4727,7 +7892,7 @@ fn fetch_web_source_excerpts_blocking(
         }))
         .user_agent("oi-notebook-public-web-excerpt/0.1")
         .build()
-        .map_err(|e| format!("无法创建网页读取 client: {e}"))?;
+        .map_err(|e| format!("无法创建网页读取客户端：{e}"))?;
 
     let request_context = input.clone();
     let handles = input
@@ -4756,10 +7921,10 @@ fn fetch_web_source_excerpts_blocking(
                     WebSourceExcerptResult {
                         id: "unknown".to_string(),
                         url: "".to_string(),
-                        title: "未知来源".to_string(),
+                        title: "Unknown source".to_string(),
                         fetched: false,
                         excerpt: None,
-                        error: Some("网页摘录任务失败".to_string()),
+                        error: Some("网页摘录任务失败。".to_string()),
                         fetched_at: Utc::now().timestamp_millis(),
                         final_url: None,
                         status: Some("failed".to_string()),
@@ -4771,6 +7936,7 @@ fn fetch_web_source_excerpts_blocking(
                         extractor: Some("none".to_string()),
                         excerpt_reason: Some("web excerpt worker panicked".to_string()),
                         code_blocks_truncated: Some(false),
+                        ..Default::default()
                     },
                 ));
             }
@@ -4786,7 +7952,7 @@ fn fetch_web_source_excerpts_blocking(
             if remaining == 0 {
                 result.fetched = false;
                 result.excerpt = None;
-                result.error = Some("网页摘录总长度已达上限".to_string());
+                result.error = Some("Web excerpt total length limit reached.".to_string());
             } else if excerpt.chars().count() > remaining {
                 *excerpt = excerpt.chars().take(remaining).collect::<String>();
                 excerpt.push_str("...");
@@ -4798,6 +7964,893 @@ fn fetch_web_source_excerpts_blocking(
         limited_results.push(result);
     }
     Ok(limited_results)
+}
+
+#[derive(Debug, Clone)]
+struct DirectDiscoveryAttempt {
+    source_name: String,
+    source_type: String,
+    url: String,
+    status: String,
+    http_status: Option<u16>,
+    content_type: Option<String>,
+    items_parsed: usize,
+    items_matched: usize,
+    candidates_emitted: usize,
+    reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct DirectDiscoveryReport {
+    attempted: bool,
+    skipped_reason: Option<String>,
+    intent: String,
+    freshness: String,
+    query: String,
+    topic_keywords: Vec<String>,
+    sources_tried: Vec<DirectDiscoveryAttempt>,
+    candidates_found: usize,
+    candidates_kept: usize,
+    duration_ms: u128,
+    cache_behavior: String,
+}
+
+#[derive(Debug, Clone)]
+struct DirectDiscoveryFeed {
+    name: &'static str,
+    feed_url: Option<&'static str>,
+    source_home: &'static str,
+    source_kind: &'static str,
+    reliability: &'static str,
+}
+
+fn is_translation_or_word_lookup_query(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let query = query.trim();
+    lower.contains("translate")
+        || lower.contains("translation")
+        || lower.contains("dictionary")
+        || lower.contains("meaning")
+        || query.contains("英语怎么说")
+        || query.contains("英文怎么说")
+        || query.contains("怎么翻译")
+        || query.contains("这个词")
+}
+
+fn is_direct_news_discovery_request(request: &WebSearchRequestInput) -> bool {
+    let freshness = request
+        .freshness
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let vertical = request
+        .vertical
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let intent = request.intent.to_ascii_lowercase();
+    let combined = request.queries.join(" ");
+    let lower = combined.to_ascii_lowercase();
+    let fresh_like = freshness.contains("latest")
+        || freshness.contains("recent")
+        || freshness.contains("fresh")
+        || freshness.contains("today")
+        || vertical.contains("news")
+        || lower.contains("latest")
+        || lower.contains("recent")
+        || combined.contains("最近")
+        || combined.contains("最新")
+        || combined.contains("今天");
+    let news_like = vertical.contains("news")
+        || intent.contains("news")
+        || lower.contains("news")
+        || combined.contains("新闻")
+        || combined.contains("资讯")
+        || combined.contains("动态");
+    fresh_like && news_like && !is_translation_or_word_lookup_query(&combined)
+}
+
+fn direct_discovery_topic_keywords(request: &WebSearchRequestInput) -> Vec<String> {
+    let mut keywords = request
+        .topic_keywords
+        .iter()
+        .chain(request.algorithm_keywords.iter())
+        .map(|keyword| keyword.trim())
+        .filter(|keyword| !keyword.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let combined = request.queries.join(" ");
+    let lower = combined.to_ascii_lowercase();
+    let candidates = [
+        ("openai", "OpenAI"),
+        ("chatgpt", "ChatGPT"),
+        ("deepseek", "DeepSeek"),
+        ("gemini", "Gemini"),
+        ("claude", "Claude"),
+        ("anthropic", "Anthropic"),
+        ("deepmind", "DeepMind"),
+        ("google", "Google"),
+        ("microsoft", "Microsoft"),
+        ("llm", "LLM"),
+        ("ai", "AI"),
+    ];
+    for (needle, value) in candidates {
+        if lower.contains(needle) {
+            keywords.push(value.to_string());
+        }
+    }
+    for value in ["人工智能", "大模型", "模型", "算力"] {
+        if combined.contains(value) {
+            keywords.push(value.to_string());
+        }
+    }
+    if keywords.is_empty() && is_direct_news_discovery_request(request) {
+        keywords.extend(
+            ["AI", "OpenAI", "ChatGPT", "DeepSeek", "LLM"]
+                .into_iter()
+                .map(ToOwned::to_owned),
+        );
+    }
+    keywords.sort_by_key(|value| value.to_ascii_lowercase());
+    keywords.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    keywords
+}
+
+fn direct_news_feeds(request: &WebSearchRequestInput) -> Vec<DirectDiscoveryFeed> {
+    let mut feeds = vec![
+        DirectDiscoveryFeed {
+            name: "OpenAI News",
+            feed_url: Some("https://openai.com/news/rss.xml"),
+            source_home: "https://openai.com/news/",
+            source_kind: "official_news",
+            reliability: "official",
+        },
+        DirectDiscoveryFeed {
+            name: "Anthropic News",
+            feed_url: None,
+            source_home: "https://www.anthropic.com/news",
+            source_kind: "official_news",
+            reliability: "official",
+        },
+        DirectDiscoveryFeed {
+            name: "Google DeepMind Blog",
+            feed_url: None,
+            source_home: "https://deepmind.google/discover/blog/",
+            source_kind: "official_blog",
+            reliability: "official",
+        },
+        DirectDiscoveryFeed {
+            name: "Google AI Blog",
+            feed_url: Some("https://blog.google/technology/ai/rss/"),
+            source_home: "https://blog.google/technology/ai/",
+            source_kind: "official_blog",
+            reliability: "official",
+        },
+        DirectDiscoveryFeed {
+            name: "Microsoft AI Blog",
+            feed_url: None,
+            source_home: "https://www.microsoft.com/en-us/ai/blog/",
+            source_kind: "official_blog",
+            reliability: "official",
+        },
+        DirectDiscoveryFeed {
+            name: "TechCrunch AI",
+            feed_url: Some("https://techcrunch.com/category/artificial-intelligence/feed/"),
+            source_home: "https://techcrunch.com/category/artificial-intelligence/",
+            source_kind: "rss_item",
+            reliability: "media",
+        },
+        DirectDiscoveryFeed {
+            name: "The Verge",
+            feed_url: Some("https://www.theverge.com/rss/index.xml"),
+            source_home: "https://www.theverge.com/ai-artificial-intelligence",
+            source_kind: "rss_item",
+            reliability: "media",
+        },
+        DirectDiscoveryFeed {
+            name: "QbitAI",
+            feed_url: Some("https://www.qbitai.com/feed"),
+            source_home: "https://www.qbitai.com/",
+            source_kind: "rss_item",
+            reliability: "media",
+        },
+    ];
+    let combined = request.queries.join(" ").to_ascii_lowercase();
+    if combined.contains("openai") {
+        feeds.sort_by_key(|feed| if feed.name.contains("OpenAI") { 0 } else { 1 });
+    }
+    feeds
+}
+
+fn make_direct_source(
+    title: &str,
+    url: &str,
+    snippet: Option<String>,
+    source_kind: &str,
+    discovery_method: &str,
+    reliability: &str,
+    discovered_by: &str,
+    feed_url: Option<&str>,
+    source_home: Option<&str>,
+    date_hint: Option<String>,
+    reason: &str,
+) -> Option<WebSearchResult> {
+    validate_public_web_url_for_read(url).ok()?;
+    let title = sanitize_search_text(title, 140);
+    let snippet = snippet
+        .map(|value| sanitize_search_text(&decode_html_entities(&value), 240))
+        .filter(|value| !value.is_empty());
+    let source_type = match source_kind {
+        "docs_page" | "official_news" => "official",
+        "official_blog" | "rss_item" => "blog",
+        "oi_reference" => "wiki",
+        _ => "unknown",
+    };
+    let reliability_type = match reliability {
+        "docs" | "official" => "official",
+        "media" => "blog",
+        "community_solution" => "community_solution",
+        "wiki" => "wiki",
+        _ => "unknown",
+    };
+    Some(WebSearchResult {
+        id: format!("web-{}", &stable_hash_hex(url)[..12]),
+        title: if title.is_empty() {
+            url.to_string()
+        } else {
+            title
+        },
+        url: url.to_string(),
+        final_url: None,
+        site: site_from_url(url),
+        snippet,
+        source_kind: Some(source_kind.to_string()),
+        discovery_method: Some(discovery_method.to_string()),
+        source_reliability: Some(reliability.to_string()),
+        discovered_by: Some(discovered_by.to_string()),
+        feed_url: feed_url.map(ToOwned::to_owned),
+        source_home: source_home.map(ToOwned::to_owned),
+        direct_discovery_reason: Some(reason.to_string()),
+        search_provider: None,
+        search_stage: Some(discovery_method.to_string()),
+        date_hint,
+        evidence_status: Some("candidate".to_string()),
+        usable_evidence: Some(false),
+        injected_into_answer: Some(false),
+        content_status: Some("not_fetched".to_string()),
+        source_type: Some(source_type.to_string()),
+        reliability: Some(reliability_type.to_string()),
+        reliability_label: Some(reliability.to_string()),
+        reliability_reason: Some(format!("No-key direct discovery via {discovered_by}.")),
+        is_constructed: Some(discovery_method == "constructed_source"),
+        constructed_reason: if discovery_method == "constructed_source" {
+            Some(reason.to_string())
+        } else {
+            None
+        },
+        ..Default::default()
+    })
+}
+
+fn rss_blocks(body: &str) -> Vec<&str> {
+    let mut blocks = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find("<item") {
+        let after_start = &rest[start..];
+        if let Some(end) = after_start.find("</item>") {
+            blocks.push(&after_start[..end + "</item>".len()]);
+            rest = &after_start[end + "</item>".len()..];
+        } else {
+            break;
+        }
+    }
+    let mut rest = body;
+    while let Some(start) = rest.find("<entry") {
+        let after_start = &rest[start..];
+        if let Some(end) = after_start.find("</entry>") {
+            blocks.push(&after_start[..end + "</entry>".len()]);
+            rest = &after_start[end + "</entry>".len()..];
+        } else {
+            break;
+        }
+    }
+    blocks.truncate(20);
+    blocks
+}
+
+fn rss_field(block: &str, names: &[&str]) -> Option<String> {
+    for name in names {
+        if let Some(value) = text_between(block, &format!("<{name}>"), &format!("</{name}>")) {
+            let cleaned = clean_bing_markup_text(&decode_html_entities(value), 240);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+        if let Some(start) = block.find(&format!("<{name} ")) {
+            let after_start = &block[start..];
+            if let Some(tag_end) = after_start.find('>') {
+                let after_tag = &after_start[tag_end + 1..];
+                if let Some(end) = after_tag.find(&format!("</{name}>")) {
+                    let cleaned =
+                        clean_bing_markup_text(&decode_html_entities(&after_tag[..end]), 240);
+                    if !cleaned.is_empty() {
+                        return Some(cleaned);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn rss_link(block: &str) -> Option<String> {
+    if let Some(link) = rss_field(block, &["link"]) {
+        if validate_public_web_url_for_read(&link).is_ok() {
+            return Some(link);
+        }
+    }
+    let mut rest = block;
+    while let Some(start) = rest.find("<link") {
+        let after_start = &rest[start..];
+        let Some(end) = after_start.find('>') else {
+            break;
+        };
+        let tag = &after_start[..end + 1];
+        if let Some(href) = html_attr_value(tag, "href") {
+            if validate_public_web_url_for_read(&href).is_ok() {
+                return Some(href);
+            }
+        }
+        rest = &after_start[end + 1..];
+    }
+    None
+}
+
+fn rss_item_matches_topic(title: &str, description: &str, keywords: &[String]) -> bool {
+    if keywords.is_empty() {
+        return true;
+    }
+    let haystack = format!("{title} {description}").to_ascii_lowercase();
+    keywords.iter().any(|keyword| {
+        let keyword_lower = keyword.to_ascii_lowercase();
+        haystack.contains(&keyword_lower) || haystack.contains(keyword)
+    })
+}
+
+fn discover_rss_items(
+    client: &reqwest::blocking::Client,
+    feed: &DirectDiscoveryFeed,
+    keywords: &[String],
+    remaining: usize,
+    attempts: &mut Vec<DirectDiscoveryAttempt>,
+) -> Vec<WebSearchResult> {
+    let Some(feed_url) = feed.feed_url else {
+        return Vec::new();
+    };
+    let response = match client.get(feed_url).send() {
+        Ok(response) => response,
+        Err(error) => {
+            attempts.push(DirectDiscoveryAttempt {
+                source_name: feed.name.to_string(),
+                source_type: "rss".to_string(),
+                url: feed_url.to_string(),
+                status: if error.is_timeout() { "timeout" } else { "failed" }.to_string(),
+                http_status: None,
+                content_type: None,
+                items_parsed: 0,
+                items_matched: 0,
+                candidates_emitted: 0,
+                reason: sanitize_ai_detail(&error.to_string()),
+            });
+            return Vec::new();
+        }
+    };
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| sanitize_ai_detail(value));
+    if !status.is_success() {
+        attempts.push(DirectDiscoveryAttempt {
+            source_name: feed.name.to_string(),
+            source_type: "rss".to_string(),
+            url: feed_url.to_string(),
+            status: "failed".to_string(),
+            http_status: Some(status.as_u16()),
+            content_type,
+            items_parsed: 0,
+            items_matched: 0,
+            candidates_emitted: 0,
+            reason: format!("HTTP {}", status.as_u16()),
+        });
+        return Vec::new();
+    }
+    let Ok(body) = response.text() else {
+        attempts.push(DirectDiscoveryAttempt {
+            source_name: feed.name.to_string(),
+            source_type: "rss".to_string(),
+            url: feed_url.to_string(),
+            status: "failed".to_string(),
+            http_status: Some(status.as_u16()),
+            content_type,
+            items_parsed: 0,
+            items_matched: 0,
+            candidates_emitted: 0,
+            reason: "response text could not be read".to_string(),
+        });
+        return Vec::new();
+    };
+    let mut results = Vec::new();
+    let blocks = rss_blocks(&body);
+    let mut matched = 0usize;
+    for block in &blocks {
+        if results.len() >= remaining {
+            break;
+        }
+        let title = rss_field(block, &["title"]).unwrap_or_default();
+        let description = rss_field(block, &["description", "summary", "content"]).unwrap_or_default();
+        if !rss_item_matches_topic(&title, &description, keywords) {
+            continue;
+        }
+        matched += 1;
+        let Some(link) = rss_link(block) else {
+            continue;
+        };
+        let date_hint = rss_field(block, &["pubDate", "updated", "published"]);
+        if let Some(source) = make_direct_source(
+            &title,
+            &link,
+            Some(description),
+            feed.source_kind,
+            "direct_rss",
+            feed.reliability,
+            feed.name,
+            Some(feed_url),
+            Some(feed.source_home),
+            date_hint,
+            "RSS/Atom item matched freshness and topic keywords.",
+        ) {
+            results.push(source);
+        }
+    }
+    attempts.push(DirectDiscoveryAttempt {
+        source_name: feed.name.to_string(),
+        source_type: "rss".to_string(),
+        url: feed_url.to_string(),
+        status: if blocks.is_empty() {
+            "parse_failed"
+        } else if results.is_empty() {
+            "no_match"
+        } else {
+            "success"
+        }.to_string(),
+        http_status: Some(status.as_u16()),
+        content_type,
+        items_parsed: blocks.len(),
+        items_matched: matched,
+        candidates_emitted: results.len(),
+        reason: if blocks.is_empty() {
+            "RSS/Atom parser found no item/entry blocks.".to_string()
+        } else if results.is_empty() {
+            "No RSS/Atom item matched topic keywords or public URL validation.".to_string()
+        } else {
+            "RSS/Atom items emitted as candidates.".to_string()
+        },
+    });
+    results
+}
+
+fn discover_direct_news_sources(
+    request: &WebSearchRequestInput,
+    max_results: usize,
+    attempts: &mut Vec<DirectDiscoveryAttempt>,
+) -> Vec<WebSearchResult> {
+    if !is_direct_news_discovery_request(request) || max_results == 0 {
+        return Vec::new();
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("oi-notebook-direct-discovery/0.1")
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Vec::new(),
+    };
+    let keywords = direct_discovery_topic_keywords(request);
+    let mut results = Vec::new();
+    for feed in direct_news_feeds(request).into_iter().take(8) {
+        if results.len() >= max_results {
+            break;
+        }
+        let before = results.len();
+        results.extend(discover_rss_items(
+            &client,
+            &feed,
+            &keywords,
+            max_results.saturating_sub(results.len()),
+            attempts,
+        ));
+        if results.len() == before {
+            if let Some(source) = make_direct_source(
+                feed.name,
+                feed.source_home,
+                None,
+                feed.source_kind,
+                "direct_site",
+                feed.reliability,
+                feed.name,
+                feed.feed_url,
+                Some(feed.source_home),
+                None,
+                "Official or media news/blog landing candidate; still requires URL Reader and Evidence Gate.",
+            ) {
+                attempts.push(DirectDiscoveryAttempt {
+                    source_name: feed.name.to_string(),
+                    source_type: if feed.feed_url.is_some() { "official_news_page" } else { "official_news_page" }.to_string(),
+                    url: feed.source_home.to_string(),
+                    status: "success".to_string(),
+                    http_status: None,
+                    content_type: None,
+                    items_parsed: 0,
+                    items_matched: 0,
+                    candidates_emitted: 1,
+                    reason: "Emitted direct site candidate after RSS was unavailable or produced no matching item.".to_string(),
+                });
+                results.push(source);
+            }
+        }
+    }
+    results.truncate(max_results);
+    results
+}
+
+fn discover_direct_docs_sources(
+    request: &WebSearchRequestInput,
+    max_results: usize,
+    attempts: &mut Vec<DirectDiscoveryAttempt>,
+) -> Vec<WebSearchResult> {
+    if max_results == 0 {
+        return Vec::new();
+    }
+    let combined = request.queries.join(" ");
+    if is_direct_news_discovery_request(request) || is_translation_or_word_lookup_query(&combined) {
+        return Vec::new();
+    }
+    let lower = combined.to_ascii_lowercase();
+    let mut candidates: Vec<(&str, &str, &str)> = Vec::new();
+    if lower.contains("react") || lower.contains("useeffect") || lower.contains("hook") {
+        candidates.push((
+            "React useEffect",
+            "https://react.dev/reference/react/useEffect",
+            "React docs candidate for hooks/useEffect query.",
+        ));
+    }
+    if lower.contains("javascript")
+        || lower.contains("css")
+        || lower.contains("html")
+        || lower.contains("web api")
+        || lower.contains("mdn")
+    {
+        candidates.push((
+            "MDN Web Docs",
+            "https://developer.mozilla.org/en-US/docs/Web",
+            "MDN docs candidate for web platform query.",
+        ));
+    }
+    if lower.contains("python") {
+        candidates.push(("Python Documentation", "https://docs.python.org/3/", "Python official docs candidate."));
+    }
+    if lower.contains("rust") || lower.contains("ownership") {
+        candidates.push((
+            "The Rust Programming Language: Ownership",
+            "https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html",
+            "Rust book candidate for ownership/Rust query.",
+        ));
+    }
+    if lower.contains("tauri") || lower.contains("command") {
+        candidates.push((
+            "Tauri commands",
+            "https://v2.tauri.app/develop/calling-rust/",
+            "Tauri docs candidate for command/Rust IPC query.",
+        ));
+    }
+    if lower.contains("vite") {
+        candidates.push(("Vite Guide", "https://vite.dev/guide/", "Vite docs candidate."));
+    }
+    if lower.contains("tailwind") {
+        candidates.push(("Tailwind CSS Documentation", "https://tailwindcss.com/docs", "Tailwind docs candidate."));
+    }
+    if lower.contains("typescript") || lower.contains(" ts ") {
+        candidates.push((
+            "TypeScript Handbook",
+            "https://www.typescriptlang.org/docs/handbook/intro.html",
+            "TypeScript handbook candidate.",
+        ));
+    }
+    if lower.contains("node.js") || lower.contains("nodejs") || lower.contains("node ") {
+        candidates.push(("Node.js API", "https://nodejs.org/api/", "Node.js official API docs candidate."));
+    }
+    let results = candidates
+        .into_iter()
+        .take(max_results)
+        .filter_map(|(title, url, reason)| {
+            attempts.push(DirectDiscoveryAttempt {
+                source_name: title.to_string(),
+                source_type: "docs_constructed".to_string(),
+                url: url.to_string(),
+                status: "success".to_string(),
+                http_status: None,
+                content_type: None,
+                items_parsed: 0,
+                items_matched: 1,
+                candidates_emitted: 1,
+                reason: reason.to_string(),
+            });
+            make_direct_source(
+                title,
+                url,
+                None,
+                "docs_page",
+                "direct_site",
+                "docs",
+                "docs-direct-v1",
+                None,
+                Some(url),
+                None,
+                reason,
+            )
+        })
+        .collect();
+    results
+}
+
+fn discover_direct_oi_sources(
+    request: &WebSearchRequestInput,
+    max_results: usize,
+    attempts: &mut Vec<DirectDiscoveryAttempt>,
+) -> Vec<WebSearchResult> {
+    if max_results == 0 {
+        return Vec::new();
+    }
+    let combined = request.queries.join(" ");
+    if is_translation_or_word_lookup_query(&combined) {
+        return Vec::new();
+    }
+    let lower = combined.to_ascii_lowercase();
+    let mut candidates: Vec<(String, String, String, String)> = Vec::new();
+    if let Some(problem_id) = request.problem_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let upper = problem_id.to_ascii_uppercase();
+        if upper.starts_with('P') && upper[1..].chars().all(|ch| ch.is_ascii_digit()) {
+            candidates.push((
+                format!("Luogu {upper} problem"),
+                format!("https://www.luogu.com.cn/problem/{upper}"),
+                "community_solution".to_string(),
+                "Luogu problem candidate from detected problem id.".to_string(),
+            ));
+            candidates.push((
+                format!("Luogu {upper} solutions"),
+                format!("https://www.luogu.com.cn/problem/solution/{upper}"),
+                "community_solution".to_string(),
+                "Luogu solution candidate from detected problem id.".to_string(),
+            ));
+        }
+    }
+    if lower.contains("centroid") || combined.contains("点分治") || combined.contains("点分树") {
+        candidates.push((
+            "cp-algorithms centroid decomposition".to_string(),
+            "https://cp-algorithms.com/graph/centroid_decomposition.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for centroid decomposition.".to_string(),
+        ));
+        candidates.push((
+            "OI Wiki 点分治".to_string(),
+            "https://oi-wiki.org/graph/tree-divide/".to_string(),
+            "wiki".to_string(),
+            "OI Wiki candidate for Chinese centroid decomposition query.".to_string(),
+        ));
+    }
+    if lower.contains("dijkstra") {
+        candidates.push((
+            "cp-algorithms Dijkstra".to_string(),
+            "https://cp-algorithms.com/graph/dijkstra.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for Dijkstra.".to_string(),
+        ));
+    }
+    if lower.contains("lca") {
+        candidates.push((
+            "cp-algorithms Lowest Common Ancestor".to_string(),
+            "https://cp-algorithms.com/graph/lca.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for LCA.".to_string(),
+        ));
+    }
+    if lower.contains("dsu") || lower.contains("disjoint set") || combined.contains("并查集") {
+        candidates.push((
+            "cp-algorithms Disjoint Set Union".to_string(),
+            "https://cp-algorithms.com/data_structures/disjoint_set_union.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for DSU.".to_string(),
+        ));
+    }
+    if lower.contains("kmp") {
+        candidates.push((
+            "cp-algorithms prefix function".to_string(),
+            "https://cp-algorithms.com/string/prefix-function.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for KMP/prefix function.".to_string(),
+        ));
+    }
+    if lower.contains("segment tree") || combined.contains("线段树") {
+        candidates.push((
+            "cp-algorithms segment tree".to_string(),
+            "https://cp-algorithms.com/data_structures/segment_tree.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for segment tree.".to_string(),
+        ));
+    }
+    if lower.contains("z function") || lower.contains("z-function") || combined.contains("z 函数") {
+        candidates.push((
+            "cp-algorithms Z-function".to_string(),
+            "https://cp-algorithms.com/string/z-function.html".to_string(),
+            "wiki".to_string(),
+            "OI direct candidate for Z-function.".to_string(),
+        ));
+    }
+    let results = candidates
+        .into_iter()
+        .take(max_results)
+        .filter_map(|(title, url, reliability, reason)| {
+            attempts.push(DirectDiscoveryAttempt {
+                source_name: title.clone(),
+                source_type: "oi_constructed".to_string(),
+                url: url.clone(),
+                status: "success".to_string(),
+                http_status: None,
+                content_type: None,
+                items_parsed: 0,
+                items_matched: 1,
+                candidates_emitted: 1,
+                reason: reason.clone(),
+            });
+            make_direct_source(
+                &title,
+                &url,
+                None,
+                "oi_reference",
+                "constructed_source",
+                &reliability,
+                "oi-direct-v1",
+                None,
+                Some(&url),
+                None,
+                &reason,
+            )
+        })
+        .collect();
+    results
+}
+
+fn direct_discovery_debug_string(report: &DirectDiscoveryReport) -> String {
+    let mut parts = vec![
+        format!("directDiscoveryAttempted={}", if report.attempted { "yes" } else { "no" }),
+        format!("directDiscoverySkippedReason={}", sanitize_ai_detail(report.skipped_reason.as_deref().unwrap_or(""))),
+        format!("directDiscoveryIntent={}", sanitize_ai_detail(&report.intent)),
+        format!("directDiscoveryFreshness={}", sanitize_ai_detail(&report.freshness)),
+        format!("directDiscoveryQuery={}", sanitize_ai_detail(&report.query)),
+        format!("directDiscoveryTopicKeywords={}", sanitize_ai_detail(&report.topic_keywords.join(","))),
+        format!("directDiscoverySourcesTried={}", report.sources_tried.len()),
+        format!("directDiscoveryCandidatesFound={}", report.candidates_found),
+        format!("directDiscoveryCandidatesKept={}", report.candidates_kept),
+        format!("directDiscoveryDurationMs={}", report.duration_ms),
+        format!("directDiscoveryCacheBehavior={}", sanitize_ai_detail(&report.cache_behavior)),
+    ];
+    for (index, attempt) in report.sources_tried.iter().enumerate() {
+        parts.push(format!(
+            "directSource{}=sourceName={},sourceType={},url={},status={},httpStatus={},contentType={},itemsParsed={},itemsMatched={},candidatesEmitted={},reason={}",
+            index + 1,
+            sanitize_ai_detail(&attempt.source_name),
+            sanitize_ai_detail(&attempt.source_type),
+            sanitize_ai_detail(&attempt.url),
+            sanitize_ai_detail(&attempt.status),
+            attempt.http_status.map(|value| value.to_string()).unwrap_or_else(|| "-".to_string()),
+            sanitize_ai_detail(attempt.content_type.as_deref().unwrap_or("-")),
+            attempt.items_parsed,
+            attempt.items_matched,
+            attempt.candidates_emitted,
+            sanitize_ai_detail(&attempt.reason),
+        ));
+    }
+    parts.join(";")
+}
+
+fn attach_direct_discovery_debug(
+    existing: Option<&str>,
+    direct_debug: &str,
+) -> String {
+    let existing = existing
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match existing {
+        Some(existing) => format!("{direct_debug};{existing}"),
+        None => direct_debug.to_string(),
+    }
+}
+
+fn discover_no_key_direct_sources_with_report(
+    request: &WebSearchRequestInput,
+    max_results: usize,
+    cache_behavior: &str,
+) -> (Vec<WebSearchResult>, DirectDiscoveryReport) {
+    let started_at = Instant::now();
+    let mut attempts = Vec::new();
+    let mut sources = Vec::new();
+    let combined = request.queries.join(" ");
+    let news_request = is_direct_news_discovery_request(request);
+    let skipped_reason = if max_results == 0 {
+        Some("max_results_is_zero".to_string())
+    } else if is_translation_or_word_lookup_query(&combined) {
+        Some("translation_or_word_lookup_query".to_string())
+    } else {
+        None
+    };
+    if skipped_reason.is_none() {
+        sources.extend(discover_direct_news_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
+        sources.extend(discover_direct_docs_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
+        sources.extend(discover_direct_oi_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
+    }
+    let candidates_found = sources.len();
+    let merged = merge_search_sources(Vec::new(), sources, max_results);
+    let final_skipped_reason = skipped_reason.or_else(|| {
+        if !news_request && attempts.is_empty() && candidates_found == 0 {
+            Some("no_matching_direct_discovery_rule".to_string())
+        } else {
+            None
+        }
+    });
+    let report = DirectDiscoveryReport {
+        attempted: final_skipped_reason.is_none(),
+        skipped_reason: final_skipped_reason,
+        intent: request.intent.clone(),
+        freshness: request.freshness.clone().unwrap_or_default(),
+        query: combined,
+        topic_keywords: direct_discovery_topic_keywords(request),
+        sources_tried: attempts,
+        candidates_found,
+        candidates_kept: merged.len(),
+        duration_ms: started_at.elapsed().as_millis(),
+        cache_behavior: cache_behavior.to_string(),
+    };
+    (merged, report)
+}
+
+fn merge_search_sources(
+    primary: Vec<WebSearchResult>,
+    secondary: Vec<WebSearchResult>,
+    max_results: usize,
+) -> Vec<WebSearchResult> {
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+    for source in primary.into_iter().chain(secondary) {
+        let key = source
+            .final_url
+            .as_deref()
+            .unwrap_or(source.url.as_str())
+            .trim()
+            .trim_end_matches('/')
+            .to_ascii_lowercase();
+        if key.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        merged.push(source);
+        if merged.len() >= max_results {
+            break;
+        }
+    }
+    merged
 }
 
 #[tauri::command]
@@ -4812,12 +8865,6 @@ pub async fn fetch_web_source_excerpts(
 fn search_web_sources_blocking(
     request: WebSearchRequestInput,
 ) -> Result<Vec<WebSearchResult>, String> {
-    let provider = request
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(WEB_SEARCH_DEFAULT_PROVIDER);
     let queries = request
         .queries
         .iter()
@@ -4831,26 +8878,50 @@ fn search_web_sources_blocking(
 
     let app_config = read_config()?;
     let search_config = normalize_web_search_config(&app_config.ai.web_search);
+    let raw_provider = request
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let provider = match raw_provider {
+        Some(WEB_SEARCH_DEFAULT_PROVIDER) => WEB_SEARCH_DEFAULT_PROVIDER,
+        Some(WEB_SEARCH_BRAVE_PROVIDER) => WEB_SEARCH_BRAVE_PROVIDER,
+        Some(WEB_SEARCH_BING_PROVIDER) => WEB_SEARCH_BING_PROVIDER,
+        Some(WEB_SEARCH_REMOVED_SEARXNG_PROVIDER)
+            if !search_config.bocha_api_key.trim().is_empty() =>
+        {
+            WEB_SEARCH_DEFAULT_PROVIDER
+        }
+        Some(WEB_SEARCH_REMOVED_SEARXNG_PROVIDER)
+            if !search_config.brave_api_key.trim().is_empty() =>
+        {
+            WEB_SEARCH_BRAVE_PROVIDER
+        }
+        Some(WEB_SEARCH_REMOVED_SEARXNG_PROVIDER) => WEB_SEARCH_BING_PROVIDER,
+        Some(_) => return Err("不支持的搜索 Provider。".to_string()),
+        None => search_config.provider.as_str(),
+    };
     if !search_config.public_search_consent {
-        return Err("需要先授权公开网页搜索".to_string());
+        return Err("需要先启用公开网页搜索授权。".to_string());
     }
     if !search_config.enabled {
-        return Err("需要在 AI 设置中配置搜索服务".to_string());
+        return Err("需要先在 AI 设置中启用联网搜索。".to_string());
     }
-
-    if provider == WEB_SEARCH_REMOVED_SEARXNG_PROVIDER {
-        return Err("SearXNG Provider 已移除，请配置 Bocha 或 Brave。".to_string());
-    }
-
     let max_results = request
         .max_results
         .unwrap_or(WEB_SEARCH_MAX_RESULTS)
         .clamp(1, WEB_SEARCH_MAX_RESULTS);
+    let max_results = if provider == WEB_SEARCH_BING_PROVIDER {
+        max_results.min(BING_PUBLIC_MAX_RESULTS)
+    } else {
+        max_results
+    };
     let endpoint_hint = match provider {
         WEB_SEARCH_DEFAULT_PROVIDER => Some(search_config.bocha_endpoint.as_str()),
         _ => None,
     };
     let cache_key = build_web_search_cache_key(provider, &request, max_results, endpoint_hint)?;
+    let failure_cache_key = format!("{cache_key}-failure");
     let ttl_seconds = search_cache_ttl_seconds(&request);
     let now_ms = web_cache::now_ms();
     let cached = web_cache::read_cached_json("search", &cache_key, now_ms);
@@ -4858,23 +8929,66 @@ fn search_web_sources_blocking(
         if let Ok(mut sources) =
             serde_json::from_value::<Vec<WebSearchResult>>(cached_entry.value.clone())
         {
+            let (_, direct_report) = discover_no_key_direct_sources_with_report(
+                &request,
+                max_results.min(12),
+                "search-cache-hit; provider-cache-returned-before-provider-request",
+            );
+            let direct_debug = direct_discovery_debug_string(&direct_report);
             mark_search_sources_cache_status(
                 &mut sources,
                 "hit",
                 cached_entry.cached_at_ms,
                 cached_entry.ttl_seconds,
             );
+            if let Some(first) = sources.first_mut() {
+                first.search_diagnostics = Some(match first.search_diagnostics.as_deref() {
+                    Some(existing) if !existing.is_empty() => format!("{direct_debug};{existing}"),
+                    _ => direct_debug,
+                });
+            }
             return Ok(sources);
+        }
+    }
+    let (mut direct_sources, direct_report) =
+        discover_no_key_direct_sources_with_report(&request, max_results.min(12), "search-cache-miss");
+    let direct_debug = direct_discovery_debug_string(&direct_report);
+    if let Some(first) = direct_sources.first_mut() {
+        first.search_diagnostics = Some(attach_direct_discovery_debug(
+            first.search_diagnostics.as_deref(),
+            &direct_debug,
+        ));
+    }
+    let direct_count = direct_sources.len();
+    if provider == WEB_SEARCH_BING_PROVIDER && direct_count == 0 {
+        if let Some(cached_failure) =
+            web_cache::read_cached_json("search", &failure_cache_key, now_ms)
+                .filter(|entry| entry.is_fresh)
+        {
+            if let Some(error) = cached_failure.value.get("error").and_then(|value| value.as_str())
+            {
+                let remaining_seconds = cached_failure
+                    .ttl_seconds
+                    .saturating_sub(now_ms.saturating_sub(cached_failure.cached_at_ms) / 1000)
+                    .max(0);
+                return Err(format!(
+                    "{error}; {direct_debug}; cacheStatus=failure-hit; cacheRemainingSeconds={remaining_seconds}"
+                ));
+            }
         }
     }
 
     let provider_result = match provider {
         WEB_SEARCH_DEFAULT_PROVIDER => {
             if search_config.bocha_api_key.trim().is_empty() {
-                Err("???????? Bocha API Key?????????? AI ???????".to_string())
+                if direct_sources.is_empty() {
+                    Err("需要先配置 Bocha API Key，或切换到 Bing 公开搜索。".to_string())
+                } else {
+                    Ok(direct_sources)
+                }
             } else {
                 if search_config.bocha_api_key.contains(['\r', '\n']) {
-                    return Err("???????Bocha API Key ??????".to_string());
+                    return Err("Bocha API Key 包含非法换行字符。".to_string());
                 }
                 search_bocha_sources_with_fallback(
                     &request,
@@ -4882,23 +8996,50 @@ fn search_web_sources_blocking(
                     Some(search_config.bocha_endpoint.as_str()),
                     max_results,
                 )
+                .map(|sources| merge_search_sources(direct_sources, sources, max_results))
             }
         }
         WEB_SEARCH_BRAVE_PROVIDER => {
             if search_config.brave_api_key.trim().is_empty() {
-                Err("???????? Brave Search API Key?????????? AI ???????".to_string())
+                if direct_sources.is_empty() {
+                    Err("需要先配置 Brave Search API Key，或切换到 Bing 公开搜索。".to_string())
+                } else {
+                    Ok(direct_sources)
+                }
             } else {
                 if search_config.brave_api_key.contains(['\r', '\n']) {
-                    return Err("???????Brave Search API Key ??????".to_string());
+                    return Err("Brave Search API Key 包含非法换行字符。".to_string());
                 }
                 search_brave_sources(&request, search_config.brave_api_key.trim(), max_results)
+                    .map(|sources| merge_search_sources(direct_sources, sources, max_results))
             }
         }
-        _ => Err("????????? Provider ????".to_string()),
+        WEB_SEARCH_BING_PROVIDER => {
+            let bing_budget = if direct_count >= 6 {
+                max_results.min(6)
+            } else {
+                max_results
+                    .saturating_sub(direct_count)
+                    .max(6)
+                    .min(max_results)
+            };
+            match search_bing_public_sources(&request, bing_budget) {
+                Ok(sources) => Ok(merge_search_sources(direct_sources, sources, max_results)),
+                Err(_error) if direct_count > 0 => Ok(direct_sources),
+                Err(error) => Err(format!("{error}; {direct_debug}")),
+            }
+        }
+        _ => Err("不支持的搜索 Provider。".to_string()),
     };
 
     match provider_result {
         Ok(mut sources) => {
+            if let Some(first) = sources.first_mut() {
+                first.search_diagnostics = Some(attach_direct_discovery_debug(
+                    first.search_diagnostics.as_deref(),
+                    &direct_debug,
+                ));
+            }
             let _ = web_cache::write_cached_json(
                 "search",
                 &cache_key,
@@ -4914,6 +9055,14 @@ fn search_web_sources_blocking(
             Ok(sources)
         }
         Err(error) => {
+            if provider == WEB_SEARCH_BING_PROVIDER {
+                let _ = web_cache::write_cached_json(
+                    "search",
+                    &failure_cache_key,
+                    json!({ "provider": WEB_SEARCH_BING_PROVIDER, "error": error.clone() }),
+                    BING_PUBLIC_FAILURE_TTL_SECONDS,
+                );
+            }
             if let Some(cached_entry) = cached {
                 if let Ok(mut sources) =
                     serde_json::from_value::<Vec<WebSearchResult>>(cached_entry.value)
@@ -4924,6 +9073,12 @@ fn search_web_sources_blocking(
                         cached_entry.cached_at_ms,
                         cached_entry.ttl_seconds,
                     );
+                    if let Some(first) = sources.first_mut() {
+                        first.search_diagnostics = Some(attach_direct_discovery_debug(
+                            first.search_diagnostics.as_deref(),
+                            &direct_debug,
+                        ));
+                    }
                     return Ok(sources);
                 }
             }
@@ -4952,7 +9107,7 @@ pub async fn test_web_search_connection(
 ) -> Result<TestWebSearchConnectionResult, String> {
     tauri::async_runtime::spawn_blocking(move || test_web_search_connection_blocking(input))
         .await
-        .map_err(|e| format!("联网搜索测试任务失败: {e}"))?
+        .map_err(|e| format!("鑱旂綉鎼滅储娴嬭瘯浠诲姟澶辫触: {e}"))?
 }
 
 fn test_web_search_connection_blocking(
@@ -4963,10 +9118,10 @@ fn test_web_search_connection_blocking(
         WEB_SEARCH_DEFAULT_PROVIDER => {
             let api_key = input.api_key.trim();
             if api_key.is_empty() {
-                return Err("需要先填写博查 API Key".to_string());
+                return Err("闇€瑕佸厛濉啓鍗氭煡 API Key".to_string());
             }
             if api_key.contains(['\r', '\n']) {
-                return Err("博查 API Key 包含非法字符".to_string());
+                return Err("鍗氭煡 API Key 鍖呭惈闈炴硶瀛楃".to_string());
             }
             let endpoint = input
                 .endpoint
@@ -4978,8 +9133,11 @@ fn test_web_search_connection_blocking(
             let request = WebSearchRequestInput {
                 queries: vec!["NoteX connectivity test".to_string()],
                 intent: "general_web".to_string(),
+                vertical: Some("general_web".to_string()),
+                freshness: None,
                 problem_id: None,
                 algorithm_keywords: Vec::new(),
+                topic_keywords: Vec::new(),
                 max_results: Some(3),
                 provider: Some(WEB_SEARCH_DEFAULT_PROVIDER.to_string()),
             };
@@ -4989,21 +9147,28 @@ fn test_web_search_connection_blocking(
                 ok: true,
                 provider: WEB_SEARCH_DEFAULT_PROVIDER.to_string(),
                 endpoint,
+                query: Some("NoteX connectivity test".to_string()),
+                result_count: None,
+                first_title: None,
+                diagnostics: None,
             })
         }
         WEB_SEARCH_BRAVE_PROVIDER => {
             let api_key = input.api_key.trim();
             if api_key.is_empty() {
-                return Err("Brave Search API Key is missing".to_string());
+                return Err("Brave Search API Key 缺失。".to_string());
             }
             if api_key.contains(['\r', '\n']) {
-                return Err("Brave Search API Key contains invalid characters".to_string());
+                return Err("Brave Search API Key 包含非法换行字符。".to_string());
             }
             let request = WebSearchRequestInput {
                 queries: vec!["NoteX connectivity test".to_string()],
                 intent: "general_web".to_string(),
+                vertical: Some("general_web".to_string()),
+                freshness: None,
                 problem_id: None,
                 algorithm_keywords: Vec::new(),
+                topic_keywords: Vec::new(),
                 max_results: Some(3),
                 provider: Some(WEB_SEARCH_BRAVE_PROVIDER.to_string()),
             };
@@ -5012,12 +9177,40 @@ fn test_web_search_connection_blocking(
                 ok: true,
                 provider: WEB_SEARCH_BRAVE_PROVIDER.to_string(),
                 endpoint: BRAVE_SEARCH_ENDPOINT.to_string(),
+                query: Some("NoteX connectivity test".to_string()),
+                result_count: None,
+                first_title: None,
+                diagnostics: None,
+            })
+        }
+        WEB_SEARCH_BING_PROVIDER => {
+            let query = "AI鏂伴椈".to_string();
+            let request = WebSearchRequestInput {
+                queries: vec![query.clone()],
+                intent: "general_web".to_string(),
+                vertical: Some("news".to_string()),
+                freshness: Some("news".to_string()),
+                problem_id: None,
+                algorithm_keywords: Vec::new(),
+                topic_keywords: vec!["AI".to_string()],
+                max_results: Some(5),
+                provider: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
+            };
+            let sources = search_bing_public_sources(&request, 5)?;
+            Ok(TestWebSearchConnectionResult {
+                ok: true,
+                provider: WEB_SEARCH_BING_PROVIDER.to_string(),
+                endpoint: BING_NEWS_SEARCH_ENDPOINT.to_string(),
+                query: Some(query),
+                result_count: Some(sources.len()),
+                first_title: sources.first().map(|source| source.title.clone()),
+                diagnostics: sources.first().and_then(|source| source.search_diagnostics.clone()),
             })
         }
         WEB_SEARCH_REMOVED_SEARXNG_PROVIDER => {
             Err("SearXNG Provider \u{5df2}\u{79fb}\u{9664}\u{ff0c}\u{8bf7}\u{914d}\u{7f6e} Bocha \u{6216} Brave\u{3002}".to_string())
         }
-        _ => Err("Current connection test supports Bocha or Brave Search.".to_string()),
+        _ => Err("Current connection test supports Bing, Bocha, or Brave Search.".to_string()),
     }
 }
 

@@ -89,7 +89,7 @@ impl Default for WebSearchConfigFields {
 }
 
 fn default_web_search_provider() -> String {
-    "bocha".to_string()
+    "bing".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

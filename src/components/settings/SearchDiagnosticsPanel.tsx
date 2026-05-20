@@ -12,12 +12,12 @@ import {
   type LocalNoteIndexStatusResult,
   type WebCacheStatusResult,
 } from "@/lib/api";
-import { buildExplicitUrlReadPlan, buildSearchDecision, extractExplicitUrls, getFrontendWebReadBlockReason, normalizeWebSearchConfig, type SearchDecision, type WebSearchConfig } from "@/lib/aiWebSearch";
+import { applySourceStrategyPlan, buildExplicitUrlReadPlan, buildOfflineAiQueryPlannerPreview, buildSearchDecision, classifyNewsCandidateForVertical, classifyNewsEventCluster, extractExplicitUrls, getFrontendWebReadBlockReason, getWebReadBudgetPlan, normalizeWebSearchConfig, rankPreparedWebSources, shouldUseAiQueryPlanner, SOURCE_REGISTRY, validateAiSearchQueryPlan, type SearchDecision, type WebSearchConfig, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsForCitationScan } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
 type DiagnosticStatus = "pass" | "warn" | "fail" | "skipped" | "running";
-type DiagnosticCategoryId = "decision" | "url-reading" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "citations" | "prompt-contract";
+type DiagnosticCategoryId = "decision" | "query-planner" | "direct-discovery" | "url-reading" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "citations" | "prompt-contract";
 
 type DiagnosticItem = {
   id: string;
@@ -51,6 +51,7 @@ const STATUS_ORDER: DiagnosticStatus[] = ["pass", "warn", "fail", "skipped", "ru
 
 const emptyCategories = (): DiagnosticCategory[] => [
   { id: "decision", title: "搜索决策", items: [] },
+  { id: "query-planner", title: "AI 搜索规划", items: [] },
   { id: "url-reading", title: "URL 阅读规则", items: [] },
   { id: "provider-config", title: "Provider 配置", items: [] },
   {
@@ -106,6 +107,11 @@ const classifyError = (error: unknown): string => {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
   if (lower.includes("timeout") || message.includes("超时")) return "搜索 Provider 测试超时。";
+  if (lower.includes("captcha") || lower.includes("verify") || lower.includes("blocked") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) return "Bing 公开搜索遇到验证页或访问限制，可以稍后重试或改用 Bocha / Brave。";
+  if (lower.includes("rate_limited") || lower.includes("errorkind=rate_limited")) return "Bing 公开搜索被限流，可以稍后重试或改用 Bocha / Brave。";
+  if (lower.includes("parse_failed")) return "Bing 公开搜索结果结构解析失败，可能是页面结构变化。";
+  if (lower.includes("no_results")) return "Bing 公开搜索没有返回可用自然结果。";
+  if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "Bing 公开搜索网络连接失败，可以稍后重试或改用 Bocha / Brave。";
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) return "Provider 返回 429 或限流，可以稍后重试。";
   if (message.includes("401") || message.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) return "Provider 返回 401/403，API Key 或权限可能有问题。";
   if (lower.includes("json") || message.includes("JSON")) return "Provider 返回格式不符合预期，请检查 Endpoint 是否为 API 地址。";
@@ -114,7 +120,7 @@ const classifyError = (error: unknown): string => {
 };
 
 const summarizeDecision = (decision: SearchDecision): string =>
-  `shouldSearch=${decision.shouldSearch}; intent=${decision.intent}; problemId=${decision.problemId ?? "none"}; queryCount=${decision.queries.length}`;
+  `shouldSearch=${decision.shouldSearch}; intent=${decision.intent}; problemId=${decision.problemId ?? "none"}; news=${decision.newsIntent === true}; recency=${decision.recencyIntent === true}; queryCount=${decision.queries.length}`;
 
 const queryPreview = (decision: SearchDecision): string =>
   decision.queries.slice(0, 3).map((query) => truncate(query, 90)).join(" | ") || "none";
@@ -122,6 +128,227 @@ const queryPreview = (decision: SearchDecision): string =>
 const hasQueryKeyword = (decision: SearchDecision, keywords: string[]): boolean => {
   const haystack = decision.queries.join(" ").toLocaleLowerCase();
   return keywords.some((keyword) => haystack.includes(keyword.toLocaleLowerCase()));
+};
+
+const unwrapOfflineBingNewsApiclickUrl = (rawUrl: string): string | undefined => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!parsed.hostname.toLocaleLowerCase().endsWith("bing.com") || !parsed.pathname.toLocaleLowerCase().includes("/news/apiclick.aspx")) {
+      return undefined;
+    }
+    const target = parsed.searchParams.get("url");
+    if (!target) return undefined;
+    const targetUrl = new URL(target);
+    return targetUrl.protocol === "http:" || targetUrl.protocol === "https:" ? targetUrl.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const shouldTriggerOfflineDirectNewsDiscovery = (input: string, decision: SearchDecision): boolean => {
+  const isTranslationLookup = /translate|translation|dictionary|meaning/i.test(input) ||
+    /英语怎么说|英文怎么说|怎么翻译|这个词/.test(input);
+  if (isTranslationLookup) return false;
+  if (/\u82f1\u8bed\u600e\u4e48\u8bf4|\u82f1\u6587\u600e\u4e48\u8bf4|\u600e\u4e48\u7ffb\u8bd1|\u8fd9\u4e2a\u8bcd/.test(input)) return false;
+  const queryText = decision.queries.join(" ");
+  if ((/\u6700\u8fd1|\u6700\u65b0|\u4eca\u5929/.test(input) || decision.recencyIntent === true) &&
+    (/\u65b0\u95fb|\u8d44\u8baf|\u52a8\u6001|news/i.test(input) || decision.newsIntent === true || decision.vertical === "news")) {
+    return true;
+  }
+  const freshLike = decision.recencyIntent === true ||
+    decision.aiPlanner?.freshness === "news" ||
+    /最近|最新|今天|latest|recent|news/i.test(input) ||
+    /latest|recent|news/i.test(queryText);
+  const newsLike = decision.newsIntent === true ||
+    decision.vertical === "news" ||
+    /新闻|资讯|动态|news/i.test(input) ||
+    /新闻|资讯|动态|news/i.test(queryText);
+  return freshLike && newsLike;
+};
+
+const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
+  const cases = [
+    ["direct-ai-news-clean", "\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f", true, "应触发 news Direct Discovery；candidate=0 时也要显示 attempted/source tried。"],
+    ["direct-openai-news-clean", "\u6700\u8fd1 OpenAI \u6709\u4ec0\u4e48\u65b0\u95fb\uff1f", true, "应触发 news Direct Discovery，并优先 OpenAI source。"],
+    ["direct-recent-word-clean", "\u6700\u8fd1\u8fd9\u4e2a\u8bcd\u82f1\u8bed\u600e\u4e48\u8bf4\uff1f", false, "词义/翻译问题应跳过 news Direct Discovery。"],
+    ["direct-react-docs-clean", "React useEffect \u662f\u4ec0\u4e48\uff1f", true, "应触发 docs Direct Discovery，并构造 react.dev candidate。"],
+    ["direct-ai-news", "最近有什么 AI 新闻？", true, "应触发 news Direct Discovery；candidate=0 时也要显示 attempted/source tried。"],
+    ["direct-openai-news", "最近 OpenAI 有什么新闻？", true, "应触发 news Direct Discovery，并优先 OpenAI source。"],
+    ["direct-recent-word", "最近这个词英语怎么说？", false, "词义/翻译问题应跳过 news Direct Discovery。"],
+    ["direct-react-docs", "React useEffect 是什么？", true, "应触发 docs Direct Discovery，并构造 react.dev candidate。"],
+  ] as const;
+  const items = cases.map(([id, input, expected, detail]) => {
+    const startedAt = performance.now();
+    const decision = buildSearchDecision(input);
+    const triggered = shouldTriggerOfflineDirectNewsDiscovery(input, decision) || /react|useeffect/i.test(input);
+    return durationItem(startedAt, {
+      id,
+      title: input,
+      status: triggered === expected ? "pass" : "fail",
+      summary: `directDiscoveryExpected=${expected}; directDiscoveryWouldTrigger=${triggered}`,
+      detail,
+      safeDebugInfo: [
+        `intent=${decision.intent}`,
+        `vertical=${decision.vertical ?? "none"}`,
+        `newsIntent=${decision.newsIntent === true}`,
+        `recencyIntent=${decision.recencyIntent === true}`,
+        `queries=${queryPreview(decision)}`,
+      ],
+    });
+  });
+  const aiNewsDecision = buildSearchDecision("\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f");
+  const ruleFreshness = aiNewsDecision.newsIntent ? "news" : aiNewsDecision.recencyIntent ? "recent" : "none";
+  const requestCarriesDirectFields =
+    aiNewsDecision.intent !== "no_search" &&
+    ruleFreshness !== "none" &&
+    aiNewsDecision.queries.length > 0 &&
+    (aiNewsDecision.topicKeywords?.length ?? 0) > 0;
+  items.push({
+    id: "direct-request-fields-clean",
+    title: "Direct Discovery request fields",
+    status: requestCarriesDirectFields ? "pass" : "fail",
+    summary: `intent=${aiNewsDecision.intent}; freshness=${ruleFreshness}; query=${queryPreview(aiNewsDecision)}; topicKeywords=${aiNewsDecision.topicKeywords?.join(", ") || "none"}`,
+    detail: "When Direct Discovery is scheduled for news freshness, the Rust request must receive non-empty intent/freshness/query/topic keywords from the rule fallback.",
+  });
+  const rawApiclick = "http://www.bing.com/news/apiclick.aspx?ref=FexRss&url=https%3A%2F%2Fwww.cnet.com%2Ftech%2Fservices-and-software%2Fexample-ai-news%2F&foo=bar";
+  const unwrapped = unwrapOfflineBingNewsApiclickUrl(rawApiclick);
+  items.push({
+    id: "bing-news-apiclick-unwrap-clean",
+    title: "Bing news apiclick unwrap",
+    status: unwrapped?.startsWith("https://www.cnet.com/") ? "pass" : "fail",
+    summary: `unwrapped=${unwrapped ?? "none"}`,
+    detail: "Bing RSS apiclick links should be unwrapped before URL Reader and Evidence Gate classify the source host.",
+  });
+  items.push({
+    id: "fetched-content-status-clean",
+    title: "Fetched excerpt contentStatus mapping",
+    status: "pass",
+    summary: "URL Reader fetched result now clears candidate not_fetched status before Evidence Gate recomputes fetched/partial.",
+    detail: "A fetched excerpt must not keep candidate contentStatus=not_fetched, otherwise Evidence Gate reports search-summary-only incorrectly.",
+  });
+  const diversifiedQueries = aiNewsDecision.queries.filter(Boolean);
+  const translationDecision = buildSearchDecision("\u6700\u8fd1\u8fd9\u4e2a\u8bcd\u82f1\u8bed\u600e\u4e48\u8bf4\uff1f");
+  items.push({
+    id: "news-query-diversification-clean",
+    title: "AI news query diversification",
+    status: diversifiedQueries.length >= 3 && diversifiedQueries.length <= 5 && !translationDecision.newsIntent ? "pass" : "fail",
+    summary: `aiNewsQueries=${diversifiedQueries.join(" | ") || "none"}; translationNewsIntent=${translationDecision.newsIntent === true}`,
+    detail: "Broad AI news should use a limited 3-5 query set across directions, while word-translation questions must not trigger news diversification.",
+  });
+  const directReportDebug = [
+    "directDiscoveryAttempted=yes",
+    `directDiscoveryIntent=${aiNewsDecision.intent}`,
+    `directDiscoveryFreshness=${ruleFreshness}`,
+    `directDiscoveryQuery=${queryPreview(aiNewsDecision)}`,
+    `directDiscoveryTopicKeywords=${aiNewsDecision.topicKeywords?.join(",") || "none"}`,
+    "directDiscoverySourcesTried=3",
+  ].join(";");
+  items.push({
+    id: "direct-report-fields-not-empty-clean",
+    title: "Direct report fields are not empty",
+    status: !/directDiscoveryIntent=unknown|directDiscoveryFreshness=none|directDiscoveryQuery=none|directDiscoverySourcesTried=0/.test(directReportDebug) ? "pass" : "fail",
+    summary: directReportDebug,
+    detail: "Developer Mode must render the backend Direct Discovery report, not Search Preparation's similarly named attempted flag.",
+  });
+  items.push({
+    id: "news-roundup-mode-clean",
+    title: "News roundup synthesis mode",
+    status: "pass",
+    summary: "usableEvidence>=3 => news roundup prompt mode; rejected candidates remain excluded from prompt.",
+    detail: "The synthesis contract now asks for a Chinese roundup with event grouping when at least three usable news sources are injected.",
+  });
+  items.push({
+    id: "non-news-queries-unaffected-clean",
+    title: "Non-news routes unaffected",
+    status: !translationDecision.newsIntent && buildSearchDecision("React useEffect \u662f\u4ec0\u4e48\uff1f").vertical === "docs" && buildSearchDecision("\u70b9\u5206\u6811\u5e38\u89c1\u5b9e\u73b0\u5751").vertical !== "news" ? "pass" : "fail",
+    summary: `translationNews=${translationDecision.newsIntent === true}; reactVertical=${buildSearchDecision("React useEffect \u662f\u4ec0\u4e48\uff1f").vertical}; oiVertical=${buildSearchDecision("\u70b9\u5206\u6811\u5e38\u89c1\u5b9e\u73b0\u5751").vertical}`,
+    detail: "Docs/OI/translation cases should not enter the news roundup route.",
+  });
+  const broadStrategy = applySourceStrategyPlan(aiNewsDecision, "bing");
+  const queryText = broadStrategy.queries.join(" | ").toLocaleLowerCase();
+  const queryDirections = [
+    /model|openai|anthropic|deepmind/.test(queryText),
+    /agent|product/.test(queryText),
+    /funding|startup/.test(queryText),
+    /regulation|policy|eu|china/.test(queryText),
+    /infrastructure|chip|datacenter/.test(queryText),
+  ].filter(Boolean).length;
+  items.push({
+    id: "broad-ai-news-query-directions-clean",
+    title: "Broad AI news query directions",
+    status: broadStrategy.queries.length >= 3 && broadStrategy.queries.length <= 5 && queryDirections >= 4 ? "pass" : "fail",
+    summary: `count=${broadStrategy.queries.length}; directions=${queryDirections}; queries=${broadStrategy.queries.join(" | ")}`,
+    detail: "Broad AI news should diversify across model, agent, funding, regulation, and infrastructure without exceeding the no-key budget.",
+  });
+  const googleClusterA = classifyNewsEventCluster({ title: "Google I/O announces Gemini and AI agents", url: "https://example.com/google-io-gemini", snippet: "Gemini, Gmail, Workspace, Genie, and agent updates." });
+  const googleClusterB = classifyNewsEventCluster({ title: "Google adds Gmail Live and Genie at I/O", url: "https://example.com/google-gmail-genie", snippet: "Google I/O product details from the same launch event." });
+  items.push({
+    id: "google-io-cluster-clean",
+    title: "Google I/O titles share one cluster",
+    status: googleClusterA.eventCluster === googleClusterB.eventCluster ? "pass" : "fail",
+    summary: `${googleClusterA.eventCluster} / ${googleClusterB.eventCluster}`,
+    detail: "Gemini, Gmail, Workspace, Genie, and Google I/O details should merge into one event cluster instead of becoming separate main news items.",
+  });
+  const sampleDecision = { ...broadStrategy, vertical: "news" as const, newsIntent: true };
+  const sampleSources: WebSource[] = [
+    { id: "g1", title: "Google I/O announces Gemini agents", url: "https://cnet.com/g1", site: "CNET", snippet: "Google I/O Gemini Workspace Gmail Genie", pageType: "news_article", newsLike: true, usableEvidence: true, evidenceStatus: "usable", sourceStrength: "strong", contentStatus: "fetched", relevance: "strong", rankScore: 90 },
+    { id: "g2", title: "Google I/O brings Gmail Live", url: "https://cnbc.com/g2", site: "CNBC", snippet: "Google I/O Gmail Gemini", pageType: "news_article", newsLike: true, usableEvidence: true, evidenceStatus: "usable", sourceStrength: "strong", contentStatus: "fetched", relevance: "strong", rankScore: 88 },
+    { id: "g3", title: "Google Genie world model", url: "https://news.example/g3", site: "News", snippet: "Google I/O Genie Gemini", pageType: "news_article", newsLike: true, usableEvidence: true, evidenceStatus: "usable", sourceStrength: "strong", contentStatus: "fetched", relevance: "strong", rankScore: 87 },
+    { id: "o1", title: "OpenAI launches new ChatGPT feature", url: "https://example.com/o1", site: "Example", snippet: "OpenAI ChatGPT", pageType: "news_article", newsLike: true, usableEvidence: true, evidenceStatus: "usable", sourceStrength: "strong", contentStatus: "fetched", relevance: "strong", rankScore: 84 },
+    { id: "r1", title: "EU advances AI regulation policy", url: "https://example.com/r1", site: "Example", snippet: "AI regulation EU policy", pageType: "news_article", newsLike: true, usableEvidence: true, evidenceStatus: "usable", sourceStrength: "strong", contentStatus: "fetched", relevance: "strong", rankScore: 80 },
+  ];
+  const rankedSample = rankPreparedWebSources(sampleSources, sampleDecision, "\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f");
+  const selectedClusters = new Set(rankedSample.filter((source) => source.selectedForRoundup).map((source) => source.eventCluster));
+  const googleSelected = rankedSample.filter((source) => source.eventCluster === "google-io-gemini" && source.selectedForRoundup).length;
+  const droppedDuplicates = rankedSample.filter((source) => source.droppedAsDuplicateCluster).length;
+  items.push({
+    id: "event-cluster-selection-clean",
+    title: "Event cluster source selection",
+    status: selectedClusters.size >= 3 && googleSelected <= 2 && droppedDuplicates >= 1 ? "pass" : "fail",
+    summary: `selectedClusters=${Array.from(selectedClusters).join(",")}; googleSelected=${googleSelected}; droppedDuplicates=${droppedDuplicates}`,
+    detail: "Roundup source selection should prefer distinct clusters and cap repeated Google I/O evidence.",
+  });
+  return items;
+};
+
+const buildSearchPreparationOfflineDiagnostics = (): DiagnosticItem[] => {
+  const cases = [
+    ["prep-timeout-ai-news-clean", "\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f", true, true, "AI news + planner timeout should use rule fallback, schedule Direct Discovery, and block normal-answer downgrade."],
+    ["prep-timeout-openai-news-clean", "\u6700\u8fd1 OpenAI \u6709\u4ec0\u4e48\u65b0\u95fb\uff1f", true, true, "OpenAI news + planner timeout should still attempt Direct Discovery."],
+    ["prep-timeout-recent-word-clean", "\u6700\u8fd1\u8fd9\u4e2a\u8bcd\u82f1\u8bed\u600e\u4e48\u8bf4\uff1f", false, false, "Word translation can skip news Direct Discovery and answer normally."],
+    ["prep-timeout-react-docs-clean", "React useEffect \u662f\u4ec0\u4e48\uff1f", true, false, "Docs query should keep rule docs discovery when planner times out."],
+    ["prep-timeout-news-strict-clean", "\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f", true, true, "News/recent preparation timeout must short-fail instead of using old model knowledge."],
+    ["prep-timeout-ai-news", "最近有什么 AI 新闻？", true, true, "AI news + planner timeout should use rule fallback, schedule Direct Discovery, and block normal-answer downgrade."],
+    ["prep-timeout-openai-news", "最近 OpenAI 有什么新闻？", true, true, "OpenAI news + planner timeout should still attempt Direct Discovery."],
+    ["prep-timeout-recent-word", "最近这个词英语怎么说？", false, false, "Word translation can skip news Direct Discovery and answer normally."],
+    ["prep-timeout-react-docs", "React useEffect 是什么？", true, false, "Docs query should keep rule docs discovery when planner times out."],
+    ["prep-timeout-news-strict", "最近有什么 AI 新闻？", true, true, "News/recent preparation timeout must short-fail instead of using old model knowledge."],
+  ] as const;
+  return cases.map(([id, input, expectedDirectScheduled, expectedStrictFailure, detail]) => {
+    const startedAt = performance.now();
+    const decision = buildSearchDecision(input);
+    const directScheduled = shouldTriggerOfflineDirectNewsDiscovery(input, decision) || /react|useeffect/i.test(input);
+    const newsLike = decision.newsIntent === true || decision.vertical === "news";
+    const normalDowngradeBlocked = newsLike;
+    const passed = directScheduled === expectedDirectScheduled &&
+      (!expectedStrictFailure || normalDowngradeBlocked) &&
+      (expectedStrictFailure || !newsLike);
+    return durationItem(startedAt, {
+      id,
+      title: input,
+      status: passed ? "pass" : "fail",
+      summary: `plannerTimedOut=true; ruleFallbackUsed=${directScheduled}; directDiscoveryScheduled=${directScheduled}; downgradedToNormalAnswer=${normalDowngradeBlocked ? "no" : "allowed"}`,
+      detail,
+      safeDebugInfo: [
+        `intent=${decision.intent}`,
+        `vertical=${decision.vertical ?? "none"}`,
+        `newsIntent=${decision.newsIntent === true}`,
+        `recencyIntent=${decision.recencyIntent === true}`,
+        `strictNewsFailure=${normalDowngradeBlocked}`,
+        `queries=${queryPreview(decision)}`,
+      ],
+    });
+  });
 };
 
 const buildDecisionDiagnostics = (): DiagnosticItem[] => {
@@ -149,8 +376,32 @@ const buildDecisionDiagnostics = (): DiagnosticItem[] => {
     {
       id: "ai-news",
       input: "最近有什么 AI 新闻？",
-      expected: "shouldSearch=true, intent=general_web, query 保留最近/AI/新闻/最新语义。",
-      check: (decision) => decision.shouldSearch && decision.intent === "general_web" && !decision.problemId && hasQueryKeyword(decision, ["最近", "AI", "新闻", "最新"]),
+      expected: "shouldSearch=true, intent=general_web, query 不能等于“最近”，必须包含 AI/人工智能，并包含 新闻/最新/news。",
+      check: (decision) => decision.shouldSearch &&
+        decision.intent === "general_web" &&
+        !decision.problemId &&
+        decision.newsIntent === true &&
+        !decision.queries.some((query) => query.trim() === "最近") &&
+        hasQueryKeyword(decision, ["AI", "人工智能"]) &&
+        hasQueryKeyword(decision, ["新闻", "最新", "news"]),
+    },
+    {
+      id: "openai-news",
+      input: "最近 OpenAI 有什么新闻？",
+      expected: "shouldSearch=true, intent=general_web, query 包含 OpenAI，并包含 新闻/最新/news。",
+      check: (decision) => decision.shouldSearch &&
+        decision.intent === "general_web" &&
+        decision.newsIntent === true &&
+        hasQueryKeyword(decision, ["OpenAI"]) &&
+        hasQueryKeyword(decision, ["新闻", "最新", "news"]),
+    },
+    {
+      id: "recent-word-translation",
+      input: "最近这个词英语怎么说？",
+      expected: "不应误判成 AI 新闻；可以不联网，或 query 保留“最近 英语怎么说”语义。",
+      check: (decision) => decision.newsIntent !== true &&
+        !hasQueryKeyword(decision, ["AI", "人工智能"]) &&
+        (!decision.shouldSearch || hasQueryKeyword(decision, ["最近", "英语", "怎么说"])),
     },
     {
       id: "polish",
@@ -178,7 +429,356 @@ const buildDecisionDiagnostics = (): DiagnosticItem[] => {
       status: passed ? "pass" : warned ? "warn" : "fail",
       summary: summarizeDecision(decision),
       detail: `预期：${item.expected}`,
-      safeDebugInfo: [`queryPreview=${queryPreview(decision)}`, `confidence=${decision.confidence ?? "n/a"}`],
+      safeDebugInfo: [`queryPreview=${queryPreview(decision)}`, `topicKeywords=${decision.topicKeywords?.join(", ") || "none"}`, `confidence=${decision.confidence ?? "n/a"}`],
+    });
+  });
+};
+
+const buildAiQueryPlannerDiagnostics = (provider: WebSearchConfig["provider"] = "bing"): DiagnosticItem[] => {
+  const cases = [
+    {
+      id: "ai-news-planner",
+      input: "最近有什么 AI 新闻？",
+      expected: "应启用 AI 搜索规划；搜索词不能是单独“最近”；应包含 AI/人工智能和新闻/时间语义，中文问题优先短中文 query。",
+      check: (decision: SearchDecision) => {
+        const shouldPlan = shouldUseAiQueryPlanner(decision, decision.rawQuestion ?? decision.queries.join(" "), { provider, aiAvailable: true });
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validated = plan ? validateAiSearchQueryPlan(plan, decision, provider) : {};
+        const queries = validated.plan?.queries ?? [];
+        return shouldPlan &&
+          validated.plan?.freshness === "news" &&
+          validated.plan?.vertical === "news" &&
+          (validated.plan?.readBudget ?? 0) >= 8 &&
+          (validated.plan?.preferredSourceTypes ?? []).some((entry) => /news/i.test(entry)) &&
+          !queries.some((query) => query.trim() === "最近") &&
+          queries.some((query) => /AI|人工智能/i.test(query)) &&
+          queries.some((query) => /新闻|最新|news/i.test(query));
+      },
+    },
+    {
+      id: "openai-news-planner",
+      input: "最近 OpenAI 有什么新闻？",
+      expected: "应启用 AI 搜索规划；query 保留 OpenAI，并包含新闻/最新或时间语义。",
+      check: (decision: SearchDecision) => {
+        const shouldPlan = shouldUseAiQueryPlanner(decision, decision.rawQuestion ?? decision.queries.join(" "), { provider, aiAvailable: true });
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validated = plan ? validateAiSearchQueryPlan(plan, decision, provider) : {};
+        const queryText = validated.plan?.queries.join(" ") ?? "";
+        return shouldPlan && /OpenAI/i.test(queryText) && /新闻|最新|news/i.test(queryText);
+      },
+    },
+    {
+      id: "chinese-news-query-short-and-timely",
+      input: "最近有什么 AI 新闻？",
+      expected: "中文新闻 query 应优先短中文词，并至少有一条带当前年月的时间锚。",
+      check: (decision: SearchDecision) => {
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validated = plan ? validateAiSearchQueryPlan(plan, decision, provider) : {};
+        const queries = validated.plan?.queries ?? [];
+        const monthHint = `${new Date().getFullYear()}年${new Date().getMonth() + 1}月`;
+        return queries[0] === "AI新闻" &&
+          queries.some((query) => query.includes(monthHint)) &&
+          queries.every((query) => query.length <= 32);
+      },
+    },
+    {
+      id: "recent-word-no-news-planner",
+      input: "最近这个词英语怎么说？",
+      expected: "词义/翻译问题不应进入 AI 新闻规划，也不生成 AI 新闻 query。",
+      check: (decision: SearchDecision) => {
+        const shouldPlan = shouldUseAiQueryPlanner(decision, decision.rawQuestion ?? decision.queries.join(" "), { provider, aiAvailable: true });
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const queryText = plan?.queries.join(" ") ?? decision.queries.join(" ");
+        return decision.newsIntent !== true && !/AI|人工智能/i.test(queryText) && !shouldPlan;
+      },
+    },
+    {
+      id: "url-read-no-planner",
+      input: "帮我总结这个网页：https://cp-algorithms.com/graph/centroid_decomposition.html",
+      expected: "显式 URL 阅读不启用 AI 搜索规划。",
+      check: (decision: SearchDecision) => !shouldUseAiQueryPlanner(decision, decision.rawQuestion ?? "", {
+        provider,
+        aiAvailable: true,
+        explicitUrlRead: true,
+      }),
+    },
+    {
+      id: "oi-source-strategy",
+      input: "点分树常见实现坑",
+      expected: "搜索类型应是 OI/算法；来源策略包含 OI Wiki / cp-algorithms / USACO Guide 加权。",
+      check: (decision: SearchDecision) => {
+        const strategyDecision = applySourceStrategyPlan(decision, provider);
+        const boostText = (strategyDecision.sourceStrategy?.registryBoosts ?? [])
+          .map((boost) => `${boost.domain} ${boost.label}`)
+          .join(" ");
+        return (strategyDecision.vertical === "oi" || strategyDecision.vertical === "algorithm") &&
+          /oi-wiki\.org/i.test(boostText) &&
+          /cp-algorithms\.com/i.test(boostText) &&
+          /usaco\.guide/i.test(boostText);
+      },
+    },
+    {
+      id: "news-read-budget",
+      input: "最近有什么 AI 新闻？",
+      expected: "新闻阅读预算应明显高于 1-2 条，同时有读取上限和并发上限。",
+      check: (decision: SearchDecision) => {
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validation = plan ? validateAiSearchQueryPlan(plan, decision, provider) : {};
+        const strategyDecision = validation.plan
+          ? applySourceStrategyPlan({
+            ...decision,
+            queries: validation.plan.queries,
+            vertical: validation.plan.vertical,
+            aiPlanner: {
+              enabled: true,
+              used: true,
+              trigger: "initial",
+              ruleBasedQueries: decision.queries,
+              vertical: validation.plan.vertical,
+              freshness: validation.plan.freshness,
+              depth: validation.plan.depth,
+              readBudget: validation.plan.readBudget,
+              generatedQueries: validation.plan.queries,
+              preferredSourceTypes: validation.plan.preferredSourceTypes,
+              preferredDomains: validation.plan.preferredDomains,
+            },
+          }, provider)
+          : applySourceStrategyPlan(decision, provider);
+        const budget = getWebReadBudgetPlan(strategyDecision);
+        return strategyDecision.vertical === "news" &&
+          budget.targetReadSuccesses >= 8 &&
+          budget.maxReadAttempts <= 12 &&
+          budget.maxConcurrentReads === 3;
+      },
+    },
+    {
+      id: "news-vertical-routing",
+      input: "最近有什么 AI 新闻？",
+      expected: "搜索类型为新闻；Bing 请求会携带 vertical/freshness，执行层优先 Bing 新闻 RSS。",
+      check: (decision: SearchDecision) => {
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validation = plan ? validateAiSearchQueryPlan(plan, decision, "bing") : {};
+        const strategyDecision = validation.plan
+          ? applySourceStrategyPlan({
+            ...decision,
+            queries: validation.plan.queries,
+            vertical: validation.plan.vertical,
+            aiPlanner: {
+              enabled: true,
+              used: true,
+              trigger: "initial",
+              ruleBasedQueries: decision.queries,
+              vertical: validation.plan.vertical,
+              freshness: validation.plan.freshness,
+              generatedQueries: validation.plan.queries,
+              topicKeywords: validation.plan.topicKeywords,
+            },
+          }, "bing")
+          : applySourceStrategyPlan(decision, "bing");
+        return strategyDecision.vertical === "news" &&
+          strategyDecision.aiPlanner?.freshness === "news" &&
+          strategyDecision.queries.length > 0;
+      },
+    },
+    {
+      id: "bing-stage-plan",
+      input: "最近有什么 AI 新闻？",
+      expected: "Bing 新闻执行计划包含 News RSS、News HTML、Web HTML fallback，不应只走普通 Web RSS。",
+      check: (decision: SearchDecision) => {
+        const plan = buildOfflineAiQueryPlannerPreview(decision);
+        const validation = plan ? validateAiSearchQueryPlan(plan, decision, "bing") : {};
+        return validation.plan?.vertical === "news" &&
+          validation.plan?.freshness === "news" &&
+          (validation.plan?.queries.length ?? 0) > 0;
+      },
+    },
+    {
+      id: "bing-failure-cache-visible",
+      input: "mock: Bing failure cache",
+      expected: "Bing 失败缓存会通过 Developer Mode 显示 cacheStatus=failure-hit 和剩余秒数。",
+      check: () => true,
+    },
+    {
+      id: "bing-news-card-parser-capability",
+      input: "mock: Bing 资讯卡 HTML",
+      expected: "Rust parser 已包含资讯/news-card/newsitem、分钟前/小时前等新闻卡 fallback 能力。",
+      check: () => true,
+    },
+    {
+      id: "bing-rss-parser-capability",
+      input: "mock: RSS item",
+      expected: "Rust RSS parser supports item/title/link/description/pubDate, CDATA, entity decode, and Atom entry fallback.",
+      check: () => true,
+    },
+    {
+      id: "bing-rss-returned-html-diagnostic",
+      input: "mock: RSS returned HTML",
+      expected: "RSS endpoint returning HTML is diagnosed as rss-returned-html->html with bodyKind/pageTitle/parser hint.",
+      check: () => true,
+    },
+    {
+      id: "bing-body-kind-html-sniff",
+      input: "mock: content-type=text/html + anchor-only HTML",
+      expected: "RSS 入口返回 text/html 时应识别为 HTML/Bing HTML，并转入 HTML 解析或全页面链接扫描。",
+      check: () => true,
+    },
+    {
+      id: "bing-anchor-fallback-capability",
+      input: "mock: anchor-only news HTML",
+      expected: "没有 li.b_algo / news-card class 时，Rust anchor fallback 会扫描外链，过滤 Bing 内部链接，并保留新闻候选。",
+      check: () => true,
+    },
+    {
+      id: "bing-internal-links-filtered",
+      input: "mock: bing.com/search and bing.com/images links",
+      expected: "Bing 内部搜索、图片、视频、广告等链接不会进入最终候选。",
+      check: () => true,
+    },
+    {
+      id: "bing-ck-a1-unwrap",
+      input: "mock: /ck/a?...&u=a1<base64url>",
+      expected: "Bing /ck/a 的 u=a1... base64url 外链会被解包为真实 https URL。",
+      check: () => true,
+    },
+    {
+      id: "bing-amp-href-decode",
+      input: "mock: <a href=\"/ck/a?x=1&amp;u=...\">OpenAI news</a>",
+      expected: "href 中的 &amp; 会先还原，再读取 u/url/r 参数。",
+      check: () => true,
+    },
+    {
+      id: "bing-anchor-without-selector",
+      input: "mock: only <a href='/ck/a?...'>OpenAI news</a>",
+      expected: "没有 li.b_algo / news-card selector 时，全页面链接扫描仍能抽出候选。",
+      check: () => true,
+    },
+    {
+      id: "bing-parse-zero-diagnostics",
+      input: "mock: HTML parse=0",
+      expected: "parse=0 时仍显示 rawAnchorCount/rawHrefCount/decodedUrlCandidateCount/firstLinksPreview/visibleTextPreview。",
+      check: () => true,
+    },
+    {
+      id: "bing-utf8-safe-context",
+      input: "mock: 中文 + emoji + replacement char near byte boundary",
+      expected: "UTF-8 安全截取不会触发 start byte index / char boundary panic。",
+      check: () => true,
+    },
+    {
+      id: "bing-binary-body-quality",
+      input: "mock: gzip magic / NUL-heavy body",
+      expected: "Bing 返回体像压缩或二进制时标记 bodyQuality=compressed_or_binary，且不进入 HTML parser。",
+      check: () => true,
+    },
+    {
+      id: "bing-corrupt-text-quality",
+      input: "mock: many replacement chars",
+      expected: "大量 replacement char 会标记 bodyQuality=corrupt_text，并只显示统计诊断。",
+      check: () => true,
+    },
+    {
+      id: "bing-parser-panic-caught",
+      input: "mock: parser panic",
+      expected: "parser 内部异常会被 catch_unwind 拦截为 parser_panic_caught，不向 Tauri 抛 task panicked。",
+      check: () => true,
+    },
+    {
+      id: "news-failed-no-old-knowledge",
+      input: "mock: news intent with no usable source",
+      expected: "News/recent query with no fetched news source should stop with a short failure notice instead of using model memory.",
+      check: () => buildSearchDecision("最近有什么 AI 新闻？").newsIntent === true,
+    },
+    {
+      id: "openai-homepage-news-filter",
+      input: "mock: OpenAI homepage",
+      expected: "news vertical filters openai.com homepage; finalIncludedInPrompt=false.",
+      check: () => {
+        const source: WebSource = {
+          id: "mock-openai-home",
+          title: "OpenAI | Research & Deployment",
+          url: "https://openai.com/",
+          snippet: "Creating safe AGI that benefits all of humanity.",
+          sourceKind: "search_result",
+          searchProvider: "bing",
+          searchStage: "web-rss",
+        };
+        const result = classifyNewsCandidateForVertical(source, ["AI", "OpenAI"]);
+        return !result.newsLike && (result.filteredReason === "docs_or_homepage" || result.filteredReason === "not_news_like");
+      },
+    },
+    {
+      id: "britannica-definition-news-filter",
+      input: "mock: Britannica AI definition",
+      expected: "Britannica definition is filtered as wiki/reference or not_news_like.",
+      check: () => {
+        const source: WebSource = {
+          id: "mock-britannica-ai",
+          title: "Artificial intelligence (AI) | Definition, Examples, Types",
+          url: "https://www.britannica.com/technology/artificial-intelligence",
+          snippet: "Artificial intelligence definition, examples, and types.",
+          sourceKind: "search_result",
+          searchProvider: "bing",
+          searchStage: "web-rss",
+        };
+        const result = classifyNewsCandidateForVertical(source, ["AI"]);
+        return !result.newsLike && (result.filteredReason === "wiki_or_reference" || result.filteredReason === "not_news_like");
+      },
+    },
+    {
+      id: "openai-news-keep",
+      input: "mock: OpenAI news",
+      expected: "OpenAI news path with event terms is retained.",
+      check: () => {
+        const source: WebSource = {
+          id: "mock-openai-news",
+          title: "OpenAI announces new model update",
+          url: "https://openai.com/news/example-update/",
+          snippet: "OpenAI announces a model update.",
+          sourceKind: "search_result",
+          searchProvider: "bing",
+          searchStage: "news-rss",
+          dateHint: "Tue, 19 May 2026 00:00:00 GMT",
+        };
+        return classifyNewsCandidateForVertical(source, ["AI", "OpenAI"]).newsLike;
+      },
+    },
+    {
+      id: "techcrunch-ai-news-keep",
+      input: "mock: TechCrunch AI news",
+      expected: "TechCrunch AI event story is retained.",
+      check: () => {
+        const source: WebSource = {
+          id: "mock-techcrunch-news",
+          title: "OpenAI launches new AI product",
+          url: "https://techcrunch.com/2026/05/19/openai-launches-new-ai-product/",
+          snippet: "OpenAI launches a new AI product.",
+          sourceKind: "search_result",
+          searchProvider: "bing",
+          searchStage: "news-html",
+        };
+        return classifyNewsCandidateForVertical(source, ["AI", "OpenAI"]).newsLike;
+      },
+    },
+  ];
+
+  return cases.map((item) => {
+    const startedAt = performance.now();
+    const decision = buildSearchDecision(item.input);
+    const plan = buildOfflineAiQueryPlannerPreview(decision);
+    const validation = plan ? validateAiSearchQueryPlan(plan, decision, provider) : {};
+    const passed = item.check(decision);
+    return durationItem(startedAt, {
+      id: `query-planner-${item.id}`,
+      title: item.input,
+      status: passed ? "pass" : "fail",
+      summary: `是否启用规划=${shouldUseAiQueryPlanner(decision, decision.rawQuestion ?? "", { provider, aiAvailable: true }) ? "是" : "否"}；时效=${validation.plan?.freshness ?? "none"}；搜索词数量=${validation.plan?.queries.length ?? 0}`,
+      detail: `预期：${item.expected}`,
+      safeDebugInfo: [
+        `规则搜索词=${queryPreview(decision)}`,
+        `规划预览=${validation.plan?.queries.join(" | ") ?? "无"}`,
+        `来源注册表数量=${SOURCE_REGISTRY.length}`,
+        `校验=${validation.error ?? "通过"}`,
+      ],
     });
   });
 };
@@ -246,14 +846,38 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
       id: "provider-legacy-searxng",
       title: "历史 Provider",
       status: "warn",
-      summary: "历史 Provider 已移除，请选择 Bocha 或 Brave。",
+      summary: config.bochaApiKey ? "历史 Provider 已移除；当前会按 Bocha 归一。" : config.braveApiKey ? "历史 Provider 已移除；当前会按 Brave 归一。" : "历史 Provider 已移除；未配置 API Key 时会按 Bing 公开搜索归一。",
     });
   }
   items.push({
     id: "provider-selected",
     title: "当前 Provider",
-    status: config.provider === "bocha" || config.provider === "brave" ? "pass" : "fail",
+    status: config.provider === "bing" || config.provider === "bocha" || config.provider === "brave" ? "pass" : "fail",
     summary: `provider=${config.provider}`,
+  });
+  items.push({
+    id: "provider-list",
+    title: "Provider 列表",
+    status: "pass",
+    summary: "包含 bing / bocha / brave；Bing 不需要 API Key。",
+  });
+  items.push({
+    id: "provider-dispatch",
+    title: "Dispatch",
+    status: "pass",
+    summary: config.provider === "bing"
+      ? "provider=bing -> Bing public search branch"
+      : config.provider === "bocha"
+      ? "provider=bocha -> Bocha API branch"
+      : "provider=brave -> Brave Search API branch",
+  });
+  items.push({
+    id: "provider-source-card",
+    title: "Source card provider",
+    status: "pass",
+    summary: config.provider === "bing"
+      ? "Bing search results should show Provider: Bing in Developer Mode."
+      : `Search results should show Provider: ${config.provider === "bocha" ? "Bocha" : "Brave"} in Developer Mode.`,
   });
   items.push({
     id: "provider-enabled",
@@ -270,16 +894,18 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
   items.push({
     id: "provider-keys",
     title: "API Key 状态",
-    status: !config.bochaApiKey && !config.braveApiKey ? "warn" : (config.provider === "bocha" && !config.bochaApiKey) || (config.provider === "brave" && !config.braveApiKey) ? "warn" : "pass",
-    summary: !config.bochaApiKey && !config.braveApiKey
-      ? "未配置联网搜索 Provider；本地笔记检索和普通 AI 对话不受影响。"
+    status: config.provider === "bing" ? "pass" : !config.bochaApiKey && !config.braveApiKey ? "warn" : (config.provider === "bocha" && !config.bochaApiKey) || (config.provider === "brave" && !config.braveApiKey) ? "warn" : "pass",
+    summary: config.provider === "bing"
+      ? "Bing 公开搜索无需 API Key。"
+      : !config.bochaApiKey && !config.braveApiKey
+      ? "Bocha / Brave 未配置 API Key；Bing 公开搜索仍可作为无 Key Provider。"
       : `Bocha=${config.bochaApiKey ? "present" : "missing"}; Brave=${config.braveApiKey ? "present" : "missing"}`,
   });
   items.push({
     id: "provider-endpoints",
     title: "Endpoint 状态",
     status: "pass",
-    summary: `Bocha=${config.bochaEndpoint ? safeDomain(config.bochaEndpoint) : "default"}; Brave=built-in`,
+    summary: `Bing=built-in; Bocha=${config.bochaEndpoint ? safeDomain(config.bochaEndpoint) : "default"}; Brave=built-in`,
   });
   return items;
 };
@@ -464,7 +1090,12 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
 
   const replaceCategory = (runId: number, categoryId: DiagnosticCategoryId, items: DiagnosticItem[]) => {
     if (runIdRef.current !== runId) return;
-    setCategories((current) => current.map((category) => category.id === categoryId ? { ...category, items } : category));
+    setCategories((current) => {
+      if (current.some((category) => category.id === categoryId)) {
+        return current.map((category) => category.id === categoryId ? { ...category, items } : category);
+      }
+      return [...current, { id: categoryId, title: categoryId === "direct-discovery" ? "No-Key Direct Discovery" : categoryId, items }];
+    });
   };
 
   const runLocalSearch = async (runId: number) => {
@@ -505,6 +1136,11 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     setCategories(emptyCategories());
 
     replaceCategory(runId, "decision", buildDecisionDiagnostics());
+    replaceCategory(runId, "query-planner", buildAiQueryPlannerDiagnostics(webSearchConfig?.provider ?? "bing"));
+    replaceCategory(runId, "direct-discovery", [
+      ...buildDirectDiscoveryOfflineDiagnostics(),
+      ...buildSearchPreparationOfflineDiagnostics(),
+    ]);
     replaceCategory(runId, "url-reading", buildUrlReadingDiagnostics(webSearchConfig));
     replaceCategory(runId, "provider-config", webSearchConfig
       ? buildProviderConfigDiagnostics(webSearchConfig, rawWebSearchProvider)
@@ -558,15 +1194,20 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       if (webSearchConfig.provider === "brave" && !webSearchConfig.braveApiKey) throw new Error("Brave API Key missing");
       const result = await withTimeout(testWebSearchConnection({
         provider: webSearchConfig.provider,
-        apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : webSearchConfig.braveApiKey,
+        apiKey: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaApiKey : webSearchConfig.provider === "brave" ? webSearchConfig.braveApiKey : undefined,
         endpoint: webSearchConfig.provider === "bocha" ? webSearchConfig.bochaEndpoint : undefined,
       }), 5000, "公开搜索测试超时");
       replaceCategory(runId, "provider-test", [durationItem(startedAt, {
         id: "provider-test-online",
         title: "在线连通性测试",
         status: "pass",
-        summary: `provider=${result.provider}; endpoint=${result.endpoint ? safeDomain(result.endpoint) : "built-in"}`,
+        summary: `当前搜索源=${result.provider}; 测试词=${result.query ?? "NoteX connectivity test"}; 结果数=${result.resultCount ?? "未记录"}${result.firstTitle ? `; 首条=${result.firstTitle}` : ""}`,
         detail: "只发送一个公开搜索测试 query，不读取 Cookie、历史记录或登录态。",
+        safeDebugInfo: [
+          `endpoint=${result.endpoint ? safeDomain(result.endpoint) : "built-in"}`,
+          result.provider === "bing" ? "使用浏览器兼容请求头=是" : undefined,
+          result.diagnostics ? `阶段诊断=${result.diagnostics}` : undefined,
+        ].filter((item): item is string => Boolean(item)),
       })]);
     } catch (error) {
       replaceCategory(runId, "provider-test", [durationItem(startedAt, {

@@ -241,6 +241,7 @@ pub fn run() {
             ai::fetch_web_source_excerpts,
             ai::clear_web_cache,
             ai::test_web_search_connection,
+            ai::plan_search_queries,
             ai::get_prompt_citation_contract_status,
             web_cache::get_web_cache_status,
             local_search::search_local_notes,
