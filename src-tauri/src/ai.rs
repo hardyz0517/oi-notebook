@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     collections::{BTreeMap, HashSet},
     error::Error,
     fs,
@@ -1518,9 +1518,7 @@ fn clean_planner_text(value: &str, max_chars: usize) -> String {
 
 fn has_url_like_text(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    lower.contains("http://")
-        || lower.contains("https://")
-        || lower.contains("www.")
+    lower.contains("http://") || lower.contains("https://") || lower.contains("www.")
 }
 
 fn json_string_array(value: Option<&JsonValue>, max_items: usize, max_chars: usize) -> Vec<String> {
@@ -1602,14 +1600,26 @@ fn parse_ai_search_query_plan(
         .filter(|text| {
             matches!(
                 text.as_str(),
-                "news" | "oi" | "algorithm" | "general_web" | "product" | "docs" | "explicit_url" | "no_search"
+                "news"
+                    | "oi"
+                    | "algorithm"
+                    | "general_web"
+                    | "product"
+                    | "docs"
+                    | "explicit_url"
+                    | "no_search"
             )
         });
     let depth = value
         .get("depth")
         .and_then(JsonValue::as_str)
         .map(|text| text.trim().to_ascii_lowercase())
-        .filter(|text| matches!(text.as_str(), "quick" | "normal" | "deep" | "news" | "oi_research"));
+        .filter(|text| {
+            matches!(
+                text.as_str(),
+                "quick" | "normal" | "deep" | "news" | "oi_research"
+            )
+        });
     let read_budget = value
         .get("readBudget")
         .and_then(JsonValue::as_u64)
@@ -1787,7 +1797,9 @@ fn parse_chat_completion_response(
 
         if looks_like_html(body_trimmed) {
             return Err(AiResponseIssue::non_retryable(
-                format!("AI service returned HTTP {status_code}, and the error response was not JSON."),
+                format!(
+                    "AI service returned HTTP {status_code}, and the error response was not JSON."
+                ),
                 format!(
                     "debug=http_status={status_code}; error_body_preview={}",
                     sanitize_ai_detail(body_trimmed)
@@ -1982,7 +1994,10 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
                 source.page_type.as_deref(),
                 Some("news_article") | Some("article")
             ) || source.news_like == Some(true)
-                || source.search_stage.as_deref().is_some_and(|stage| stage.starts_with("news"))
+                || source
+                    .search_stage
+                    .as_deref()
+                    .is_some_and(|stage| stage.starts_with("news"))
         })
         .count();
     let mut news_event_clusters = context_sources
@@ -1992,7 +2007,10 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
                 source.page_type.as_deref(),
                 Some("news_article") | Some("article")
             ) || source.news_like == Some(true)
-                || source.search_stage.as_deref().is_some_and(|stage| stage.starts_with("news"))
+                || source
+                    .search_stage
+                    .as_deref()
+                    .is_some_and(|stage| stage.starts_with("news"))
         })
         .filter_map(|source| source.event_cluster.as_deref())
         .filter(|value| !value.trim().is_empty())
@@ -2378,18 +2396,25 @@ fn build_local_note_sources_context(sources: &[LocalNoteSearchResult]) -> Option
             continue;
         }
         let reason = truncate_local_note_context_text(&source.reason, 220);
+        let heading_path = if source.heading_path.is_empty() {
+            "none".to_string()
+        } else {
+            truncate_local_note_context_text(&source.heading_path.join(" / "), 220)
+        };
         let line_range = match (source.line_start, source.line_end) {
             (Some(start), Some(end)) if end >= start => format!("{start}-{end}"),
             (Some(start), _) => start.to_string(),
             _ => "unknown".to_string(),
         };
         entries.push(format!(
-            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nTitle: {}\nRelative path: {}\nIs current note: {}\nScore: {}\nReason: {}\nLines: {}\nSnippet:\n{}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nTitle: {}\nRelative path: {}\nHeading path: {}\nChunk index: {}\nIs current note: {}\nScore: {}\nReason: {}\nLines: {}\nSnippet:\n{}",
             local_citation_id,
             local_citation_id,
             local_citation_id,
             title,
             relative_path,
+            heading_path,
+            source.chunk_index,
             source.is_current_note,
             source.score,
             if reason.is_empty() { "matched local note content" } else { &reason },
@@ -3086,7 +3111,11 @@ fn validate_polished_prompt_template_content(
     let polished_variables = extract_prompt_variables(polished_prompt);
     let missing_variables = original_variables
         .iter()
-        .filter(|variable| !polished_variables.iter().any(|candidate| candidate == *variable))
+        .filter(|variable| {
+            !polished_variables
+                .iter()
+                .any(|candidate| candidate == *variable)
+        })
         .cloned()
         .collect::<Vec<_>>();
     if !missing_variables.is_empty() {
@@ -3097,7 +3126,11 @@ fn validate_polished_prompt_template_content(
     }
     let new_variables = polished_variables
         .iter()
-        .filter(|variable| !original_variables.iter().any(|candidate| candidate == *variable))
+        .filter(|variable| {
+            !original_variables
+                .iter()
+                .any(|candidate| candidate == *variable)
+        })
         .cloned()
         .collect::<Vec<_>>();
     if !new_variables.is_empty() {
@@ -3595,7 +3628,8 @@ fn polish_ai_prompt_template_blocking(
     let selected_config = config_from_resolved(resolved.clone());
     let original_variables = extract_prompt_variables(prompt_content);
     let variables_text = if original_variables.is_empty() {
-        "No variables are present in this template. Do not add any new {{variable}} placeholders.".to_string()
+        "No variables are present in this template. Do not add any new {{variable}} placeholders."
+            .to_string()
     } else {
         original_variables.join(", ")
     };
@@ -3652,13 +3686,18 @@ pub async fn polish_ai_prompt_template(
     .map_err(|e| format!("AI prompt polish failed: task join failed: {e}"))?
 }
 
-fn plan_search_queries_blocking(input: AiSearchQueryPlanInput) -> Result<AiSearchQueryPlan, String> {
+fn plan_search_queries_blocking(
+    input: AiSearchQueryPlanInput,
+) -> Result<AiSearchQueryPlan, String> {
     let user_input = input.user_input.trim();
     if user_input.is_empty() {
         return Err("AI query planner failed: user input is empty".to_string());
     }
     if has_url_like_text(user_input) {
-        return Err("AI query planner skipped: explicit URL reading does not need query planning".to_string());
+        return Err(
+            "AI query planner skipped: explicit URL reading does not need query planning"
+                .to_string(),
+        );
     }
 
     let config = read_config()?.ai;
@@ -3670,7 +3709,11 @@ fn plan_search_queries_blocking(input: AiSearchQueryPlanInput) -> Result<AiSearc
     let selected_config = config_from_resolved(resolved.clone());
     let max_queries = input
         .max_queries
-        .unwrap_or(if input.provider.trim() == WEB_SEARCH_BING_PROVIDER { 2 } else { 3 })
+        .unwrap_or(if input.provider.trim() == WEB_SEARCH_BING_PROVIDER {
+            2
+        } else {
+            3
+        })
         .clamp(1, 3);
     let rule_queries = input
         .rule_based_queries
@@ -3701,7 +3744,12 @@ fn plan_search_queries_blocking(input: AiSearchQueryPlanInput) -> Result<AiSearc
     let current_month_text = current_date
         .split_once('-')
         .and_then(|(year, rest)| rest.split_once('-').map(|(month, _)| (year, month)))
-        .and_then(|(year, month)| month.parse::<u32>().ok().map(|month| format!("{year}-{month:02}")))
+        .and_then(|(year, month)| {
+            month
+                .parse::<u32>()
+                .ok()
+                .map(|month| format!("{year}-{month:02}"))
+        })
         .unwrap_or_else(|| current_date_text.clone());
     let current_time_zone = input
         .current_time_zone
@@ -4520,9 +4568,7 @@ fn is_bing_block_page(status: reqwest::StatusCode, body: &str) -> Option<&'stati
 }
 
 fn compact_bing_query(query: &str) -> String {
-    let mut text = query
-        .replace("what is", " ")
-        .replace("tell me", " ");
+    let mut text = query.replace("what is", " ").replace("tell me", " ");
     text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     text.chars().take(100).collect()
 }
@@ -4703,7 +4749,9 @@ fn unwrap_bing_redirect_url(raw_href: &str) -> Option<String> {
         return None;
     }
     let base = reqwest::Url::parse("https://www.bing.com/").ok()?;
-    let parsed = reqwest::Url::parse(&trimmed).or_else(|_| base.join(&trimmed)).ok()?;
+    let parsed = reqwest::Url::parse(&trimmed)
+        .or_else(|_| base.join(&trimmed))
+        .ok()?;
     let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
     let path = parsed.path().to_ascii_lowercase();
     if host.ends_with("bing.com") && (path.starts_with("/ck/") || path.starts_with("/aclick")) {
@@ -4866,8 +4914,8 @@ fn bing_news_filter_reason(source: &WebSearchResult, strict: bool) -> Option<&'s
         return Some("not_news_like");
     }
     let official_company_host = host == "openai.com" || host == "anthropic.com";
-    let official_company_news_path =
-        official_company_host && (path.contains("/news") || path.contains("/blog") || path.contains("/announcement"));
+    let official_company_news_path = official_company_host
+        && (path.contains("/news") || path.contains("/blog") || path.contains("/announcement"));
     if official_company_host && !official_company_news_path {
         return Some("docs_or_homepage");
     }
@@ -4897,7 +4945,10 @@ fn bing_news_filter_reason(source: &WebSearchResult, strict: bool) -> Option<&'s
             || path.contains("/technology")
             || path.contains("/article")
             || !official_company_host);
-    let has_date = source.date_hint.as_deref().is_some_and(|value| !value.trim().is_empty());
+    let has_date = source
+        .date_hint
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
     let event_like = [
         "announces",
         "launches",
@@ -4918,7 +4969,10 @@ fn bing_news_filter_reason(source: &WebSearchResult, strict: bool) -> Option<&'s
     .iter()
     .any(|keyword| text.contains(keyword));
 
-    if known_news || (has_date && event_like) || (!strict && has_date && is_known_news_domain(&host)) {
+    if known_news
+        || (has_date && event_like)
+        || (!strict && has_date && is_known_news_domain(&host))
+    {
         return None;
     }
     Some("not_news_like")
@@ -4931,16 +4985,14 @@ fn parse_bing_date_hint(value: &str) -> Option<chrono::DateTime<Utc>> {
     }
     chrono::DateTime::parse_from_rfc2822(trimmed)
         .map(|date| date.with_timezone(&Utc))
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(trimmed).map(|date| date.with_timezone(&Utc)))
+        .or_else(|_| {
+            chrono::DateTime::parse_from_rfc3339(trimmed).map(|date| date.with_timezone(&Utc))
+        })
         .ok()
 }
 
 fn bing_news_freshness_score(source: &WebSearchResult) -> i64 {
-    let Some(date) = source
-        .date_hint
-        .as_deref()
-        .and_then(parse_bing_date_hint)
-    else {
+    let Some(date) = source.date_hint.as_deref().and_then(parse_bing_date_hint) else {
         let (host, _) = host_and_path(&source.url);
         return if is_known_news_domain(&host) { 4 } else { -3 };
     };
@@ -4961,10 +5013,7 @@ fn bing_news_freshness_score(source: &WebSearchResult) -> i64 {
     }
 }
 
-fn filter_bing_news_results(
-    sources: Vec<WebSearchResult>,
-    strict: bool,
-) -> Vec<WebSearchResult> {
+fn filter_bing_news_results(sources: Vec<WebSearchResult>, strict: bool) -> Vec<WebSearchResult> {
     let mut filtered = sources
         .into_iter()
         .filter_map(|mut source| {
@@ -5006,7 +5055,10 @@ fn bing_result_to_web_source(
                     .unwrap_or("")
                     .to_ascii_lowercase()
                     .ends_with("bing.com")
-                    && parsed.path().to_ascii_lowercase().contains("/news/apiclick.aspx")
+                    && parsed
+                        .path()
+                        .to_ascii_lowercase()
+                        .contains("/news/apiclick.aspx")
             });
     if url.contains("bing.com/search") {
         return None;
@@ -5033,7 +5085,11 @@ fn bing_result_to_web_source(
         source_reliability: None,
         discovered_by: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
         feed_url: None,
-        source_home: if unwrapped_bing_apiclick { Some(discovered_url.clone()) } else { None },
+        source_home: if unwrapped_bing_apiclick {
+            Some(discovered_url.clone())
+        } else {
+            None
+        },
         direct_discovery_reason: None,
         search_provider: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
         search_stage: Some(stage.to_string()),
@@ -5056,7 +5112,11 @@ fn bing_result_to_web_source(
         reliability_label: Some(reliability_label),
         reliability_reason: Some(format!(
             "{reliability_reason} Bing public search stage={stage}.{}",
-            if unwrapped_bing_apiclick { " Unwrapped Bing news apiclick URL before URL Reader." } else { "" }
+            if unwrapped_bing_apiclick {
+                " Unwrapped Bing news apiclick URL before URL Reader."
+            } else {
+                ""
+            }
         )),
         relevance: None,
         relevance_label: None,
@@ -5101,11 +5161,7 @@ fn clean_bing_markup_text(text: &str, max_chars: usize) -> String {
         .strip_prefix("<![CDATA[")
         .unwrap_or(text.trim())
         .strip_suffix("]]>")
-        .unwrap_or_else(|| {
-            text.trim()
-                .strip_prefix("<![CDATA[")
-                .unwrap_or(text.trim())
-        });
+        .unwrap_or_else(|| text.trim().strip_prefix("<![CDATA[").unwrap_or(text.trim()));
     sanitize_search_text(trimmed, max_chars)
 }
 
@@ -5132,7 +5188,11 @@ fn sanitize_bing_diag_value(value: &str, max_chars: usize) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("_");
-    if cleaned.is_empty() { "-".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "-".to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn decode_numeric_html_entities(text: &str) -> String {
@@ -5169,7 +5229,10 @@ fn clean_bing_feed_text(text: &str, max_chars: usize) -> String {
         .unwrap_or(text.trim())
         .strip_suffix("]]>")
         .unwrap_or_else(|| text.trim().strip_prefix("<![CDATA[").unwrap_or(text.trim()));
-    sanitize_search_text(&decode_numeric_html_entities(&decode_html_entities(trimmed)), max_chars)
+    sanitize_search_text(
+        &decode_numeric_html_entities(&decode_html_entities(trimmed)),
+        max_chars,
+    )
 }
 
 fn detect_bing_body_kind(content_type: &str, body: &str) -> String {
@@ -5215,13 +5278,16 @@ fn detect_bing_body_kind(content_type: &str, body: &str) -> String {
 }
 
 fn visible_text_preview(body: &str) -> String {
-    safe_preview(&sanitize_search_text(
-        &strip_html_tags_to_text(body)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" "),
+    safe_preview(
+        &sanitize_search_text(
+            &strip_html_tags_to_text(body)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+            300,
+        ),
         300,
-    ), 300)
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -5343,7 +5409,16 @@ fn score_bing_anchor_candidate(title: &str, url: &str, context: &str, news_mode:
             score += 2;
         }
     }
-    for keyword in ["minutes ago", "minute ago", "hours ago", "hour ago", "today", "yesterday", "may 2026", "2026"] {
+    for keyword in [
+        "minutes ago",
+        "minute ago",
+        "hours ago",
+        "hour ago",
+        "today",
+        "yesterday",
+        "may 2026",
+        "2026",
+    ] {
         if text.contains(keyword) {
             score += 3;
         }
@@ -5353,7 +5428,18 @@ fn score_bing_anchor_candidate(title: &str, url: &str, context: &str, news_mode:
             score += 2;
         }
     }
-    for keyword in ["news", "announcement", "release", "launch", "funding", "partnership", "report", "update", "today", "yesterday"] {
+    for keyword in [
+        "news",
+        "announcement",
+        "release",
+        "launch",
+        "funding",
+        "partnership",
+        "report",
+        "update",
+        "today",
+        "yesterday",
+    ] {
         if title.contains(keyword) || context.contains(keyword) {
             score += 2;
         }
@@ -5361,17 +5447,31 @@ fn score_bing_anchor_candidate(title: &str, url: &str, context: &str, news_mode:
     if is_known_news_domain(&host) {
         score += 5;
     }
-    if path.contains("/news") || path.contains("/technology") || path.contains("/article") || path.contains("/blog") {
+    if path.contains("/news")
+        || path.contains("/technology")
+        || path.contains("/article")
+        || path.contains("/blog")
+    {
         score += 3;
     }
-    if news_mode && (host.contains("wikipedia.org") || host.contains("britannica.com") || host.contains("github.com") || path.contains("/docs") || path.contains("/learn/what-is")) {
+    if news_mode
+        && (host.contains("wikipedia.org")
+            || host.contains("britannica.com")
+            || host.contains("github.com")
+            || path.contains("/docs")
+            || path.contains("/learn/what-is"))
+    {
         score -= 8;
     }
     score
 }
 
 #[allow(dead_code)]
-fn parse_all_anchors_fallback(body: &str, max_results: usize, stage: &str) -> BingAnchorFallbackReport {
+fn parse_all_anchors_fallback(
+    body: &str,
+    max_results: usize,
+    stage: &str,
+) -> BingAnchorFallbackReport {
     let lower = body.to_ascii_lowercase();
     let news_mode = stage.starts_with("news") || lower.contains("news");
     let mut scanned_count = 0;
@@ -5382,15 +5482,19 @@ fn parse_all_anchors_fallback(body: &str, max_results: usize, stage: &str) -> Bi
     let mut cursor = 0;
     while cursor < lower.len() {
         cursor = char_boundary_at_or_after(&lower, cursor);
-        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a") else {
+        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a")
+        else {
             break;
         };
         let start = cursor + relative_start;
-        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>') else {
+        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>')
+        else {
             break;
         };
         let tag_end = start + tag_end_relative;
-        let Some(close_relative) = safe_slice_by_byte_range(&lower, tag_end + 1, lower.len()).find("</a>") else {
+        let Some(close_relative) =
+            safe_slice_by_byte_range(&lower, tag_end + 1, lower.len()).find("</a>")
+        else {
             cursor = char_boundary_at_or_after(&lower, tag_end.saturating_add(1));
             continue;
         };
@@ -5410,12 +5514,19 @@ fn parse_all_anchors_fallback(body: &str, max_results: usize, stage: &str) -> Bi
             continue;
         };
         external_count += 1;
-        let context = clean_bing_markup_text(&strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)), 360);
+        let context = clean_bing_markup_text(
+            &strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)),
+            360,
+        );
         let date_hint = extract_bing_relative_date_hint(&format!("{title} {context}"));
         let score = score_bing_anchor_candidate(&title, &url, &context, news_mode);
         if previews.len() < 5 {
             let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
-            previews.push(format!("{}@{}", sanitize_bing_diag_value(&title, 72), sanitize_bing_diag_value(&host, 48)));
+            previews.push(format!(
+                "{}@{}",
+                sanitize_bing_diag_value(&title, 72),
+                sanitize_bing_diag_value(&host, 48)
+            ));
         }
         if title.len() < 4 || (news_mode && score < 2) {
             rejected_count += 1;
@@ -5465,7 +5576,11 @@ fn parse_all_anchors_fallback(body: &str, max_results: usize, stage: &str) -> Bi
     }
 }
 
-fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) -> BingAnchorFallbackReport {
+fn parse_all_bing_anchors_fallback(
+    body: &str,
+    max_results: usize,
+    stage: &str,
+) -> BingAnchorFallbackReport {
     let lower = body.to_ascii_lowercase();
     let news_mode = stage.starts_with("news") || lower.contains("news");
     let mut raw_anchor_count = 0;
@@ -5479,11 +5594,13 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
     let mut cursor = 0;
     while cursor < lower.len() {
         cursor = char_boundary_at_or_after(&lower, cursor);
-        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a") else {
+        let Some(relative_start) = safe_slice_by_byte_range(&lower, cursor, lower.len()).find("<a")
+        else {
             break;
         };
         let start = cursor + relative_start;
-        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>') else {
+        let Some(tag_end_relative) = safe_slice_by_byte_range(&lower, start, lower.len()).find('>')
+        else {
             break;
         };
         let tag_end = start + tag_end_relative;
@@ -5501,25 +5618,36 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
         let title = clean_bing_markup_text(&strip_html_tags_to_text(inner), 160);
         let Some(href) = html_attr_value(tag, "href") else {
             rejected_count += 1;
-            *filtered_counts.entry("missing_href".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("missing_href".to_string())
+                .or_insert(0) += 1;
             cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
             continue;
         };
         raw_href_count += 1;
         let Some(url) = clean_bing_anchor_url(&href) else {
             rejected_count += 1;
-            *filtered_counts.entry("url_decode_or_internal".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("url_decode_or_internal".to_string())
+                .or_insert(0) += 1;
             cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
             continue;
         };
         decoded_url_candidate_count += 1;
         external_count += 1;
-        let context = clean_bing_markup_text(&strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)), 360);
+        let context = clean_bing_markup_text(
+            &strip_html_tags_to_text(&safe_text_window(body, start, 450, 550)),
+            360,
+        );
         let date_hint = extract_bing_relative_date_hint(&format!("{title} {context}"));
         let score = score_bing_anchor_candidate(&title, &url, &context, news_mode);
         if previews.len() < 5 {
             let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
-            previews.push(format!("{}@{}", sanitize_bing_diag_value(&title, 72), sanitize_bing_diag_value(&host, 48)));
+            previews.push(format!(
+                "{}@{}",
+                sanitize_bing_diag_value(&title, 72),
+                sanitize_bing_diag_value(&host, 48)
+            ));
         }
         let (host, path) = host_and_path(&url);
         let path_looks_news = path.contains("/news")
@@ -5530,13 +5658,17 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
         let keep_without_snippet = news_mode && (is_known_news_domain(&host) || path_looks_news);
         if title.len() < 4 && !keep_without_snippet {
             rejected_count += 1;
-            *filtered_counts.entry("empty_title".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("empty_title".to_string())
+                .or_insert(0) += 1;
             cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
             continue;
         }
         if news_mode && score < 2 && !keep_without_snippet {
             rejected_count += 1;
-            *filtered_counts.entry("low_news_score".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("low_news_score".to_string())
+                .or_insert(0) += 1;
             cursor = char_boundary_at_or_after(&lower, close.saturating_add(4));
             continue;
         }
@@ -5557,14 +5689,20 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
         raw_href_count += 1;
         let Some(url) = clean_bing_anchor_url(&raw_url) else {
             rejected_count += 1;
-            *filtered_counts.entry("url_decode_or_internal".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("url_decode_or_internal".to_string())
+                .or_insert(0) += 1;
             continue;
         };
         decoded_url_candidate_count += 1;
         external_count += 1;
         if previews.len() < 5 {
             let host = site_from_url(&url).unwrap_or_else(|| "-".to_string());
-            previews.push(format!("{}@{}", sanitize_bing_diag_value(&url, 72), sanitize_bing_diag_value(&host, 48)));
+            previews.push(format!(
+                "{}@{}",
+                sanitize_bing_diag_value(&url, 72),
+                sanitize_bing_diag_value(&host, 48)
+            ));
         }
         let (host, path) = host_and_path(&url);
         if news_mode
@@ -5575,7 +5713,9 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
             && !path.contains("/blog")
         {
             rejected_count += 1;
-            *filtered_counts.entry("raw_url_not_news_like".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("raw_url_not_news_like".to_string())
+                .or_insert(0) += 1;
             continue;
         }
         candidates.push(BingAnchorCandidate {
@@ -5607,7 +5747,9 @@ fn parse_all_bing_anchors_fallback(body: &str, max_results: usize, stage: &str) 
             results.push(source);
         } else {
             rejected_count += 1;
-            *filtered_counts.entry("result_url_rejected".to_string()).or_insert(0) += 1;
+            *filtered_counts
+                .entry("result_url_rejected".to_string())
+                .or_insert(0) += 1;
         }
     }
     let kept_count = results.len();
@@ -5649,7 +5791,9 @@ fn extract_http_urls_from_text(text: &str) -> Vec<String> {
                     || ch == ']'
             })
             .unwrap_or(rest.len());
-        let candidate = safe_slice_by_byte_range(rest, 0, end).trim_end_matches(['.', ',', ';', ':']).to_string();
+        let candidate = safe_slice_by_byte_range(rest, 0, end)
+            .trim_end_matches(['.', ',', ';', ':'])
+            .to_string();
         if !candidate.is_empty() && urls.len() < 24 && !urls.contains(&candidate) {
             urls.push(candidate);
         }
@@ -5659,7 +5803,10 @@ fn extract_http_urls_from_text(text: &str) -> Vec<String> {
 }
 
 fn lower_find_from(haystack_lower: &str, needle: &str, start: usize) -> Option<usize> {
-    haystack_lower.get(start..)?.find(needle).map(|index| start + index)
+    haystack_lower
+        .get(start..)?
+        .find(needle)
+        .map(|index| start + index)
 }
 
 fn xml_elements_by_tag(text: &str, tag: &str) -> Vec<String> {
@@ -5793,7 +5940,11 @@ fn parse_bing_rss_report(body: &str, max_results: usize, stage: &str) -> BingPar
             &link,
             &description,
             stage,
-            if date_hint.is_empty() { None } else { Some(date_hint) },
+            if date_hint.is_empty() {
+                None
+            } else {
+                Some(date_hint)
+            },
         ) {
             results.push(source);
         } else {
@@ -5975,20 +6126,46 @@ fn safe_text_window(text: &str, byte_index: usize, before: usize, after: usize) 
 fn extract_bing_relative_date_hint(text: &str) -> Option<String> {
     let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let lower = compact.to_ascii_lowercase();
-    for marker in ["minutes ago", "minute ago", "hours ago", "hour ago", "today", "yesterday"] {
+    for marker in [
+        "minutes ago",
+        "minute ago",
+        "hours ago",
+        "hour ago",
+        "today",
+        "yesterday",
+    ] {
         if let Some(index) = lower.find(&marker.to_ascii_lowercase()) {
-            return Some(sanitize_search_text(&safe_text_window(&compact, index, 12, 18), 80));
+            return Some(sanitize_search_text(
+                &safe_text_window(&compact, index, 12, 18),
+                80,
+            ));
         }
     }
     if let Some(year_index) = compact.find("202") {
-        return Some(sanitize_search_text(&safe_text_window(&compact, year_index, 2, 18), 80));
+        return Some(sanitize_search_text(
+            &safe_text_window(&compact, year_index, 2, 18),
+            80,
+        ));
     }
     for month in [
-        "January", "February", "March", "April", "May", "June", "July", "August",
-        "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ] {
         if let Some(index) = compact.find(month) {
-            return Some(sanitize_search_text(&safe_text_window(&compact, index, 0, 22), 80));
+            return Some(sanitize_search_text(
+                &safe_text_window(&compact, index, 0, 22),
+                80,
+            ));
         }
     }
     None
@@ -6006,9 +6183,16 @@ fn looks_like_bing_news_block(fragment: &str) -> bool {
 }
 
 #[allow(dead_code)]
-fn parse_bing_news_card_results(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+fn parse_bing_news_card_results(
+    body: &str,
+    max_results: usize,
+    stage: &str,
+) -> Vec<WebSearchResult> {
     let mut results: Vec<WebSearchResult> = Vec::new();
-    for chunk in body.split("<div").filter(|chunk| looks_like_bing_news_block(chunk)) {
+    for chunk in body
+        .split("<div")
+        .filter(|chunk| looks_like_bing_news_block(chunk))
+    {
         if results.len() >= max_results {
             break;
         }
@@ -6022,13 +6206,19 @@ fn parse_bing_news_card_results(body: &str, max_results: usize, stage: &str) -> 
                 continue;
             };
             let title = title.trim();
-            if title.len() < 6 || title.eq_ignore_ascii_case("more") || title.contains("鍥剧墖") || title.contains("瑙嗛") {
+            if title.len() < 6
+                || title.eq_ignore_ascii_case("more")
+                || title.contains("鍥剧墖")
+                || title.contains("瑙嗛")
+            {
                 continue;
             }
             let block_text = strip_html_tags_to_text(chunk);
             let snippet = clean_bing_markup_text(&block_text, 240);
             let date_hint = extract_bing_relative_date_hint(&snippet);
-            if let Some(source) = bing_result_to_web_source(title, &href, &snippet, stage, date_hint) {
+            if let Some(source) =
+                bing_result_to_web_source(title, &href, &snippet, stage, date_hint)
+            {
                 if !results.iter().any(|item| item.url == source.url) {
                     results.push(source);
                     local_count += 1;
@@ -6042,7 +6232,10 @@ fn parse_bing_news_card_results(body: &str, max_results: usize, stage: &str) -> 
 #[allow(dead_code)]
 fn parse_bing_html_results(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
     let mut results = Vec::new();
-    if stage.starts_with("news") || body.contains("璧勮") || body.to_ascii_lowercase().contains("b_news") {
+    if stage.starts_with("news")
+        || body.contains("璧勮")
+        || body.to_ascii_lowercase().contains("b_news")
+    {
         results.extend(parse_bing_news_card_results(body, max_results, stage));
     }
     for chunk in body.split("<li").filter(|chunk| chunk.contains("b_algo")) {
@@ -6081,7 +6274,8 @@ fn parse_bing_html_results(body: &str, max_results: usize, stage: &str) -> Vec<W
             } else {
                 "web-html-fallback"
             };
-            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None) {
+            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None)
+            {
                 if !results.iter().any(|item| item.url == source.url) {
                     results.push(source);
                 }
@@ -6133,7 +6327,8 @@ fn parse_bing_news_html_results(body: &str, max_results: usize) -> Vec<WebSearch
             continue;
         }
         let snippet = clean_bing_markup_text(&strip_html_tags_to_text(chunk), 240);
-        if let Some(source) = bing_result_to_web_source(&title, &href, &snippet, "news-html", None) {
+        if let Some(source) = bing_result_to_web_source(&title, &href, &snippet, "news-html", None)
+        {
             if !results.iter().any(|item| item.url == source.url) {
                 results.push(source);
             }
@@ -6142,7 +6337,11 @@ fn parse_bing_news_html_results(body: &str, max_results: usize) -> Vec<WebSearch
     results
 }
 
-fn parse_bing_news_card_results_v2(body: &str, max_results: usize, stage: &str) -> Vec<WebSearchResult> {
+fn parse_bing_news_card_results_v2(
+    body: &str,
+    max_results: usize,
+    stage: &str,
+) -> Vec<WebSearchResult> {
     let mut results: Vec<WebSearchResult> = Vec::new();
     let mut blocks = body
         .split("<div")
@@ -6177,7 +6376,9 @@ fn parse_bing_news_card_results_v2(body: &str, max_results: usize, stage: &str) 
             {
                 continue;
             }
-            if let Some(source) = bing_result_to_web_source(title, &href, &snippet, stage, date_hint.clone()) {
+            if let Some(source) =
+                bing_result_to_web_source(title, &href, &snippet, stage, date_hint.clone())
+            {
                 if !results.iter().any(|item| item.url == source.url) {
                     results.push(source);
                 }
@@ -6224,7 +6425,10 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
         let date_hint = extract_bing_relative_date_hint(&strip_html_tags_to_text(chunk));
         if let Some(source) = bing_result_to_web_source(&title, &href, snippet, stage, date_hint) {
             if !results.iter().any(|item| item.url == source.url) {
-                if !matched_selectors.iter().any(|value| value == "li.b_algo h2 a") {
+                if !matched_selectors
+                    .iter()
+                    .any(|value| value == "li.b_algo h2 a")
+                {
                     matched_selectors.push("li.b_algo h2 a".to_string());
                 }
                 results.push(source);
@@ -6246,9 +6450,13 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
             } else {
                 "web-html-fallback"
             };
-            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None) {
+            if let Some(source) = bing_result_to_web_source(&title, &href, "", fallback_stage, None)
+            {
                 if !results.iter().any(|item| item.url == source.url) {
-                    if !matched_selectors.iter().any(|value| value == "h2 a fallback") {
+                    if !matched_selectors
+                        .iter()
+                        .any(|value| value == "h2 a fallback")
+                    {
                         matched_selectors.push("h2 a fallback".to_string());
                     }
                     results.push(source);
@@ -6258,7 +6466,9 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
             }
         }
     }
-    if results.len() < max_results && (stage.starts_with("news") || lower.contains("news") || body.contains("璧勮")) {
+    if results.len() < max_results
+        && (stage.starts_with("news") || lower.contains("news") || body.contains("璧勮"))
+    {
         for chunk in body.split("<a ").skip(1) {
             if results.len() >= max_results {
                 break;
@@ -6273,9 +6483,14 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
             }
             let snippet = clean_bing_markup_text(&strip_html_tags_to_text(chunk), 240);
             let date_hint = extract_bing_relative_date_hint(&snippet);
-            if let Some(source) = bing_result_to_web_source(&title, &href, &snippet, stage, date_hint) {
+            if let Some(source) =
+                bing_result_to_web_source(&title, &href, &snippet, stage, date_hint)
+            {
                 if !results.iter().any(|item| item.url == source.url) {
-                    if !matched_selectors.iter().any(|value| value == "all anchors news fallback") {
+                    if !matched_selectors
+                        .iter()
+                        .any(|value| value == "all anchors news fallback")
+                    {
                         matched_selectors.push("all anchors news fallback".to_string());
                     }
                     results.push(source);
@@ -6286,7 +6501,8 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
         }
     }
     let anchor_report = if results.len() < max_results {
-        let report = parse_all_bing_anchors_fallback(body, max_results.saturating_sub(results.len()), stage);
+        let report =
+            parse_all_bing_anchors_fallback(body, max_results.saturating_sub(results.len()), stage);
         if report.raw_anchor_count > 0
             && !matched_selectors
                 .iter()
@@ -6332,7 +6548,12 @@ fn parse_bing_html_report(body: &str, max_results: usize, stage: &str) -> BingPa
     };
     BingParseReport {
         results,
-        parser_used: if stage.starts_with("news") { "news-html" } else { "web-html" }.to_string(),
+        parser_used: if stage.starts_with("news") {
+            "news-html"
+        } else {
+            "web-html"
+        }
+        .to_string(),
         matched_selectors,
         rejected_count,
         parse_failure_hint,
@@ -6374,11 +6595,18 @@ fn extract_html_page_title(body: &str) -> Option<String> {
         return Some(title);
     }
     let lower = body.to_ascii_lowercase();
-    for marker in ["property=\"og:title\"", "property='og:title'", "name=\"description\"", "name='description'"] {
+    for marker in [
+        "property=\"og:title\"",
+        "property='og:title'",
+        "name=\"description\"",
+        "name='description'",
+    ] {
         let Some(marker_start) = lower.find(marker) else {
             continue;
         };
-        let tag_start = safe_slice_by_byte_range(&lower, 0, marker_start).rfind('<').unwrap_or(marker_start);
+        let tag_start = safe_slice_by_byte_range(&lower, 0, marker_start)
+            .rfind('<')
+            .unwrap_or(marker_start);
         let tag_end = safe_slice_by_byte_range(&lower, marker_start, lower.len())
             .find('>')
             .map(|offset| marker_start + offset)
@@ -6468,10 +6696,8 @@ fn bing_stage_parse_meta(page: &BingFetchedPage, report: &BingParseReport) -> St
             .collect::<Vec<_>>()
             .join(",")
     };
-    let visible_preview = sanitize_bing_diag_value(
-        report.visible_text_preview.as_deref().unwrap_or("-"),
-        180,
-    );
+    let visible_preview =
+        sanitize_bing_diag_value(report.visible_text_preview.as_deref().unwrap_or("-"), 180);
     let filtered_reasons = if report.filtered_reason_counts.is_empty() {
         "-".to_string()
     } else {
@@ -6510,7 +6736,12 @@ fn bing_stage_parse_meta(page: &BingFetchedPage, report: &BingParseReport) -> St
     )
 }
 
-fn bing_diagnostics_summary(provider: &str, vertical: &str, stages: &[String], final_reason: &str) -> String {
+fn bing_diagnostics_summary(
+    provider: &str,
+    vertical: &str,
+    stages: &[String],
+    final_reason: &str,
+) -> String {
     format!(
         "provider={provider}; vertical={vertical}; browserHeaders=enabled; attemptedStages={}; finalFailureReason={final_reason}",
         stages.join(" | ")
@@ -6531,7 +6762,10 @@ fn fetch_bing_public_page_once(
         url.query_pairs_mut().append_pair("format", "rss");
     }
     let locale = if use_locale {
-        if query.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)) {
+        if query
+            .chars()
+            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch))
+        {
             url.query_pairs_mut()
                 .append_pair("mkt", "zh-CN")
                 .append_pair("setlang", "zh-CN")
@@ -6687,7 +6921,8 @@ fn search_bing_public_sources(
         if news_mode {
             match fetch_bing_public_page(&client, &query, true, BingPublicRoute::News) {
                 Ok(page) => {
-                    let report = parse_bing_response_report(&page, query_remaining, "news-rss", true);
+                    let report =
+                        parse_bing_response_report(&page, query_remaining, "news-rss", true);
                     let parsed = report.results.clone();
                     let parsed_count = parsed.len();
                     query_results = filter_bing_news_results(parsed, false);
@@ -6701,7 +6936,11 @@ fn search_bing_public_sources(
                         parsed_count.saturating_sub(query_results.len()),
                         query_results.len(),
                         page.duration_ms,
-                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(if page.used_locale {
+                            "miss(locale)"
+                        } else {
+                            "miss(no-locale)"
+                        }),
                         Some(&parse_meta),
                     ));
                     if query_results.is_empty() {
@@ -6733,7 +6972,8 @@ fn search_bing_public_sources(
             if query_results.is_empty() {
                 match fetch_bing_public_page(&client, &query, false, BingPublicRoute::News) {
                     Ok(page) => {
-                        let report = parse_bing_response_report(&page, query_remaining, "news-html", false);
+                        let report =
+                            parse_bing_response_report(&page, query_remaining, "news-html", false);
                         let parsed = report.results.clone();
                         let parsed_count = parsed.len();
                         query_results = filter_bing_news_results(parsed, false);
@@ -6747,7 +6987,11 @@ fn search_bing_public_sources(
                             parsed_count.saturating_sub(query_results.len()),
                             query_results.len(),
                             page.duration_ms,
-                            Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                            Some(if page.used_locale {
+                                "miss(locale)"
+                            } else {
+                                "miss(no-locale)"
+                            }),
                             Some(&parse_meta),
                         ));
                         if query_results.is_empty() {
@@ -6782,7 +7026,8 @@ fn search_bing_public_sources(
             let rss_body = fetch_bing_public_page(&client, &query, true, BingPublicRoute::Web);
             query_results = match rss_body {
                 Ok(page) => {
-                    let report = parse_bing_response_report(&page, query_remaining, "web-rss", true);
+                    let report =
+                        parse_bing_response_report(&page, query_remaining, "web-rss", true);
                     let parsed = report.results.clone();
                     let parsed_count = parsed.len();
                     let filtered = if news_mode {
@@ -6800,7 +7045,11 @@ fn search_bing_public_sources(
                         parsed_count.saturating_sub(filtered.len()),
                         filtered.len(),
                         page.duration_ms,
-                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(if page.used_locale {
+                            "miss(locale)"
+                        } else {
+                            "miss(no-locale)"
+                        }),
                         Some(&parse_meta),
                     ));
                     filtered
@@ -6837,7 +7086,8 @@ fn search_bing_public_sources(
         if query_results.is_empty() {
             match fetch_bing_public_page(&client, &query, false, BingPublicRoute::Web) {
                 Ok(page) => {
-                    let report = parse_bing_response_report(&page, query_remaining, "web-html", false);
+                    let report =
+                        parse_bing_response_report(&page, query_remaining, "web-html", false);
                     let parsed = report.results.clone();
                     let parsed_count = parsed.len();
                     query_results = if news_mode {
@@ -6856,7 +7106,11 @@ fn search_bing_public_sources(
                         parsed_count.saturating_sub(query_results.len()),
                         query_results.len(),
                         page.duration_ms,
-                        Some(if page.used_locale { "miss(locale)" } else { "miss(no-locale)" }),
+                        Some(if page.used_locale {
+                            "miss(locale)"
+                        } else {
+                            "miss(no-locale)"
+                        }),
                         Some(&parse_meta),
                     ));
                 }
@@ -6878,9 +7132,26 @@ fn search_bing_public_sources(
             }
             if query_results.is_empty() {
                 let detail = if fallback_notes.is_empty() {
-                    format!("stage=complete; resultCount=0; diagnostics={}", bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "no_candidates"))
+                    format!(
+                        "stage=complete; resultCount=0; diagnostics={}",
+                        bing_diagnostics_summary(
+                            WEB_SEARCH_BING_PROVIDER,
+                            if news_mode { "news" } else { "web" },
+                            &stage_diags,
+                            "no_candidates"
+                        )
+                    )
                 } else {
-                    format!("stage=complete; resultCount=0; fallbackReason={}; diagnostics={}", fallback_notes.join(","), bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "all_filtered"))
+                    format!(
+                        "stage=complete; resultCount=0; fallbackReason={}; diagnostics={}",
+                        fallback_notes.join(","),
+                        bing_diagnostics_summary(
+                            WEB_SEARCH_BING_PROVIDER,
+                            if news_mode { "news" } else { "web" },
+                            &stage_diags,
+                            "all_filtered"
+                        )
+                    )
                 };
                 return Err(bing_public_error("parse_failed", &detail));
             }
@@ -6906,9 +7177,26 @@ fn search_bing_public_sources(
 
     if results.is_empty() {
         let detail = if fallback_notes.is_empty() {
-            format!("stage=complete; diagnostics={}", bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "no_candidates"))
+            format!(
+                "stage=complete; diagnostics={}",
+                bing_diagnostics_summary(
+                    WEB_SEARCH_BING_PROVIDER,
+                    if news_mode { "news" } else { "web" },
+                    &stage_diags,
+                    "no_candidates"
+                )
+            )
         } else {
-            format!("stage=complete; fallbackReason={}; diagnostics={}", fallback_notes.join(","), bing_diagnostics_summary(WEB_SEARCH_BING_PROVIDER, if news_mode { "news" } else { "web" }, &stage_diags, "all_filtered"))
+            format!(
+                "stage=complete; fallbackReason={}; diagnostics={}",
+                fallback_notes.join(","),
+                bing_diagnostics_summary(
+                    WEB_SEARCH_BING_PROVIDER,
+                    if news_mode { "news" } else { "web" },
+                    &stage_diags,
+                    "all_filtered"
+                )
+            )
         };
         return Err(bing_public_error("no_results", &detail));
     }
@@ -7224,8 +7512,8 @@ fn validate_public_web_url_for_read(url: &str) -> Result<reqwest::Url, WebReadFa
 }
 
 fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
-    let parsed =
-        reqwest::Url::parse(url.trim()).map_err(|_| "Web page URL is invalid and cannot be read.".to_string())?;
+    let parsed = reqwest::Url::parse(url.trim())
+        .map_err(|_| "Web page URL is invalid and cannot be read.".to_string())?;
     match parsed.scheme() {
         "http" | "https" => {}
         _ => return Err("Only public http / https web pages can be read.".to_string()),
@@ -7245,14 +7533,18 @@ fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
         || host.ends_with(".internal")
         || host.ends_with(".lan")
     {
-        return Err("Refusing to access localhost, private network, or local hostnames.".to_string());
+        return Err(
+            "Refusing to access localhost, private network, or local hostnames.".to_string(),
+        );
     }
     if is_search_engine_results_url(&host, parsed.path(), parsed.query()) {
         return Err("search engine result pages are not read".to_string());
     }
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_or_local_ip(ip) {
-            return Err("Refusing to access localhost, private network, or local addresses.".to_string());
+            return Err(
+                "Refusing to access localhost, private network, or local addresses.".to_string(),
+            );
         }
     } else {
         let port = parsed.port_or_known_default().unwrap_or(443);
@@ -7263,7 +7555,10 @@ fn validate_public_web_url(url: &str) -> Result<reqwest::Url, String> {
         for addr in addrs {
             resolved_any = true;
             if is_private_or_local_ip(addr.ip()) {
-                return Err("Web page host resolved to a private or local address; skipped read.".to_string());
+                return Err(
+                    "Web page host resolved to a private or local address; skipped read."
+                        .to_string(),
+                );
             }
         }
         if !resolved_any {
@@ -7370,7 +7665,10 @@ fn normalize_extracted_text(text: &str, max_chars: usize) -> String {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
-        if lower.contains("advertisement") || lower.contains("copyright") || lower.contains("all rights reserved") {
+        if lower.contains("advertisement")
+            || lower.contains("copyright")
+            || lower.contains("all rights reserved")
+        {
             continue;
         }
         lines.push(trimmed.to_string());
@@ -7414,7 +7712,7 @@ fn fetch_single_web_source_excerpt(
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("URL failed public web safety validation".to_string()),
                 code_blocks_truncated: Some(false),
-            ..Default::default()
+                ..Default::default()
             };
         }
     };
@@ -7461,7 +7759,14 @@ fn fetch_single_web_source_excerpt(
                 status: Some("failed".to_string()),
                 excerpt: None,
                 error: Some(message),
-                error_kind: Some(if error.is_timeout() { "timeout" } else { "unknown" }.to_string()),
+                error_kind: Some(
+                    if error.is_timeout() {
+                        "timeout"
+                    } else {
+                        "unknown"
+                    }
+                    .to_string(),
+                ),
                 fetched_at,
                 cache_status: Some("miss".to_string()),
                 cached_at: None,
@@ -7470,7 +7775,7 @@ fn fetch_single_web_source_excerpt(
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("HTTP request failed".to_string()),
                 code_blocks_truncated: Some(false),
-            ..Default::default()
+                ..Default::default()
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
@@ -7496,7 +7801,7 @@ fn fetch_single_web_source_excerpt(
             extractor: Some("none".to_string()),
             excerpt_reason: Some("Final URL failed public web safety validation".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7521,7 +7826,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some("HTTP status requires authorization".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7544,7 +7849,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not found".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7567,7 +7872,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not successful".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7602,7 +7907,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("content_type_unsupported".to_string()),
             excerpt_reason: Some("Content type is not extractable text or HTML".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7629,7 +7934,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("too_large".to_string()),
             excerpt_reason: Some("Response body is too large".to_string()),
             code_blocks_truncated: Some(false),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     }
@@ -7660,7 +7965,7 @@ fn fetch_single_web_source_excerpt(
                     error_kind: Some("too_large".to_string()),
                     excerpt_reason: Some("Response body exceeded size limit".to_string()),
                     code_blocks_truncated: Some(false),
-                ..Default::default()
+                    ..Default::default()
                 };
                 return finish_web_excerpt_result(result, &cache_key, cached);
             }
@@ -7685,7 +7990,7 @@ fn fetch_single_web_source_excerpt(
                 error_kind: Some("unknown".to_string()),
                 excerpt_reason: Some("Response body read failed".to_string()),
                 code_blocks_truncated: Some(false),
-            ..Default::default()
+                ..Default::default()
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
@@ -7731,7 +8036,7 @@ fn fetch_single_web_source_excerpt(
             error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some(extracted.reason),
             code_blocks_truncated: Some(extracted.code_blocks_truncated),
-        ..Default::default()
+            ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     };
@@ -7744,7 +8049,14 @@ fn fetch_single_web_source_excerpt(
         excerpt: Some(excerpt_text),
         error: None,
         final_url: Some(final_url),
-        status: Some(if extracted.quality == "partial" { "partial" } else { "fetched" }.to_string()),
+        status: Some(
+            if extracted.quality == "partial" {
+                "partial"
+            } else {
+                "fetched"
+            }
+            .to_string(),
+        ),
         error_kind: None,
         fetched_at,
         cache_status: Some("miss".to_string()),
@@ -7754,7 +8066,7 @@ fn fetch_single_web_source_excerpt(
         extractor: Some(extracted.extractor.to_string()),
         excerpt_reason: Some(extracted.reason),
         code_blocks_truncated: Some(extracted.code_blocks_truncated),
-    ..Default::default()
+        ..Default::default()
     };
     finish_web_excerpt_result(result, &cache_key, cached)
 }
@@ -8334,7 +8646,12 @@ fn discover_rss_items(
                 source_name: feed.name.to_string(),
                 source_type: "rss".to_string(),
                 url: feed_url.to_string(),
-                status: if error.is_timeout() { "timeout" } else { "failed" }.to_string(),
+                status: if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "failed"
+                }
+                .to_string(),
                 http_status: None,
                 content_type: None,
                 items_parsed: 0,
@@ -8389,7 +8706,8 @@ fn discover_rss_items(
             break;
         }
         let title = rss_field(block, &["title"]).unwrap_or_default();
-        let description = rss_field(block, &["description", "summary", "content"]).unwrap_or_default();
+        let description =
+            rss_field(block, &["description", "summary", "content"]).unwrap_or_default();
         if !rss_item_matches_topic(&title, &description, keywords) {
             continue;
         }
@@ -8424,7 +8742,8 @@ fn discover_rss_items(
             "no_match"
         } else {
             "success"
-        }.to_string(),
+        }
+        .to_string(),
         http_status: Some(status.as_u16()),
         content_type,
         items_parsed: blocks.len(),
@@ -8541,7 +8860,11 @@ fn discover_direct_docs_sources(
         ));
     }
     if lower.contains("python") {
-        candidates.push(("Python Documentation", "https://docs.python.org/3/", "Python official docs candidate."));
+        candidates.push((
+            "Python Documentation",
+            "https://docs.python.org/3/",
+            "Python official docs candidate.",
+        ));
     }
     if lower.contains("rust") || lower.contains("ownership") {
         candidates.push((
@@ -8558,10 +8881,18 @@ fn discover_direct_docs_sources(
         ));
     }
     if lower.contains("vite") {
-        candidates.push(("Vite Guide", "https://vite.dev/guide/", "Vite docs candidate."));
+        candidates.push((
+            "Vite Guide",
+            "https://vite.dev/guide/",
+            "Vite docs candidate.",
+        ));
     }
     if lower.contains("tailwind") {
-        candidates.push(("Tailwind CSS Documentation", "https://tailwindcss.com/docs", "Tailwind docs candidate."));
+        candidates.push((
+            "Tailwind CSS Documentation",
+            "https://tailwindcss.com/docs",
+            "Tailwind docs candidate.",
+        ));
     }
     if lower.contains("typescript") || lower.contains(" ts ") {
         candidates.push((
@@ -8571,7 +8902,11 @@ fn discover_direct_docs_sources(
         ));
     }
     if lower.contains("node.js") || lower.contains("nodejs") || lower.contains("node ") {
-        candidates.push(("Node.js API", "https://nodejs.org/api/", "Node.js official API docs candidate."));
+        candidates.push((
+            "Node.js API",
+            "https://nodejs.org/api/",
+            "Node.js official API docs candidate.",
+        ));
     }
     let results = candidates
         .into_iter()
@@ -8621,7 +8956,12 @@ fn discover_direct_oi_sources(
     }
     let lower = combined.to_ascii_lowercase();
     let mut candidates: Vec<(String, String, String, String)> = Vec::new();
-    if let Some(problem_id) = request.problem_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(problem_id) = request
+        .problem_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         let upper = problem_id.to_ascii_uppercase();
         if upper.starts_with('P') && upper[1..].chars().all(|ch| ch.is_ascii_digit()) {
             candidates.push((
@@ -8638,7 +8978,8 @@ fn discover_direct_oi_sources(
             ));
         }
     }
-    if lower.contains("centroid") || combined.contains("点分治") || combined.contains("点分树") {
+    if lower.contains("centroid") || combined.contains("点分治") || combined.contains("点分树")
+    {
         candidates.push((
             "cp-algorithms centroid decomposition".to_string(),
             "https://cp-algorithms.com/graph/centroid_decomposition.html".to_string(),
@@ -8692,7 +9033,8 @@ fn discover_direct_oi_sources(
             "OI direct candidate for segment tree.".to_string(),
         ));
     }
-    if lower.contains("z function") || lower.contains("z-function") || combined.contains("z 函数") {
+    if lower.contains("z function") || lower.contains("z-function") || combined.contains("z 函数")
+    {
         candidates.push((
             "cp-algorithms Z-function".to_string(),
             "https://cp-algorithms.com/string/z-function.html".to_string(),
@@ -8736,17 +9078,35 @@ fn discover_direct_oi_sources(
 
 fn direct_discovery_debug_string(report: &DirectDiscoveryReport) -> String {
     let mut parts = vec![
-        format!("directDiscoveryAttempted={}", if report.attempted { "yes" } else { "no" }),
-        format!("directDiscoverySkippedReason={}", sanitize_ai_detail(report.skipped_reason.as_deref().unwrap_or(""))),
-        format!("directDiscoveryIntent={}", sanitize_ai_detail(&report.intent)),
-        format!("directDiscoveryFreshness={}", sanitize_ai_detail(&report.freshness)),
+        format!(
+            "directDiscoveryAttempted={}",
+            if report.attempted { "yes" } else { "no" }
+        ),
+        format!(
+            "directDiscoverySkippedReason={}",
+            sanitize_ai_detail(report.skipped_reason.as_deref().unwrap_or(""))
+        ),
+        format!(
+            "directDiscoveryIntent={}",
+            sanitize_ai_detail(&report.intent)
+        ),
+        format!(
+            "directDiscoveryFreshness={}",
+            sanitize_ai_detail(&report.freshness)
+        ),
         format!("directDiscoveryQuery={}", sanitize_ai_detail(&report.query)),
-        format!("directDiscoveryTopicKeywords={}", sanitize_ai_detail(&report.topic_keywords.join(","))),
+        format!(
+            "directDiscoveryTopicKeywords={}",
+            sanitize_ai_detail(&report.topic_keywords.join(","))
+        ),
         format!("directDiscoverySourcesTried={}", report.sources_tried.len()),
         format!("directDiscoveryCandidatesFound={}", report.candidates_found),
         format!("directDiscoveryCandidatesKept={}", report.candidates_kept),
         format!("directDiscoveryDurationMs={}", report.duration_ms),
-        format!("directDiscoveryCacheBehavior={}", sanitize_ai_detail(&report.cache_behavior)),
+        format!(
+            "directDiscoveryCacheBehavior={}",
+            sanitize_ai_detail(&report.cache_behavior)
+        ),
     ];
     for (index, attempt) in report.sources_tried.iter().enumerate() {
         parts.push(format!(
@@ -8767,13 +9127,8 @@ fn direct_discovery_debug_string(report: &DirectDiscoveryReport) -> String {
     parts.join(";")
 }
 
-fn attach_direct_discovery_debug(
-    existing: Option<&str>,
-    direct_debug: &str,
-) -> String {
-    let existing = existing
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+fn attach_direct_discovery_debug(existing: Option<&str>, direct_debug: &str) -> String {
+    let existing = existing.map(str::trim).filter(|value| !value.is_empty());
     match existing {
         Some(existing) => format!("{direct_debug};{existing}"),
         None => direct_debug.to_string(),
@@ -8798,9 +9153,21 @@ fn discover_no_key_direct_sources_with_report(
         None
     };
     if skipped_reason.is_none() {
-        sources.extend(discover_direct_news_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
-        sources.extend(discover_direct_docs_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
-        sources.extend(discover_direct_oi_sources(request, max_results.saturating_sub(sources.len()), &mut attempts));
+        sources.extend(discover_direct_news_sources(
+            request,
+            max_results.saturating_sub(sources.len()),
+            &mut attempts,
+        ));
+        sources.extend(discover_direct_docs_sources(
+            request,
+            max_results.saturating_sub(sources.len()),
+            &mut attempts,
+        ));
+        sources.extend(discover_direct_oi_sources(
+            request,
+            max_results.saturating_sub(sources.len()),
+            &mut attempts,
+        ));
     }
     let candidates_found = sources.len();
     let merged = merge_search_sources(Vec::new(), sources, max_results);
@@ -8950,8 +9317,11 @@ fn search_web_sources_blocking(
             return Ok(sources);
         }
     }
-    let (mut direct_sources, direct_report) =
-        discover_no_key_direct_sources_with_report(&request, max_results.min(12), "search-cache-miss");
+    let (mut direct_sources, direct_report) = discover_no_key_direct_sources_with_report(
+        &request,
+        max_results.min(12),
+        "search-cache-miss",
+    );
     let direct_debug = direct_discovery_debug_string(&direct_report);
     if let Some(first) = direct_sources.first_mut() {
         first.search_diagnostics = Some(attach_direct_discovery_debug(
@@ -8965,7 +9335,10 @@ fn search_web_sources_blocking(
             web_cache::read_cached_json("search", &failure_cache_key, now_ms)
                 .filter(|entry| entry.is_fresh)
         {
-            if let Some(error) = cached_failure.value.get("error").and_then(|value| value.as_str())
+            if let Some(error) = cached_failure
+                .value
+                .get("error")
+                .and_then(|value| value.as_str())
             {
                 let remaining_seconds = cached_failure
                     .ttl_seconds

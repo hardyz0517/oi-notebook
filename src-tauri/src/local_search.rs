@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 
 use crate::paths;
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
 const DEFAULT_MAX_RESULTS: usize = 5;
 const MAX_RESULTS_LIMIT: usize = 8;
 const DEFAULT_MAX_CHARS_PER_RESULT: usize = 900;
@@ -20,7 +20,11 @@ const MAX_SCANNED_FILES: usize = 1500;
 const MIN_RESULT_SCORE: i64 = 22;
 const MAX_CODE_CHARS_PER_BLOCK: usize = 500;
 const MAX_INDEX_CHUNKS_PER_NOTE: usize = 80;
-const MAX_INDEX_CHUNK_CHARS: usize = 2400;
+const MIN_INDEX_CHUNK_CHARS: usize = 220;
+const TARGET_INDEX_CHUNK_CHARS: usize = 900;
+const MAX_INDEX_CHUNK_CHARS: usize = 1200;
+const MAX_INDEX_SEARCHABLE_CHARS: usize = 1600;
+const MAX_RESULTS_PER_NOTE: usize = 3;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +57,18 @@ pub struct LocalNoteSearchResult {
     pub line_start: Option<usize>,
     pub line_end: Option<usize>,
     pub is_current_note: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub heading_path: Vec<String>,
+    #[serde(default)]
+    pub chunk_index: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matched_terms: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detected_problem_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detected_algorithm_terms: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_citation_id: Option<String>,
 }
@@ -86,15 +102,30 @@ struct NoteFrontmatter {
 #[derive(Debug, Clone)]
 struct SearchTerms {
     terms: Vec<String>,
+    expanded_terms: Vec<String>,
     specific_terms: HashSet<String>,
+    problem_ids: Vec<String>,
+    algorithm_terms: Vec<String>,
     general_news_query: bool,
+    oi_synonyms_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ScoredNote {
     note: IndexedNote,
     score: i64,
     reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ScoredChunk {
+    note: IndexedNote,
+    chunk: IndexedChunk,
+    score: i64,
+    reasons: Vec<String>,
+    matched_terms: Vec<String>,
+    is_current_note: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -130,11 +161,18 @@ struct IndexedNote {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IndexedChunk {
+    chunk_id: String,
+    chunk_index: usize,
+    heading_path: Vec<String>,
+    text_preview: String,
+    searchable_text: String,
     text: String,
     normalized_text: String,
     line_start: usize,
     line_end: usize,
     is_code: bool,
+    detected_problem_ids: Vec<String>,
+    detected_algorithm_terms: Vec<String>,
 }
 
 #[tauri::command]
@@ -263,12 +301,12 @@ fn search_local_notes_blocking(
 
     let mut scored = indexed_notes
         .into_iter()
-        .filter_map(|note| {
+        .flat_map(|note| {
             let is_current_note = current_note_path
                 .as_deref()
                 .map(|current| current.eq_ignore_ascii_case(&note.relative_path))
                 .unwrap_or(false);
-            score_note(note, is_current_note, &search_terms)
+            score_note_chunks(note, is_current_note, &search_terms)
         })
         .collect::<Vec<_>>();
 
@@ -276,40 +314,61 @@ fn search_local_notes_blocking(
         b.score
             .cmp(&a.score)
             .then_with(|| a.note.relative_path.cmp(&b.note.relative_path))
+            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
     });
 
-    Ok(scored
-        .into_iter()
-        .take(max_results)
-        .filter_map(|scored_note| {
-            let (snippet, line_start, line_end) = build_snippet(
-                &scored_note.note.chunks,
-                &search_terms,
-                max_chars_per_result,
-            );
-            if snippet.trim().is_empty() {
-                return None;
-            }
-            let relative_path = scored_note.note.relative_path;
-            let is_current_note = current_note_path
-                .as_deref()
-                .map(|current| current.eq_ignore_ascii_case(&relative_path))
-                .unwrap_or(false);
-            Some(LocalNoteSearchResult {
-                id: stable_local_note_id(&relative_path),
-                title: scored_note.note.title,
-                path: relative_path.clone(),
-                relative_path,
-                snippet,
-                score: scored_note.score,
-                reason: summarize_reasons(&scored_note.reasons),
-                line_start,
-                line_end,
-                is_current_note,
-                local_citation_id: None,
-            })
-        })
-        .collect())
+    let searched_chunks = scored.len();
+    let mut per_note_count: HashMap<String, usize> = HashMap::new();
+    let mut results = Vec::new();
+    let mut same_note_dedup_applied = false;
+
+    for scored_chunk in scored {
+        if results.len() >= max_results {
+            break;
+        }
+        let note_count = per_note_count
+            .entry(scored_chunk.note.relative_path.clone())
+            .or_insert(0);
+        if *note_count >= MAX_RESULTS_PER_NOTE {
+            same_note_dedup_applied = true;
+            continue;
+        }
+        *note_count += 1;
+
+        let snippet = prepare_snippet_block(&scored_chunk.chunk.text, max_chars_per_result);
+        if snippet.trim().is_empty() {
+            continue;
+        }
+        let relative_path = scored_chunk.note.relative_path;
+        let diagnostics = local_search_diagnostics(
+            &search_terms,
+            searched_chunks,
+            scored_chunk.score,
+            same_note_dedup_applied,
+            scored_chunk.is_current_note,
+        );
+        results.push(LocalNoteSearchResult {
+            id: stable_local_chunk_id(&relative_path, &scored_chunk.chunk.chunk_id),
+            title: scored_chunk.note.title,
+            path: relative_path.clone(),
+            relative_path,
+            snippet,
+            score: scored_chunk.score,
+            reason: summarize_reasons(&scored_chunk.reasons),
+            line_start: Some(scored_chunk.chunk.line_start),
+            line_end: Some(scored_chunk.chunk.line_end),
+            is_current_note: scored_chunk.is_current_note,
+            heading_path: scored_chunk.chunk.heading_path,
+            chunk_index: scored_chunk.chunk.chunk_index,
+            matched_terms: scored_chunk.matched_terms,
+            detected_problem_ids: scored_chunk.chunk.detected_problem_ids,
+            detected_algorithm_terms: scored_chunk.chunk.detected_algorithm_terms,
+            diagnostics: Some(diagnostics),
+            local_citation_id: None,
+        });
+    }
+
+    Ok(results)
 }
 
 fn load_or_update_index(notes_dir: &Path) -> Result<Vec<IndexedNote>, String> {
@@ -442,17 +501,46 @@ fn index_note_file(meta: &NoteFileMeta) -> Option<IndexedNote> {
     } else {
         frontmatter.title.trim().to_string()
     };
-    let chunks = split_blocks(&body)
+    let chunks = split_markdown_chunks(&meta.relative_path, &body)
         .into_iter()
         .take(MAX_INDEX_CHUNKS_PER_NOTE)
-        .map(|block| {
+        .enumerate()
+        .map(|(chunk_index, block)| {
             let text = truncate_chars(&block.text, MAX_INDEX_CHUNK_CHARS);
+            let heading_text = block.heading_path.join(" ");
+            let searchable_text = truncate_chars(
+                &[
+                    title.as_str(),
+                    &meta.relative_path,
+                    &frontmatter.summary,
+                    &frontmatter.tags.join(" "),
+                    &heading_text,
+                    &text,
+                ]
+                .join("\n"),
+                MAX_INDEX_SEARCHABLE_CHARS,
+            );
+            let normalized_text = normalize_text_for_search(&searchable_text);
+            let detected_problem_ids = detect_problem_ids(&searchable_text);
+            let detected_algorithm_terms = detect_algorithm_terms(&normalized_text);
             IndexedChunk {
-                normalized_text: normalize_text_for_search(&text),
+                chunk_id: stable_chunk_id(
+                    &meta.relative_path,
+                    &block.heading_path,
+                    chunk_index,
+                    &text,
+                ),
+                chunk_index,
+                heading_path: block.heading_path,
+                text_preview: truncate_chars(&text, 360),
+                searchable_text,
                 text,
+                normalized_text,
                 line_start: block.start_line,
                 line_end: block.end_line,
                 is_code: block.is_code,
+                detected_problem_ids,
+                detected_algorithm_terms,
             }
         })
         .collect::<Vec<_>>();
@@ -617,6 +705,13 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
     .join(" ");
     let combined_normalized = normalize_text_for_search(&combined);
     let general_news_query = is_general_news_query(&combined_normalized);
+    let problem_ids = detect_problem_ids(&combined);
+    let oi_synonyms_enabled = should_enable_oi_synonyms(input, &combined_normalized, &problem_ids);
+    let algorithm_terms = if oi_synonyms_enabled {
+        detect_algorithm_terms(&combined_normalized)
+    } else {
+        Vec::new()
+    };
 
     let mut terms = Vec::new();
     push_term(&mut terms, &input.query);
@@ -630,42 +725,72 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
         push_term(&mut terms, keyword);
     }
     for token in tokenize_query(&combined_normalized) {
-        push_term(&mut terms, &token);
+        if is_allowed_search_token(&token, oi_synonyms_enabled) {
+            push_term(&mut terms, &token);
+        }
     }
-    for group in algorithm_alias_groups() {
-        if group
+    let mut expanded_terms = Vec::new();
+    if oi_synonyms_enabled {
+        for group in oi_alias_groups() {
+            if group
+                .iter()
+                .any(|alias| term_matches(&combined_normalized, alias))
+            {
+                for alias in group.iter().copied() {
+                    push_term(&mut terms, alias);
+                    push_term(&mut expanded_terms, alias);
+                }
+            }
+        }
+        for keyword in known_algorithm_terms()
             .iter()
-            .any(|alias| combined_normalized.contains(&normalize_term(alias)))
+            .chain(oi_known_algorithm_terms().iter())
         {
-            for alias in group.iter().copied() {
-                push_term(&mut terms, alias);
+            if term_matches(&combined_normalized, keyword) && is_allowed_search_token(&normalize_term(keyword), true) {
+                push_term(&mut terms, keyword);
+                push_term(&mut expanded_terms, keyword);
             }
         }
     }
-    for keyword in known_algorithm_terms() {
-        if combined_normalized.contains(&normalize_term(keyword)) {
-            push_term(&mut terms, keyword);
-        }
+    for problem_id in &problem_ids {
+        push_term(&mut terms, problem_id);
+    }
+    for algorithm_term in &algorithm_terms {
+        push_term(&mut terms, algorithm_term);
     }
 
     let mut seen = HashSet::new();
     let terms = terms
         .into_iter()
         .map(|term| normalize_term(&term))
-        .filter(|term| term.chars().count() >= 2 && !is_low_value_term(term))
+        .filter(|term| is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term))
         .filter(|term| seen.insert(term.clone()))
         .take(32)
         .collect::<Vec<_>>();
+    let mut expanded_seen = HashSet::new();
+    let expanded_terms = expanded_terms
+        .into_iter()
+        .map(|term| normalize_term(&term))
+        .filter(|term| is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term))
+        .filter(|term| expanded_seen.insert(term.clone()))
+        .take(24)
+        .collect::<Vec<_>>();
     let specific_terms = terms
         .iter()
-        .filter(|term| looks_specific(term))
+        .filter(|term| {
+            looks_specific(term, oi_synonyms_enabled) || problem_ids.iter().any(|id| normalize_term(id) == **term)
+        })
         .cloned()
         .collect::<HashSet<_>>();
 
     SearchTerms {
         terms,
+        expanded_terms,
         specific_terms,
+        problem_ids,
+        algorithm_terms,
         general_news_query,
+        oi_synonyms_enabled,
     }
 }
 
@@ -720,6 +845,7 @@ fn tokenize_query(value: &str) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn algorithm_alias_groups() -> &'static [&'static [&'static str]] {
     &[
         &["点分树", "动态点分治", "点分治"],
@@ -761,6 +887,246 @@ fn known_algorithm_terms() -> &'static [&'static str] {
     ]
 }
 
+fn oi_alias_groups() -> &'static [&'static [&'static str]] {
+    &[
+        &["点分树", "centroid tree", "动态点分治", "震波"],
+        &["点分治", "centroid decomposition", "重心分治"],
+        &[
+            "树链剖分",
+            "hld",
+            "heavy light decomposition",
+            "heavy-light decomposition",
+        ],
+        &["最近公共祖先", "lca", "倍增", "binary lifting"],
+        &["并查集", "dsu", "union find", "union-find"],
+        &["树状数组", "bit", "fenwick", "fenwick tree"],
+        &["线段树", "线段树模板", "segment tree"],
+        &["kmp", "前缀函数", "prefix function"],
+        &["z 函数", "z函数", "z-function", "z function"],
+        &["扩展 kmp", "exkmp", "扩展kmp"],
+        &["dijkstra", "最短路", "单源最短路"],
+        &["tarjan", "scc", "强连通分量", "割点", "桥"],
+        &["二分图", "matching", "二分图匹配"],
+        &["网络流", "maxflow", "max flow", "dinic"],
+        &["单调队列", "monotonic queue"],
+        &["单调栈", "monotonic stack"],
+    ]
+}
+
+fn oi_known_algorithm_terms() -> &'static [&'static str] {
+    &[
+        "P3379",
+        "LCA",
+        "最近公共祖先",
+        "倍增",
+        "Dijkstra",
+        "最短路",
+        "点分树",
+        "动态点分治",
+        "点分治",
+        "并查集",
+        "DSU",
+        "树状数组",
+        "BIT",
+        "线段树",
+        "KMP",
+        "Z 函数",
+        "Z函数",
+        "exKMP",
+        "扩展 KMP",
+        "Tarjan",
+        "SCC",
+        "网络流",
+        "Dinic",
+        "常见坑",
+        "实现",
+        "复杂度",
+        "初始化",
+        "边界",
+    ]
+}
+
+fn term_matches(normalized_haystack: &str, needle: &str) -> bool {
+    let normalized = normalize_term(needle);
+    if normalized.is_empty() {
+        return false;
+    }
+    if needs_ascii_boundaries(&normalized) {
+        return ascii_bounded_match_count(normalized_haystack, &normalized) > 0;
+    }
+    normalized_haystack.contains(&normalized)
+}
+
+fn term_match_count(normalized_haystack: &str, needle: &str) -> usize {
+    let normalized = normalize_term(needle);
+    if normalized.is_empty() {
+        return 0;
+    }
+    if needs_ascii_boundaries(&normalized) {
+        return ascii_bounded_match_count(normalized_haystack, &normalized);
+    }
+    normalized_haystack.matches(&normalized).count()
+}
+
+fn needs_ascii_boundaries(term: &str) -> bool {
+    term.chars()
+        .any(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn is_ascii_word_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn ascii_bounded_match_count(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let haystack_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut count = 0;
+    let mut start = 0;
+    while let Some(offset) = haystack[start..].find(needle) {
+        let index = start + offset;
+        let before_ok = index == 0 || !is_ascii_word_char(haystack_bytes[index - 1]);
+        let after_index = index + needle_bytes.len();
+        let after_ok = after_index >= haystack_bytes.len() || !is_ascii_word_char(haystack_bytes[after_index]);
+        if before_ok && after_ok {
+            count += 1;
+        }
+        start = after_index;
+    }
+    count
+}
+
+fn is_allowed_search_token(term: &str, oi_synonyms_enabled: bool) -> bool {
+    let normalized = normalize_term(term);
+    if normalized.is_empty() {
+        return false;
+    }
+    let char_count = normalized.chars().count();
+    if normalized.chars().all(|ch| ch.is_ascii_alphanumeric()) && char_count < 3 {
+        return oi_synonyms_enabled && matches!(normalized.as_str(), "z");
+    }
+    char_count >= 2
+}
+
+fn should_enable_oi_synonyms(
+    input: &LocalNoteSearchInput,
+    combined_normalized: &str,
+    problem_ids: &[String],
+) -> bool {
+    if input.problem_id.as_deref().is_some_and(|value| !value.trim().is_empty())
+        || !problem_ids.is_empty()
+        || input.algorithm_keywords.iter().any(|keyword| !keyword.trim().is_empty())
+    {
+        return true;
+    }
+
+    oi_alias_groups()
+        .iter()
+        .flat_map(|group| group.iter().copied())
+        .chain(known_algorithm_terms().iter().copied())
+        .chain(oi_known_algorithm_terms().iter().copied())
+        .filter(|term| is_clear_algorithm_query_term(term))
+        .any(|term| term_matches(combined_normalized, term))
+}
+
+fn is_clear_algorithm_query_term(term: &str) -> bool {
+    let normalized = normalize_term(term);
+    if normalized.is_empty() || is_low_value_term(&normalized) {
+        return false;
+    }
+    if normalized.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return normalized.chars().count() >= 3 && !matches!(normalized.as_str(), "tle" | "mle");
+    }
+    normalized.chars().count() >= 2
+}
+
+fn detect_algorithm_terms(normalized_text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for group in oi_alias_groups() {
+        if group
+            .iter()
+            .any(|alias| term_matches(normalized_text, alias))
+        {
+            for alias in group.iter().copied() {
+                push_term(&mut terms, alias);
+            }
+        }
+    }
+    for term in known_algorithm_terms()
+        .iter()
+        .chain(oi_known_algorithm_terms().iter())
+    {
+        if term_matches(normalized_text, term) {
+            push_term(&mut terms, term);
+        }
+    }
+    dedup_limited(terms, 24)
+}
+
+fn detect_problem_ids(value: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for raw in value.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-') {
+        let token = raw.trim_matches(|ch: char| ch == '_' || ch == '-');
+        if token.len() < 3 {
+            continue;
+        }
+        let upper = token.to_ascii_uppercase();
+        if is_luogu_problem_id(&upper)
+            || is_codeforces_problem_id(&upper)
+            || is_atcoder_problem_id(&upper)
+            || is_spoj_problem_id(&upper)
+        {
+            ids.push(upper);
+        }
+    }
+    dedup_limited(ids, 12)
+}
+
+fn is_luogu_problem_id(token: &str) -> bool {
+    token
+        .strip_prefix('P')
+        .map(|rest| rest.len() >= 3 && rest.chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(false)
+}
+
+fn is_codeforces_problem_id(token: &str) -> bool {
+    let digit_count = token.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    digit_count >= 3
+        && digit_count < token.len()
+        && token[digit_count..]
+            .chars()
+            .all(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit())
+}
+
+fn is_atcoder_problem_id(token: &str) -> bool {
+    token.starts_with("AT_")
+        || token.starts_with("ABC")
+        || token.starts_with("ARC")
+        || token.starts_with("AGC")
+}
+
+fn is_spoj_problem_id(token: &str) -> bool {
+    token.len() >= 4
+        && token.len() <= 16
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit())
+        && token.chars().any(|ch| ch.is_ascii_digit())
+        && token.chars().any(|ch| ch.is_ascii_uppercase())
+}
+
+fn dedup_limited(values: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .filter(|value| seen.insert(value.to_ascii_lowercase()))
+        .take(limit)
+        .collect()
+}
+
 fn is_low_value_term(term: &str) -> bool {
     matches!(
         term,
@@ -795,6 +1161,20 @@ fn is_low_value_term(term: &str) -> bool {
 }
 
 fn is_general_news_query(combined: &str) -> bool {
+    let has_real_news_word = [
+        "最近", "最新", "新闻", "消息", "今天", "这周", "近期", "latest", "recent", "news",
+    ]
+    .iter()
+    .any(|word| combined.contains(&normalize_term(word)));
+    let has_real_oi_signal = oi_known_algorithm_terms()
+        .iter()
+        .any(|term| combined.contains(&normalize_term(term)))
+        || ["信息学", "竞赛", "洛谷", "题解", "oi", "acm", "icpc"]
+            .iter()
+            .any(|term| combined.contains(term));
+    if has_real_news_word {
+        return !has_real_oi_signal;
+    }
     let has_news_word = [
         "最近", "最新", "新闻", "消息", "今天", "这周", "近期", "ai news",
     ]
@@ -812,6 +1192,145 @@ fn is_general_news_query(combined: &str) -> bool {
     !has_local_oi_signal
 }
 
+fn score_note_chunks(
+    note: IndexedNote,
+    is_current_note: bool,
+    search_terms: &SearchTerms,
+) -> Vec<ScoredChunk> {
+    let title = normalize_text_for_search(&note.title);
+    let path = normalize_text_for_search(&note.relative_path);
+    let frontmatter = normalize_text_for_search(&note.frontmatter_text);
+    let tags = normalize_text_for_search(&note.tags.join(" "));
+    let summary = normalize_text_for_search(&note.summary);
+    let headings = normalize_text_for_search(&note.headings.join(" "));
+    let note_modified_secs = note.modified_secs;
+    let mut scored_chunks = Vec::new();
+
+    for chunk in note.chunks.iter().cloned() {
+        let mut score = 0i64;
+        let mut reasons = Vec::new();
+        let mut matched_terms = Vec::new();
+        let heading_text = normalize_text_for_search(&chunk.heading_path.join(" "));
+        let chunk_text = &chunk.normalized_text;
+
+        for problem_id in &search_terms.problem_ids {
+            let normalized_id = normalize_term(problem_id);
+            if !normalized_id.is_empty()
+                && (path.contains(&normalized_id)
+                    || title.contains(&normalized_id)
+                    || chunk_text.contains(&normalized_id))
+            {
+                score += 90;
+                reasons.push(format!("problem id matched {problem_id}"));
+                matched_terms.push(problem_id.clone());
+            }
+        }
+
+        for term in &search_terms.terms {
+            let term_weight = if search_terms.specific_terms.contains(term) {
+                2
+            } else {
+                1
+            };
+            let is_expanded = search_terms
+                .expanded_terms
+                .iter()
+                .any(|expanded| expanded == term);
+            if term_matches(&title, term) {
+                score += 34 * term_weight;
+                reasons.push(format!("title matched {term}"));
+                matched_terms.push(term.clone());
+            }
+            if term_matches(&tags, term) {
+                score += 30 * term_weight;
+                reasons.push(format!("tag matched {term}"));
+                matched_terms.push(term.clone());
+            }
+            if term_matches(&heading_text, term) {
+                score += 28 * term_weight;
+                reasons.push(format!("heading matched {term}"));
+                matched_terms.push(term.clone());
+            } else if term_matches(&headings, term) {
+                score += 12 * term_weight;
+                reasons.push(format!("other heading matched {term}"));
+                matched_terms.push(term.clone());
+            }
+            if term_matches(&summary, term) || term_matches(&frontmatter, term) {
+                score += 18 * term_weight;
+                reasons.push(format!("frontmatter matched {term}"));
+                matched_terms.push(term.clone());
+            }
+            if term_matches(&path, term) {
+                score += 16 * term_weight;
+                reasons.push(format!("path matched {term}"));
+                matched_terms.push(term.clone());
+            }
+            let matches = term_match_count(chunk_text, term).min(5) as i64;
+            if matches > 0 {
+                let body_weight = if is_expanded { 3 } else { 5 };
+                score += matches * body_weight * term_weight as i64;
+                reasons.push(format!("chunk matched {term}"));
+                matched_terms.push(term.clone());
+            }
+        }
+
+        if search_terms.oi_synonyms_enabled {
+            for algorithm_term in &search_terms.algorithm_terms {
+                if chunk
+                    .detected_algorithm_terms
+                    .iter()
+                    .any(|detected| normalize_term(detected) == normalize_term(algorithm_term))
+                {
+                    score += 18;
+                    reasons.push(format!("algorithm term matched {algorithm_term}"));
+                    matched_terms.push(algorithm_term.clone());
+                }
+            }
+        }
+
+        if is_current_note && score > 0 {
+            score += 8;
+            reasons.push("current note boost".to_string());
+        }
+        if note_modified_secs > 0 && score > 0 {
+            score += 1;
+        }
+        if chunk.is_code {
+            score -= 8;
+            if query_looks_like_template(search_terms) {
+                score += 12;
+                reasons.push("code/template query boost".to_string());
+            }
+        }
+        let chunk_len = chunk.text.chars().count();
+        if chunk_len < 80 {
+            score -= 10;
+        }
+        if !search_terms.specific_terms.is_empty()
+            && !matched_terms
+                .iter()
+                .any(|term| search_terms.specific_terms.contains(&normalize_term(term)))
+        {
+            score -= 12;
+        }
+
+        let matched_terms = dedup_limited(matched_terms, 16);
+        if score >= MIN_RESULT_SCORE {
+            scored_chunks.push(ScoredChunk {
+                note: note.clone(),
+                chunk,
+                score,
+                reasons,
+                matched_terms,
+                is_current_note,
+            });
+        }
+    }
+
+    scored_chunks
+}
+
+#[allow(dead_code)]
 fn score_note(
     note: IndexedNote,
     is_current_note: bool,
@@ -892,16 +1411,18 @@ fn score_note(
     }
 }
 
-fn looks_specific(term: &str) -> bool {
+fn looks_specific(term: &str, oi_synonyms_enabled: bool) -> bool {
     term.chars().any(|ch| ch.is_ascii_digit())
         || term.chars().count() >= 4
-        || algorithm_alias_groups()
-            .iter()
-            .flat_map(|group| group.iter().copied())
-            .any(|known| normalize_term(known) == term)
-        || known_algorithm_terms()
-            .iter()
-            .any(|known| normalize_term(known) == term)
+        || (oi_synonyms_enabled
+            && (oi_alias_groups()
+                .iter()
+                .flat_map(|group| group.iter().copied())
+                .any(|known| normalize_term(known) == term)
+                || known_algorithm_terms()
+                    .iter()
+                    .chain(oi_known_algorithm_terms().iter())
+                    .any(|known| normalize_term(known) == term)))
 }
 
 fn summarize_reasons(reasons: &[String]) -> String {
@@ -915,6 +1436,7 @@ fn summarize_reasons(reasons: &[String]) -> String {
         .join("; ")
 }
 
+#[allow(dead_code)]
 fn build_snippet(
     chunks: &[IndexedChunk],
     search_terms: &SearchTerms,
@@ -974,8 +1496,199 @@ struct TextBlock {
     start_line: usize,
     end_line: usize,
     is_code: bool,
+    heading_path: Vec<String>,
 }
 
+fn split_markdown_chunks(relative_path: &str, body: &str) -> Vec<TextBlock> {
+    let mut chunks = Vec::new();
+    let mut heading_path: Vec<String> = Vec::new();
+    let mut current = Vec::new();
+    let mut current_start = 1usize;
+    let mut current_end = 1usize;
+    let mut current_has_non_code = false;
+    let mut current_is_code_only = true;
+    let mut in_code = false;
+    let mut code_chars = 0usize;
+    let mut code_truncated = false;
+
+    let flush = |chunks: &mut Vec<TextBlock>,
+                 current: &mut Vec<String>,
+                 current_start: usize,
+                 current_end: usize,
+                 heading_path: &[String],
+                 current_has_non_code: bool,
+                 current_is_code_only: bool| {
+        let text = current.join("\n").trim().to_string();
+        if text.is_empty() {
+            current.clear();
+            return;
+        }
+        chunks.push(TextBlock {
+            text,
+            start_line: current_start,
+            end_line: current_end.max(current_start),
+            is_code: current_is_code_only && !current_has_non_code,
+            heading_path: heading_path.to_vec(),
+        });
+        current.clear();
+    };
+
+    for (line_index, line) in body.lines().enumerate() {
+        let line_no = line_index + 1;
+        let trimmed = line.trim();
+        let heading = parse_markdown_heading(trimmed);
+
+        if !in_code {
+            if let Some((level, title)) = heading {
+                if !current.is_empty() {
+                    flush(
+                        &mut chunks,
+                        &mut current,
+                        current_start,
+                        current_end,
+                        &heading_path,
+                        current_has_non_code,
+                        current_is_code_only,
+                    );
+                }
+                let depth = level.min(3);
+                if heading_path.len() >= depth {
+                    heading_path.truncate(depth - 1);
+                }
+                heading_path.push(title);
+                current_start = line_no;
+                current_end = line_no;
+                current_has_non_code = true;
+                current_is_code_only = false;
+                current.push(line.to_string());
+                continue;
+            }
+
+            if trimmed.is_empty() {
+                if current_chars(&current) >= MIN_INDEX_CHUNK_CHARS {
+                    flush(
+                        &mut chunks,
+                        &mut current,
+                        current_start,
+                        current_end,
+                        &heading_path,
+                        current_has_non_code,
+                        current_is_code_only,
+                    );
+                    current_has_non_code = false;
+                    current_is_code_only = true;
+                    current_start = line_no + 1;
+                    current_end = line_no + 1;
+                } else if !current.is_empty() {
+                    current.push(String::new());
+                    current_end = line_no;
+                } else {
+                    current_start = line_no + 1;
+                    current_end = line_no + 1;
+                }
+                continue;
+            }
+        }
+
+        let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        if fence {
+            in_code = !in_code;
+            if current.is_empty() {
+                current_start = line_no;
+            }
+            current.push(line.to_string());
+            current_end = line_no;
+            current_is_code_only &= !current_has_non_code;
+            if !in_code {
+                code_chars = 0;
+                code_truncated = false;
+            }
+            continue;
+        }
+
+        if current.is_empty() {
+            current_start = line_no;
+            current_is_code_only = in_code;
+        }
+
+        if in_code {
+            let line_chars = line.chars().count();
+            if code_chars + line_chars > MAX_CODE_CHARS_PER_BLOCK {
+                if !code_truncated {
+                    current.push("[code block truncated]".to_string());
+                    code_truncated = true;
+                }
+                current_end = line_no;
+                continue;
+            }
+            code_chars += line_chars;
+        } else {
+            current_has_non_code = true;
+            current_is_code_only = false;
+        }
+
+        current.push(line.to_string());
+        current_end = line_no;
+
+        if current_chars(&current) >= TARGET_INDEX_CHUNK_CHARS {
+            flush(
+                &mut chunks,
+                &mut current,
+                current_start,
+                current_end,
+                &heading_path,
+                current_has_non_code,
+                current_is_code_only,
+            );
+            current_has_non_code = false;
+            current_is_code_only = true;
+            current_start = line_no + 1;
+            current_end = line_no + 1;
+        }
+    }
+
+    if !current.is_empty() {
+        flush(
+            &mut chunks,
+            &mut current,
+            current_start,
+            current_end,
+            &heading_path,
+            current_has_non_code,
+            current_is_code_only,
+        );
+    }
+
+    if chunks.is_empty() && !body.trim().is_empty() {
+        chunks.push(TextBlock {
+            text: truncate_chars(body.trim(), MAX_INDEX_CHUNK_CHARS),
+            start_line: 1,
+            end_line: body.lines().count().max(1),
+            is_code: false,
+            heading_path: vec![fallback_title(relative_path)],
+        });
+    }
+
+    chunks
+}
+
+fn current_chars(lines: &[String]) -> usize {
+    lines.iter().map(|line| line.chars().count() + 1).sum()
+}
+
+fn parse_markdown_heading(trimmed: &str) -> Option<(usize, String)> {
+    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=3).contains(&level) {
+        return None;
+    }
+    let rest = trimmed.get(level..)?.trim();
+    if rest.is_empty() || rest.starts_with('#') {
+        return None;
+    }
+    Some((level, rest.trim_matches('#').trim().to_string()))
+}
+
+#[allow(dead_code)]
 fn split_blocks(body: &str) -> Vec<TextBlock> {
     let mut blocks = Vec::new();
     let mut current = Vec::new();
@@ -993,6 +1706,7 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
                     start_line,
                     end_line: line_no.saturating_sub(1).max(start_line),
                     is_code: current_is_code,
+                    heading_path: Vec::new(),
                 });
                 current.clear();
             }
@@ -1008,6 +1722,7 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
                     start_line,
                     end_line: line_no.max(start_line),
                     is_code: true,
+                    heading_path: Vec::new(),
                 });
                 current.clear();
                 current_is_code = false;
@@ -1022,6 +1737,7 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
                     start_line,
                     end_line: line_no.saturating_sub(1).max(start_line),
                     is_code: current_is_code,
+                    heading_path: Vec::new(),
                 });
                 current.clear();
                 current_is_code = false;
@@ -1042,11 +1758,13 @@ fn split_blocks(body: &str) -> Vec<TextBlock> {
             start_line,
             end_line,
             is_code: current_is_code,
+            heading_path: Vec::new(),
         });
     }
     blocks
 }
 
+#[allow(dead_code)]
 fn score_chunk(chunk: &IndexedChunk, search_terms: &SearchTerms) -> i64 {
     let mut score = 0i64;
     for term in &search_terms.terms {
@@ -1145,6 +1863,37 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     truncated
 }
 
+fn query_looks_like_template(search_terms: &SearchTerms) -> bool {
+    search_terms.terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "模板" | "template" | "代码" | "code" | "实现"
+        )
+    })
+}
+
+fn local_search_diagnostics(
+    search_terms: &SearchTerms,
+    searched_chunks: usize,
+    top_score: i64,
+    same_note_dedup_applied: bool,
+    current_note_boost_applied: bool,
+) -> String {
+    format!(
+        "localIndexVersion={}; queryTerms={}; expandedTerms={}; problemIds={}; algorithmTerms={}; searchedChunks={}; topChunkScore={}; sameNoteDedupApplied={}; currentNoteBoostApplied={}",
+        INDEX_VERSION,
+        search_terms.terms.join("|"),
+        search_terms.expanded_terms.join("|"),
+        search_terms.problem_ids.join("|"),
+        search_terms.algorithm_terms.join("|"),
+        searched_chunks,
+        top_score,
+        same_note_dedup_applied,
+        current_note_boost_applied,
+    )
+}
+
+#[allow(dead_code)]
 fn stable_local_note_id(relative_path: &str) -> String {
     let mut hash = 1469598103934665603u64;
     for byte in relative_path.as_bytes() {
@@ -1152,6 +1901,36 @@ fn stable_local_note_id(relative_path: &str) -> String {
         hash = hash.wrapping_mul(1099511628211);
     }
     format!("local-note-{hash:016x}")
+}
+
+fn stable_chunk_id(
+    relative_path: &str,
+    heading_path: &[String],
+    chunk_index: usize,
+    text: &str,
+) -> String {
+    let seed = format!(
+        "{}|{}|{}|{}",
+        relative_path,
+        heading_path.join(">"),
+        chunk_index,
+        text
+    );
+    let mut hash = 1469598103934665603u64;
+    for byte in seed.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("chunk-{hash:016x}")
+}
+
+fn stable_local_chunk_id(relative_path: &str, chunk_id: &str) -> String {
+    let mut hash = 1469598103934665603u64;
+    for byte in format!("{relative_path}|{chunk_id}").as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("local-note-chunk-{hash:016x}")
 }
 
 fn metadata_modified_secs(metadata: &fs::Metadata) -> u64 {

@@ -1114,6 +1114,20 @@ const sanitizeLocalNoteSourcesForStorage = (value: unknown): LocalNoteSearchResu
       lineStart: typeof source.lineStart === "number" && Number.isFinite(source.lineStart) ? Math.max(1, Math.floor(source.lineStart)) : undefined,
       lineEnd: typeof source.lineEnd === "number" && Number.isFinite(source.lineEnd) ? Math.max(1, Math.floor(source.lineEnd)) : undefined,
       isCurrentNote: source.isCurrentNote === true,
+      headingPath: Array.isArray(source.headingPath)
+        ? source.headingPath.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 6)
+        : undefined,
+      chunkIndex: typeof source.chunkIndex === "number" && Number.isFinite(source.chunkIndex) ? Math.max(0, Math.floor(source.chunkIndex)) : undefined,
+      matchedTerms: Array.isArray(source.matchedTerms)
+        ? source.matchedTerms.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 16)
+        : undefined,
+      detectedProblemIds: Array.isArray(source.detectedProblemIds)
+        ? source.detectedProblemIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 12)
+        : undefined,
+      detectedAlgorithmTerms: Array.isArray(source.detectedAlgorithmTerms)
+        ? source.detectedAlgorithmTerms.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 16)
+        : undefined,
+      diagnostics: typeof source.diagnostics === "string" && source.diagnostics.trim() ? source.diagnostics.trim().slice(0, 1000) : undefined,
       localCitationId: typeof source.localCitationId === "string" && /^N\d{1,2}$/.test(source.localCitationId.trim())
         ? source.localCitationId.trim()
         : undefined,
@@ -1642,6 +1656,15 @@ const getLocalNoteCitationDisplayMap = (sources: LocalNoteSearchResult[] | undef
         : [];
     }),
   );
+
+const getDisplayedLocalNoteSources = (text: string, sources: LocalNoteSearchResult[] | undefined): LocalNoteSearchResult[] => {
+  const validSources = (sources ?? []).filter((source) => isValidLocalCitationId(source.localCitationId));
+  if (validSources.length === 0) return [];
+  const sourceByCitationId = new Map(validSources.map((source) => [source.localCitationId!, source]));
+  return getUsedCitationIdList(text, validSources.map((source) => source.localCitationId!))
+    .map((citationId) => sourceByCitationId.get(citationId))
+    .filter((source): source is LocalNoteSearchResult => Boolean(source));
+};
 
 const getAiCitationDisplayMap = (
   text: string,
@@ -2552,6 +2575,7 @@ function LocalNoteSourcesCard({
                 ? `L${source.lineStart}-${source.lineEnd}`
                 : `L${source.lineStart}`
               : null;
+            const headingLabel = source.headingPath?.length ? source.headingPath.join(" / ") : null;
             const openSource = () => {
               void onOpenLocalNote?.(source.relativePath, source.lineStart ?? null);
             };
@@ -2581,6 +2605,7 @@ function LocalNoteSourcesCard({
                 </div>
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
                   <span className="min-w-0 truncate">{source.relativePath}</span>
+                  {headingLabel && <span className="max-w-full truncate" title={headingLabel}>{headingLabel}</span>}
                   {lineLabel && <span>{lineLabel}</span>}
                   {source.reason && <span className="truncate" title={source.reason}>{source.reason}</span>}
                 </div>
@@ -6638,6 +6663,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 const sourceCitations = getSourceCitations(message.sources);
                 const displayedSourceCitations = getDisplayedSourceCitations(message.text, sourceCitations);
                 const hasUsedSourceCitations = getUsedCitationIds(message.text, sourceCitations).size > 0;
+                const displayedLocalNoteSources = getDisplayedLocalNoteSources(message.text, message.localNoteSources);
                 const isCitationListExpanded = expandedCitationMessageIds[message.id] === true;
                 const isLocalNoteListExpanded = expandedLocalNoteMessageIds[message.id] === true;
                 const activeHighlightedCitationId = highlightedCitationId?.startsWith(`${message.id}:`)
@@ -6739,7 +6765,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             onToggle={() => toggleCitationList(message.id)}
                           />
                           <LocalNoteSourcesCard
-                            sources={message.localNoteSources}
+                            sources={displayedLocalNoteSources}
                             messageId={message.id}
                             isExpanded={isLocalNoteListExpanded}
                             highlightedLocalCitationId={activeHighlightedLocalCitationId}

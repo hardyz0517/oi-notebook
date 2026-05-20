@@ -10,6 +10,7 @@ import {
   testWebSearchConnection,
   type AiConfig,
   type LocalNoteIndexStatusResult,
+  type LocalNoteSearchResult,
   type WebCacheStatusResult,
 } from "@/lib/api";
 import { applySourceStrategyPlan, buildExplicitUrlReadPlan, buildOfflineAiQueryPlannerPreview, buildSearchDecision, classifyNewsCandidateForVertical, classifyNewsEventCluster, extractExplicitUrls, getFrontendWebReadBlockReason, getWebReadBudgetPlan, normalizeWebSearchConfig, rankPreparedWebSources, shouldUseAiQueryPlanner, SOURCE_REGISTRY, validateAiSearchQueryPlan, type SearchDecision, type WebSearchConfig, type WebSource } from "@/lib/aiWebSearch";
@@ -934,6 +935,19 @@ const buildLocalIndexItem = (status: LocalNoteIndexStatusResult): DiagnosticItem
   safeDebugInfo: [`size=${status.approxSizeBytes} bytes`, `readable=${status.readable}`, `writable=${status.writable}`],
 });
 
+const summarizeLocalResult = (result: LocalNoteSearchResult): string =>
+  [
+    result.relativePath || result.path,
+    result.headingPath?.length ? `heading=${result.headingPath.join(" / ")}` : undefined,
+    typeof result.chunkIndex === "number" ? `chunk=${result.chunkIndex}` : undefined,
+    `score=${result.score}`,
+    result.matchedTerms?.length ? `terms=${result.matchedTerms.slice(0, 5).join("|")}` : undefined,
+    result.diagnostics ? `diag=${truncate(result.diagnostics, 120)}` : undefined,
+  ].filter(Boolean).join("; ");
+
+const localResultsContain = (results: LocalNoteSearchResult[], pattern: RegExp): boolean =>
+  results.some((result) => pattern.test(`${result.title} ${result.relativePath} ${result.headingPath?.join(" ") ?? ""} ${result.snippet} ${result.matchedTerms?.join(" ") ?? ""} ${result.detectedAlgorithmTerms?.join(" ") ?? ""}`));
+
 const buildCitationDiagnostics = (): DiagnosticItem[] => {
   const cases = [
     {
@@ -1102,21 +1116,90 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     replaceCategory(runId, "local-search", [{ id: "local-search-running", title: "本地检索测试", status: "running", summary: "正在检索本地笔记..." }]);
     const startedAt = performance.now();
     try {
-      const results = await withTimeout(searchLocalNotes({
-        query: "点分树常见实现坑",
-        algorithmKeywords: ["点分树", "动态点分治", "重心分治"],
-        maxResults: 3,
-        maxCharsPerResult: 500,
-      }), 5000, "本地检索测试超时");
-      const keywordHit = results.some((result) => /点分树|动态点分治|重心分治/.test(`${result.title} ${result.snippet}`));
-      replaceCategory(runId, "local-search", [durationItem(startedAt, {
-        id: "local-search-test",
-        title: "点分树本地检索",
-        status: results.length === 0 ? "warn" : keywordHit ? "pass" : "warn",
-        summary: results.length === 0 ? "没有找到相关笔记。如果你没有点分树笔记，这是正常的。" : `命中 ${results.length} 条；keywordHit=${keywordHit}`,
-        detail: "只调用本地 search_local_notes，不上传笔记到外部服务。",
-        safeDebugInfo: results.slice(0, 3).map((result) => `${result.relativePath || result.path}: ${truncate(result.snippet, 120)}`),
-      })]);
+      const [centroidResults, p3379Results, zFunctionResults, reactResults] = await withTimeout(Promise.all([
+        searchLocalNotes({
+          query: "点分树常见实现坑",
+          algorithmKeywords: ["点分树", "动态点分治", "重心分治"],
+          maxResults: 5,
+          maxCharsPerResult: 500,
+        }),
+        searchLocalNotes({
+          query: "P3379 最近公共祖先",
+          problemId: "P3379",
+          algorithmKeywords: ["LCA", "最近公共祖先", "倍增"],
+          maxResults: 5,
+          maxCharsPerResult: 500,
+        }),
+        searchLocalNotes({
+          query: "Z 函数和 exKMP 有什么关系",
+          algorithmKeywords: ["Z 函数", "exKMP", "扩展 KMP"],
+          maxResults: 5,
+          maxCharsPerResult: 500,
+        }),
+        searchLocalNotes({
+          query: "React useEffect 是什么",
+          maxResults: 5,
+          maxCharsPerResult: 500,
+        }),
+      ]), 7000, "本地检索测试超时");
+
+      const centroidHit = localResultsContain(centroidResults, /点分树|centroid tree|动态点分治|震波|重心分治/i);
+      const p3379Hit = localResultsContain(p3379Results, /P3379|最近公共祖先|LCA|倍增/i);
+      const zFunctionHit = localResultsContain(zFunctionResults, /Z\s*函数|Z函数|exKMP|扩展\s*KMP/i);
+      const reactOiLeak = localResultsContain(reactResults, /点分树|P3379|最近公共祖先|exKMP|Dinic|Tarjan/i);
+      const reactShortTokenLeak = reactResults.some((result) =>
+        /\balgorithm term matched re\b/i.test(result.reason) ||
+        (result.matchedTerms ?? []).some((term) => /^re$/i.test(term)) ||
+        (result.detectedAlgorithmTerms ?? []).some((term) => /^re$/i.test(term))
+      );
+      const reactPostNavigationLeak = reactResults.some((result) =>
+        /post-navigation-test|Post Navigation Test Draft/i.test(`${result.title} ${result.relativePath}`)
+      );
+      const hasChunkIdentity = [...centroidResults, ...p3379Results, ...zFunctionResults, ...reactResults]
+        .some((result) => typeof result.chunkIndex === "number" || (result.headingPath?.length ?? 0) > 0);
+      const sameNoteLimited = [centroidResults, p3379Results, zFunctionResults, reactResults].every((results) => {
+        const counts = new Map<string, number>();
+        for (const result of results) counts.set(result.relativePath, (counts.get(result.relativePath) ?? 0) + 1);
+        return [...counts.values()].every((count) => count <= 3);
+      });
+
+      replaceCategory(runId, "local-search", [
+        durationItem(startedAt, {
+          id: "local-search-centroid",
+          title: "点分树 chunk 检索",
+          status: centroidResults.length === 0 ? "warn" : centroidHit && hasChunkIdentity ? "pass" : "warn",
+          summary: centroidResults.length === 0 ? "没有找到相关笔记。如果你没有点分树笔记，这是正常的。" : `命中 ${centroidResults.length} 条；synonymHit=${centroidHit}; chunkIdentity=${hasChunkIdentity}`,
+          detail: "只调用本地 search_local_notes，不上传笔记到外部服务。",
+          safeDebugInfo: centroidResults.slice(0, 3).map(summarizeLocalResult),
+        }),
+        durationItem(startedAt, {
+          id: "local-search-p3379",
+          title: "P3379 / LCA 强匹配",
+          status: p3379Results.length === 0 ? "warn" : p3379Hit ? "pass" : "warn",
+          summary: p3379Results.length === 0 ? "没有找到 P3379/LCA 本地笔记。" : `命中 ${p3379Results.length} 条；problemOrLcaHit=${p3379Hit}`,
+          safeDebugInfo: p3379Results.slice(0, 3).map(summarizeLocalResult),
+        }),
+        durationItem(startedAt, {
+          id: "local-search-z-exkmp",
+          title: "Z 函数 / exKMP 同义召回",
+          status: zFunctionResults.length === 0 ? "warn" : zFunctionHit ? "pass" : "warn",
+          summary: zFunctionResults.length === 0 ? "没有找到 Z 函数/exKMP 本地笔记。" : `命中 ${zFunctionResults.length} 条；synonymHit=${zFunctionHit}`,
+          safeDebugInfo: zFunctionResults.slice(0, 3).map(summarizeLocalResult),
+        }),
+        durationItem(startedAt, {
+          id: "local-search-react-guard",
+          title: "React 查询不误触发 OI synonym",
+          status: reactOiLeak || reactShortTokenLeak || reactPostNavigationLeak ? "fail" : "pass",
+          summary: `React results=${reactResults.length}; oiLeak=${reactOiLeak}; shortTokenLeak=${reactShortTokenLeak}; postNavigationLeak=${reactPostNavigationLeak}`,
+          safeDebugInfo: reactResults.slice(0, 3).map(summarizeLocalResult),
+        }),
+        durationItem(startedAt, {
+          id: "local-search-same-note-limit",
+          title: "同一笔记 chunk 不刷屏",
+          status: sameNoteLimited ? "pass" : "warn",
+          summary: `sameNoteLimited=${sameNoteLimited}`,
+        }),
+      ]);
     } catch (error) {
       replaceCategory(runId, "local-search", [durationItem(startedAt, {
         id: "local-search-test",

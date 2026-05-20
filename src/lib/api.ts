@@ -288,6 +288,12 @@ export interface LocalNoteSearchResult {
   lineStart?: number;
   lineEnd?: number;
   isCurrentNote?: boolean;
+  headingPath?: string[];
+  chunkIndex?: number;
+  matchedTerms?: string[];
+  detectedProblemIds?: string[];
+  detectedAlgorithmTerms?: string[];
+  diagnostics?: string;
   localCitationId?: string;
 }
 
