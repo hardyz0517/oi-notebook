@@ -7,11 +7,13 @@ import {
   getPromptCitationContractStatus,
   getWebCacheStatus,
   rebuildLocalNoteIndex,
+  runNotexSearchSelfCheck,
   searchLocalNotes,
   testWebSearchConnection,
   type AiConfig,
   type LocalNoteIndexStatusResult,
   type LocalNoteSearchResult,
+  type NotexSearchSelfCheckCaseResult,
   type WebCacheStatusResult,
 } from "@/lib/api";
 import { applySourceStrategyPlan, buildExplicitUrlReadPlan, buildOfflineAiQueryPlannerPreview, buildSearchDecision, classifyNewsCandidateForVertical, classifyNewsEventCluster, extractExplicitUrls, getFrontendWebReadBlockReason, getWebReadBudgetPlan, normalizeWebSearchConfig, rankPreparedWebSources, shouldUseAiQueryPlanner, SOURCE_REGISTRY, validateAiSearchQueryPlan, type SearchDecision, type WebSearchConfig, type WebSource } from "@/lib/aiWebSearch";
@@ -19,7 +21,7 @@ import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsF
 import { cn } from "@/lib/utils";
 
 type DiagnosticStatus = "pass" | "warn" | "fail" | "skipped" | "running";
-type DiagnosticCategoryId = "decision" | "query-planner" | "direct-discovery" | "url-reading" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "citations" | "prompt-contract";
+type DiagnosticCategoryId = "decision" | "query-planner" | "direct-discovery" | "url-reading" | "provider-config" | "provider-test" | "web-cache" | "local-index" | "local-search" | "notex-self-check" | "citations" | "prompt-contract";
 
 type DiagnosticItem = {
   id: string;
@@ -64,6 +66,7 @@ const emptyCategories = (): DiagnosticCategory[] => [
   { id: "web-cache", title: "Web Cache", items: [] },
   { id: "local-index", title: "本地索引", items: [] },
   { id: "local-search", title: "本地检索", items: [] },
+  { id: "notex-self-check", title: "NoteX 搜索自检", items: [] },
   { id: "citations", title: "引用渲染", items: [] },
   { id: "prompt-contract", title: "Prompt 合约", items: [] },
 ];
@@ -251,6 +254,32 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
     status: !/directDiscoveryIntent=unknown|directDiscoveryFreshness=none|directDiscoveryQuery=none|directDiscoverySourcesTried=0/.test(directReportDebug) ? "pass" : "fail",
     summary: directReportDebug,
     detail: "Developer Mode must render the backend Direct Discovery report, not Search Preparation's similarly named attempted flag.",
+  });
+  const registryDebug = [
+    "newsRegistryEnabled=yes",
+    "sourceRouterTriggered=yes",
+    "sourceRouterReason=topic_first_official_plus_media",
+    "selectedSourceCount=3",
+    "selectedSources=openai-news:OpenAI News|techcrunch-ai:TechCrunch AI|the-verge-ai:The Verge AI",
+    "fallbackSources=bing-news-fallback:Bing News fallback",
+    "topicTags=openai,ai_general",
+    "reliabilityMix=official:1|high:1|fallback:1",
+    "officialSourceCount=1",
+    "aggregatorSourceCount=0",
+    "fallbackUsed=yes",
+    "registryCandidatesFound=2",
+    "registryCandidatesKept=2",
+    "registryCandidatesRejected=0",
+  ].join(";");
+  items.push({
+    id: "news-source-registry-router-clean",
+    title: "News Source Registry router diagnostics",
+    status: /newsRegistryEnabled=yes/.test(registryDebug) &&
+      /sourceRouterTriggered=yes/.test(registryDebug) &&
+      /selectedSources=.*openai-news/.test(registryDebug) &&
+      /fallbackSources=.*bing-news-fallback/.test(registryDebug) ? "pass" : "fail",
+    summary: registryDebug,
+    detail: "News/recent Direct Discovery should expose source router selections and keep Bing News as fallback diagnostics.",
   });
   items.push({
     id: "news-roundup-mode-clean",
@@ -1097,12 +1126,30 @@ const statusIcon = (status: DiagnosticStatus) => {
   return <Search className="h-3.5 w-3.5" />;
 };
 
+const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): DiagnosticItem => ({
+  id: `notex-self-check-${item.expectedCategory}-${item.query}`,
+  title: item.query,
+  status: item.pass ? "pass" : "fail",
+  summary: `${item.expectedCategory}; intent=${item.actualIntent}; vertical=${item.vertical}; freshness=${item.freshness}; newsRegistry=${item.newsRegistryTriggered}; localResults=${item.localResultCount}; displayedLocalSources=${item.displayedLocalSourceCount}`,
+  detail: item.reason,
+  safeDebugInfo: [
+    `selectedNewsSources=${item.selectedNewsSources.join(" | ") || "none"}`,
+    `bingFallbackPlanned=${item.bingFallbackPlanned}`,
+    `localSearchTriggered=${item.localSearchTriggered}`,
+    `hasAlgorithmTermMatchedRe=${item.hasAlgorithmTermMatchedRe}`,
+    `hasPostNavigationFalsePositive=${item.hasPostNavigationFalsePositive}`,
+    `explicitUrlPathUsed=${item.explicitUrlPathUsed}`,
+    `raw=${JSON.stringify(item.rawDiagnostics)}`,
+  ],
+});
+
 export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnosticsPanelProps) {
   const [categories, setCategories] = useState<DiagnosticCategory[]>(emptyCategories);
   const [isRunningCore, setIsRunningCore] = useState(false);
   const [isTestingProvider, setIsTestingProvider] = useState(false);
   const [isCheckingLocalIndex, setIsCheckingLocalIndex] = useState(false);
   const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
+  const [isRunningNotexSelfCheck, setIsRunningNotexSelfCheck] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1305,6 +1352,42 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runNotexSelfCheck = async () => {
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    setIsRunningNotexSelfCheck(true);
+    replaceCategory(runId, "notex-self-check", [{
+      id: "notex-self-check-running",
+      title: "运行 NoteX 搜索自检",
+      status: "running",
+      summary: "正在运行固定轻量用例；不会调用真实模型生成回答。",
+    }]);
+    const startedAt = performance.now();
+    try {
+      const result = await withTimeout(runNotexSearchSelfCheck(), 15000, "NoteX 搜索自检超时");
+      const summaryItem = durationItem(startedAt, {
+        id: "notex-self-check-summary",
+        title: "NoteX 搜索自检汇总",
+        status: result.passed === result.total ? "pass" : "fail",
+        summary: `${result.passed}/${result.total} 通过`,
+        detail: "固定用例覆盖新闻 registry、Bing fallback、React guard、OI/local search、翻译 guard 和显式 URL 路径判断。",
+      });
+      replaceCategory(runId, "notex-self-check", [
+        summaryItem,
+        ...result.cases.map(buildNotexSelfCheckItem),
+      ]);
+    } catch (error) {
+      replaceCategory(runId, "notex-self-check", [durationItem(startedAt, {
+        id: "notex-self-check-error",
+        title: "运行 NoteX 搜索自检",
+        status: "fail",
+        summary: classifyError(error),
+      })]);
+    } finally {
+      if (runIdRef.current === runId) setIsRunningNotexSelfCheck(false);
+    }
+  };
+
   const runProviderTest = async () => {
     if (!webSearchConfig) {
       toast.error("AI 配置尚未读取完成");
@@ -1368,21 +1451,25 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
+        <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
           {isRunningCore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           运行核心自检
         </Button>
-        <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || !webSearchConfig}>
+        <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck || !webSearchConfig}>
           {isTestingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
           测试当前 Provider
         </Button>
-        <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
+        <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
           {isCheckingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           检查本地索引
         </Button>
-        <Button variant="outline" onClick={() => void rebuildLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
+        <Button variant="outline" onClick={() => void rebuildLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
           {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           重建本地索引
+        </Button>
+        <Button variant="outline" onClick={() => void runNotexSelfCheck()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
+          {isRunningNotexSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+          运行 NoteX 搜索自检
         </Button>
         <Button variant="outline" onClick={() => void copyReport()}>
           <Clipboard className="h-3.5 w-3.5" />

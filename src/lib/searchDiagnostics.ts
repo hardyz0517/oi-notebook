@@ -30,7 +30,26 @@ export type DirectDiscoveryDiagnostics = {
   candidatesKept?: string;
   durationMs?: string;
   cacheBehavior?: string;
+  newsRegistry?: NewsSourceRegistryDiagnostics;
   sourceLines: string[];
+};
+
+export type NewsSourceRegistryDiagnostics = {
+  enabled?: string;
+  sourceRouterTriggered?: string;
+  sourceRouterReason?: string;
+  selectedSourceCount?: string;
+  selectedSources?: string;
+  skippedSources?: string;
+  fallbackSources?: string;
+  topicTags?: string;
+  reliabilityMix?: string;
+  officialSourceCount?: string;
+  aggregatorSourceCount?: string;
+  fallbackUsed?: string;
+  registryCandidatesFound?: string;
+  registryCandidatesKept?: string;
+  registryCandidatesRejected?: string;
 };
 
 export type ProviderSearchDiagnostics = {
@@ -209,6 +228,28 @@ const splitDebugFields = (raw: string): string[] =>
 const lookupDebugField = (parts: string[], key: string): string | undefined =>
   parts.find((part) => part.startsWith(`${key}=`))?.slice(key.length + 1);
 
+const parseNewsSourceRegistryDiagnosticsFromParts = (parts: string[]): NewsSourceRegistryDiagnostics | undefined => {
+  const enabled = lookupDebugField(parts, "newsRegistryEnabled");
+  if (!enabled) return undefined;
+  return {
+    enabled,
+    sourceRouterTriggered: lookupDebugField(parts, "sourceRouterTriggered"),
+    sourceRouterReason: lookupDebugField(parts, "sourceRouterReason"),
+    selectedSourceCount: lookupDebugField(parts, "selectedSourceCount"),
+    selectedSources: lookupDebugField(parts, "selectedSources"),
+    skippedSources: lookupDebugField(parts, "skippedSources"),
+    fallbackSources: lookupDebugField(parts, "fallbackSources"),
+    topicTags: lookupDebugField(parts, "topicTags"),
+    reliabilityMix: lookupDebugField(parts, "reliabilityMix"),
+    officialSourceCount: lookupDebugField(parts, "officialSourceCount"),
+    aggregatorSourceCount: lookupDebugField(parts, "aggregatorSourceCount"),
+    fallbackUsed: lookupDebugField(parts, "fallbackUsed"),
+    registryCandidatesFound: lookupDebugField(parts, "registryCandidatesFound"),
+    registryCandidatesKept: lookupDebugField(parts, "registryCandidatesKept"),
+    registryCandidatesRejected: lookupDebugField(parts, "registryCandidatesRejected"),
+  };
+};
+
 export const parseSearchDiagnostics = (raw: string): SearchDiagnostics => {
   const news = parseNewsReadBudgetDiagnostics(raw);
   return {
@@ -296,6 +337,7 @@ export const parseDirectDiscoveryDiagnostics = (raw: string): DirectDiscoveryDia
     candidatesKept: lookupDebugField(parts, "directDiscoveryCandidatesKept"),
     durationMs: lookupDebugField(parts, "directDiscoveryDurationMs"),
     cacheBehavior: lookupDebugField(parts, "directDiscoveryCacheBehavior"),
+    newsRegistry: parseNewsSourceRegistryDiagnosticsFromParts(parts),
     sourceLines,
   };
 };
@@ -391,6 +433,23 @@ export const formatBingDiagnostics = (raw: string): string[] => {
 export const formatDirectDiscoveryDiagnostics = (raw: string): string[] => {
   const diagnostics = parseDirectDiscoveryDiagnostics(raw);
   if (!diagnostics?.attempted) return [];
+  const registryLines = diagnostics.newsRegistry ? [
+    diagnostics.newsRegistry.enabled ? `newsRegistryEnabled=${diagnostics.newsRegistry.enabled}` : undefined,
+    diagnostics.newsRegistry.sourceRouterTriggered ? `sourceRouterTriggered=${diagnostics.newsRegistry.sourceRouterTriggered}` : undefined,
+    diagnostics.newsRegistry.sourceRouterReason ? `sourceRouterReason=${diagnostics.newsRegistry.sourceRouterReason}` : undefined,
+    diagnostics.newsRegistry.topicTags ? `topicTags=${diagnostics.newsRegistry.topicTags}` : undefined,
+    diagnostics.newsRegistry.selectedSourceCount ? `selectedSourceCount=${diagnostics.newsRegistry.selectedSourceCount}` : undefined,
+    diagnostics.newsRegistry.selectedSources ? `selectedSources=${diagnostics.newsRegistry.selectedSources}` : undefined,
+    diagnostics.newsRegistry.skippedSources ? `skippedSources=${diagnostics.newsRegistry.skippedSources}` : undefined,
+    diagnostics.newsRegistry.fallbackSources ? `fallbackSources=${diagnostics.newsRegistry.fallbackSources}` : undefined,
+    diagnostics.newsRegistry.reliabilityMix ? `reliabilityMix=${diagnostics.newsRegistry.reliabilityMix}` : undefined,
+    diagnostics.newsRegistry.officialSourceCount ? `officialSourceCount=${diagnostics.newsRegistry.officialSourceCount}` : undefined,
+    diagnostics.newsRegistry.aggregatorSourceCount ? `aggregatorSourceCount=${diagnostics.newsRegistry.aggregatorSourceCount}` : undefined,
+    diagnostics.newsRegistry.fallbackUsed ? `fallbackUsed=${diagnostics.newsRegistry.fallbackUsed}` : undefined,
+    diagnostics.newsRegistry.registryCandidatesFound ? `registryCandidatesFound=${diagnostics.newsRegistry.registryCandidatesFound}` : undefined,
+    diagnostics.newsRegistry.registryCandidatesKept ? `registryCandidatesKept=${diagnostics.newsRegistry.registryCandidatesKept}` : undefined,
+    diagnostics.newsRegistry.registryCandidatesRejected ? `registryCandidatesRejected=${diagnostics.newsRegistry.registryCandidatesRejected}` : undefined,
+  ].filter((line): line is string => Boolean(line)) : [];
   return [
     `directDiscoveryAttempted：${diagnostics.attempted === "yes" ? "yes" : "no"}`,
     diagnostics.skippedReason ? `directDiscoverySkippedReason：${diagnostics.skippedReason}` : undefined,
@@ -403,6 +462,7 @@ export const formatDirectDiscoveryDiagnostics = (raw: string): string[] => {
     `directDiscoveryCandidatesKept：${diagnostics.candidatesKept ?? "0"}`,
     `directDiscoveryDurationMs：${diagnostics.durationMs ?? "0"}`,
     `directDiscoveryCacheBehavior：${diagnostics.cacheBehavior || "unknown"}`,
+    ...registryLines,
     ...diagnostics.sourceLines,
   ].filter((line): line is string => Boolean(line));
 };

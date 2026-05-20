@@ -348,6 +348,32 @@ export interface PromptCitationContractStatusResult {
   bareIdWarning: boolean;
 }
 
+export interface NotexSearchSelfCheckCaseResult {
+  query: string;
+  expectedCategory: string;
+  actualIntent: string;
+  vertical: string;
+  freshness: string;
+  newsRegistryTriggered: boolean;
+  selectedNewsSources: string[];
+  bingFallbackPlanned: boolean;
+  localSearchTriggered: boolean;
+  localResultCount: number;
+  displayedLocalSourceCount: number;
+  hasAlgorithmTermMatchedRe: boolean;
+  hasPostNavigationFalsePositive: boolean;
+  explicitUrlPathUsed: boolean;
+  pass: boolean;
+  reason: string;
+  rawDiagnostics: unknown;
+}
+
+export interface NotexSearchSelfCheckResult {
+  passed: number;
+  total: number;
+  cases: NotexSearchSelfCheckCaseResult[];
+}
+
 export interface NoteChatStreamChunkEvent {
   streamId: string;
   delta: string;
@@ -838,6 +864,14 @@ export async function rebuildLocalNoteIndex(): Promise<LocalNoteIndexStatusResul
 export async function getPromptCitationContractStatus(): Promise<PromptCitationContractStatusResult> {
   try {
     return await invoke<PromptCitationContractStatusResult>("get_prompt_citation_contract_status");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckResult> {
+  try {
+    return await invoke<NotexSearchSelfCheckResult>("run_notex_search_self_check");
   } catch (e) {
     throw toError(e);
   }

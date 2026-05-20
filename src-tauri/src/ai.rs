@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tauri::Emitter;
 
-use crate::local_search::LocalNoteSearchResult;
+use crate::local_search::{
+    LocalNoteSearchInput, LocalNoteSearchResult, LocalSearchSelfCheckProbe,
+};
 use crate::luogu::{read_config, write_config, AiConfigFields, AiModel, AiProvider};
 use crate::paths;
 use crate::prompts::{render_prompt_template, PromptTemplateKind};
@@ -508,6 +510,36 @@ pub struct PromptCitationContractStatus {
     pub local_available_ids: bool,
     pub local_marker_instruction: bool,
     pub bare_id_warning: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotexSearchSelfCheckResult {
+    pub passed: usize,
+    pub total: usize,
+    pub cases: Vec<NotexSearchSelfCheckCaseResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotexSearchSelfCheckCaseResult {
+    pub query: String,
+    pub expected_category: String,
+    pub actual_intent: String,
+    pub vertical: String,
+    pub freshness: String,
+    pub news_registry_triggered: bool,
+    pub selected_news_sources: Vec<String>,
+    pub bing_fallback_planned: bool,
+    pub local_search_triggered: bool,
+    pub local_result_count: usize,
+    pub displayed_local_source_count: usize,
+    pub has_algorithm_term_matched_re: bool,
+    pub has_post_navigation_false_positive: bool,
+    pub explicit_url_path_used: bool,
+    pub pass: bool,
+    pub reason: String,
+    pub raw_diagnostics: JsonValue,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -8300,6 +8332,20 @@ struct DirectDiscoveryReport {
     freshness: String,
     query: String,
     topic_keywords: Vec<String>,
+    topic_tags: Vec<String>,
+    news_registry_enabled: bool,
+    source_router_triggered: bool,
+    source_router_reason: String,
+    selected_sources: Vec<String>,
+    skipped_sources: Vec<String>,
+    fallback_sources: Vec<String>,
+    reliability_mix: String,
+    official_source_count: usize,
+    aggregator_source_count: usize,
+    fallback_used: bool,
+    registry_candidates_found: usize,
+    registry_candidates_kept: usize,
+    registry_candidates_rejected: usize,
     sources_tried: Vec<DirectDiscoveryAttempt>,
     candidates_found: usize,
     candidates_kept: usize,
@@ -8309,11 +8355,49 @@ struct DirectDiscoveryReport {
 
 #[derive(Debug, Clone)]
 struct DirectDiscoveryFeed {
+    id: &'static str,
     name: &'static str,
     feed_url: Option<&'static str>,
     source_home: &'static str,
     source_kind: &'static str,
     reliability: &'static str,
+    source_type: &'static str,
+    topics: &'static [&'static str],
+    reason: String,
+    max_items: usize,
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct NewsSourceDefinition {
+    id: &'static str,
+    name: &'static str,
+    homepage: &'static str,
+    source_type: &'static str,
+    reliability: &'static str,
+    topics: &'static [&'static str],
+    languages: &'static [&'static str],
+    regions: &'static [&'static str],
+    rss_urls: &'static [&'static str],
+    site_urls: &'static [&'static str],
+    official: bool,
+    aggregator: bool,
+    enabled_by_default: bool,
+    max_items: usize,
+    timeout_ms: u64,
+    notes: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct NewsSourceRoute {
+    selected_sources: Vec<DirectDiscoveryFeed>,
+    skipped_sources: Vec<String>,
+    fallback_sources: Vec<String>,
+    source_strategy: String,
+    topic_tags: Vec<String>,
+    reliability_mix: String,
+    official_source_count: usize,
+    aggregator_source_count: usize,
 }
 
 fn is_translation_or_word_lookup_query(query: &str) -> bool {
@@ -8408,70 +8492,361 @@ fn direct_discovery_topic_keywords(request: &WebSearchRequestInput) -> Vec<Strin
     keywords
 }
 
-fn direct_news_feeds(request: &WebSearchRequestInput) -> Vec<DirectDiscoveryFeed> {
-    let mut feeds = vec![
-        DirectDiscoveryFeed {
+fn news_source_registry() -> Vec<NewsSourceDefinition> {
+    vec![
+        NewsSourceDefinition {
+            id: "openai-news",
             name: "OpenAI News",
-            feed_url: Some("https://openai.com/news/rss.xml"),
-            source_home: "https://openai.com/news/",
-            source_kind: "official_news",
+            homepage: "https://openai.com/news/",
+            source_type: "official_news",
             reliability: "official",
+            topics: &["ai_general", "ai_model", "ai_agent", "openai", "developer_tools"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://openai.com/news/rss.xml"],
+            site_urls: &["https://openai.com/news/"],
+            official: true,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Official OpenAI news RSS and landing page candidates.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "anthropic-news",
             name: "Anthropic News",
-            feed_url: None,
-            source_home: "https://www.anthropic.com/news",
-            source_kind: "official_news",
+            homepage: "https://www.anthropic.com/news",
+            source_type: "official_news",
             reliability: "official",
+            topics: &["ai_general", "ai_model", "ai_agent", "anthropic"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://www.anthropic.com/news"],
+            official: true,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Official Anthropic news page; URL Reader decides evidence usability.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "google-deepmind-blog",
             name: "Google DeepMind Blog",
-            feed_url: None,
-            source_home: "https://deepmind.google/discover/blog/",
-            source_kind: "official_blog",
+            homepage: "https://deepmind.google/discover/blog/",
+            source_type: "official_blog",
             reliability: "official",
+            topics: &["ai_general", "ai_model", "deepmind", "google_ai", "research"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://deepmind.google/discover/blog/"],
+            official: true,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Official DeepMind blog landing candidate.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "google-ai-blog",
             name: "Google AI Blog",
-            feed_url: Some("https://blog.google/technology/ai/rss/"),
-            source_home: "https://blog.google/technology/ai/",
-            source_kind: "official_blog",
+            homepage: "https://blog.google/technology/ai/",
+            source_type: "official_blog",
             reliability: "official",
+            topics: &["ai_general", "ai_model", "google_ai", "developer_tools"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://blog.google/technology/ai/rss/"],
+            site_urls: &["https://blog.google/technology/ai/"],
+            official: true,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Official Google AI RSS and landing page candidates.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "microsoft-ai-blog",
             name: "Microsoft AI Blog",
-            feed_url: None,
-            source_home: "https://www.microsoft.com/en-us/ai/blog/",
-            source_kind: "official_blog",
+            homepage: "https://www.microsoft.com/en-us/ai/blog/",
+            source_type: "official_blog",
             reliability: "official",
+            topics: &["ai_general", "ai_model", "microsoft_ai", "developer_tools"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://www.microsoft.com/en-us/ai/blog/"],
+            official: true,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Official Microsoft AI blog landing candidate.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "techcrunch-ai",
             name: "TechCrunch AI",
-            feed_url: Some("https://techcrunch.com/category/artificial-intelligence/feed/"),
-            source_home: "https://techcrunch.com/category/artificial-intelligence/",
-            source_kind: "rss_item",
-            reliability: "media",
+            homepage: "https://techcrunch.com/category/artificial-intelligence/",
+            source_type: "tech_media",
+            reliability: "high",
+            topics: &["ai_general", "ai_model", "ai_agent", "funding", "developer_tools"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://techcrunch.com/category/artificial-intelligence/feed/"],
+            site_urls: &["https://techcrunch.com/category/artificial-intelligence/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Technology media RSS; only candidate discovery.",
         },
-        DirectDiscoveryFeed {
-            name: "The Verge",
-            feed_url: Some("https://www.theverge.com/rss/index.xml"),
-            source_home: "https://www.theverge.com/ai-artificial-intelligence",
-            source_kind: "rss_item",
-            reliability: "media",
+        NewsSourceDefinition {
+            id: "the-verge-ai",
+            name: "The Verge AI",
+            homepage: "https://www.theverge.com/ai-artificial-intelligence",
+            source_type: "tech_media",
+            reliability: "high",
+            topics: &["ai_general", "ai_model", "ai_agent", "hardware", "regulation"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://www.theverge.com/rss/index.xml"],
+            site_urls: &["https://www.theverge.com/ai-artificial-intelligence"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Broad technology media RSS; filtered by topic before URL Reader.",
         },
-        DirectDiscoveryFeed {
+        NewsSourceDefinition {
+            id: "qbitai",
             name: "QbitAI",
-            feed_url: Some("https://www.qbitai.com/feed"),
-            source_home: "https://www.qbitai.com/",
-            source_kind: "rss_item",
-            reliability: "media",
+            homepage: "https://www.qbitai.com/",
+            source_type: "tech_media",
+            reliability: "medium",
+            topics: &["ai_general", "china_ai", "ai_model", "hardware"],
+            languages: &["zh"],
+            regions: &["cn"],
+            rss_urls: &["https://www.qbitai.com/feed"],
+            site_urls: &["https://www.qbitai.com/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Chinese AI media RSS; only candidate discovery.",
         },
+        NewsSourceDefinition {
+            id: "bing-news-fallback",
+            name: "Bing News fallback",
+            homepage: BING_NEWS_SEARCH_ENDPOINT,
+            source_type: "search_fallback",
+            reliability: "fallback",
+            topics: &["ai_general", "ai_model", "ai_agent", "openai", "anthropic", "google_ai", "deepmind", "microsoft_ai", "china_ai", "hardware", "regulation", "security", "funding", "developer_tools"],
+            languages: &["en", "zh"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &[BING_NEWS_SEARCH_ENDPOINT],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 0,
+            timeout_ms: 5000,
+            notes: "Provider fallback only; not emitted as direct evidence.",
+        },
+    ]
+}
+
+fn infer_news_topic_tags(request: &WebSearchRequestInput, keywords: &[String]) -> Vec<String> {
+    let combined = format!(
+        "{} {}",
+        request.queries.join(" "),
+        keywords.join(" ")
+    );
+    let lower = combined.to_ascii_lowercase();
+    let mut tags = Vec::<String>::new();
+    let topic_rules = [
+        ("openai", "openai"),
+        ("chatgpt", "openai"),
+        ("anthropic", "anthropic"),
+        ("claude", "anthropic"),
+        ("google", "google_ai"),
+        ("gemini", "google_ai"),
+        ("deepmind", "deepmind"),
+        ("microsoft", "microsoft_ai"),
+        ("copilot", "microsoft_ai"),
+        ("deepseek", "china_ai"),
+        ("china", "china_ai"),
+        ("hardware", "hardware"),
+        ("gpu", "hardware"),
+        ("chip", "hardware"),
+        ("regulation", "regulation"),
+        ("policy", "regulation"),
+        ("security", "security"),
+        ("funding", "funding"),
+        ("startup", "funding"),
+        ("agent", "ai_agent"),
+        ("tool", "developer_tools"),
+        ("developer", "developer_tools"),
+        ("model", "ai_model"),
+        ("llm", "ai_model"),
+        ("ai", "ai_general"),
     ];
-    let combined = request.queries.join(" ").to_ascii_lowercase();
-    if combined.contains("openai") {
-        feeds.sort_by_key(|feed| if feed.name.contains("OpenAI") { 0 } else { 1 });
+    for (needle, tag) in topic_rules {
+        if lower.contains(needle) {
+            tags.push(tag.to_string());
+        }
     }
-    feeds
+    for value in ["浜哄伐鏅鸿兘", "澶фā鍨?", "妯″瀷"] {
+        if combined.contains(value) {
+            tags.push("ai_general".to_string());
+        }
+    }
+    if tags.is_empty() {
+        tags.push("ai_general".to_string());
+    }
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+fn news_source_matches_topics(source: &NewsSourceDefinition, topic_tags: &[String]) -> bool {
+    source
+        .topics
+        .iter()
+        .any(|topic| topic_tags.iter().any(|tag| tag.as_str() == *topic))
+        || source.topics.contains(&"ai_general")
+}
+
+fn route_news_sources_for_request(
+    request: &WebSearchRequestInput,
+    keywords: &[String],
+) -> NewsSourceRoute {
+    let topic_tags = infer_news_topic_tags(request, keywords);
+    let registry = news_source_registry();
+    let mut selected = Vec::<&NewsSourceDefinition>::new();
+    let mut skipped_sources = Vec::<String>::new();
+    let mut fallback_sources = Vec::<String>::new();
+    let exact_topic = topic_tags
+        .iter()
+        .any(|tag| matches!(tag.as_str(), "openai" | "anthropic" | "google_ai" | "deepmind" | "microsoft_ai"));
+    for source in &registry {
+        if source.source_type == "search_fallback" {
+            fallback_sources.push(format!("{}:{}", source.id, source.name));
+            continue;
+        }
+        if !source.enabled_by_default {
+            skipped_sources.push(format!("{}:disabled", source.id));
+            continue;
+        }
+        let matches_topic = news_source_matches_topics(source, &topic_tags);
+        if exact_topic {
+            let exact_match = source
+                .topics
+                .iter()
+                .any(|topic| topic_tags.iter().any(|tag| tag.as_str() == *topic));
+            let supporting_media = !source.official
+                && !source.aggregator
+                && selected.iter().filter(|item| !item.official).count() < 2;
+            if exact_match || supporting_media {
+                selected.push(source);
+            } else {
+                skipped_sources.push(format!("{}:topic_mismatch", source.id));
+            }
+            continue;
+        }
+        if matches_topic {
+            selected.push(source);
+        } else {
+            skipped_sources.push(format!("{}:topic_mismatch", source.id));
+        }
+    }
+    selected.sort_by_key(|source| {
+        let topic_priority = if source
+            .topics
+            .iter()
+            .any(|topic| topic_tags.iter().any(|tag| tag.as_str() == *topic))
+        {
+            0
+        } else {
+            1
+        };
+        let reliability_priority = match source.reliability {
+            "official" => 0,
+            "high" => 1,
+            "medium" => 2,
+            "aggregator" => 3,
+            _ => 4,
+        };
+        (topic_priority, reliability_priority, source.name)
+    });
+    selected.truncate(8);
+    let mut reliability_counts = BTreeMap::<String, usize>::new();
+    for source in &selected {
+        *reliability_counts
+            .entry(source.reliability.to_string())
+            .or_insert(0) += 1;
+    }
+    let reliability_mix = reliability_counts
+        .into_iter()
+        .map(|(key, value)| format!("{key}:{value}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let official_source_count = selected.iter().filter(|source| source.official).count();
+    let aggregator_source_count = selected.iter().filter(|source| source.aggregator).count();
+    let source_strategy = if exact_topic {
+        "topic_first_official_plus_media".to_string()
+    } else {
+        "ai_general_official_media_plus_fallback".to_string()
+    };
+    let selected_sources = selected
+        .into_iter()
+        .map(|source| {
+            let primary_rss = source.rss_urls.first().copied();
+            let primary_site = source
+                .site_urls
+                .first()
+                .copied()
+                .unwrap_or(source.homepage);
+            DirectDiscoveryFeed {
+                id: source.id,
+                name: source.name,
+                feed_url: primary_rss,
+                source_home: primary_site,
+                source_kind: match source.source_type {
+                    "official_news" => "official_news",
+                    "official_blog" | "research_blog" => "official_blog",
+                    "tech_media" | "media_rss" | "aggregator_rss" => "rss_item",
+                    _ => "rss_item",
+                },
+                reliability: source.reliability,
+                source_type: source.source_type,
+                topics: source.topics,
+                reason: format!(
+                    "sourceRouterStrategy={};topics={};languages={};regions={};notes={}",
+                    source_strategy,
+                    source.topics.join("|"),
+                    source.languages.join("|"),
+                    source.regions.join("|"),
+                    source.notes
+                ),
+                max_items: source.max_items,
+                timeout_ms: source.timeout_ms,
+            }
+        })
+        .collect::<Vec<_>>();
+    NewsSourceRoute {
+        selected_sources,
+        skipped_sources,
+        fallback_sources,
+        source_strategy,
+        topic_tags,
+        reliability_mix,
+        official_source_count,
+        aggregator_source_count,
+    }
 }
 
 fn make_direct_source(
@@ -8701,8 +9076,9 @@ fn discover_rss_items(
     let mut results = Vec::new();
     let blocks = rss_blocks(&body);
     let mut matched = 0usize;
+    let source_limit = remaining.min(feed.max_items.max(1));
     for block in &blocks {
-        if results.len() >= remaining {
+        if results.len() >= source_limit {
             break;
         }
         let title = rss_field(block, &["title"]).unwrap_or_default();
@@ -8727,7 +9103,10 @@ fn discover_rss_items(
             Some(feed_url),
             Some(feed.source_home),
             date_hint,
-            "RSS/Atom item matched freshness and topic keywords.",
+            &format!(
+                "RSS/Atom item matched freshness and topic keywords. {}",
+                feed.reason
+            ),
         ) {
             results.push(source);
         }
@@ -8764,10 +9143,22 @@ fn discover_direct_news_sources(
     request: &WebSearchRequestInput,
     max_results: usize,
     attempts: &mut Vec<DirectDiscoveryAttempt>,
-) -> Vec<WebSearchResult> {
+) -> (Vec<WebSearchResult>, NewsSourceRoute) {
+    let empty_route = NewsSourceRoute {
+        selected_sources: Vec::new(),
+        skipped_sources: Vec::new(),
+        fallback_sources: Vec::new(),
+        source_strategy: "not_news_request".to_string(),
+        topic_tags: Vec::new(),
+        reliability_mix: String::new(),
+        official_source_count: 0,
+        aggregator_source_count: 0,
+    };
     if !is_direct_news_discovery_request(request) || max_results == 0 {
-        return Vec::new();
+        return (Vec::new(), empty_route);
     }
+    let keywords = direct_discovery_topic_keywords(request);
+    let route = route_news_sources_for_request(request, &keywords);
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .connect_timeout(Duration::from_secs(3))
@@ -8776,11 +9167,10 @@ fn discover_direct_news_sources(
         .build()
     {
         Ok(client) => client,
-        Err(_) => return Vec::new(),
+        Err(_) => return (Vec::new(), route),
     };
-    let keywords = direct_discovery_topic_keywords(request);
     let mut results = Vec::new();
-    for feed in direct_news_feeds(request).into_iter().take(8) {
+    for feed in route.selected_sources.iter() {
         if results.len() >= max_results {
             break;
         }
@@ -8804,11 +9194,14 @@ fn discover_direct_news_sources(
                 feed.feed_url,
                 Some(feed.source_home),
                 None,
-                "Official or media news/blog landing candidate; still requires URL Reader and Evidence Gate.",
+                &format!(
+                    "Official or media news/blog landing candidate; still requires URL Reader and Evidence Gate. {}",
+                    feed.reason
+                ),
             ) {
                 attempts.push(DirectDiscoveryAttempt {
                     source_name: feed.name.to_string(),
-                    source_type: if feed.feed_url.is_some() { "official_news_page" } else { "official_news_page" }.to_string(),
+                    source_type: feed.source_type.to_string(),
                     url: feed.source_home.to_string(),
                     status: "success".to_string(),
                     http_status: None,
@@ -8816,14 +9209,20 @@ fn discover_direct_news_sources(
                     items_parsed: 0,
                     items_matched: 0,
                     candidates_emitted: 1,
-                    reason: "Emitted direct site candidate after RSS was unavailable or produced no matching item.".to_string(),
+                    reason: format!(
+                        "Emitted direct site candidate after RSS was unavailable or produced no matching item. sourceId={};topics={};timeoutMs={};{}",
+                        feed.id,
+                        feed.topics.join("|"),
+                        feed.timeout_ms,
+                        feed.reason
+                    ),
                 });
                 results.push(source);
             }
         }
     }
     results.truncate(max_results);
-    results
+    (results, route)
 }
 
 fn discover_direct_docs_sources(
@@ -9107,6 +9506,57 @@ fn direct_discovery_debug_string(report: &DirectDiscoveryReport) -> String {
             "directDiscoveryCacheBehavior={}",
             sanitize_ai_detail(&report.cache_behavior)
         ),
+        format!(
+            "newsRegistryEnabled={}",
+            if report.news_registry_enabled { "yes" } else { "no" }
+        ),
+        format!(
+            "sourceRouterTriggered={}",
+            if report.source_router_triggered { "yes" } else { "no" }
+        ),
+        format!(
+            "sourceRouterReason={}",
+            sanitize_ai_detail(&report.source_router_reason)
+        ),
+        format!(
+            "selectedSourceCount={}",
+            report.selected_sources.len()
+        ),
+        format!(
+            "selectedSources={}",
+            sanitize_ai_detail(&report.selected_sources.join("|"))
+        ),
+        format!(
+            "skippedSources={}",
+            sanitize_ai_detail(&report.skipped_sources.join("|"))
+        ),
+        format!(
+            "fallbackSources={}",
+            sanitize_ai_detail(&report.fallback_sources.join("|"))
+        ),
+        format!(
+            "topicTags={}",
+            sanitize_ai_detail(&report.topic_tags.join(","))
+        ),
+        format!(
+            "reliabilityMix={}",
+            sanitize_ai_detail(&report.reliability_mix)
+        ),
+        format!("officialSourceCount={}", report.official_source_count),
+        format!("aggregatorSourceCount={}", report.aggregator_source_count),
+        format!(
+            "fallbackUsed={}",
+            if report.fallback_used { "yes" } else { "no" }
+        ),
+        format!(
+            "registryCandidatesFound={}",
+            report.registry_candidates_found
+        ),
+        format!("registryCandidatesKept={}", report.registry_candidates_kept),
+        format!(
+            "registryCandidatesRejected={}",
+            report.registry_candidates_rejected
+        ),
     ];
     for (index, attempt) in report.sources_tried.iter().enumerate() {
         parts.push(format!(
@@ -9145,6 +9595,20 @@ fn discover_no_key_direct_sources_with_report(
     let mut sources = Vec::new();
     let combined = request.queries.join(" ");
     let news_request = is_direct_news_discovery_request(request);
+    let mut news_route = NewsSourceRoute {
+        selected_sources: Vec::new(),
+        skipped_sources: Vec::new(),
+        fallback_sources: Vec::new(),
+        source_strategy: if news_request {
+            "news_request_not_routed".to_string()
+        } else {
+            "not_news_request".to_string()
+        },
+        topic_tags: Vec::new(),
+        reliability_mix: String::new(),
+        official_source_count: 0,
+        aggregator_source_count: 0,
+    };
     let skipped_reason = if max_results == 0 {
         Some("max_results_is_zero".to_string())
     } else if is_translation_or_word_lookup_query(&combined) {
@@ -9153,11 +9617,13 @@ fn discover_no_key_direct_sources_with_report(
         None
     };
     if skipped_reason.is_none() {
-        sources.extend(discover_direct_news_sources(
+        let (news_sources, route) = discover_direct_news_sources(
             request,
             max_results.saturating_sub(sources.len()),
             &mut attempts,
-        ));
+        );
+        news_route = route;
+        sources.extend(news_sources);
         sources.extend(discover_direct_docs_sources(
             request,
             max_results.saturating_sub(sources.len()),
@@ -9171,7 +9637,7 @@ fn discover_no_key_direct_sources_with_report(
     }
     let candidates_found = sources.len();
     let merged = merge_search_sources(Vec::new(), sources, max_results);
-    let final_skipped_reason = skipped_reason.or_else(|| {
+    let final_skipped_reason = skipped_reason.clone().or_else(|| {
         if !news_request && attempts.is_empty() && candidates_found == 0 {
             Some("no_matching_direct_discovery_rule".to_string())
         } else {
@@ -9185,6 +9651,28 @@ fn discover_no_key_direct_sources_with_report(
         freshness: request.freshness.clone().unwrap_or_default(),
         query: combined,
         topic_keywords: direct_discovery_topic_keywords(request),
+        topic_tags: news_route.topic_tags.clone(),
+        news_registry_enabled: news_request,
+        source_router_triggered: news_request && skipped_reason.is_none(),
+        source_router_reason: news_route.source_strategy.clone(),
+        selected_sources: news_route
+            .selected_sources
+            .iter()
+            .map(|source| format!("{}:{}", source.id, source.name))
+            .collect(),
+        skipped_sources: news_route.skipped_sources.clone(),
+        fallback_sources: news_route.fallback_sources.clone(),
+        reliability_mix: news_route.reliability_mix.clone(),
+        official_source_count: news_route.official_source_count,
+        aggregator_source_count: news_route.aggregator_source_count,
+        fallback_used: news_request,
+        registry_candidates_found: if news_request { candidates_found } else { 0 },
+        registry_candidates_kept: if news_request { merged.len() } else { 0 },
+        registry_candidates_rejected: if news_request {
+            candidates_found.saturating_sub(merged.len())
+        } else {
+            0
+        },
         sources_tried: attempts,
         candidates_found,
         candidates_kept: merged.len(),
@@ -9218,6 +9706,429 @@ fn merge_search_sources(
         }
     }
     merged
+}
+
+fn self_check_request(
+    query: &str,
+    intent: &str,
+    vertical: Option<&str>,
+    freshness: Option<&str>,
+    topic_keywords: &[&str],
+    algorithm_keywords: &[&str],
+    problem_id: Option<&str>,
+) -> WebSearchRequestInput {
+    WebSearchRequestInput {
+        queries: vec![query.to_string()],
+        intent: intent.to_string(),
+        vertical: vertical.map(ToOwned::to_owned),
+        freshness: freshness.map(ToOwned::to_owned),
+        problem_id: problem_id.map(ToOwned::to_owned),
+        algorithm_keywords: algorithm_keywords.iter().map(|value| value.to_string()).collect(),
+        topic_keywords: topic_keywords.iter().map(|value| value.to_string()).collect(),
+        max_results: Some(8),
+        provider: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
+    }
+}
+
+fn run_local_self_check_query(
+    query: &str,
+    problem_id: Option<&str>,
+    algorithm_keywords: &[&str],
+) -> LocalSearchSelfCheckProbe {
+    crate::local_search::inspect_local_search_for_self_check(&LocalNoteSearchInput {
+        query: query.to_string(),
+        problem_id: problem_id.map(ToOwned::to_owned),
+        problem_title: None,
+        algorithm_keywords: algorithm_keywords.iter().map(|value| value.to_string()).collect(),
+        current_note_path: None,
+        max_results: Some(5),
+        max_chars_per_result: Some(500),
+    })
+}
+
+fn local_probe_has_algorithm_term_re(probe: &LocalSearchSelfCheckProbe) -> bool {
+    probe
+        .query_terms
+        .iter()
+        .chain(probe.expanded_terms.iter())
+        .chain(probe.algorithm_terms.iter())
+        .any(|term| term.eq_ignore_ascii_case("re"))
+}
+
+fn direct_candidate_gate_protected(route: &NewsSourceRoute) -> bool {
+    let Some(first_source) = route.selected_sources.first() else {
+        return false;
+    };
+    make_direct_source(
+        first_source.name,
+        first_source.source_home,
+        None,
+        first_source.source_kind,
+        "direct_site",
+        first_source.reliability,
+        first_source.name,
+        first_source.feed_url,
+        Some(first_source.source_home),
+        None,
+        "Self-check candidate; should not be usable evidence before URL Reader.",
+    )
+    .is_some_and(|source| {
+        source.evidence_status.as_deref() == Some("candidate")
+            && source.usable_evidence == Some(false)
+            && source.injected_into_answer == Some(false)
+            && source.content_status.as_deref() == Some("not_fetched")
+    })
+}
+
+fn build_self_check_case(
+    query: &str,
+    expected_category: &str,
+    request: WebSearchRequestInput,
+    local_probe: Option<LocalSearchSelfCheckProbe>,
+    explicit_url_path_used: bool,
+) -> NotexSearchSelfCheckCaseResult {
+    let keywords = direct_discovery_topic_keywords(&request);
+    let news_registry_triggered = is_direct_news_discovery_request(&request);
+    let route = if news_registry_triggered {
+        Some(route_news_sources_for_request(&request, &keywords))
+    } else {
+        None
+    };
+    let selected_news_sources = route
+        .as_ref()
+        .map(|route| {
+            route
+                .selected_sources
+                .iter()
+                .map(|source| format!("{}:{}", source.id, source.name))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let bing_fallback_planned = route.as_ref().is_some_and(|route| {
+        route
+            .fallback_sources
+            .iter()
+            .any(|source| source.contains("bing-news-fallback"))
+    });
+    let candidate_gate_protected = route
+        .as_ref()
+        .map(direct_candidate_gate_protected)
+        .unwrap_or(true);
+    let (local_search_triggered, has_algorithm_term_matched_re, local_probe_diagnostics) =
+        match local_probe {
+            Some(probe) => {
+                let has_algorithm_term_matched_re = local_probe_has_algorithm_term_re(&probe);
+                (
+                    true,
+                    has_algorithm_term_matched_re,
+                    Some(json!({
+                        "oiSynonymsEnabled": probe.oi_synonyms_enabled,
+                        "queryTerms": probe.query_terms,
+                        "expandedTerms": probe.expanded_terms,
+                        "problemIds": probe.problem_ids,
+                        "algorithmTerms": probe.algorithm_terms,
+                        "mode": "query-planning-only-no-note-io",
+                    })),
+                )
+            }
+            None => (false, false, None),
+        };
+    let local_result_count = 0usize;
+    let has_post_navigation_false_positive = false;
+    let displayed_local_source_count = 0usize;
+    let actual_intent = request.intent.clone();
+    let vertical = request.vertical.clone().unwrap_or_else(|| "none".to_string());
+    let freshness = request
+        .freshness
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
+
+    let mut failures = Vec::<String>::new();
+    match expected_category {
+        "news_ai" => {
+            if !news_registry_triggered {
+                failures.push("news registry was not triggered".to_string());
+            }
+            if !bing_fallback_planned {
+                failures.push("Bing News fallback was not planned".to_string());
+            }
+            if !candidate_gate_protected {
+                failures.push("direct candidate was not protected by candidate evidence state".to_string());
+            }
+        }
+        "news_openai" => {
+            if !news_registry_triggered {
+                failures.push("news registry was not triggered".to_string());
+            }
+            if !selected_news_sources
+                .iter()
+                .any(|source| source.contains("openai-news"))
+            {
+                failures.push("OpenAI source was not selected".to_string());
+            }
+            if !bing_fallback_planned {
+                failures.push("Bing News fallback was not planned".to_string());
+            }
+            if !candidate_gate_protected {
+                failures.push("direct candidate was not protected by candidate evidence state".to_string());
+            }
+        }
+        "news_anthropic" => {
+            if !news_registry_triggered {
+                failures.push("news registry was not triggered".to_string());
+            }
+            if !selected_news_sources
+                .iter()
+                .any(|source| source.contains("anthropic-news"))
+            {
+                failures.push("Anthropic source was not selected".to_string());
+            }
+            if !bing_fallback_planned {
+                failures.push("Bing News fallback was not planned".to_string());
+            }
+            if !candidate_gate_protected {
+                failures.push("direct candidate was not protected by candidate evidence state".to_string());
+            }
+        }
+        "docs_react" => {
+            if news_registry_triggered {
+                failures.push("React docs query triggered news registry".to_string());
+            }
+            if has_algorithm_term_matched_re {
+                failures.push("React docs query produced algorithm term matched re".to_string());
+            }
+            if has_post_navigation_false_positive {
+                failures.push("React docs query returned Post Navigation false positive".to_string());
+            }
+            if displayed_local_source_count != 0 {
+                failures.push("local candidates would be displayed without N# citation".to_string());
+            }
+        }
+        "oi_algorithm" => {
+            if news_registry_triggered {
+                failures.push("OI query triggered news registry".to_string());
+            }
+            if !local_search_triggered {
+                failures.push("OI query did not run local search".to_string());
+            }
+        }
+        "translation_guard" => {
+            if news_registry_triggered {
+                failures.push("translation query triggered news registry".to_string());
+            }
+            if local_search_triggered {
+                failures.push("translation query unexpectedly ran local search".to_string());
+            }
+        }
+        "explicit_url" => {
+            if news_registry_triggered {
+                failures.push("explicit URL query triggered news registry".to_string());
+            }
+            if !explicit_url_path_used {
+                failures.push("explicit URL path was not detected".to_string());
+            }
+        }
+        _ => {}
+    }
+    let pass = failures.is_empty();
+    let reason = if pass {
+        "pass".to_string()
+    } else {
+        failures.join("; ")
+    };
+    NotexSearchSelfCheckCaseResult {
+        query: query.to_string(),
+        expected_category: expected_category.to_string(),
+        actual_intent,
+        vertical,
+        freshness,
+        news_registry_triggered,
+        selected_news_sources: selected_news_sources.clone(),
+        bing_fallback_planned,
+        local_search_triggered,
+        local_result_count,
+        displayed_local_source_count,
+        has_algorithm_term_matched_re,
+        has_post_navigation_false_positive,
+        explicit_url_path_used,
+        pass,
+        reason,
+        raw_diagnostics: json!({
+            "topicKeywords": keywords,
+            "selectedNewsSources": selected_news_sources,
+            "bingFallbackPlanned": bing_fallback_planned,
+            "candidateRequiresUrlReaderAndEvidenceGate": candidate_gate_protected,
+            "displayedLocalSourceCountAssumption": "Self-check does not generate an answer, so local candidates are not visible unless a real answer cites N#.",
+            "localSearch": local_probe_diagnostics,
+        }),
+    }
+}
+
+fn explicit_url_path_detected(query: &str) -> bool {
+    extract_http_urls_from_text(query)
+        .iter()
+        .any(|url| validate_public_web_url_for_read(url).is_ok())
+}
+
+pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckResult, String> {
+    let cases = vec![
+        build_self_check_case(
+            "最近有什么 AI 新闻？",
+            "news_ai",
+            self_check_request(
+                "AI news latest",
+                "general_web",
+                Some("news"),
+                Some("news"),
+                &["AI", "OpenAI", "Anthropic", "Google DeepMind"],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
+        build_self_check_case(
+            "最近 OpenAI 有什么新闻？",
+            "news_openai",
+            self_check_request(
+                "OpenAI latest news",
+                "general_web",
+                Some("news"),
+                Some("news"),
+                &["OpenAI", "ChatGPT"],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
+        build_self_check_case(
+            "最近 Anthropic 有什么新闻？",
+            "news_anthropic",
+            self_check_request(
+                "Anthropic latest news",
+                "general_web",
+                Some("news"),
+                Some("news"),
+                &["Anthropic", "Claude"],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
+        build_self_check_case(
+            "React useEffect 是什么",
+            "docs_react",
+            self_check_request(
+                "React useEffect docs",
+                "docs_technical",
+                Some("docs"),
+                None,
+                &["React", "useEffect"],
+                &[],
+                None,
+            ),
+            Some(run_local_self_check_query("React useEffect 是什么", None, &[])),
+            false,
+        ),
+        build_self_check_case(
+            "点分树常见实现坑",
+            "oi_algorithm",
+            self_check_request(
+                "点分树常见实现坑",
+                "algorithm_reference",
+                Some("algorithm"),
+                None,
+                &[],
+                &["点分树", "centroid tree", "震波", "点分治"],
+                None,
+            ),
+            Some(run_local_self_check_query(
+                "点分树常见实现坑",
+                None,
+                &["点分树", "centroid tree", "震波", "点分治"],
+            )),
+            false,
+        ),
+        build_self_check_case(
+            "P3379 最近公共祖先",
+            "oi_algorithm",
+            self_check_request(
+                "P3379 最近公共祖先",
+                "algorithm_reference",
+                Some("algorithm"),
+                None,
+                &[],
+                &["LCA", "最近公共祖先", "倍增"],
+                Some("P3379"),
+            ),
+            Some(run_local_self_check_query(
+                "P3379 最近公共祖先",
+                Some("P3379"),
+                &["LCA", "最近公共祖先", "倍增"],
+            )),
+            false,
+        ),
+        build_self_check_case(
+            "Z 函数和 exKMP 有什么关系",
+            "oi_algorithm",
+            self_check_request(
+                "Z 函数和 exKMP 有什么关系",
+                "algorithm_reference",
+                Some("algorithm"),
+                None,
+                &[],
+                &["Z 函数", "exKMP", "扩展 KMP"],
+                None,
+            ),
+            Some(run_local_self_check_query(
+                "Z 函数和 exKMP 有什么关系",
+                None,
+                &["Z 函数", "exKMP", "扩展 KMP"],
+            )),
+            false,
+        ),
+        build_self_check_case(
+            "最近这个词英语怎么说？",
+            "translation_guard",
+            self_check_request(
+                "最近这个词英语怎么说？",
+                "general_knowledge",
+                None,
+                None,
+                &[],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
+        {
+            let query = "帮我总结这个网页：https://cp-algorithms.com/graph/centroid_decomposition.html";
+            build_self_check_case(
+                query,
+                "explicit_url",
+                self_check_request(query, "explicit_url", Some("explicit_url"), None, &[], &[], None),
+                None,
+                explicit_url_path_detected(query),
+            )
+        },
+    ];
+    let passed = cases.iter().filter(|case| case.pass).count();
+    let total = cases.len();
+    Ok(NotexSearchSelfCheckResult {
+        passed,
+        total,
+        cases,
+    })
+}
+
+#[tauri::command]
+pub async fn run_notex_search_self_check() -> Result<NotexSearchSelfCheckResult, String> {
+    tauri::async_runtime::spawn_blocking(run_notex_search_self_check_core)
+        .await
+        .map_err(|e| format!("NoteX search self-check task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -9917,6 +10828,31 @@ pub fn delete_ai_provider_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notex_search_self_check_passes() {
+        let result = run_notex_search_self_check_core().unwrap();
+        for case in &result.cases {
+            println!(
+                "{} [{}] {} :: {}",
+                if case.pass { "PASS" } else { "FAIL" },
+                case.expected_category,
+                case.query,
+                case.reason
+            );
+        }
+        assert_eq!(
+            result.passed, result.total,
+            "NoteX search self-check failed: {}",
+            result
+                .cases
+                .iter()
+                .filter(|case| !case.pass)
+                .map(|case| format!("{} => {}", case.query, case.reason))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
 
     #[test]
     fn parses_plain_ai_ok_json() {

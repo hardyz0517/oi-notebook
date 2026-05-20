@@ -94,6 +94,16 @@ pub struct LocalNoteIndexStatus {
     last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalSearchSelfCheckProbe {
+    pub oi_synonyms_enabled: bool,
+    pub query_terms: Vec<String>,
+    pub expanded_terms: Vec<String>,
+    pub problem_ids: Vec<String>,
+    pub algorithm_terms: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct NoteFrontmatter {
     title: String,
@@ -409,6 +419,19 @@ fn search_local_notes_blocking(
     }
 
     Ok(results)
+}
+
+pub(crate) fn inspect_local_search_for_self_check(
+    input: &LocalNoteSearchInput,
+) -> LocalSearchSelfCheckProbe {
+    let terms = build_search_terms(input);
+    LocalSearchSelfCheckProbe {
+        oi_synonyms_enabled: terms.oi_synonyms_enabled,
+        query_terms: terms.terms,
+        expanded_terms: terms.expanded_terms,
+        problem_ids: terms.problem_ids,
+        algorithm_terms: terms.algorithm_terms,
+    }
 }
 
 fn load_or_update_index(notes_dir: &Path) -> Result<Vec<IndexedNote>, String> {
