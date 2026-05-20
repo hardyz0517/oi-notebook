@@ -1081,6 +1081,20 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       citationId: typeof source.citationId === "string" && /^S\d{1,2}$/.test(source.citationId.trim())
         ? source.citationId.trim()
         : undefined,
+      eventCluster: typeof source.eventCluster === "string" && source.eventCluster.trim()
+        ? source.eventCluster.trim()
+        : undefined,
+      clusterLabel: typeof source.clusterLabel === "string" && source.clusterLabel.trim()
+        ? source.clusterLabel.trim()
+        : undefined,
+      clusterReason: typeof source.clusterReason === "string" && source.clusterReason.trim()
+        ? source.clusterReason.trim()
+        : undefined,
+      clusterSize: typeof source.clusterSize === "number" && Number.isFinite(source.clusterSize)
+        ? source.clusterSize
+        : undefined,
+      selectedForRoundup: source.selectedForRoundup === true,
+      droppedAsDuplicateCluster: source.droppedAsDuplicateCluster === true,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 24) : undefined;
@@ -2822,6 +2836,7 @@ function WebSearchSourcesCard({
               const description = getSourceCardDescription(source);
               const clusterDebugItems = [
                 source.eventCluster ? `Event cluster：${source.eventCluster}` : undefined,
+                source.clusterLabel ? `Cluster label：${source.clusterLabel}` : undefined,
                 source.clusterReason ? `Cluster reason：${source.clusterReason}` : undefined,
                 typeof source.clusterSize === "number" ? `Cluster size：${source.clusterSize}` : undefined,
                 source.selectedForRoundup !== undefined ? `Selected for roundup：${source.selectedForRoundup === true ? "yes" : "no"}` : undefined,
@@ -4005,6 +4020,23 @@ export default function AiSidebar({
       const selectedRoundupSources = rankedSources.filter((source) => source.selectedForRoundup === true);
       const duplicateClusterDrops = rankedSources.filter((source) => source.droppedAsDuplicateCluster === true).length;
       const roundupClusterSummary = Array.from(new Set(selectedRoundupSources.map((source) => source.eventCluster).filter(Boolean))).join(",");
+      const newsClusteredSources = rankedSources.filter((source) => source.eventCluster);
+      const newsClusterIds = Array.from(new Set(newsClusteredSources.map((source) => source.eventCluster).filter(Boolean)));
+      const selectedClusterIds = Array.from(new Set(rankedSources
+        .filter((source) => source.selected === true && source.eventCluster)
+        .map((source) => source.eventCluster)
+        .filter(Boolean)));
+      const clusterSummary = newsClusterIds.slice(0, 8).map((clusterId) => {
+        const clusterSources = rankedSources.filter((source) => source.eventCluster === clusterId);
+        const representative = clusterSources.find((source) => source.selected === true) ?? clusterSources[0];
+        return [
+          clusterId,
+          representative?.clusterLabel,
+          representative?.title,
+          `sources=${clusterSources.length}`,
+          `dropped=${clusterSources.filter((source) => source.droppedAsDuplicateCluster === true).length}`,
+        ].filter(Boolean).join(",");
+      }).join(" | ");
       const readDebug = newsRoundup
         ? [
           "debug=newsRead",
@@ -4018,6 +4050,13 @@ export default function AiSidebar({
           `selectedRoundupSources=${selectedRoundupSources.length}`,
           `duplicateClusterDrops=${duplicateClusterDrops}`,
           `roundupClusters=${encodeDebugValue(roundupClusterSummary || "none")}`,
+          `newsClusteringEnabled=${newsClusteredSources.length > 0 ? "yes" : "no"}`,
+          `candidateCountBeforeClustering=${sourcesWithExcerpts.length}`,
+          `clusterCount=${newsClusterIds.length}`,
+          `selectedClusterCount=${selectedClusterIds.length}`,
+          `diversityApplied=${duplicateClusterDrops > 0 || selectedClusterIds.length > 1 ? "yes" : "no"}`,
+          `singleClusterWarning=${newsClusterIds.length === 1 ? "yes" : "no"}`,
+          `clusters=${encodeDebugValue(clusterSummary || "none")}`,
         ].join("; ")
         : undefined;
       return {

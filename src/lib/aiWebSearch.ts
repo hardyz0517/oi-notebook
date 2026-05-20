@@ -281,7 +281,7 @@ export type EvidenceSource = WebSource & {
 
 export type NewsCluster = Pick<
   WebSource,
-  "eventCluster" | "clusterReason" | "clusterSize" | "selectedForRoundup" | "droppedAsDuplicateCluster"
+  "eventCluster" | "clusterLabel" | "clusterReason" | "clusterSize" | "selectedForRoundup" | "droppedAsDuplicateCluster"
 >;
 
 export type WebSource = {
@@ -347,6 +347,7 @@ export type WebSource = {
   selected?: boolean;
   citationId?: string;
   eventCluster?: string;
+  clusterLabel?: string;
   clusterReason?: string;
   clusterSize?: number;
   selectedForRoundup?: boolean;
@@ -529,6 +530,7 @@ export type WebSearchResult = {
   selected?: boolean;
   citationId?: string;
   eventCluster?: string;
+  clusterLabel?: string;
   clusterReason?: string;
   clusterSize?: number;
   selectedForRoundup?: boolean;
@@ -2779,6 +2781,7 @@ export const rankPreparedWebSources = (
   const recentInfoRequested = isRecentGeneralWebDecision(decision, userInput);
   const readBudget = decision.sourceStrategy?.readBudget ?? getWebReadBudgetPlan(decision);
   const clusterForRoundup = isBroadAiNewsRoundupDecision(decision, userInput);
+  const clusterNewsSources = clusterForRoundup || recentInfoRequested;
   let selectedCandidateCount = 0;
   let selectedStrongCount = 0;
   const ranked = sources
@@ -2792,7 +2795,7 @@ export const rankPreparedWebSources = (
     .sort((left, right) => (right.rankScore ?? 0) - (left.rankScore ?? 0) || left.index - right.index)
     .map(({ index: _index, ...source }) => source);
 
-  const clustered = withNewsEventClusters(ranked, clusterForRoundup || recentInfoRequested);
+  const clustered = withNewsEventClusters(ranked, clusterNewsSources);
 
   if (clusterForRoundup) {
     const selectedKeys = new Set<string>();
@@ -2836,25 +2839,32 @@ export const rankPreparedWebSources = (
     });
   }
 
+  const selectedClusterCounts = new Map<string, number>();
   return clustered
     .map((source) => {
       const relevance = source.relevance ?? "strong";
       const usableEvidence = source.usableEvidence === true;
       const candidateThreshold = recentInfoRequested ? 36 : 30;
-      const shouldSelect = usableEvidence && (
+      const cluster = source.eventCluster ?? "other-ai-news";
+      const maxPerCluster = recentInfoRequested && isNewsSourceForClustering(source) ? 2 : Number.POSITIVE_INFINITY;
+      const currentClusterCount = selectedClusterCounts.get(cluster) ?? 0;
+      const baseSelect = usableEvidence && (
         relevance === "strong"
           ? selectedStrongCount < readBudget.maxPromptSources
           : selectedCandidateCount < 2 && (source.rankScore ?? 0) >= candidateThreshold
       );
+      const duplicateCluster = baseSelect && currentClusterCount >= maxPerCluster;
+      const shouldSelect = baseSelect && !duplicateCluster;
       if (shouldSelect && relevance === "strong") selectedStrongCount += 1;
       if (shouldSelect && relevance === "candidate") selectedCandidateCount += 1;
+      if (shouldSelect) selectedClusterCounts.set(cluster, currentClusterCount + 1);
       return {
         ...source,
         selected: shouldSelect,
         finalIncludedInPrompt: shouldSelect,
         injectedIntoAnswer: shouldSelect,
         selectedForRoundup: false,
-        droppedAsDuplicateCluster: false,
+        droppedAsDuplicateCluster: duplicateCluster,
       };
     });
 };
@@ -2981,12 +2991,63 @@ const getNewsClusterText = (source: WebSource): string =>
     source.site,
   ].filter(Boolean).join(" "));
 
+const NEWS_CLUSTER_STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it", "its",
+  "new", "news", "of", "on", "or", "over", "report", "says", "the", "to", "with",
+  "ai", "artificial", "intelligence", "latest", "update", "updates", "launches", "announces", "unveils",
+  "发布", "宣布", "最新", "新闻", "报道", "的", "了", "和", "与",
+]);
+
+const NEWS_ENTITY_RULES: Array<{ tag: string; label: string; patterns: RegExp[] }> = [
+  { tag: "openai", label: "OpenAI", patterns: [/\bopenai\b/i, /\bchatgpt\b/i, /\bgpt[-\s]?\d*/i] },
+  { tag: "anthropic", label: "Anthropic", patterns: [/\banthropic\b/i, /\bclaude\b/i] },
+  { tag: "google", label: "Google", patterns: [/\bgoogle\b/i, /\bgemini\b/i, /\bdeepmind\b/i] },
+  { tag: "microsoft", label: "Microsoft", patterns: [/\bmicrosoft\b/i, /\bcopilot\b/i] },
+  { tag: "nvidia", label: "NVIDIA", patterns: [/\bnvidia\b/i] },
+  { tag: "meta", label: "Meta", patterns: [/\bmeta\b/i, /\bllama\b/i] },
+  { tag: "apple", label: "Apple", patterns: [/\bapple\b/i] },
+  { tag: "xai", label: "xAI", patterns: [/\bxai\b/i, /\bgrok\b/i] },
+  { tag: "deepseek", label: "DeepSeek", patterns: [/\bdeepseek\b/i] },
+];
+
+const NEWS_EVENT_TOKEN_RULES: Array<{ token: string; label: string; patterns: RegExp[] }> = [
+  { token: "model", label: "model release", patterns: [/\bmodel\b/i, /\brelease\b/i, /\bgpt[-\s]?\d*/i, /\bgemini\b/i, /\bclaude\b/i, /模型|发布|推出/] },
+  { token: "agent", label: "agent / tool", patterns: [/\bagent\b/i, /\btool\b/i, /\bcopilot\b/i, /\bworkspace\b/i, /\bgmail\b/i, /智能体|工具/] },
+  { token: "funding", label: "funding", patterns: [/\bfunding\b/i, /\bfundraise/i, /\bstartup\b/i, /\bvaluation\b/i, /\binvestment\b/i, /融资|投资|初创/] },
+  { token: "regulation", label: "regulation", patterns: [/\bregulation\b/i, /\bpolicy\b/i, /\blaw\b/i, /\bai\s+act\b/i, /\beu\b/i, /监管|政策|法规|法案/] },
+  { token: "security", label: "security / safety", patterns: [/\bsafety\b/i, /\bsecurity\b/i, /\brisk\b/i, /\bvulnerab/i, /安全|风险|漏洞/] },
+  { token: "research", label: "research", patterns: [/\bresearch\b/i, /\bbenchmark\b/i, /\bpaper\b/i, /研究|论文|基准/] },
+  { token: "infrastructure", label: "infrastructure", patterns: [/\binfrastructure\b/i, /\bdatacenter\b/i, /\bdata\s+center\b/i, /\bchip\b/i, /\bgpu\b/i, /\bnvidia\b/i, /\bcompute\b/i, /算力|芯片|数据中心/] },
+  { token: "partnership", label: "partnership", patterns: [/\bpartnership\b/i, /\bpartner\b/i, /\bcollaborat/i, /合作/] },
+  { token: "lawsuit", label: "lawsuit", patterns: [/\blawsuit\b/i, /\bsues?\b/i, /\bcourt\b/i, /诉讼|起诉|法院/] },
+  { token: "acquisition", label: "acquisition", patterns: [/\bacquisition\b/i, /\bacquires?\b/i, /\bmerger\b/i, /收购|并购/] },
+];
+
+const extractNewsClusterTokens = (text: string): string[] =>
+  text
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !NEWS_CLUSTER_STOP_WORDS.has(token))
+    .slice(0, 16);
+
+const extractNewsEntityTags = (text: string): Array<{ tag: string; label: string }> =>
+  NEWS_ENTITY_RULES
+    .filter((rule) => rule.patterns.some((pattern) => pattern.test(text)))
+    .map(({ tag, label }) => ({ tag, label }));
+
+const extractNewsEventTokens = (text: string): Array<{ token: string; label: string }> =>
+  NEWS_EVENT_TOKEN_RULES
+    .filter((rule) => rule.patterns.some((pattern) => pattern.test(text)))
+    .map(({ token, label }) => ({ token, label }));
+
 const NEWS_EVENT_CLUSTER_RULES: Array<{ id: string; label: string; reason: string; patterns: RegExp[] }> = [
   {
     id: "google-io-gemini",
     label: "Google I/O / Gemini",
     reason: "matched Google I/O, Gemini, Workspace, Gmail, Genie, Antigravity, or Google agent signals",
-    patterns: [/\bgoogle\s+i\/?o\b/i, /\bgemini\b/i, /\bgoogle\b/i, /\bdeepmind\b/i, /\bworkspace\b/i, /\bgmail\b/i, /\bgenie\b/i, /\bantigravity\b/i, /\bgoogle\s+agent/i],
+    patterns: [/\bgoogle\s+i\/?o\b/i, /\bgemini\b/i, /\bworkspace\b/i, /\bgmail\b/i, /\bgenie\b/i, /\bantigravity\b/i, /\bgoogle\s+agent/i],
   },
   {
     id: "openai-chatgpt",
@@ -3032,13 +3093,29 @@ const NEWS_EVENT_CLUSTER_RULES: Array<{ id: string; label: string; reason: strin
   },
 ];
 
-export const classifyNewsEventCluster = (source: Pick<WebSource, "title" | "snippet" | "excerpt" | "url" | "site">): { eventCluster: string; clusterReason: string } => {
+export const classifyNewsEventCluster = (source: Pick<WebSource, "title" | "snippet" | "excerpt" | "url" | "site">): { eventCluster: string; clusterLabel: string; clusterReason: string } => {
   const text = getNewsClusterText(source as WebSource);
   const matched = NEWS_EVENT_CLUSTER_RULES.find((rule) => rule.patterns.some((pattern) => pattern.test(text)));
-  if (matched) return { eventCluster: matched.id, clusterReason: matched.reason };
+  if (matched) return { eventCluster: matched.id, clusterLabel: matched.label, clusterReason: matched.reason };
+  const entities = extractNewsEntityTags(text);
+  const events = extractNewsEventTokens(text);
+  const titleTokens = extractNewsClusterTokens(source.title || text);
+  if (entities.length > 0 || events.length > 0) {
+    const entity = entities[0] ?? { tag: "ai", label: "AI" };
+    const event = events[0] ?? { token: titleTokens[0] ?? "news", label: "news" };
+    const supportingTokens = titleTokens
+      .filter((token) => token !== entity.tag && token !== event.token)
+      .slice(0, 2);
+    return {
+      eventCluster: [entity.tag, event.token, ...supportingTokens].join("-"),
+      clusterLabel: `${entity.label} ${event.label}`,
+      clusterReason: `matched entity=${entity.tag}; event=${event.token}; tokens=${supportingTokens.join("|") || "none"}`,
+    };
+  }
   const host = getSourceHostname(source.url ?? "");
   return {
     eventCluster: host ? `host:${host}` : "other-ai-news",
+    clusterLabel: host ? `News from ${host}` : "Other AI news",
     clusterReason: host ? `fallback host cluster for ${host}` : "fallback miscellaneous AI news cluster",
   };
 };
@@ -3068,6 +3145,7 @@ const withNewsEventClusters = (sources: WebSource[], enabled: boolean): WebSourc
     return {
       ...source,
       eventCluster: source.eventCluster ?? cluster.eventCluster,
+      clusterLabel: source.clusterLabel ?? cluster.clusterLabel,
       clusterReason: source.clusterReason ?? cluster.clusterReason,
     };
   });

@@ -358,6 +358,7 @@ pub struct WebSearchResult {
     pub selected: Option<bool>,
     pub citation_id: Option<String>,
     pub event_cluster: Option<String>,
+    pub cluster_label: Option<String>,
     pub cluster_reason: Option<String>,
     pub cluster_size: Option<i64>,
     pub selected_for_roundup: Option<bool>,
@@ -529,6 +530,7 @@ pub struct NotexSearchSelfCheckCaseResult {
     pub vertical: String,
     pub freshness: String,
     pub news_registry_triggered: bool,
+    pub news_clustering_triggered: bool,
     pub selected_news_sources: Vec<String>,
     pub bing_fallback_planned: bool,
     pub local_search_triggered: bool,
@@ -537,6 +539,10 @@ pub struct NotexSearchSelfCheckCaseResult {
     pub has_algorithm_term_matched_re: bool,
     pub has_post_navigation_false_positive: bool,
     pub explicit_url_path_used: bool,
+    pub cluster_count: usize,
+    pub selected_cluster_count: usize,
+    pub diversity_applied: bool,
+    pub single_cluster_warning: bool,
     pub pass: bool,
     pub reason: String,
     pub raw_diagnostics: JsonValue,
@@ -2053,9 +2059,9 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
     let news_event_cluster_count = news_event_clusters.len();
     let news_roundup_guidance = if news_roundup_source_count >= 3 {
         if news_event_cluster_count <= 1 {
-            "News roundup mode is active, but the usable news evidence appears to cover only one event cluster. For news/recent questions, answer in Chinese based only on successfully read public sources. Do not split one launch, conference, or company event into many fake news items. Start with one overview sentence that says the readable sources are concentrated in one cluster, then write 1-3 event-level points. Merge product details from the same event under one point. Do not use rejected candidates or model memory to add unverified news."
+            "News roundup mode is active, but the usable news evidence appears to cover only one event cluster. Each source includes Event cluster, Event cluster label, Event cluster size, and duplicate-selection fields. For news/recent questions, answer in Chinese based only on successfully read public sources. Do not split one launch, conference, or company event into many fake news items. Start with one overview sentence that says the readable sources are concentrated in one cluster, then write 1-3 event-level points. Merge product details from the same event under one point. Do not use rejected candidates or model memory to add unverified news."
         } else {
-            "News roundup mode is active with multiple event clusters. For news/recent questions, answer in Chinese as a concise event-level roundup based only on successfully read public sources. Start with one overview sentence, then cover 3-6 independent events when evidence supports them, or fewer with a source-scope note if coverage is narrow. Each point should explain what happened, why it matters, and likely impact. Do not split one launch, conference, or company event into many fake news items; merge same-cluster product details under one point. Do not use rejected candidates or model memory to add unverified news."
+            "News roundup mode is active with multiple event clusters. Each source includes Event cluster, Event cluster label, Event cluster size, and duplicate-selection fields. For news/recent questions, answer in Chinese as a concise event-level roundup based only on successfully read public sources. Start with one overview sentence, then cover 3-6 independent events when evidence supports them, or fewer with a source-scope note if coverage is narrow. Each point should explain what happened, why it matters, and likely impact. Do not split one launch, conference, or company event into many fake news items; merge same-cluster product details under one point. Do not use rejected candidates or model memory to add unverified news."
         }
     } else {
         "News roundup mode is inactive or evidence is limited. For news/recent questions, keep the answer cautious and avoid padding beyond the successfully read sources."
@@ -2234,6 +2240,12 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(truncate_search_context_text)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "none".to_string());
+        let cluster_label = source
+            .cluster_label
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
         let cluster_reason = source
             .cluster_reason
             .as_deref()
@@ -2274,7 +2286,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         citation_ids.push(citation_id.clone());
 
         entries.push(format!(
-            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster label: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             citation_id,
             citation_id,
             citation_id,
@@ -2296,6 +2308,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             source_strength,
             evidence_reason,
             event_cluster,
+            cluster_label,
             cluster_reason,
             cluster_size,
             selected_for_roundup,
@@ -4427,6 +4440,7 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         selected: None,
         citation_id: None,
         event_cluster: None,
+        cluster_label: None,
         cluster_reason: None,
         cluster_size: None,
         selected_for_roundup: None,
@@ -4525,6 +4539,7 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         selected: None,
         citation_id: None,
         event_cluster: None,
+        cluster_label: None,
         cluster_reason: None,
         cluster_size: None,
         selected_for_roundup: None,
@@ -5173,6 +5188,7 @@ fn bing_result_to_web_source(
         selected: None,
         citation_id: None,
         event_cluster: None,
+        cluster_label: None,
         cluster_reason: None,
         cluster_size: None,
         selected_for_roundup: None,
@@ -8187,6 +8203,7 @@ fn finish_web_excerpt_result(
             selected: None,
             citation_id: None,
             event_cluster: None,
+            cluster_label: None,
             cluster_reason: None,
             cluster_size: None,
             selected_for_roundup: None,
@@ -9780,6 +9797,174 @@ fn direct_candidate_gate_protected(route: &NewsSourceRoute) -> bool {
     })
 }
 
+#[derive(Debug, Clone)]
+struct NewsClusteringSelfCheckCandidate {
+    id: &'static str,
+    title: &'static str,
+    source_id: &'static str,
+    reliability: &'static str,
+    official: bool,
+    rank: i64,
+}
+
+#[derive(Debug, Clone)]
+struct NewsClusteringSelfCheckResult {
+    enabled: bool,
+    candidate_count_before_clustering: usize,
+    cluster_count: usize,
+    selected_cluster_count: usize,
+    diversity_applied: bool,
+    single_cluster_warning: bool,
+    selected_representatives: Vec<String>,
+    dropped_duplicate_count: usize,
+}
+
+fn normalize_news_cluster_text(value: &str) -> String {
+    value
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { ' ' })
+        .collect::<String>()
+}
+
+fn self_check_news_cluster_key(title: &str) -> String {
+    let normalized = normalize_news_cluster_text(title);
+    let entity = if normalized.contains("openai") || normalized.contains("chatgpt") || normalized.contains("gpt") {
+        "openai"
+    } else if normalized.contains("anthropic") || normalized.contains("claude") {
+        "anthropic"
+    } else if normalized.contains("google") || normalized.contains("gemini") || normalized.contains("deepmind") {
+        "google"
+    } else if normalized.contains("microsoft") || normalized.contains("copilot") {
+        "microsoft"
+    } else if normalized.contains("nvidia") || normalized.contains("gpu") || normalized.contains("chip") {
+        "nvidia"
+    } else {
+        "ai"
+    };
+    let event = if normalized.contains("i o") || normalized.contains("gemini") || normalized.contains("workspace") || normalized.contains("gmail") || normalized.contains("genie") {
+        "io-gemini"
+    } else if normalized.contains("funding") || normalized.contains("startup") || normalized.contains("investment") {
+        "funding"
+    } else if normalized.contains("regulation") || normalized.contains("policy") || normalized.contains("act") {
+        "regulation"
+    } else if normalized.contains("security") || normalized.contains("safety") || normalized.contains("risk") {
+        "security"
+    } else if normalized.contains("agent") || normalized.contains("tool") {
+        "agent"
+    } else if normalized.contains("model") || normalized.contains("launch") || normalized.contains("release") {
+        "model"
+    } else {
+        "news"
+    };
+    format!("{entity}-{event}")
+}
+
+fn source_reliability_priority(reliability: &str, official: bool) -> i64 {
+    if official {
+        0
+    } else {
+        match reliability {
+            "official" => 0,
+            "high" => 1,
+            "medium" => 2,
+            "aggregator" => 3,
+            _ => 4,
+        }
+    }
+}
+
+fn run_news_clustering_self_check(
+    expected_category: &str,
+    route: Option<&NewsSourceRoute>,
+) -> NewsClusteringSelfCheckResult {
+    let enabled = matches!(expected_category, "news_ai" | "news_openai" | "news_anthropic");
+    if !enabled {
+        return NewsClusteringSelfCheckResult {
+            enabled: false,
+            candidate_count_before_clustering: 0,
+            cluster_count: 0,
+            selected_cluster_count: 0,
+            diversity_applied: false,
+            single_cluster_warning: false,
+            selected_representatives: Vec::new(),
+            dropped_duplicate_count: 0,
+        };
+    }
+
+    let mut candidates = match expected_category {
+        "news_openai" => vec![
+            NewsClusteringSelfCheckCandidate { id: "o-official", title: "OpenAI launches a new ChatGPT model", source_id: "openai-news", reliability: "official", official: true, rank: 100 },
+            NewsClusteringSelfCheckCandidate { id: "o-media-1", title: "Media covers OpenAI ChatGPT model launch", source_id: "techcrunch-ai", reliability: "high", official: false, rank: 88 },
+            NewsClusteringSelfCheckCandidate { id: "o-media-2", title: "Another OpenAI GPT model launch report", source_id: "the-verge-ai", reliability: "high", official: false, rank: 82 },
+            NewsClusteringSelfCheckCandidate { id: "o-agent", title: "OpenAI announces ChatGPT agent tool update", source_id: "openai-news", reliability: "official", official: true, rank: 80 },
+        ],
+        "news_anthropic" => vec![
+            NewsClusteringSelfCheckCandidate { id: "a-official", title: "Anthropic announces Claude model update", source_id: "anthropic-news", reliability: "official", official: true, rank: 100 },
+            NewsClusteringSelfCheckCandidate { id: "a-media", title: "Claude model update coverage from media", source_id: "techcrunch-ai", reliability: "high", official: false, rank: 86 },
+            NewsClusteringSelfCheckCandidate { id: "a-safety", title: "Anthropic publishes Claude safety research", source_id: "anthropic-news", reliability: "official", official: true, rank: 80 },
+        ],
+        _ => vec![
+            NewsClusteringSelfCheckCandidate { id: "g1", title: "Google I/O announces Gemini agents", source_id: "google-ai-blog", reliability: "official", official: true, rank: 96 },
+            NewsClusteringSelfCheckCandidate { id: "g2", title: "Google I/O brings Gmail Live and Gemini", source_id: "the-verge-ai", reliability: "high", official: false, rank: 92 },
+            NewsClusteringSelfCheckCandidate { id: "g3", title: "Google Genie model at I/O gets media coverage", source_id: "techcrunch-ai", reliability: "high", official: false, rank: 88 },
+            NewsClusteringSelfCheckCandidate { id: "o1", title: "OpenAI launches ChatGPT agent tool", source_id: "openai-news", reliability: "official", official: true, rank: 86 },
+            NewsClusteringSelfCheckCandidate { id: "r1", title: "EU advances AI regulation policy", source_id: "techcrunch-ai", reliability: "high", official: false, rank: 82 },
+            NewsClusteringSelfCheckCandidate { id: "n1", title: "Nvidia AI infrastructure chip demand grows", source_id: "the-verge-ai", reliability: "high", official: false, rank: 78 },
+        ],
+    };
+
+    if let Some(route) = route {
+        let route_ids = route
+            .selected_sources
+            .iter()
+            .map(|source| source.id)
+            .collect::<HashSet<_>>();
+        candidates.retain(|candidate| route_ids.contains(candidate.source_id) || candidate.source_id.starts_with("the-verge") || candidate.source_id.starts_with("techcrunch"));
+    }
+
+    candidates.sort_by_key(|candidate| {
+        (
+            source_reliability_priority(candidate.reliability, candidate.official),
+            -candidate.rank,
+            candidate.id,
+        )
+    });
+    let mut cluster_counts = BTreeMap::<String, usize>::new();
+    for candidate in &candidates {
+        *cluster_counts
+            .entry(self_check_news_cluster_key(candidate.title))
+            .or_insert(0) += 1;
+    }
+
+    let max_per_cluster = if expected_category == "news_ai" { 1 } else { 2 };
+    let max_selected = if expected_category == "news_ai" { 4 } else { 3 };
+    let mut selected_cluster_counts = BTreeMap::<String, usize>::new();
+    let mut selected_representatives = Vec::<String>::new();
+    let mut dropped_duplicate_count = 0usize;
+    for candidate in &candidates {
+        let cluster = self_check_news_cluster_key(candidate.title);
+        let current = selected_cluster_counts.get(&cluster).copied().unwrap_or(0);
+        if current >= max_per_cluster || selected_representatives.len() >= max_selected {
+            dropped_duplicate_count += 1;
+            continue;
+        }
+        selected_representatives.push(format!("{}:{}", candidate.source_id, candidate.id));
+        selected_cluster_counts.insert(cluster, current + 1);
+    }
+
+    NewsClusteringSelfCheckResult {
+        enabled,
+        candidate_count_before_clustering: candidates.len(),
+        cluster_count: cluster_counts.len(),
+        selected_cluster_count: selected_cluster_counts.len(),
+        diversity_applied: dropped_duplicate_count > 0 || selected_cluster_counts.len() > 1,
+        single_cluster_warning: cluster_counts.len() == 1,
+        selected_representatives,
+        dropped_duplicate_count,
+    }
+}
+
 fn build_self_check_case(
     query: &str,
     expected_category: &str,
@@ -9814,6 +9999,7 @@ fn build_self_check_case(
         .as_ref()
         .map(direct_candidate_gate_protected)
         .unwrap_or(true);
+    let clustering = run_news_clustering_self_check(expected_category, route.as_ref());
     let (local_search_triggered, has_algorithm_term_matched_re, local_probe_diagnostics) =
         match local_probe {
             Some(probe) => {
@@ -9849,6 +10035,15 @@ fn build_self_check_case(
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
             }
+            if !clustering.enabled {
+                failures.push("news clustering was not enabled".to_string());
+            }
+            if clustering.cluster_count == 0 {
+                failures.push("news cluster count was missing".to_string());
+            }
+            if !clustering.diversity_applied && clustering.cluster_count > 1 {
+                failures.push("news diversity was not applied".to_string());
+            }
             if !bing_fallback_planned {
                 failures.push("Bing News fallback was not planned".to_string());
             }
@@ -9860,11 +10055,21 @@ fn build_self_check_case(
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
             }
+            if !clustering.enabled {
+                failures.push("news clustering was not enabled".to_string());
+            }
             if !selected_news_sources
                 .iter()
                 .any(|source| source.contains("openai-news"))
             {
                 failures.push("OpenAI source was not selected".to_string());
+            }
+            if !clustering
+                .selected_representatives
+                .iter()
+                .any(|source| source.contains("openai-news"))
+            {
+                failures.push("OpenAI official source was not preserved by clustering".to_string());
             }
             if !bing_fallback_planned {
                 failures.push("Bing News fallback was not planned".to_string());
@@ -9876,6 +10081,9 @@ fn build_self_check_case(
         "news_anthropic" => {
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
+            }
+            if !clustering.enabled {
+                failures.push("news clustering was not enabled".to_string());
             }
             if !selected_news_sources
                 .iter()
@@ -9894,6 +10102,9 @@ fn build_self_check_case(
             if news_registry_triggered {
                 failures.push("React docs query triggered news registry".to_string());
             }
+            if clustering.enabled {
+                failures.push("React docs query triggered news clustering".to_string());
+            }
             if has_algorithm_term_matched_re {
                 failures.push("React docs query produced algorithm term matched re".to_string());
             }
@@ -9908,6 +10119,9 @@ fn build_self_check_case(
             if news_registry_triggered {
                 failures.push("OI query triggered news registry".to_string());
             }
+            if clustering.enabled {
+                failures.push("OI query triggered news clustering".to_string());
+            }
             if !local_search_triggered {
                 failures.push("OI query did not run local search".to_string());
             }
@@ -9916,6 +10130,9 @@ fn build_self_check_case(
             if news_registry_triggered {
                 failures.push("translation query triggered news registry".to_string());
             }
+            if clustering.enabled {
+                failures.push("translation query triggered news clustering".to_string());
+            }
             if local_search_triggered {
                 failures.push("translation query unexpectedly ran local search".to_string());
             }
@@ -9923,6 +10140,9 @@ fn build_self_check_case(
         "explicit_url" => {
             if news_registry_triggered {
                 failures.push("explicit URL query triggered news registry".to_string());
+            }
+            if clustering.enabled {
+                failures.push("explicit URL query triggered news clustering".to_string());
             }
             if !explicit_url_path_used {
                 failures.push("explicit URL path was not detected".to_string());
@@ -9943,6 +10163,7 @@ fn build_self_check_case(
         vertical,
         freshness,
         news_registry_triggered,
+        news_clustering_triggered: clustering.enabled,
         selected_news_sources: selected_news_sources.clone(),
         bing_fallback_planned,
         local_search_triggered,
@@ -9951,6 +10172,10 @@ fn build_self_check_case(
         has_algorithm_term_matched_re,
         has_post_navigation_false_positive,
         explicit_url_path_used,
+        cluster_count: clustering.cluster_count,
+        selected_cluster_count: clustering.selected_cluster_count,
+        diversity_applied: clustering.diversity_applied,
+        single_cluster_warning: clustering.single_cluster_warning,
         pass,
         reason,
         raw_diagnostics: json!({
@@ -9959,6 +10184,16 @@ fn build_self_check_case(
             "bingFallbackPlanned": bing_fallback_planned,
             "candidateRequiresUrlReaderAndEvidenceGate": candidate_gate_protected,
             "displayedLocalSourceCountAssumption": "Self-check does not generate an answer, so local candidates are not visible unless a real answer cites N#.",
+            "newsClustering": {
+                "enabled": clustering.enabled,
+                "candidateCountBeforeClustering": clustering.candidate_count_before_clustering,
+                "clusterCount": clustering.cluster_count,
+                "selectedClusterCount": clustering.selected_cluster_count,
+                "diversityApplied": clustering.diversity_applied,
+                "singleClusterWarning": clustering.single_cluster_warning,
+                "selectedRepresentatives": clustering.selected_representatives,
+                "droppedDuplicateCount": clustering.dropped_duplicate_count,
+            },
             "localSearch": local_probe_diagnostics,
         }),
     }

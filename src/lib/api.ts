@@ -355,6 +355,7 @@ export interface NotexSearchSelfCheckCaseResult {
   vertical: string;
   freshness: string;
   newsRegistryTriggered: boolean;
+  newsClusteringTriggered: boolean;
   selectedNewsSources: string[];
   bingFallbackPlanned: boolean;
   localSearchTriggered: boolean;
@@ -363,6 +364,10 @@ export interface NotexSearchSelfCheckCaseResult {
   hasAlgorithmTermMatchedRe: boolean;
   hasPostNavigationFalsePositive: boolean;
   explicitUrlPathUsed: boolean;
+  clusterCount: number;
+  selectedClusterCount: number;
+  diversityApplied: boolean;
+  singleClusterWarning: boolean;
   pass: boolean;
   reason: string;
   rawDiagnostics: unknown;

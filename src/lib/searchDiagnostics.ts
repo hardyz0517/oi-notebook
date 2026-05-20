@@ -74,6 +74,20 @@ export type EvidenceDiagnostics = {
 export type NewsReadBudgetDiagnostics = UrlReaderDiagnostics & EvidenceDiagnostics & {
   queryDiversification?: string;
   eventClusterCount?: string;
+  selectedRoundupSources?: string;
+  duplicateClusterDrops?: string;
+  roundupClusters?: string;
+  clustering?: NewsClusteringDiagnostics;
+};
+
+export type NewsClusteringDiagnostics = {
+  enabled?: string;
+  candidateCountBeforeClustering?: string;
+  clusterCount?: string;
+  selectedClusterCount?: string;
+  diversityApplied?: string;
+  singleClusterWarning?: string;
+  clusters?: string;
 };
 
 export type SearchDiagnostics = {
@@ -407,6 +421,7 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
     .find((item) => item.includes("newsReadAttempts="));
   if (!chunk) return undefined;
   const parts = chunk.split(";").map((part) => part.trim()).filter(Boolean);
+  const clusteringEnabled = lookupDebugField(parts, "newsClusteringEnabled");
   return {
     readAttempts: lookupDebugField(parts, "newsReadAttempts"),
     readSuccesses: lookupDebugField(parts, "newsReadSuccesses"),
@@ -415,6 +430,18 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
     excerptChars: lookupDebugField(parts, "excerptChars"),
     queryDiversification: lookupDebugField(parts, "queryDiversification"),
     eventClusterCount: lookupDebugField(parts, "eventClusterCount"),
+    selectedRoundupSources: lookupDebugField(parts, "selectedRoundupSources"),
+    duplicateClusterDrops: lookupDebugField(parts, "duplicateClusterDrops"),
+    roundupClusters: lookupDebugField(parts, "roundupClusters"),
+    clustering: clusteringEnabled ? {
+      enabled: clusteringEnabled,
+      candidateCountBeforeClustering: lookupDebugField(parts, "candidateCountBeforeClustering"),
+      clusterCount: lookupDebugField(parts, "clusterCount"),
+      selectedClusterCount: lookupDebugField(parts, "selectedClusterCount"),
+      diversityApplied: lookupDebugField(parts, "diversityApplied"),
+      singleClusterWarning: lookupDebugField(parts, "singleClusterWarning"),
+      clusters: lookupDebugField(parts, "clusters"),
+    } : undefined,
   };
 };
 
@@ -471,13 +498,23 @@ export const formatNewsReadDiagnostics = (raw: string): string[] => {
   const diagnostics = parseNewsReadBudgetDiagnostics(raw);
   if (!diagnostics) return [];
   return [
-    `newsReadAttempts：${diagnostics.readAttempts ?? "0"}`,
-    `newsReadSuccesses：${diagnostics.readSuccesses ?? "0"}`,
-    `usableEvidenceCount：${diagnostics.usableEvidenceCount ?? "0"}`,
-    `rejectedCount：${diagnostics.rejectedCount ?? "0"}`,
-    `excerptChars：${diagnostics.excerptChars ?? "0"}`,
-    `queryDiversification：${diagnostics.queryDiversification || "single"}`,
-    `eventClusterCount：${diagnostics.eventClusterCount ?? "0"}`,
+    `newsReadAttempts: ${diagnostics.readAttempts ?? "0"}`,
+    `newsReadSuccesses: ${diagnostics.readSuccesses ?? "0"}`,
+    `usableEvidenceCount: ${diagnostics.usableEvidenceCount ?? "0"}`,
+    `rejectedCount: ${diagnostics.rejectedCount ?? "0"}`,
+    `excerptChars: ${diagnostics.excerptChars ?? "0"}`,
+    `queryDiversification: ${diagnostics.queryDiversification || "single"}`,
+    `eventClusterCount: ${diagnostics.eventClusterCount ?? "0"}`,
+    `newsClusteringEnabled: ${diagnostics.clustering?.enabled ?? "no"}`,
+    `candidateCountBeforeClustering: ${diagnostics.clustering?.candidateCountBeforeClustering ?? "0"}`,
+    `clusterCount: ${diagnostics.clustering?.clusterCount ?? "0"}`,
+    `selectedClusterCount: ${diagnostics.clustering?.selectedClusterCount ?? "0"}`,
+    `diversityApplied: ${diagnostics.clustering?.diversityApplied ?? "no"}`,
+    `singleClusterWarning: ${diagnostics.clustering?.singleClusterWarning ?? "no"}`,
+    `selectedRoundupSources: ${diagnostics.selectedRoundupSources ?? "0"}`,
+    `duplicateClusterDrops: ${diagnostics.duplicateClusterDrops ?? "0"}`,
+    `roundupClusters: ${diagnostics.roundupClusters || "none"}`,
+    `clusters: ${diagnostics.clustering?.clusters || "none"}`,
   ];
 };
 
