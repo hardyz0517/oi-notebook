@@ -19,8 +19,8 @@ import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from 
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache } from "@/lib/api";
-import type { AiConfig, AiProvider, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex } from "@/lib/api";
+import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
@@ -240,6 +240,21 @@ function getSettingsCenterResizeCursor(handle: SettingsResizeHandle): string {
   if (handle === "top" || handle === "bottom") return "ns-resize";
   if (handle === "top-left" || handle === "bottom-right") return "nwse-resize";
   return "nesw-resize";
+}
+
+function getLocalIndexStatusLabel(status: LocalNoteIndexStatusResult | null, isBuilding: boolean): string {
+  if (isBuilding) return "正在建立本地笔记索引...";
+  if (!status) return "尚未读取";
+  if (status.status === "ready") return "可用";
+  if (status.status === "stale") return "建议重建";
+  if (status.status === "error") return "读取失败";
+  if (!status.exists) return "尚未建立";
+  return status.status || "未知";
+}
+
+function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {
+  if (!status?.updatedAt) return "尚未记录";
+  return new Date(status.updatedAt * 1000).toLocaleString();
 }
 
 function getResizedSettingsCenterRect(handle: SettingsResizeHandle, startRect: SettingsCenterRect, deltaX: number, deltaY: number): SettingsCenterRect {
@@ -501,9 +516,9 @@ const SETTINGS_TREE: Array<{
     label: "AI",
     children: [
       { id: "ai-api", label: "模型与 API" },
+      { id: "ai-local-notes", label: "本地笔记索引" },
       { id: "ai-web-search", label: "联网搜索" },
       { id: "ai-prompts", label: "Prompt 模板" },
-      { id: "ai-local-notes", label: "本地笔记" },
     ],
   },
   { id: "luogu", label: "洛谷", children: [{ id: "luogu-account", label: "账号与扫描" }] },
@@ -1677,6 +1692,10 @@ export default function App() {
   const [webSearchConnectionMessage, setWebSearchConnectionMessage] = useState<string | null>(null);
   const [isClearingWebCache, setIsClearingWebCache] = useState(false);
   const [webCacheMessage, setWebCacheMessage] = useState<string | null>(null);
+  const [localIndexStatus, setLocalIndexStatus] = useState<LocalNoteIndexStatusResult | null>(null);
+  const [isLoadingLocalIndexStatus, setIsLoadingLocalIndexStatus] = useState(false);
+  const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
+  const [localIndexMessage, setLocalIndexMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
@@ -1701,7 +1720,7 @@ export default function App() {
   const [promptPolishMessage, setPromptPolishMessage] = useState<string | null>(null);
   const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>(() => ({
     appearance: false,
-    ai: false,
+    ai: true,
     luogu: false,
     blog: false,
     data: false,
@@ -1991,6 +2010,14 @@ export default function App() {
     "grid min-w-0 gap-0 px-6 py-5",
     activeSettingsTarget.type === "category" && "border-b border-border/70 last:border-b-0",
   );
+  useEffect(() => {
+    const localNotesVisible =
+      activeSettingsTarget.type === "page"
+        ? activeSettingsTarget.page === "ai-local-notes"
+        : activeSettingsTarget.category === "ai";
+    if (!localNotesVisible || localIndexStatus || isLoadingLocalIndexStatus || isRebuildingLocalIndex) return;
+    void refreshLocalIndexStatus();
+  }, [activeSettingsTarget, isLoadingLocalIndexStatus, isRebuildingLocalIndex, localIndexStatus]);
   const promptTemplateRows = useMemo(
     () => promptTemplates.map((prompt) => ({
       ...prompt,
@@ -2914,6 +2941,45 @@ export default function App() {
       toast.error(message);
     } finally {
       setIsClearingWebCache(false);
+    }
+  };
+
+  const refreshLocalIndexStatus = async () => {
+    setIsLoadingLocalIndexStatus(true);
+    setLocalIndexMessage(null);
+    try {
+      const status = await getLocalNoteIndexStatus();
+      setLocalIndexStatus(status);
+      if (!status.exists) {
+        setLocalIndexMessage("本地索引尚未建立，首次搜索或点击重建后会生成。");
+      } else if (status.status === "stale") {
+        setLocalIndexMessage("本地索引版本已更新，建议重建索引。");
+      } else if (status.status === "error") {
+        setLocalIndexMessage("本地索引读取失败，可尝试重建。");
+      }
+    } catch (e) {
+      const message = getErrorMessage(e);
+      setLocalIndexMessage(message);
+      toast.error(`本地索引状态读取失败：${message}`);
+    } finally {
+      setIsLoadingLocalIndexStatus(false);
+    }
+  };
+
+  const handleRebuildLocalIndex = async () => {
+    setIsRebuildingLocalIndex(true);
+    setLocalIndexMessage("正在建立本地笔记索引...");
+    try {
+      const status = await rebuildLocalNoteIndex();
+      setLocalIndexStatus(status);
+      setLocalIndexMessage(`重建完成：${status.noteCount} 篇笔记，${status.chunkCount} 个片段。`);
+      toast.success("本地笔记索引已重建");
+    } catch (e) {
+      const message = getErrorMessage(e);
+      setLocalIndexMessage(message);
+      toast.error(`本地索引重建失败：${message}`);
+    } finally {
+      setIsRebuildingLocalIndex(false);
     }
   };
 
@@ -6652,6 +6718,53 @@ export default function App() {
                     </section>
                   )}
 
+                  {shouldRenderSettingsPage("ai-local-notes") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记索引</div><div className="text-xs leading-5 text-muted-foreground">用于让 NoteX 更快、更准确地从你的 Markdown 笔记中检索相关段落，只保存在本机。</div></div>
+                      <SettingRow title="本地索引状态" description="显示本地笔记是否已经建立索引；读取状态不会触发重建。" align="start">
+                        <div className="grid gap-2 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={cn(
+                              "inline-flex rounded-sm border px-2 py-0.5 text-xs",
+                              isRebuildingLocalIndex
+                                ? "border-sky-300/60 bg-sky-500/10 text-sky-700 dark:text-sky-200"
+                                : localIndexStatus?.status === "ready"
+                                  ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                                  : localIndexStatus?.status === "error"
+                                    ? "border-red-300/60 bg-red-500/10 text-red-700 dark:text-red-200"
+                                    : "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+                            )}>{getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}</span>
+                            {isLoadingLocalIndexStatus && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />读取中</span>}
+                          </div>
+                          <div className="grid gap-1 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
+                            <span>索引版本：{localIndexStatus?.version ?? "尚未建立"} / 当前 {localIndexStatus?.currentVersion ?? 3}</span>
+                            <span>笔记数：{localIndexStatus?.noteCount ?? 0}</span>
+                            <span>片段数：{localIndexStatus?.chunkCount ?? 0}</span>
+                            <span>上次更新时间：{getLocalIndexUpdatedLabel(localIndexStatus)}</span>
+                          </div>
+                          {localIndexMessage && <div className="text-xs leading-5 text-muted-foreground">{localIndexMessage}</div>}
+                          {developerModeEnabled && localIndexStatus && (
+                            <div className="grid gap-1 rounded-md border border-border/70 bg-muted/15 px-2.5 py-2 font-mono text-[11px] leading-5 text-muted-foreground">
+                              <span>path={localIndexStatus.pathLabel}</span>
+                              <span>readable={String(localIndexStatus.readable)} writable={String(localIndexStatus.writable)} size={localIndexStatus.approxSizeBytes} bytes</span>
+                              {localIndexStatus.lastError && <span>lastError={localIndexStatus.lastError}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="重建本地笔记索引" description="用于笔记较多、搜索结果不准或刚升级索引版本后。不会修改笔记正文。">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}><RefreshCw className="h-3.5 w-3.5" />刷新状态</Button>
+                          <Button variant="outline" size="sm" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                            {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                            {isRebuildingLocalIndex ? "正在建立..." : "重建本地笔记索引"}
+                          </Button>
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="检索使用方式" description="聊天中按需读取相关片段；普通模式只显示回答正文实际引用的 N# 本地来源。"><span className="text-sm text-muted-foreground">无需额外配置</span></SettingRow>
+                    </section>
+                  )}
+
                   {shouldRenderSettingsPage("ai-web-search") && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
@@ -6694,13 +6807,6 @@ export default function App() {
                           <SettingRow title={PROMPT_STYLE_PLACEHOLDER.title} description={PROMPT_STYLE_PLACEHOLDER.purpose}><span className="text-xs text-muted-foreground">后续接入</span></SettingRow>
                         </>
                       )}
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("ai-local-notes") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记</div></div>
-                      <SettingRow title="检索使用方式" description="聊天中按需读取相关片段。"><span className="text-sm text-muted-foreground">当前无需额外配置</span></SettingRow>
                     </section>
                   )}
 

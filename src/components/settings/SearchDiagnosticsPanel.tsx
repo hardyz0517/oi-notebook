@@ -6,6 +6,7 @@ import {
   getLocalNoteIndexStatus,
   getPromptCitationContractStatus,
   getWebCacheStatus,
+  rebuildLocalNoteIndex,
   searchLocalNotes,
   testWebSearchConnection,
   type AiConfig,
@@ -925,25 +926,40 @@ const buildWebCacheItem = (status: WebCacheStatusResult): DiagnosticItem => ({
 const buildLocalIndexItem = (status: LocalNoteIndexStatusResult): DiagnosticItem => ({
   id: "local-index-status",
   title: "本地笔记索引",
-  status: !status.exists ? "warn" : status.readable ? "pass" : "fail",
+  status: status.status === "ready" ? "pass" : status.status === "error" ? "fail" : "warn",
   summary: status.exists
-    ? `${status.pathLabel} notes=${status.noteCount}, chunks=${status.chunkCount}, version=${status.version ?? "unknown"}`
+    ? `${status.pathLabel} status=${status.status}; notes=${status.noteCount}, chunks=${status.chunkCount}, version=${status.version ?? "unknown"}/${status.currentVersion}`
     : `${status.pathLabel} 尚不存在；首次本地检索后可能建立。`,
   detail: status.lastError
     ? `索引读取失败：${truncate(status.lastError, 220)}。可运行一次本地笔记检索，后续再考虑重建索引。`
     : `updatedAt=${status.updatedAt ?? "unknown"}; sample=${status.sampleRelativePaths.slice(0, 3).join(", ") || "none"}`,
-  safeDebugInfo: [`size=${status.approxSizeBytes} bytes`, `readable=${status.readable}`, `writable=${status.writable}`],
+  safeDebugInfo: [`localIndexVersion=${status.version ?? "missing"}`, `currentVersion=${status.currentVersion}`, `indexedNoteCount=${status.noteCount}`, `indexedChunkCount=${status.chunkCount}`, `indexUpdatedAt=${status.updatedAt ?? "unknown"}`, `size=${status.approxSizeBytes} bytes`, `readable=${status.readable}`, `writable=${status.writable}`],
 });
 
-const summarizeLocalResult = (result: LocalNoteSearchResult): string =>
-  [
+const getLocalDiagnosticValue = (diagnostics: string | undefined, key: string): string | undefined =>
+  diagnostics
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${key}=`))
+    ?.slice(key.length + 1);
+
+const summarizeLocalResult = (result: LocalNoteSearchResult): string => {
+  const expandedTerms = getLocalDiagnosticValue(result.diagnostics, "expandedTerms");
+  const problemIds = getLocalDiagnosticValue(result.diagnostics, "problemIds");
+  const algorithmTerms = getLocalDiagnosticValue(result.diagnostics, "algorithmTerms");
+  const sameNoteDedupApplied = getLocalDiagnosticValue(result.diagnostics, "sameNoteDedupApplied");
+  return [
     result.relativePath || result.path,
     result.headingPath?.length ? `heading=${result.headingPath.join(" / ")}` : undefined,
     typeof result.chunkIndex === "number" ? `chunk=${result.chunkIndex}` : undefined,
     `score=${result.score}`,
     result.matchedTerms?.length ? `terms=${result.matchedTerms.slice(0, 5).join("|")}` : undefined,
-    result.diagnostics ? `diag=${truncate(result.diagnostics, 120)}` : undefined,
+    expandedTerms ? `expandedTerms=${truncate(expandedTerms, 80)}` : undefined,
+    problemIds ? `problemIds=${problemIds}` : undefined,
+    algorithmTerms ? `algorithmTerms=${truncate(algorithmTerms, 80)}` : undefined,
+    sameNoteDedupApplied ? `sameNoteDedupApplied=${sameNoteDedupApplied}` : undefined,
   ].filter(Boolean).join("; ");
+};
 
 const localResultsContain = (results: LocalNoteSearchResult[], pattern: RegExp): boolean =>
   results.some((result) => pattern.test(`${result.title} ${result.relativePath} ${result.headingPath?.join(" ") ?? ""} ${result.snippet} ${result.matchedTerms?.join(" ") ?? ""} ${result.detectedAlgorithmTerms?.join(" ") ?? ""}`));
@@ -1086,6 +1102,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningCore, setIsRunningCore] = useState(false);
   const [isTestingProvider, setIsTestingProvider] = useState(false);
   const [isCheckingLocalIndex, setIsCheckingLocalIndex] = useState(false);
+  const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1262,6 +1279,32 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const rebuildLocalIndex = async () => {
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    setIsRebuildingLocalIndex(true);
+    replaceCategory(runId, "local-index", [{ id: "local-index-rebuilding", title: "重建本地笔记索引", status: "running", summary: "正在建立本地笔记索引..." }]);
+    const startedAt = performance.now();
+    try {
+      const status = await withTimeout(rebuildLocalNoteIndex(), 30000, "本地索引重建超时");
+      replaceCategory(runId, "local-index", [durationItem(startedAt, {
+        ...buildLocalIndexItem(status),
+        id: "local-index-rebuilt",
+        title: "重建本地笔记索引",
+        summary: `重建完成：notes=${status.noteCount}, chunks=${status.chunkCount}, version=${status.version ?? "unknown"}/${status.currentVersion}`,
+      })]);
+    } catch (error) {
+      replaceCategory(runId, "local-index", [durationItem(startedAt, {
+        id: "local-index-rebuild-error",
+        title: "重建本地笔记索引",
+        status: "fail",
+        summary: classifyError(error),
+      })]);
+    } finally {
+      if (runIdRef.current === runId) setIsRebuildingLocalIndex(false);
+    }
+  };
+
   const runProviderTest = async () => {
     if (!webSearchConfig) {
       toast.error("AI 配置尚未读取完成");
@@ -1325,17 +1368,21 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex}>
+        <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
           {isRunningCore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           运行核心自检
         </Button>
-        <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || !webSearchConfig}>
+        <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || !webSearchConfig}>
           {isTestingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
           测试当前 Provider
         </Button>
-        <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex}>
+        <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
           {isCheckingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           检查本地索引
+        </Button>
+        <Button variant="outline" onClick={() => void rebuildLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex}>
+          {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+          重建本地索引
         </Button>
         <Button variant="outline" onClick={() => void copyReport()}>
           <Clipboard className="h-3.5 w-3.5" />

@@ -79,6 +79,8 @@ pub struct LocalNoteIndexStatus {
     exists: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<u32>,
+    current_version: u32,
+    status: String,
     note_count: usize,
     chunk_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,10 +187,19 @@ pub async fn search_local_notes(
 }
 
 #[tauri::command]
+pub async fn rebuild_local_note_index() -> Result<LocalNoteIndexStatus, String> {
+    tauri::async_runtime::spawn_blocking(rebuild_local_note_index_blocking)
+        .await
+        .map_err(|e| format!("Local note index rebuild task failed: {e}"))?
+}
+
+#[tauri::command]
 pub fn get_local_note_index_status() -> LocalNoteIndexStatus {
     let mut status = LocalNoteIndexStatus {
         exists: false,
         version: None,
+        current_version: INDEX_VERSION,
+        status: "missing".to_string(),
         note_count: 0,
         chunk_count: 0,
         updated_at: None,
@@ -234,10 +245,21 @@ pub fn get_local_note_index_status() -> LocalNoteIndexStatus {
         }
     }
 
-    match read_index_file(&index_path) {
+    match read_index_file_unchecked(&index_path) {
         Ok(index) => {
             status.readable = true;
             status.version = Some(index.version);
+            status.status = if index.version == INDEX_VERSION {
+                "ready".to_string()
+            } else {
+                "stale".to_string()
+            };
+            if index.version != INDEX_VERSION {
+                status.last_error = Some(format!(
+                    "version mismatch: found {}, expected {}",
+                    index.version, INDEX_VERSION
+                ));
+            }
             status.updated_at = Some(index.updated_at);
             status.note_count = index.notes.len();
             status.chunk_count = index.notes.iter().map(|note| note.chunks.len()).sum();
@@ -249,11 +271,29 @@ pub fn get_local_note_index_status() -> LocalNoteIndexStatus {
                 .collect();
         }
         Err(e) => {
+            status.status = "error".to_string();
             status.last_error = Some(e);
         }
     }
 
     status
+}
+
+fn rebuild_local_note_index_blocking() -> Result<LocalNoteIndexStatus, String> {
+    let notes_dir = paths::notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+    let canonical_notes_dir = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve notes directory: {e}"))?;
+    let mut notes = build_index_from_scan(&canonical_notes_dir)?;
+    notes.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    let index = LocalNoteIndex {
+        version: INDEX_VERSION,
+        updated_at: now_secs(),
+        notes,
+    };
+    write_index_file(&local_index_path()?, &index)?;
+    Ok(get_local_note_index_status())
 }
 
 fn probe_writable(dir: &Path) -> Result<bool, String> {
@@ -432,9 +472,7 @@ fn local_index_path() -> Result<PathBuf, String> {
 }
 
 fn read_index_file(path: &Path) -> Result<LocalNoteIndex, String> {
-    let bytes = fs::read(path).map_err(|e| format!("read failed: {e}"))?;
-    let index = serde_json::from_slice::<LocalNoteIndex>(&bytes)
-        .map_err(|e| format!("parse failed: {e}"))?;
+    let index = read_index_file_unchecked(path)?;
     if index.version != INDEX_VERSION {
         return Err(format!(
             "version mismatch: found {}, expected {}",
@@ -442,6 +480,11 @@ fn read_index_file(path: &Path) -> Result<LocalNoteIndex, String> {
         ));
     }
     Ok(index)
+}
+
+fn read_index_file_unchecked(path: &Path) -> Result<LocalNoteIndex, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read failed: {e}"))?;
+    serde_json::from_slice::<LocalNoteIndex>(&bytes).map_err(|e| format!("parse failed: {e}"))
 }
 
 fn write_index_file(path: &Path, index: &LocalNoteIndex) -> Result<(), String> {

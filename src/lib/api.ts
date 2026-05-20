@@ -327,6 +327,8 @@ export interface WebCacheStatusResult {
 export interface LocalNoteIndexStatusResult {
   exists: boolean;
   version?: number;
+  currentVersion: number;
+  status: "missing" | "ready" | "building" | "stale" | "error" | string;
   noteCount: number;
   chunkCount: number;
   updatedAt?: number;
@@ -820,6 +822,14 @@ export async function getWebCacheStatus(): Promise<WebCacheStatusResult> {
 export async function getLocalNoteIndexStatus(): Promise<LocalNoteIndexStatusResult> {
   try {
     return await invoke<LocalNoteIndexStatusResult>("get_local_note_index_status");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function rebuildLocalNoteIndex(): Promise<LocalNoteIndexStatusResult> {
+  try {
+    return await invoke<LocalNoteIndexStatusResult>("rebuild_local_note_index");
   } catch (e) {
     throw toError(e);
   }

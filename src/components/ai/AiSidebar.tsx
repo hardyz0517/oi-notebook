@@ -2543,6 +2543,7 @@ function AssistantCollapsibleHeader({
 function LocalNoteSourcesCard({
   sources,
   messageId,
+  developerModeEnabled,
   isExpanded,
   highlightedLocalCitationId,
   onToggle,
@@ -2550,6 +2551,7 @@ function LocalNoteSourcesCard({
 }: {
   sources?: LocalNoteSearchResult[];
   messageId: string;
+  developerModeEnabled: boolean;
   isExpanded: boolean;
   highlightedLocalCitationId?: string | null;
   onToggle: () => void;
@@ -2576,6 +2578,16 @@ function LocalNoteSourcesCard({
                 : `L${source.lineStart}`
               : null;
             const headingLabel = source.headingPath?.length ? source.headingPath.join(" / ") : null;
+            const developerDetails = [
+              typeof source.chunkIndex === "number" ? `chunk=${source.chunkIndex}` : undefined,
+              lineLabel ? `lines=${lineLabel}` : undefined,
+              `score=${source.score}`,
+              source.matchedTerms?.length ? `matched=${source.matchedTerms.slice(0, 6).join("|")}` : undefined,
+              source.detectedProblemIds?.length ? `problems=${source.detectedProblemIds.join("|")}` : undefined,
+              source.detectedAlgorithmTerms?.length ? `algorithms=${source.detectedAlgorithmTerms.slice(0, 6).join("|")}` : undefined,
+              source.reason ? `reason=${source.reason}` : undefined,
+              source.diagnostics ? `diagnostics=${source.diagnostics}` : undefined,
+            ].filter((item): item is string => Boolean(item));
             const openSource = () => {
               void onOpenLocalNote?.(source.relativePath, source.lineStart ?? null);
             };
@@ -2607,11 +2619,15 @@ function LocalNoteSourcesCard({
                   <span className="min-w-0 truncate">{source.relativePath}</span>
                   {headingLabel && <span className="max-w-full truncate" title={headingLabel}>{headingLabel}</span>}
                   {lineLabel && <span>{lineLabel}</span>}
-                  {source.reason && <span className="truncate" title={source.reason}>{source.reason}</span>}
                 </div>
                 <div className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-muted-foreground">
                   {source.snippet}
                 </div>
+                {developerModeEnabled && developerDetails.length > 0 && (
+                  <div className="grid gap-0.5 border-t border-border/50 pt-1 font-mono text-[10px] leading-4 text-muted-foreground/80 dark:border-white/10">
+                    {developerDetails.slice(0, 8).map((detail) => <div key={detail} className="truncate" title={detail}>{detail}</div>)}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -6767,6 +6783,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           <LocalNoteSourcesCard
                             sources={displayedLocalNoteSources}
                             messageId={message.id}
+                            developerModeEnabled={developerModeEnabled}
                             isExpanded={isLocalNoteListExpanded}
                             highlightedLocalCitationId={activeHighlightedLocalCitationId}
                             onToggle={() => toggleLocalNoteList(message.id)}

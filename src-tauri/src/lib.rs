@@ -246,6 +246,7 @@ pub fn run() {
             web_cache::get_web_cache_status,
             local_search::search_local_notes,
             local_search::get_local_note_index_status,
+            local_search::rebuild_local_note_index,
             ai::generate_note_metadata,
             ai::polish_note_body,
             ai::suggest_note_tags,
