@@ -1095,6 +1095,21 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         : undefined,
       selectedForRoundup: source.selectedForRoundup === true,
       droppedAsDuplicateCluster: source.droppedAsDuplicateCluster === true,
+      queryFocusEntities: Array.isArray(source.queryFocusEntities)
+        ? source.queryFocusEntities.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5)
+        : undefined,
+      companySpecificNews: source.companySpecificNews === true,
+      focusEntitySource: source.focusEntitySource,
+      candidatePrimaryEntities: Array.isArray(source.candidatePrimaryEntities)
+        ? source.candidatePrimaryEntities.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5)
+        : undefined,
+      entityMatchStrength: typeof source.entityMatchStrength === "string"
+        ? source.entityMatchStrength
+        : undefined,
+      entityFilterApplied: source.entityFilterApplied === true,
+      rejectedWrongEntityReason: typeof source.rejectedWrongEntityReason === "string" && source.rejectedWrongEntityReason.trim()
+        ? source.rejectedWrongEntityReason.trim()
+        : undefined,
     }];
   });
   return sources.length > 0 ? sources.slice(0, 24) : undefined;
@@ -2839,6 +2854,13 @@ function WebSearchSourcesCard({
                 source.clusterLabel ? `Cluster label：${source.clusterLabel}` : undefined,
                 source.clusterReason ? `Cluster reason：${source.clusterReason}` : undefined,
                 typeof source.clusterSize === "number" ? `Cluster size：${source.clusterSize}` : undefined,
+                source.queryFocusEntities?.length ? `Query focus：${source.queryFocusEntities.join(", ")}` : undefined,
+                source.companySpecificNews !== undefined ? `Company-specific news：${source.companySpecificNews === true ? "yes" : "no"}` : undefined,
+                source.focusEntitySource ? `Focus entity source：${source.focusEntitySource}` : undefined,
+                source.candidatePrimaryEntities?.length ? `Candidate entities：${source.candidatePrimaryEntities.join(", ")}` : undefined,
+                source.entityMatchStrength ? `Entity match：${source.entityMatchStrength}` : undefined,
+                source.entityFilterApplied !== undefined ? `Entity filter：${source.entityFilterApplied === true ? "yes" : "no"}` : undefined,
+                source.rejectedWrongEntityReason ? `Wrong entity reason：${source.rejectedWrongEntityReason}` : undefined,
                 source.selectedForRoundup !== undefined ? `Selected for roundup：${source.selectedForRoundup === true ? "yes" : "no"}` : undefined,
                 source.droppedAsDuplicateCluster === true ? "Dropped：duplicate event cluster" : undefined,
               ].filter((item): item is string => Boolean(item));
@@ -4102,6 +4124,7 @@ export default function AiSidebar({
         preparationDiagnostics.providerSearchAttempted = true;
         const roundSources = await searchWebSources({
           provider: activeWebSearchProvider,
+          rawUserQuery: options?.userInput ?? roundDecision.rawQuestion,
           queries: searchQueries,
           intent: roundDecision.intent,
           vertical: roundVertical,
@@ -4295,6 +4318,7 @@ export default function AiSidebar({
       const decisionVertical = decision.vertical ?? decision.aiPlanner?.vertical ?? (decisionFreshness === "news" ? "news" : undefined);
       const sources = await searchWebSources({
         provider: activeWebSearchProvider,
+        rawUserQuery: decision.rawQuestion,
         queries: limitWebSearchQueriesForProvider(decision.queries, activeWebSearchProvider, decision.intent),
         intent: decision.intent,
         vertical: decisionVertical,

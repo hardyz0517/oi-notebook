@@ -352,6 +352,13 @@ export type WebSource = {
   clusterSize?: number;
   selectedForRoundup?: boolean;
   droppedAsDuplicateCluster?: boolean;
+  queryFocusEntities?: string[];
+  companySpecificNews?: boolean;
+  focusEntitySource?: "raw_user_query" | "search_query" | "none";
+  candidatePrimaryEntities?: string[];
+  entityMatchStrength?: "primary" | "secondary" | "mention" | "none";
+  entityFilterApplied?: boolean;
+  rejectedWrongEntityReason?: string;
 };
 
 export type PublicWebRequestPolicy = {
@@ -375,6 +382,11 @@ export type WebSearchConfig = {
 export type AiSearchFreshness = "none" | "recent" | "latest" | "news";
 
 export type WebSearchRequest = {
+  /**
+   * The user's original question. Source routing uses this for company-specific
+   * news focus; expanded search queries/topic keywords must not broaden it.
+   */
+  rawUserQuery?: string;
   queries: string[];
   intent: ResearchIntent;
   vertical?: SearchVertical;
@@ -535,6 +547,13 @@ export type WebSearchResult = {
   clusterSize?: number;
   selectedForRoundup?: boolean;
   droppedAsDuplicateCluster?: boolean;
+  queryFocusEntities?: string[];
+  companySpecificNews?: boolean;
+  focusEntitySource?: WebSource["focusEntitySource"];
+  candidatePrimaryEntities?: string[];
+  entityMatchStrength?: "primary" | "secondary" | "mention" | "none";
+  entityFilterApplied?: boolean;
+  rejectedWrongEntityReason?: string;
 };
 
 export type WebSourceExcerptRequest = {
@@ -2546,12 +2565,106 @@ export const evaluateWebSourceEvidence = (
   };
 };
 
+const NEWS_ENTITY_ALIASES: Record<string, string[]> = {
+  openai: ["openai", "chatgpt", "gpt", "codex", "sora"],
+  anthropic: ["anthropic", "claude"],
+  google_ai: ["google", "gemini", "deepmind"],
+  microsoft_ai: ["microsoft", "copilot"],
+  nvidia: ["nvidia"],
+};
+
+const normalizeNewsFocusEntity = (value: string): string | undefined => {
+  if (/\bopenai\b|\bchatgpt\b|\bgpt\b|\bcodex\b|\bsora\b/i.test(value)) return "openai";
+  if (/\banthropic\b|\bclaude\b/i.test(value)) return "anthropic";
+  if (/\bgoogle\b|\bgemini\b|\bdeepmind\b/i.test(value)) return "google_ai";
+  if (/\bmicrosoft\b|\bcopilot\b/i.test(value)) return "microsoft_ai";
+  if (/\bnvidia\b/i.test(value)) return "nvidia";
+  return undefined;
+};
+
+const getQueryFocusEntities = (
+  rawUserQuery?: string,
+  searchQueries: string[] = [],
+): { entities: string[]; source: WebSource["focusEntitySource"] } => {
+  const rawEntities = rawUserQuery?.trim()
+    ? unique([normalizeNewsFocusEntity(rawUserQuery)].filter((entity): entity is string => Boolean(entity)))
+    : [];
+  if (rawUserQuery?.trim()) {
+    return { entities: rawEntities, source: rawEntities.length > 0 ? "raw_user_query" : "none" };
+  }
+  const queryEntities = unique(searchQueries.map(normalizeNewsFocusEntity).filter((entity): entity is string => Boolean(entity)));
+  return { entities: queryEntities, source: queryEntities.length > 0 ? "search_query" : "none" };
+};
+
+const sourceOfficialEntity = (source: WebSource, host: string): string | undefined => {
+  const text = `${source.discoveredBy ?? ""} ${source.sourceHome ?? ""} ${source.feedUrl ?? ""} ${source.url ?? ""}`.toLocaleLowerCase();
+  if (host === "openai.com" || text.includes("openai.com") || text.includes("openai-news")) return "openai";
+  if (host === "anthropic.com" || host.endsWith(".anthropic.com") || text.includes("anthropic.com") || text.includes("anthropic-news")) return "anthropic";
+  if (host === "blog.google" || host === "deepmind.google" || text.includes("blog.google") || text.includes("deepmind.google") || text.includes("google-ai")) return "google_ai";
+  if (host.endsWith("microsoft.com") || text.includes("microsoft-ai")) return "microsoft_ai";
+  if (host.endsWith("nvidia.com")) return "nvidia";
+  return undefined;
+};
+
+const titleHasPrimaryNewsEntity = (title: string, entity: string): boolean => {
+  const lower = title.toLocaleLowerCase().trim();
+  const aliases = NEWS_ENTITY_ALIASES[entity] ?? [];
+  if (aliases.some((alias) => new RegExp(`\\b${alias}\\b`, "i").test(lower) && lower.startsWith(alias))) return true;
+  return aliases.some((alias) => new RegExp(`\\b${alias}\\b\\s+(?:launches|announces|releases|unveils|says|adds|introduces|updates|model|agent|tool|news)`, "i").test(lower));
+};
+
+const classifyFocusEntityMatch = (
+  source: WebSource,
+  focusEntities: string[],
+  host: string,
+): { strength: "primary" | "secondary" | "mention" | "none"; entities: string[]; reason?: string } => {
+  if (focusEntities.length === 0) return { strength: "none", entities: [] };
+  const officialEntity = sourceOfficialEntity(source, host);
+  if (officialEntity && focusEntities.includes(officialEntity)) {
+    return { strength: "primary", entities: [officialEntity], reason: "official focus entity source" };
+  }
+  if (officialEntity && !focusEntities.includes(officialEntity)) {
+    return { strength: "none", entities: [officialEntity], reason: `official source belongs to ${officialEntity}` };
+  }
+  const title = source.title ?? "";
+  const text = [source.title, source.snippet, source.site, source.url].filter(Boolean).join(" ");
+  const primaryEntities = focusEntities.filter((entity) => titleHasPrimaryNewsEntity(title, entity));
+  if (primaryEntities.length > 0) return { strength: "secondary", entities: primaryEntities, reason: "focus entity is primary title subject" };
+  const mentionedEntities = focusEntities.filter((entity) => (NEWS_ENTITY_ALIASES[entity] ?? []).some((alias) => new RegExp(`\\b${alias}\\b`, "i").test(text)));
+  if (mentionedEntities.length > 0) return { strength: "mention", entities: mentionedEntities, reason: "focus entity appears only as a mention" };
+  return { strength: "none", entities: [], reason: "focus entity not found" };
+};
+
 export const classifyNewsCandidateForVertical = (
   source: WebSource,
   topicKeywords: string[] = [],
-): { newsLike: boolean; filteredReason?: string; score: number; reason: string } => {
+  rawUserQuery?: string,
+  searchQueries: string[] = [],
+): { newsLike: boolean; filteredReason?: string; score: number; reason: string; queryFocusEntities?: string[]; companySpecificNews?: boolean; focusEntitySource?: WebSource["focusEntitySource"]; candidatePrimaryEntities?: string[]; entityMatchStrength?: "primary" | "secondary" | "mention" | "none"; entityFilterApplied?: boolean; rejectedWrongEntityReason?: string } => {
   const { host, path } = getWebSourceUrlParts(source);
   const text = [source.title, source.snippet, source.site, source.url].filter(Boolean).join(" ");
+  const focus = getQueryFocusEntities(rawUserQuery, searchQueries);
+  const queryFocusEntities = focus.entities;
+  const companySpecificNews = queryFocusEntities.length === 1;
+  const entityMatch = classifyFocusEntityMatch(source, queryFocusEntities, host);
+  const entityFields = {
+    queryFocusEntities,
+    companySpecificNews,
+    focusEntitySource: focus.source,
+    candidatePrimaryEntities: entityMatch.entities,
+    entityMatchStrength: entityMatch.strength,
+    entityFilterApplied: companySpecificNews,
+  };
+  if (companySpecificNews && entityMatch.strength !== "primary" && entityMatch.strength !== "secondary") {
+    return {
+      newsLike: false,
+      filteredReason: entityMatch.strength === "mention" ? "wrong_focus_entity_mention" : "wrong_focus_entity",
+      score: entityMatch.strength === "mention" ? -45 : -90,
+      reason: entityMatch.reason ?? "candidate does not make the query focus entity the main subject",
+      rejectedWrongEntityReason: entityMatch.reason,
+      ...entityFields,
+    };
+  }
   const topicPool = isAiNewsTopic(topicKeywords)
     ? unique([...topicKeywords, ...AI_NEWS_RELEVANCE_KEYWORDS])
     : unique(topicKeywords);
@@ -2609,6 +2722,7 @@ export const classifyNewsCandidateForVertical = (
   return {
     newsLike: true,
     score,
+    ...entityFields,
     reason: [
       authority ? "news authority domain" : undefined,
       isCompanyNewsPath ? "official news path" : undefined,
@@ -2625,7 +2739,7 @@ const classifyGeneralWebSourceRelevance = (
   source: WebSource,
   decision: SearchDecision,
   userInput: string,
-): { relevance: WebSourceRelevance; score: number; reason: string } => {
+): { relevance: WebSourceRelevance; score: number; reason: string; queryFocusEntities?: string[]; companySpecificNews?: boolean; focusEntitySource?: WebSource["focusEntitySource"]; candidatePrimaryEntities?: string[]; entityMatchStrength?: "primary" | "secondary" | "mention" | "none"; entityFilterApplied?: boolean; rejectedWrongEntityReason?: string } => {
   const topicKeywords = getGeneralWebTopicKeywords(decision, userInput);
   if (!isRecentGeneralWebDecision(decision, userInput) || topicKeywords.length === 0) {
     return { relevance: source.relevance ?? "strong", score: 40, reason: source.relevanceReason ?? "无明确新闻主题过滤要求。" };
@@ -2641,18 +2755,32 @@ const classifyGeneralWebSourceRelevance = (
   const vertical = decision.vertical ?? decision.aiPlanner?.vertical ?? inferSearchVertical(decision);
 
   if (vertical === "news") {
-    const newsClassification = classifyNewsCandidateForVertical(source, topicKeywords);
+    const newsClassification = classifyNewsCandidateForVertical(source, topicKeywords, userInput || decision.rawQuestion, decision.queries);
     if (!newsClassification.newsLike) {
       return {
         relevance: "unrelated",
         score: newsClassification.score,
         reason: newsClassification.filteredReason ?? newsClassification.reason,
+        queryFocusEntities: newsClassification.queryFocusEntities,
+        companySpecificNews: newsClassification.companySpecificNews,
+        focusEntitySource: newsClassification.focusEntitySource,
+        candidatePrimaryEntities: newsClassification.candidatePrimaryEntities,
+        entityMatchStrength: newsClassification.entityMatchStrength,
+        entityFilterApplied: newsClassification.entityFilterApplied,
+        rejectedWrongEntityReason: newsClassification.rejectedWrongEntityReason,
       };
     }
     return {
       relevance: newsClassification.score >= 64 ? "strong" : "candidate",
       score: newsClassification.score,
       reason: newsClassification.reason,
+      queryFocusEntities: newsClassification.queryFocusEntities,
+      companySpecificNews: newsClassification.companySpecificNews,
+      focusEntitySource: newsClassification.focusEntitySource,
+      candidatePrimaryEntities: newsClassification.candidatePrimaryEntities,
+      entityMatchStrength: newsClassification.entityMatchStrength,
+      entityFilterApplied: newsClassification.entityFilterApplied,
+      rejectedWrongEntityReason: newsClassification.rejectedWrongEntityReason,
     };
   }
 
@@ -2779,6 +2907,9 @@ export const rankPreparedWebSources = (
   context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
 ): WebSource[] => {
   const recentInfoRequested = isRecentGeneralWebDecision(decision, userInput);
+  const focus = getQueryFocusEntities(userInput || decision.rawQuestion, decision.queries);
+  const focusEntities = focus.entities;
+  const companySpecificNews = recentInfoRequested && focusEntities.length === 1;
   const readBudget = decision.sourceStrategy?.readBudget ?? getWebReadBudgetPlan(decision);
   const clusterForRoundup = isBroadAiNewsRoundupDecision(decision, userInput);
   const clusterNewsSources = clusterForRoundup || recentInfoRequested;
@@ -2845,6 +2976,10 @@ export const rankPreparedWebSources = (
       const relevance = source.relevance ?? "strong";
       const usableEvidence = source.usableEvidence === true;
       const candidateThreshold = recentInfoRequested ? 36 : 30;
+      const entityMatch = companySpecificNews
+        ? source.entityMatchStrength ?? classifyFocusEntityMatch(source, focusEntities, getWebSourceUrlParts(source).host).strength
+        : undefined;
+      const entityAllowed = !companySpecificNews || entityMatch === "primary" || entityMatch === "secondary";
       const cluster = source.eventCluster ?? "other-ai-news";
       const maxPerCluster = recentInfoRequested && isNewsSourceForClustering(source) ? 2 : Number.POSITIVE_INFINITY;
       const currentClusterCount = selectedClusterCounts.get(cluster) ?? 0;
@@ -2854,7 +2989,7 @@ export const rankPreparedWebSources = (
           : selectedCandidateCount < 2 && (source.rankScore ?? 0) >= candidateThreshold
       );
       const duplicateCluster = baseSelect && currentClusterCount >= maxPerCluster;
-      const shouldSelect = baseSelect && !duplicateCluster;
+      const shouldSelect = baseSelect && entityAllowed && !duplicateCluster;
       if (shouldSelect && relevance === "strong") selectedStrongCount += 1;
       if (shouldSelect && relevance === "candidate") selectedCandidateCount += 1;
       if (shouldSelect) selectedClusterCounts.set(cluster, currentClusterCount + 1);
@@ -2865,6 +3000,12 @@ export const rankPreparedWebSources = (
         injectedIntoAnswer: shouldSelect,
         selectedForRoundup: false,
         droppedAsDuplicateCluster: duplicateCluster,
+        queryFocusEntities: companySpecificNews ? focusEntities : source.queryFocusEntities,
+        companySpecificNews: companySpecificNews || source.companySpecificNews,
+        focusEntitySource: companySpecificNews ? focus.source : source.focusEntitySource,
+        entityMatchStrength: entityMatch ?? source.entityMatchStrength,
+        entityFilterApplied: companySpecificNews || source.entityFilterApplied,
+        rejectedWrongEntityReason: entityAllowed ? source.rejectedWrongEntityReason : "company-specific news requires primary or secondary focus entity match",
       };
     });
 };
@@ -3238,7 +3379,7 @@ const prepareWebSourcesForDecisionBase = (
     const filteredReasonCounts = scored
       .filter((item) => item.relevance === "unrelated")
       .reduce<Record<string, number>>((acc, item) => {
-        const classification = vertical === "news" ? classifyNewsCandidateForVertical(item.source, topicKeywords) : undefined;
+        const classification = vertical === "news" ? classifyNewsCandidateForVertical(item.source, topicKeywords, userInput || decision.rawQuestion, decision.queries) : undefined;
         const reason = classification?.filteredReason ?? item.reason ?? "query/topic mismatch";
         acc[reason] = (acc[reason] ?? 0) + 1;
         return acc;
@@ -3262,6 +3403,13 @@ const prepareWebSourcesForDecisionBase = (
         relevance: item.relevance,
         relevanceLabel: item.relevance === "strong" ? "强相关" : "相关资料",
         relevanceReason: item.reason,
+        queryFocusEntities: item.queryFocusEntities,
+        companySpecificNews: item.companySpecificNews,
+        focusEntitySource: item.focusEntitySource,
+        candidatePrimaryEntities: item.candidatePrimaryEntities,
+        entityMatchStrength: item.entityMatchStrength,
+        entityFilterApplied: item.entityFilterApplied,
+        rejectedWrongEntityReason: item.rejectedWrongEntityReason,
         newsLike: vertical === "news" ? true : item.source.newsLike,
         freshnessScore: vertical === "news" ? getWebSourceFreshnessScore(item.source) : item.source.freshnessScore,
         filteredReason: undefined,

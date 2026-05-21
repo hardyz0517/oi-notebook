@@ -24,6 +24,7 @@ export type DirectDiscoveryDiagnostics = {
   intent?: string;
   freshness?: string;
   query?: string;
+  rawUserQuery?: string;
   topicKeywords?: string;
   sourcesTried?: string;
   candidatesFound?: string;
@@ -38,6 +39,12 @@ export type NewsSourceRegistryDiagnostics = {
   enabled?: string;
   sourceRouterTriggered?: string;
   sourceRouterReason?: string;
+  queryFocusEntities?: string;
+  focusEntitySource?: string;
+  companySpecificNews?: string;
+  entityFilterApplied?: string;
+  rejectedWrongEntityCount?: string;
+  rejectedWrongEntitySamples?: string;
   selectedSourceCount?: string;
   selectedSources?: string;
   skippedSources?: string;
@@ -249,6 +256,12 @@ const parseNewsSourceRegistryDiagnosticsFromParts = (parts: string[]): NewsSourc
     enabled,
     sourceRouterTriggered: lookupDebugField(parts, "sourceRouterTriggered"),
     sourceRouterReason: lookupDebugField(parts, "sourceRouterReason"),
+    queryFocusEntities: lookupDebugField(parts, "queryFocusEntities"),
+    focusEntitySource: lookupDebugField(parts, "focusEntitySource"),
+    companySpecificNews: lookupDebugField(parts, "companySpecificNews"),
+    entityFilterApplied: lookupDebugField(parts, "entityFilterApplied"),
+    rejectedWrongEntityCount: lookupDebugField(parts, "rejectedWrongEntityCount"),
+    rejectedWrongEntitySamples: lookupDebugField(parts, "rejectedWrongEntitySamples"),
     selectedSourceCount: lookupDebugField(parts, "selectedSourceCount"),
     selectedSources: lookupDebugField(parts, "selectedSources"),
     skippedSources: lookupDebugField(parts, "skippedSources"),
@@ -345,6 +358,7 @@ export const parseDirectDiscoveryDiagnostics = (raw: string): DirectDiscoveryDia
     intent: lookupDebugField(parts, "directDiscoveryIntent"),
     freshness: lookupDebugField(parts, "directDiscoveryFreshness"),
     query: lookupDebugField(parts, "directDiscoveryQuery"),
+    rawUserQuery: lookupDebugField(parts, "rawUserQuery"),
     topicKeywords: lookupDebugField(parts, "directDiscoveryTopicKeywords"),
     sourcesTried: lookupDebugField(parts, "directDiscoverySourcesTried"),
     candidatesFound: lookupDebugField(parts, "directDiscoveryCandidatesFound"),
@@ -464,6 +478,12 @@ export const formatDirectDiscoveryDiagnostics = (raw: string): string[] => {
     diagnostics.newsRegistry.enabled ? `newsRegistryEnabled=${diagnostics.newsRegistry.enabled}` : undefined,
     diagnostics.newsRegistry.sourceRouterTriggered ? `sourceRouterTriggered=${diagnostics.newsRegistry.sourceRouterTriggered}` : undefined,
     diagnostics.newsRegistry.sourceRouterReason ? `sourceRouterReason=${diagnostics.newsRegistry.sourceRouterReason}` : undefined,
+    diagnostics.newsRegistry.queryFocusEntities ? `queryFocusEntities=${diagnostics.newsRegistry.queryFocusEntities}` : undefined,
+    diagnostics.newsRegistry.focusEntitySource ? `focusEntitySource=${diagnostics.newsRegistry.focusEntitySource}` : undefined,
+    diagnostics.newsRegistry.companySpecificNews ? `companySpecificNews=${diagnostics.newsRegistry.companySpecificNews}` : undefined,
+    diagnostics.newsRegistry.entityFilterApplied ? `entityFilterApplied=${diagnostics.newsRegistry.entityFilterApplied}` : undefined,
+    diagnostics.newsRegistry.rejectedWrongEntityCount ? `rejectedWrongEntityCount=${diagnostics.newsRegistry.rejectedWrongEntityCount}` : undefined,
+    diagnostics.newsRegistry.rejectedWrongEntitySamples ? `rejectedWrongEntitySamples=${diagnostics.newsRegistry.rejectedWrongEntitySamples}` : undefined,
     diagnostics.newsRegistry.topicTags ? `topicTags=${diagnostics.newsRegistry.topicTags}` : undefined,
     diagnostics.newsRegistry.selectedSourceCount ? `selectedSourceCount=${diagnostics.newsRegistry.selectedSourceCount}` : undefined,
     diagnostics.newsRegistry.selectedSources ? `selectedSources=${diagnostics.newsRegistry.selectedSources}` : undefined,
@@ -483,6 +503,7 @@ export const formatDirectDiscoveryDiagnostics = (raw: string): string[] => {
     `directDiscoveryIntent：${diagnostics.intent ?? "unknown"}`,
     `directDiscoveryFreshness：${diagnostics.freshness || "none"}`,
     `directDiscoveryQuery：${diagnostics.query || "none"}`,
+    `rawUserQuery：${diagnostics.rawUserQuery || "none"}`,
     `directDiscoveryTopicKeywords：${diagnostics.topicKeywords || "none"}`,
     `directDiscoverySourcesTried：${diagnostics.sourcesTried ?? "0"}`,
     `directDiscoveryCandidatesFound：${diagnostics.candidatesFound ?? "0"}`,

@@ -356,6 +356,11 @@ export interface NotexSearchSelfCheckCaseResult {
   freshness: string;
   newsRegistryTriggered: boolean;
   newsClusteringTriggered: boolean;
+  companySpecificNews: boolean;
+  queryFocusEntities: string[];
+  focusEntitySource: string;
+  entityFilterApplied: boolean;
+  rejectedWrongEntityCount: number;
   selectedNewsSources: string[];
   bingFallbackPlanned: boolean;
   localSearchTriggered: boolean;
