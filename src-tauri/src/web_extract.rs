@@ -26,6 +26,7 @@ pub struct WebExtractResult {
     pub quality: &'static str,
     pub extractor: &'static str,
     pub reason: String,
+    pub extracted_text_chars: usize,
     pub code_blocks_truncated: bool,
 }
 
@@ -147,6 +148,7 @@ fn extract_luogu_excerpt(
             extractor: "luogu",
             reason: "Luogu page body is unavailable in static HTML or requires page rendering"
                 .to_string(),
+            extracted_text_chars: 0,
             code_blocks_truncated: false,
         };
     }
@@ -159,6 +161,7 @@ fn extract_luogu_excerpt(
             extractor: "luogu",
             reason: "Luogu public HTML did not expose enough readable problem or solution text"
                 .to_string(),
+            extracted_text_chars: selected.chars().count(),
             code_blocks_truncated: code_truncated,
         };
     }
@@ -199,6 +202,7 @@ fn quality_result(text: String, extractor: &'static str, reason: &str) -> WebExt
         quality,
         extractor,
         reason: reason.to_string(),
+        extracted_text_chars: count,
         code_blocks_truncated: false,
     }
 }

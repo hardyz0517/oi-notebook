@@ -1149,6 +1149,7 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
     `hasAlgorithmTermMatchedRe=${item.hasAlgorithmTermMatchedRe}`,
     `hasPostNavigationFalsePositive=${item.hasPostNavigationFalsePositive}`,
     `explicitUrlPathUsed=${item.explicitUrlPathUsed}`,
+    `extractorQualityChecks=${JSON.stringify((item.rawDiagnostics as { extractorQualityChecks?: unknown })?.extractorQualityChecks ?? [])}`,
     `raw=${JSON.stringify(item.rawDiagnostics)}`,
   ],
 });

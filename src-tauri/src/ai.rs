@@ -397,6 +397,8 @@ pub struct WebSourceExcerptResult {
     pub id: String,
     pub url: String,
     pub final_url: Option<String>,
+    #[serde(default)]
+    pub final_url_host: Option<String>,
     pub title: String,
     pub fetched: bool,
     pub status: Option<String>,
@@ -404,12 +406,28 @@ pub struct WebSourceExcerptResult {
     pub error: Option<String>,
     pub error_kind: Option<String>,
     pub fetched_at: i64,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub body_bytes: Option<usize>,
+    #[serde(default)]
+    pub extracted_text_chars: Option<usize>,
+    #[serde(default)]
+    pub excerpt_chars: Option<usize>,
+    #[serde(default)]
+    pub published_at: Option<String>,
     pub cache_status: Option<String>,
     pub cached_at: Option<String>,
     pub cache_ttl_seconds: Option<i64>,
     pub excerpt_quality: Option<String>,
     pub extractor: Option<String>,
     pub excerpt_reason: Option<String>,
+    #[serde(default)]
+    pub blocked_reason: Option<String>,
+    #[serde(default)]
+    pub needs_js_reason: Option<String>,
+    #[serde(default)]
+    pub extraction_failure_reason: Option<String>,
     pub code_blocks_truncated: Option<bool>,
     #[serde(default)]
     pub evidence_status: Option<String>,
@@ -2160,6 +2178,18 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("unknown");
+        let final_url_host = source
+            .final_url
+            .as_deref()
+            .and_then(|value| reqwest::Url::parse(value).ok())
+            .and_then(|value| value.host_str().map(|host| host.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let read_status = source
+            .read_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
         let extractor = source
             .extractor
             .as_deref()
@@ -2295,7 +2325,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         citation_ids.push(citation_id.clone());
 
         entries.push(format!(
-            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster label: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster label: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nFinal URL host: {}\nRead status: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             citation_id,
             citation_id,
             citation_id,
@@ -2333,6 +2363,8 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             rank_reason,
             cache_status,
             cached_at,
+            final_url_host,
+            read_status,
             excerpt_status,
             excerpt_quality,
             extractor,
@@ -2357,7 +2389,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - Only sources marked with Web excerpt status: fetched may be described as webpage excerpts. Do not use failed or unavailable sources as webpage content.\n\
 - Sources whose Source origin is user-provided explicit public URL came directly from URLs the user pasted. Treat their fetched excerpts as explicit URL reading context, not as search-engine discovery.\n\
 - Even for fetched excerpts, do not say you read the full page. Say \"based on the extracted webpage excerpt\" or equivalent.\n\
-- Web excerpts are cleaned, selected, and truncated snippets, not complete webpages; if Web excerpt quality is partial, blocked, or empty, answer cautiously and avoid over-inference.\n\
+- Web excerpts are cleaned, selected, and truncated snippets, not complete webpages; if Web excerpt quality is medium, low, snippet_only, title_only, unavailable, too_short, blocked, partial, or empty, answer cautiously and avoid over-inference. Never treat snippet_only or title_only as page-body evidence.\n\
 - A generic extractor is weaker evidence than a site-specific extractor such as oi_wiki, cp_algorithms, or luogu. If Luogu extraction is blocked or unavailable, do not guess problem statements or solution content from the Luogu page.\n\
 - If Code blocks truncated is true, do not make certain conclusions from incomplete code; use surrounding explanation and treat the code as partial evidence.\n\
 - Do not say a webpage clearly states something unless the snippet itself contains that information.\n\
@@ -6655,21 +6687,12 @@ fn extract_html_page_title(body: &str) -> Option<String> {
     for marker in [
         "property=\"og:title\"",
         "property='og:title'",
-        "name=\"description\"",
-        "name='description'",
+        "name=\"twitter:title\"",
+        "name='twitter:title'",
+        "property=\"twitter:title\"",
+        "property='twitter:title'",
     ] {
-        let Some(marker_start) = lower.find(marker) else {
-            continue;
-        };
-        let tag_start = safe_slice_by_byte_range(&lower, 0, marker_start)
-            .rfind('<')
-            .unwrap_or(marker_start);
-        let tag_end = safe_slice_by_byte_range(&lower, marker_start, lower.len())
-            .find('>')
-            .map(|offset| marker_start + offset)
-            .unwrap_or(marker_start);
-        let tag = safe_slice_by_byte_range(body, tag_start, tag_end.saturating_add(1));
-        if let Some(content) = html_attr_value(tag, "content") {
+        if let Some(content) = extract_html_meta_content(body, &lower, marker) {
             let cleaned = clean_bing_markup_text(&decode_html_entities(&content), 120);
             if !cleaned.is_empty() {
                 return Some(cleaned);
@@ -6677,6 +6700,118 @@ fn extract_html_page_title(body: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_html_meta_content(body: &str, lower: &str, marker: &str) -> Option<String> {
+    let marker_start = lower.find(marker)?;
+    let tag_start = safe_slice_by_byte_range(lower, 0, marker_start)
+        .rfind('<')
+        .unwrap_or(marker_start);
+    let tag_end = safe_slice_by_byte_range(lower, marker_start, lower.len())
+        .find('>')
+        .map(|offset| marker_start + offset)
+        .unwrap_or(marker_start);
+    let tag = safe_slice_by_byte_range(body, tag_start, tag_end.saturating_add(1));
+    html_attr_value(tag, "content")
+}
+
+fn extract_html_meta_description(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    for marker in [
+        "name=\"description\"",
+        "name='description'",
+        "property=\"og:description\"",
+        "property='og:description'",
+        "name=\"twitter:description\"",
+        "name='twitter:description'",
+    ] {
+        if let Some(content) = extract_html_meta_content(body, &lower, marker) {
+            let cleaned = clean_bing_markup_text(&decode_html_entities(&content), 240);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    None
+}
+
+fn extract_html_published_at(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    for marker in [
+        "property=\"article:published_time\"",
+        "property='article:published_time'",
+        "name=\"article:published_time\"",
+        "name='article:published_time'",
+        "itemprop=\"datepublished\"",
+        "itemprop='datepublished'",
+    ] {
+        if let Some(content) = extract_html_meta_content(body, &lower, marker) {
+            let cleaned = clean_bing_markup_text(&decode_html_entities(&content), 80);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    for marker in ["\"datepublished\"", "'datepublished'"] {
+        let Some(marker_start) = lower.find(marker) else {
+            continue;
+        };
+        let window = safe_slice_by_byte_range(body, marker_start, (marker_start + 320).min(body.len()));
+        for key in ["\"datePublished\"", "'datePublished'", "\"datepublished\"", "'datepublished'"] {
+            if let Some(key_start) = window.find(key) {
+                let rest = &window[key_start + key.len()..];
+                if let Some(colon_start) = rest.find(':') {
+                    let value_part = rest[colon_start + 1..].trim_start();
+                    let quote = value_part.chars().next().filter(|ch| *ch == '"' || *ch == '\'');
+                    if let Some(quote) = quote {
+                        if let Some(end) = value_part[1..].find(quote) {
+                            let cleaned = clean_bing_markup_text(&decode_html_entities(&value_part[1..1 + end]), 80);
+                            if !cleaned.is_empty() {
+                                return Some(cleaned);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for marker in ["<time", " datetime="] {
+        let Some(marker_start) = lower.find(marker) else {
+            continue;
+        };
+        let tag_start = if marker == "<time" {
+            marker_start
+        } else {
+            safe_slice_by_byte_range(&lower, 0, marker_start)
+                .rfind('<')
+                .unwrap_or(marker_start)
+        };
+        let tag_end = safe_slice_by_byte_range(&lower, marker_start, lower.len())
+            .find('>')
+            .map(|offset| marker_start + offset)
+            .unwrap_or(marker_start);
+        let tag = safe_slice_by_byte_range(body, tag_start, tag_end.saturating_add(1));
+        if let Some(datetime) = html_attr_value(tag, "datetime") {
+            let cleaned = clean_bing_markup_text(&decode_html_entities(&datetime), 80);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    None
+}
+
+fn excerpt_quality_status_label(quality: &str, text_chars: usize, meta_description: Option<&str>) -> (&'static str, &'static str) {
+    match quality {
+        "good" => ("high", "fetched article body extracted"),
+        "partial" => ("medium", "partial webpage body extracted"),
+        "empty" if text_chars > 0 => ("too_short", "extracted webpage body was too short"),
+        "empty" if meta_description.is_some() => ("snippet_only", "only metadata description was available"),
+        "empty" => ("title_only", "only title or non-body metadata was available"),
+        "blocked" => ("blocked", "page body appears blocked or requires rendering"),
+        "failed" => ("failed", "extractor failed"),
+        _ => ("low", "weak extracted excerpt quality"),
+    }
 }
 
 fn classify_bing_body_kind(status: reqwest::StatusCode, content_type: &str, body: &str) -> String {
@@ -7768,6 +7903,8 @@ fn fetch_single_web_source_excerpt(
                 excerpt_quality: Some("blocked".to_string()),
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("URL failed public web safety validation".to_string()),
+                content_status: Some("blocked".to_string()),
+                blocked_reason: Some("URL failed public web safety validation".to_string()),
                 code_blocks_truncated: Some(false),
                 ..Default::default()
             };
@@ -7831,6 +7968,8 @@ fn fetch_single_web_source_excerpt(
                 excerpt_quality: Some("failed".to_string()),
                 extractor: Some("none".to_string()),
                 excerpt_reason: Some("HTTP request failed".to_string()),
+                content_status: Some("failed".to_string()),
+                extraction_failure_reason: Some("HTTP request failed".to_string()),
                 code_blocks_truncated: Some(false),
                 ..Default::default()
             };
@@ -7839,11 +7978,16 @@ fn fetch_single_web_source_excerpt(
     };
 
     let final_url = response.url().to_string();
+    let final_url_host = response
+        .url()
+        .host_str()
+        .map(|host| host.to_ascii_lowercase());
     if let Err(error) = validate_public_web_url_for_read(&final_url) {
         let result = WebSourceExcerptResult {
             id,
             url,
             final_url: Some(final_url),
+            final_url_host,
             title,
             fetched: false,
             status: Some("blocked".to_string()),
@@ -7857,6 +8001,8 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
             excerpt_reason: Some("Final URL failed public web safety validation".to_string()),
+            blocked_reason: Some("Final URL failed public web safety validation".to_string()),
+            content_status: Some("blocked".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -7879,9 +8025,12 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
             status: Some("blocked".to_string()),
             error_kind: Some("blocked_or_unreadable".to_string()),
             excerpt_reason: Some("HTTP status requires authorization".to_string()),
+            blocked_reason: Some("HTTP status requires authorization".to_string()),
+            content_status: Some("blocked".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -7902,9 +8051,12 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("empty".to_string()),
             extractor: Some("none".to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
             status: Some("failed".to_string()),
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not found".to_string()),
+            extraction_failure_reason: Some("HTTP status was not found".to_string()),
+            content_status: Some("failed".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -7925,9 +8077,12 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("failed".to_string()),
             extractor: Some("none".to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
             status: Some("failed".to_string()),
             error_kind: Some("http_status".to_string()),
             excerpt_reason: Some("HTTP status was not successful".to_string()),
+            extraction_failure_reason: Some("HTTP status was not successful".to_string()),
+            content_status: Some("failed".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -7960,9 +8115,13 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
+            content_type: Some(content_type.clone()),
             status: Some("blocked".to_string()),
             error_kind: Some("content_type_unsupported".to_string()),
             excerpt_reason: Some("Content type is not extractable text or HTML".to_string()),
+            blocked_reason: Some("Content type is not extractable text or HTML".to_string()),
+            content_status: Some("blocked".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -7987,9 +8146,13 @@ fn fetch_single_web_source_excerpt(
             excerpt_quality: Some("blocked".to_string()),
             extractor: Some("none".to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
+            content_type: Some(content_type.clone()),
             status: Some("blocked".to_string()),
             error_kind: Some("too_large".to_string()),
             excerpt_reason: Some("Response body is too large".to_string()),
+            blocked_reason: Some("Response body is too large".to_string()),
+            content_status: Some("blocked".to_string()),
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
@@ -8018,9 +8181,14 @@ fn fetch_single_web_source_excerpt(
                     excerpt_quality: Some("blocked".to_string()),
                     extractor: Some("none".to_string()),
                     final_url: Some(final_url.clone()),
+                    final_url_host: final_url_host.clone(),
+                    content_type: Some(content_type.clone()),
+                    body_bytes: Some(body_bytes.len()),
                     status: Some("blocked".to_string()),
                     error_kind: Some("too_large".to_string()),
                     excerpt_reason: Some("Response body exceeded size limit".to_string()),
+                    blocked_reason: Some("Response body exceeded size limit".to_string()),
+                    content_status: Some("blocked".to_string()),
                     code_blocks_truncated: Some(false),
                     ..Default::default()
                 };
@@ -8043,15 +8211,24 @@ fn fetch_single_web_source_excerpt(
                 excerpt_quality: Some("failed".to_string()),
                 extractor: Some("none".to_string()),
                 final_url: Some(final_url.clone()),
+                final_url_host: final_url_host.clone(),
+                content_type: Some(content_type.clone()),
+                body_bytes: Some(body_bytes.len()),
                 status: Some("failed".to_string()),
                 error_kind: Some("unknown".to_string()),
                 excerpt_reason: Some("Response body read failed".to_string()),
+                extraction_failure_reason: Some("Response body read failed".to_string()),
+                content_status: Some("failed".to_string()),
                 code_blocks_truncated: Some(false),
                 ..Default::default()
             };
             return finish_web_excerpt_result(result, &cache_key, cached);
         }
     };
+    let body_byte_count = body_bytes.len();
+    let extracted_title = extract_html_page_title(&body);
+    let meta_description = extract_html_meta_description(&body);
+    let published_at = extract_html_published_at(&body);
     let extract_context = WebExtractContext {
         url: final_url.clone(),
         title: title.clone(),
@@ -8073,12 +8250,25 @@ fn fetch_single_web_source_excerpt(
         &extract_context,
         max_chars,
     );
+    let (quality_label, quality_reason) = excerpt_quality_status_label(
+        extracted.quality,
+        extracted.extracted_text_chars,
+        meta_description.as_deref(),
+    );
 
     let Some(excerpt_text) = extracted.text.clone() else {
+        let content_status = match quality_label {
+            "too_short" => "too_short",
+            "snippet_only" => "search_summary_only",
+            "title_only" => "search_summary_only",
+            "blocked" => "needs_js",
+            _ => "unavailable",
+        };
+        let failure_reason = format!("{}; {}", extracted.reason, quality_reason);
         let result = WebSourceExcerptResult {
             id,
             url,
-            title,
+            title: extracted_title.unwrap_or(title),
             fetched: false,
             excerpt: None,
             error: Some("Web page body is unavailable or requires login.".to_string()),
@@ -8086,28 +8276,56 @@ fn fetch_single_web_source_excerpt(
             cache_status: Some("miss".to_string()),
             cached_at: None,
             cache_ttl_seconds: None,
-            excerpt_quality: Some(extracted.quality.to_string()),
+            excerpt_quality: Some(quality_label.to_string()),
             extractor: Some(extracted.extractor.to_string()),
             final_url: Some(final_url.clone()),
+            final_url_host: final_url_host.clone(),
+            content_type: Some(content_type.clone()),
+            body_bytes: Some(body_byte_count),
+            extracted_text_chars: Some(extracted.extracted_text_chars),
+            excerpt_chars: Some(0),
+            published_at,
             status: Some("blocked".to_string()),
             error_kind: Some("blocked_or_unreadable".to_string()),
-            excerpt_reason: Some(extracted.reason),
+            excerpt_reason: Some(failure_reason.clone()),
+            needs_js_reason: if quality_label == "blocked" {
+                Some(failure_reason.clone())
+            } else {
+                None
+            },
+            extraction_failure_reason: Some(failure_reason),
+            content_status: Some(content_status.to_string()),
             code_blocks_truncated: Some(extracted.code_blocks_truncated),
             ..Default::default()
         };
         return finish_web_excerpt_result(result, &cache_key, cached);
     };
+    let excerpt_chars = excerpt_text.chars().count();
 
     let result = WebSourceExcerptResult {
         id,
         url,
-        title,
+        title: extracted_title.unwrap_or(title),
         fetched: true,
         excerpt: Some(excerpt_text),
         error: None,
         final_url: Some(final_url),
+        final_url_host,
+        content_type: Some(content_type),
+        body_bytes: Some(body_byte_count),
+        extracted_text_chars: Some(extracted.extracted_text_chars),
+        excerpt_chars: Some(excerpt_chars),
+        published_at,
         status: Some(
-            if extracted.quality == "partial" {
+            if quality_label == "medium" {
+                "partial"
+            } else {
+                "fetched"
+            }
+            .to_string(),
+        ),
+        content_status: Some(
+            if quality_label == "medium" {
                 "partial"
             } else {
                 "fetched"
@@ -8119,9 +8337,9 @@ fn fetch_single_web_source_excerpt(
         cache_status: Some("miss".to_string()),
         cached_at: None,
         cache_ttl_seconds: None,
-        excerpt_quality: Some(extracted.quality.to_string()),
+        excerpt_quality: Some(quality_label.to_string()),
         extractor: Some(extracted.extractor.to_string()),
-        excerpt_reason: Some(extracted.reason),
+        excerpt_reason: Some(format!("{}; {}", extracted.reason, quality_reason)),
         code_blocks_truncated: Some(extracted.code_blocks_truncated),
         ..Default::default()
     };
@@ -8323,9 +8541,15 @@ fn fetch_web_source_excerpts_blocking(
                 result.fetched = false;
                 result.excerpt = None;
                 result.error = Some("Web excerpt total length limit reached.".to_string());
+                result.status = Some("failed".to_string());
+                result.excerpt_quality = Some("unavailable".to_string());
+                result.content_status = Some("unavailable".to_string());
+                result.extraction_failure_reason =
+                    Some("Web excerpt total length limit reached".to_string());
             } else if excerpt.chars().count() > remaining {
                 *excerpt = excerpt.chars().take(remaining).collect::<String>();
                 excerpt.push_str("...");
+                result.excerpt_chars = Some(excerpt.chars().count());
                 total_chars = WEB_EXTRACT_TOTAL_CONTEXT_CHARS;
             } else {
                 total_chars += excerpt.chars().count();
@@ -10143,6 +10367,89 @@ struct NewsClusteringSelfCheckResult {
     figma_mention_selected: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtractorQualitySelfCheckCase {
+    name: &'static str,
+    content_status: &'static str,
+    page_type: &'static str,
+    excerpt_quality: &'static str,
+    excerpt_chars: usize,
+    expected_usable: bool,
+    actual_usable: bool,
+    reason: String,
+}
+
+fn synthetic_extractor_evidence_usable(
+    content_status: &str,
+    page_type: &str,
+    excerpt_quality: &str,
+    excerpt_chars: usize,
+) -> bool {
+    if matches!(
+        content_status,
+        "not_fetched"
+            | "unavailable"
+            | "needs_js"
+            | "blocked"
+            | "failed"
+            | "search_summary_only"
+            | "too_short"
+            | "wrong_page_type"
+    ) {
+        return false;
+    }
+    if matches!(page_type, "homepage" | "search_page" | "redirect" | "login" | "download") {
+        return false;
+    }
+    if matches!(excerpt_quality, "snippet_only" | "title_only" | "unavailable" | "too_short" | "blocked" | "failed") {
+        return false;
+    }
+    excerpt_chars >= 160 && matches!(content_status, "fetched" | "partial")
+}
+
+fn run_extractor_quality_self_check() -> Vec<ExtractorQualitySelfCheckCase> {
+    [
+        ("meta description only", "search_summary_only", "article", "snippet_only", 120usize, false),
+        ("title only", "search_summary_only", "article", "title_only", 40usize, false),
+        ("needs_js", "needs_js", "article", "blocked", 0usize, false),
+        ("blocked", "blocked", "article", "blocked", 0usize, false),
+        ("too_short", "too_short", "article", "too_short", 80usize, false),
+        ("fetched article body", "fetched", "article", "high", 900usize, true),
+        ("dated news article body", "fetched", "news_article", "high", 850usize, true),
+        ("search page", "wrong_page_type", "search_page", "high", 900usize, false),
+        ("homepage", "wrong_page_type", "homepage", "high", 900usize, false),
+    ]
+    .into_iter()
+    .map(|(name, content_status, page_type, excerpt_quality, excerpt_chars, expected_usable)| {
+        let actual_usable = synthetic_extractor_evidence_usable(
+            content_status,
+            page_type,
+            excerpt_quality,
+            excerpt_chars,
+        );
+        let reason = if actual_usable == expected_usable {
+            "pass".to_string()
+        } else {
+            format!(
+                "expected usable={} but got usable={} for contentStatus={}, pageType={}, excerptQuality={}",
+                expected_usable, actual_usable, content_status, page_type, excerpt_quality
+            )
+        };
+        ExtractorQualitySelfCheckCase {
+            name,
+            content_status,
+            page_type,
+            excerpt_quality,
+            excerpt_chars,
+            expected_usable,
+            actual_usable,
+            reason,
+        }
+    })
+    .collect()
+}
+
 fn normalize_news_cluster_text(value: &str) -> String {
     value
         .to_ascii_lowercase()
@@ -10396,6 +10703,18 @@ fn build_self_check_case(
         .unwrap_or_else(|| "none".to_string());
 
     let mut failures = Vec::<String>::new();
+    let extractor_quality_checks = if expected_category == "explicit_url" {
+        run_extractor_quality_self_check()
+    } else {
+        Vec::new()
+    };
+    if !extractor_quality_checks.is_empty()
+        && extractor_quality_checks
+            .iter()
+            .any(|check| check.actual_usable != check.expected_usable)
+    {
+        failures.push("extractor quality synthetic evidence checks failed".to_string());
+    }
     match expected_category {
         "news_ai" => {
             if !news_registry_triggered {
@@ -10647,6 +10966,7 @@ fn build_self_check_case(
                 "selectedWrongEntityCount": clustering.selected_wrong_entity_count,
                 "figmaMentionSelected": clustering.figma_mention_selected,
             },
+            "extractorQualityChecks": extractor_quality_checks,
             "localSearch": local_probe_diagnostics,
         }),
     }

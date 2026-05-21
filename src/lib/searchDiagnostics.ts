@@ -71,6 +71,9 @@ export type UrlReaderDiagnostics = {
   readAttempts?: string;
   readSuccesses?: string;
   excerptChars?: string;
+  contentStatusMix?: string;
+  excerptQualityMix?: string;
+  urlReaderFailures?: string;
 };
 
 export type EvidenceDiagnostics = {
@@ -87,6 +90,9 @@ export type NewsReadBudgetDiagnostics = UrlReaderDiagnostics & EvidenceDiagnosti
   duplicateClusterDrops?: string;
   roundupClusters?: string;
   clustering?: NewsClusteringDiagnostics;
+  contentStatusMix?: string;
+  excerptQualityMix?: string;
+  urlReaderFailures?: string;
 };
 
 export type NewsClusteringDiagnostics = {
@@ -289,6 +295,9 @@ export const parseSearchDiagnostics = (raw: string): SearchDiagnostics => {
       readAttempts: news.readAttempts,
       readSuccesses: news.readSuccesses,
       excerptChars: news.excerptChars,
+      contentStatusMix: news.contentStatusMix,
+      excerptQualityMix: news.excerptQualityMix,
+      urlReaderFailures: news.urlReaderFailures,
     } : undefined,
     evidence: news ? {
       usableEvidenceCount: news.usableEvidenceCount,
@@ -444,6 +453,9 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
     usableEvidenceCount: lookupDebugField(parts, "usableEvidenceCount"),
     rejectedCount: lookupDebugField(parts, "rejectedCount"),
     excerptChars: lookupDebugField(parts, "excerptChars"),
+    contentStatusMix: lookupDebugField(parts, "contentStatusMix"),
+    excerptQualityMix: lookupDebugField(parts, "excerptQualityMix"),
+    urlReaderFailures: lookupDebugField(parts, "urlReaderFailures"),
     queryDiversification: lookupDebugField(parts, "queryDiversification"),
     droppedQueryDiversification: lookupDebugField(parts, "droppedQueryDiversification"),
     droppedQueryReason: lookupDebugField(parts, "droppedQueryReason"),
@@ -528,6 +540,9 @@ export const formatNewsReadDiagnostics = (raw: string): string[] => {
     `usableEvidenceCount: ${diagnostics.usableEvidenceCount ?? "0"}`,
     `rejectedCount: ${diagnostics.rejectedCount ?? "0"}`,
     `excerptChars: ${diagnostics.excerptChars ?? "0"}`,
+    `contentStatusMix: ${diagnostics.contentStatusMix || "none"}`,
+    `excerptQualityMix: ${diagnostics.excerptQualityMix || "none"}`,
+    `urlReaderFailures: ${diagnostics.urlReaderFailures || "none"}`,
     `queryDiversification: ${diagnostics.queryDiversification || "single"}`,
     ...(diagnostics.droppedQueryDiversification ? [`droppedQueryDiversification: ${diagnostics.droppedQueryDiversification}`] : []),
     ...(diagnostics.droppedQueryReason ? [`droppedQueryReason: ${diagnostics.droppedQueryReason}`] : []),

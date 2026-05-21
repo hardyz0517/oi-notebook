@@ -85,7 +85,10 @@ export type WebContentStatus =
   | "unavailable"
   | "needs_js"
   | "blocked"
-  | "failed";
+  | "failed"
+  | "search_summary_only"
+  | "too_short"
+  | "wrong_page_type";
 
 export const WEB_CONTENT_STATUSES = [
   "not_fetched",
@@ -95,6 +98,9 @@ export const WEB_CONTENT_STATUSES = [
   "needs_js",
   "blocked",
   "failed",
+  "search_summary_only",
+  "too_short",
+  "wrong_page_type",
 ] as const satisfies readonly WebContentStatus[];
 
 export type WebSourceStrength = "strong" | "medium" | "weak" | "rejected";
@@ -205,7 +211,7 @@ export type WebReadResult = {
   siteName?: string;
   status: "fetched" | "partial" | "blocked" | "failed" | "cached" | "stale";
   excerpt?: string;
-  excerptQuality?: "good" | "partial" | "empty" | "blocked" | "failed";
+  excerptQuality?: "high" | "medium" | "low" | "snippet_only" | "title_only" | "unavailable" | "too_short" | "good" | "partial" | "empty" | "blocked" | "failed";
   extractor?: "oi_wiki" | "cp_algorithms" | "luogu" | "generic" | "none";
   excerptReason?: string;
   codeBlocksTruncated?: boolean;
@@ -326,15 +332,24 @@ export type WebSource = {
   excerptStatus?: WebSourceExcerptStatus;
   excerpt?: string;
   excerptError?: string;
+  contentType?: string;
+  bodyBytes?: number;
+  extractedTextChars?: number;
+  excerptChars?: number;
+  publishedAt?: string;
+  finalUrlHost?: string;
   fetchedAt?: number;
   cacheStatus?: WebCacheStatus;
   readStatus?: WebReadResult["status"];
   errorKind?: WebReadErrorKind;
   cachedAt?: string;
   cacheTtlSeconds?: number;
-  excerptQuality?: "good" | "partial" | "empty" | "blocked" | "failed";
+  excerptQuality?: "high" | "medium" | "low" | "snippet_only" | "title_only" | "unavailable" | "too_short" | "good" | "partial" | "empty" | "blocked" | "failed";
   extractor?: "oi_wiki" | "cp_algorithms" | "luogu" | "generic" | "none";
   excerptReason?: string;
+  blockedReason?: string;
+  needsJsReason?: string;
+  extractionFailureReason?: string;
   codeBlocksTruncated?: boolean;
   rankScore?: number;
   rankReason?: string;
@@ -574,6 +589,7 @@ export type WebSourceExcerptResult = {
   id: string;
   url: string;
   finalUrl?: string;
+  finalUrlHost?: string;
   title: string;
   fetched: boolean;
   status?: WebReadResult["status"];
@@ -581,12 +597,20 @@ export type WebSourceExcerptResult = {
   error?: string;
   errorKind?: WebReadErrorKind;
   fetchedAt: number;
+  contentType?: string;
+  bodyBytes?: number;
+  extractedTextChars?: number;
+  excerptChars?: number;
+  publishedAt?: string;
   cacheStatus?: WebCacheStatus;
   cachedAt?: string;
   cacheTtlSeconds?: number;
   excerptQuality?: WebSource["excerptQuality"];
   extractor?: WebSource["extractor"];
   excerptReason?: string;
+  blockedReason?: string;
+  needsJsReason?: string;
+  extractionFailureReason?: string;
   codeBlocksTruncated?: boolean;
   evidenceStatus?: WebEvidenceStatus;
   usableEvidence?: boolean;
@@ -2453,13 +2477,15 @@ const classifyEvidencePageType = (source: WebSource): WebPageType => {
 const getEvidenceContentStatus = (source: WebSource): WebContentStatus => {
   const readStatus = source.readStatus;
   if (source.excerptStatus === "fetched" && source.excerpt?.trim()) {
-    return readStatus === "partial" || source.excerptQuality === "partial" ? "partial" : "fetched";
+    return readStatus === "partial" || source.excerptQuality === "partial" || source.excerptQuality === "medium" ? "partial" : "fetched";
   }
   if (!source.excerptStatus || source.excerptStatus === "not_requested") return "not_fetched";
   if (source.excerptStatus === "blocked" || source.excerptQuality === "blocked") {
     return source.errorKind === "blocked_or_unreadable" ? "needs_js" : "blocked";
   }
-  if (source.excerptStatus === "unavailable" || source.excerptQuality === "empty") return "unavailable";
+  if (source.excerptQuality === "snippet_only" || source.excerptQuality === "title_only") return "search_summary_only";
+  if (source.excerptQuality === "too_short" || source.excerptQuality === "empty") return "too_short";
+  if (source.excerptStatus === "unavailable" || source.excerptQuality === "unavailable") return "unavailable";
   return "failed";
 };
 
@@ -2523,7 +2549,7 @@ export const evaluateWebSourceEvidence = (
   if (isSearchOrUtilityPage(pageType)) {
     return rejectEvidence(source, pageType, contentStatus, `${pageType} pages are not citable evidence`);
   }
-  if (["unavailable", "needs_js", "blocked", "failed"].includes(contentStatus)) {
+  if (["unavailable", "needs_js", "blocked", "failed", "search_summary_only", "too_short", "wrong_page_type"].includes(contentStatus)) {
     return rejectEvidence(source, pageType, contentStatus, `content status ${contentStatus} is not usable evidence`);
   }
   if (!hasExcerpt || contentStatus === "not_fetched") {

@@ -1016,6 +1016,24 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
       excerptError: typeof source.excerptError === "string" && source.excerptError.trim()
         ? source.excerptError.trim()
         : undefined,
+      contentType: typeof source.contentType === "string" && source.contentType.trim()
+        ? source.contentType.trim()
+        : undefined,
+      bodyBytes: typeof source.bodyBytes === "number" && Number.isFinite(source.bodyBytes)
+        ? source.bodyBytes
+        : undefined,
+      extractedTextChars: typeof source.extractedTextChars === "number" && Number.isFinite(source.extractedTextChars)
+        ? source.extractedTextChars
+        : undefined,
+      excerptChars: typeof source.excerptChars === "number" && Number.isFinite(source.excerptChars)
+        ? source.excerptChars
+        : undefined,
+      publishedAt: typeof source.publishedAt === "string" && source.publishedAt.trim()
+        ? source.publishedAt.trim()
+        : undefined,
+      finalUrlHost: typeof source.finalUrlHost === "string" && source.finalUrlHost.trim()
+        ? source.finalUrlHost.trim()
+        : undefined,
       fetchedAt: typeof source.fetchedAt === "number" && Number.isFinite(source.fetchedAt)
         ? source.fetchedAt
         : undefined,
@@ -1037,6 +1055,13 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         ? source.cacheTtlSeconds
         : undefined,
       excerptQuality:
+        source.excerptQuality === "high" ||
+        source.excerptQuality === "medium" ||
+        source.excerptQuality === "low" ||
+        source.excerptQuality === "snippet_only" ||
+        source.excerptQuality === "title_only" ||
+        source.excerptQuality === "unavailable" ||
+        source.excerptQuality === "too_short" ||
         source.excerptQuality === "good" ||
         source.excerptQuality === "partial" ||
         source.excerptQuality === "empty" ||
@@ -1054,6 +1079,15 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
           : undefined,
       excerptReason: typeof source.excerptReason === "string" && source.excerptReason.trim()
         ? source.excerptReason.trim()
+        : undefined,
+      blockedReason: typeof source.blockedReason === "string" && source.blockedReason.trim()
+        ? source.blockedReason.trim()
+        : undefined,
+      needsJsReason: typeof source.needsJsReason === "string" && source.needsJsReason.trim()
+        ? source.needsJsReason.trim()
+        : undefined,
+      extractionFailureReason: typeof source.extractionFailureReason === "string" && source.extractionFailureReason.trim()
+        ? source.extractionFailureReason.trim()
         : undefined,
       codeBlocksTruncated: source.codeBlocksTruncated === true,
       rankScore: typeof source.rankScore === "number" && Number.isFinite(source.rankScore)
@@ -1626,7 +1660,7 @@ const isHttpUrl = (href: string): boolean => /^https?:\/\//i.test(href);
 
 const getCitationStatusLabel = (citation: WebSourceCitation): string => {
   if (citation.isConstructed && citation.excerptStatus !== "fetched") return "公开资料入口";
-  if (citation.excerptStatus === "fetched" && citation.excerptQuality === "partial") return "部分摘要";
+  if (citation.excerptStatus === "fetched" && (citation.excerptQuality === "partial" || citation.excerptQuality === "medium")) return "部分摘要";
   if (citation.excerptStatus === "fetched") return "已读取摘要";
   if (citation.excerptQuality === "blocked" || citation.excerptStatus === "unavailable") return "正文不可用";
   if (citation.excerptStatus === "failed") return "读取失败";
@@ -2426,11 +2460,12 @@ const getSourceCitations = (sources: WebSource[] | undefined): WebSourceCitation
 
 const getSourceExcerptStatusLabel = (source: WebSource): string => {
   const rawExcerptStatus = source.excerptStatus as string | undefined;
-  if (source.excerptStatus === "fetched" && source.excerptQuality === "partial") return "部分摘要";
+  if (source.excerptStatus === "fetched" && (source.excerptQuality === "partial" || source.excerptQuality === "medium")) return "部分摘要";
   if (source.excerptStatus === "fetched" && source.cacheStatus === "hit") return "已读取缓存摘要";
   if (source.excerptStatus === "fetched" && source.cacheStatus === "stale") return "已读取过期摘要";
   if (source.excerptStatus === "fetched") return "已读取摘要";
   if (rawExcerptStatus === "blocked" || source.excerptQuality === "blocked") return "需要页面渲染";
+  if (source.excerptQuality === "snippet_only" || source.excerptQuality === "title_only" || source.excerptQuality === "too_short") return "正文过短";
   if (source.excerptStatus === "unavailable") return "正文不可用";
   if (source.excerptStatus === "failed") return "读取失败";
   if (source.isConstructed) return "未读取正文";
@@ -2466,7 +2501,7 @@ const getSourceDebugReadMethodLabel = (source: WebSource): string => {
 
 const getSourceDebugCacheLabel = (source: WebSource): string => {
   if (source.excerptStatus === "failed" || source.excerptQuality === "failed") return "读取失败";
-  if (source.excerptStatus === "unavailable" || source.excerptQuality === "blocked" || (source.excerptStatus as string | undefined) === "blocked") return "读取失败";
+  if (source.excerptStatus === "unavailable" || source.excerptQuality === "blocked" || source.excerptQuality === "unavailable" || source.excerptQuality === "snippet_only" || source.excerptQuality === "title_only" || source.excerptQuality === "too_short" || (source.excerptStatus as string | undefined) === "blocked") return "读取失败";
   if (!source.excerptStatus || source.excerptStatus === "not_requested") return "未读取正文";
   if (source.cacheStatus === "hit") return "缓存命中";
   if (source.cacheStatus === "stale") return "缓存过期";
@@ -2492,9 +2527,9 @@ const getSourceCardDescription = (source: WebSource): string | undefined => {
     const excerptPreview = source.excerpt?.replace(/\s+/g, " ").trim();
     if (excerptPreview) {
       const preview = excerptPreview.length > 120 ? `${excerptPreview.slice(0, 120)}...` : excerptPreview;
-      return `${source.excerptQuality === "partial" ? "已提取部分相关片段" : "已提取相关片段"}：${preview}`;
+      return `${source.excerptQuality === "partial" || source.excerptQuality === "medium" ? "已提取部分相关片段" : "已提取相关片段"}：${preview}`;
     }
-    return source.excerptQuality === "partial" ? "已从公开页面提取部分网页摘录。" : "已从公开页面提取网页摘录。";
+    return source.excerptQuality === "partial" || source.excerptQuality === "medium" ? "已从公开页面提取部分网页摘录。" : "已从公开页面提取网页摘录。";
   }
   if (rawExcerptStatus === "blocked" || source.excerptQuality === "blocked" || source.excerptStatus === "unavailable") {
     return "正文不可用或需要页面渲染。";
@@ -2885,10 +2920,19 @@ function WebSearchSourcesCard({
                 `Evidence：${source.evidenceStatus ?? "candidate"}`,
                 `Page：${source.pageType ?? "unknown"}`,
                 `Content：${source.contentStatus ?? "not_fetched"}`,
+                source.finalUrlHost ? `Final host：${source.finalUrlHost}` : undefined,
+                source.contentType ? `Content-Type：${source.contentType}` : undefined,
+                typeof source.bodyBytes === "number" ? `Body bytes：${source.bodyBytes}` : undefined,
+                typeof source.extractedTextChars === "number" ? `Extracted chars：${source.extractedTextChars}` : undefined,
+                typeof source.excerptChars === "number" ? `Excerpt chars：${source.excerptChars}` : undefined,
+                source.publishedAt ? `Published：${source.publishedAt}` : undefined,
                 `Strength：${source.sourceStrength ?? "rejected"}`,
                 `Usable：${source.usableEvidence === true ? "是" : "否"}`,
                 source.rejectedReason ? `拒绝原因：${source.rejectedReason}` : undefined,
                 source.evidenceReason ? `准入原因：${source.evidenceReason}` : undefined,
+                source.needsJsReason ? `needs_js：${source.needsJsReason}` : undefined,
+                source.blockedReason ? `blocked：${source.blockedReason}` : undefined,
+                source.extractionFailureReason ? `extractor failure：${source.extractionFailureReason}` : undefined,
                 source.filteredReason ? `过滤原因：${getDebugReasonLabel(source.filteredReason)}` : undefined,
                 source.dateHint ? `发布时间：${source.dateHint}` : undefined,
                 typeof source.freshnessScore === "number" ? `时效评分：${source.freshnessScore}` : undefined,
@@ -4018,7 +4062,9 @@ export default function AiSidebar({
         }
         const sourceWithExcerpt = {
           ...source,
+          title: result.title?.trim() || source.title,
           finalUrl: result.finalUrl,
+          finalUrlHost: result.finalUrlHost,
           contentStatus: result.contentStatus,
           excerptStatus: result.fetched ? "fetched" as const : (
             result.errorKind === "private_network" ||
@@ -4032,6 +4078,11 @@ export default function AiSidebar({
           excerpt: result.excerpt,
           excerptError: result.error,
           errorKind: result.errorKind,
+          contentType: result.contentType,
+          bodyBytes: result.bodyBytes,
+          extractedTextChars: result.extractedTextChars,
+          excerptChars: result.excerptChars,
+          publishedAt: result.publishedAt,
           fetchedAt: result.fetchedAt,
           cacheStatus: result.cacheStatus,
           cachedAt: result.cachedAt,
@@ -4039,6 +4090,9 @@ export default function AiSidebar({
           excerptQuality: result.excerptQuality,
           extractor: result.extractor,
           excerptReason: result.excerptReason,
+          blockedReason: result.blockedReason,
+          needsJsReason: result.needsJsReason,
+          extractionFailureReason: result.extractionFailureReason,
           codeBlocksTruncated: result.codeBlocksTruncated,
         };
         return evaluateWebSourceEvidence(sourceWithExcerpt, activeDecision, result.excerpt, options?.userInput);
@@ -4053,6 +4107,13 @@ export default function AiSidebar({
         .filter((source) => source.selected === true && source.eventCluster)
         .map((source) => source.eventCluster)
         .filter(Boolean)));
+      const summarizeCounts = (values: Array<string | undefined>): string => {
+        const counts = new Map<string, number>();
+        values.filter((value): value is string => Boolean(value)).forEach((value) => {
+          counts.set(value, (counts.get(value) ?? 0) + 1);
+        });
+        return Array.from(counts.entries()).map(([key, count]) => `${key}:${count}`).join(",") || "none";
+      };
       const clusterSummary = newsClusterIds.slice(0, 8).map((clusterId) => {
         const clusterSources = rankedSources.filter((source) => source.eventCluster === clusterId);
         const representative = clusterSources.find((source) => source.selected === true) ?? clusterSources[0];
@@ -4072,6 +4133,9 @@ export default function AiSidebar({
           `usableEvidenceCount=${rankedSources.filter((source) => source.usableEvidence === true && source.evidenceStatus === "usable").length}`,
           `rejectedCount=${rankedSources.filter((source) => source.evidenceStatus === "rejected").length}`,
           `excerptChars=${excerptResults.reduce((sum, result) => sum + (result.excerpt?.length ?? 0), 0)}`,
+          `contentStatusMix=${encodeDebugValue(summarizeCounts(rankedSources.map((source) => source.contentStatus)))}`,
+          `excerptQualityMix=${encodeDebugValue(summarizeCounts(rankedSources.map((source) => source.excerptQuality)))}`,
+          `urlReaderFailures=${encodeDebugValue(rankedSources.filter((source) => source.rejectedReason || source.extractionFailureReason || source.needsJsReason || source.blockedReason).slice(0, 4).map((source) => `${source.title}:${source.rejectedReason ?? source.extractionFailureReason ?? source.needsJsReason ?? source.blockedReason}`).join(" | ") || "none")}`,
           `queryDiversification=${encodeDebugValue(activeDecision.queries.length > 1 ? activeDecision.queries.join(" / ") : "single")}`,
           activeDecision.sourceStrategy?.droppedTargetedQueries && activeDecision.sourceStrategy.droppedTargetedQueries.length > 0
             ? `droppedQueryDiversification=${encodeDebugValue(activeDecision.sourceStrategy.droppedTargetedQueries.map((item) => item.query).join(" / "))}`
