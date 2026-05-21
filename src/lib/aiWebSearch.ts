@@ -452,6 +452,7 @@ export type SourceStrategyPlan = {
   preferredDomains: string[];
   avoidedSourceTypes: string[];
   targetedQueries: string[];
+  droppedTargetedQueries: Array<{ query: string; reason: string }>;
   registryBoosts: Array<{ domain: string; label: string; weight: number; reason: string }>;
   readBudget: WebReadBudgetPlan;
   candidateLimit: number;
@@ -2037,13 +2038,54 @@ const buildTargetedQueries = (
   vertical: SearchVertical,
   preferredDomains: string[],
   provider: WebSearchProvider,
-): string[] => {
-  if (provider !== "bing") return [];
+): { queries: string[]; dropped: Array<{ query: string; reason: string }> } => {
+  if (provider !== "bing") return { queries: [], dropped: [] };
   const baseQueries = decision.queries.filter((query) => query && !query.includes("site:"));
   const topicQuery = baseQueries[0] ?? decision.topicKeywords?.slice(0, 4).join(" ") ?? "";
-  if (!topicQuery) return [];
-  const domains = preferredDomains.slice(0, vertical === "news" ? 3 : 2);
-  return unique(domains.map((domain) => trimQuery(`${topicQuery} site:${domain}`))).slice(0, vertical === "news" ? 3 : 2);
+  if (!topicQuery) return { queries: [], dropped: [] };
+  const focus = getQueryFocusEntities(decision.rawQuestion, decision.queries);
+  const companySpecificNews = vertical === "news" && focus.entities.length === 1;
+  const focusEntity = focus.entities[0];
+  const maxDomains = vertical === "news" ? 3 : 2;
+  const keptDomains: string[] = [];
+  const dropped: Array<{ query: string; reason: string }> = [];
+  for (const domain of preferredDomains) {
+    const query = trimQuery(`${topicQuery} site:${domain}`);
+    const domainEntity = normalizeNewsFocusEntity(domain);
+    if (companySpecificNews && domainEntity && domainEntity !== focusEntity) {
+      dropped.push({ query, reason: "entity_mismatch_for_company_query" });
+      continue;
+    }
+    keptDomains.push(domain);
+    if (keptDomains.length >= maxDomains) break;
+  }
+  return {
+    queries: unique(keptDomains.map((domain) => trimQuery(`${topicQuery} site:${domain}`))).slice(0, maxDomains),
+    dropped,
+  };
+};
+
+const filterCompanySpecificSiteQueries = (
+  decision: SearchDecision,
+  vertical: SearchVertical,
+  queries: string[],
+): { queries: string[]; dropped: Array<{ query: string; reason: string }> } => {
+  const focus = getQueryFocusEntities(decision.rawQuestion, decision.queries);
+  const companySpecificNews = vertical === "news" && focus.entities.length === 1;
+  if (!companySpecificNews) return { queries, dropped: [] };
+  const focusEntity = focus.entities[0];
+  const kept: string[] = [];
+  const dropped: Array<{ query: string; reason: string }> = [];
+  for (const query of queries) {
+    const siteMatch = query.match(/\bsite:([^\s]+)/i);
+    const siteEntity = siteMatch ? normalizeNewsFocusEntity(siteMatch[1]) : undefined;
+    if (siteEntity && siteEntity !== focusEntity) {
+      dropped.push({ query, reason: "entity_mismatch_for_company_query" });
+      continue;
+    }
+    kept.push(query);
+  }
+  return { queries: kept, dropped };
 };
 
 export const buildSourceStrategyPlan = (
@@ -2068,13 +2110,15 @@ export const buildSourceStrategyPlan = (
     ...(vertical === "news" ? ["docs", "wiki", "github", "homepage", "dictionary", "translation"] : []),
   ]).slice(0, 10);
   const readBudget = getWebReadBudgetPlan({ ...decision, vertical });
-  const targetedQueries = buildTargetedQueries(decision, vertical, preferredDomains, provider);
+  const targetedQueryPlan = buildTargetedQueries(decision, vertical, preferredDomains, provider);
+  const targetedQueries = targetedQueryPlan.queries;
   return {
     vertical,
     preferredSourceTypes,
     preferredDomains,
     avoidedSourceTypes,
     targetedQueries,
+    droppedTargetedQueries: targetedQueryPlan.dropped,
     registryBoosts: registryEntries
       .slice()
       .sort((left, right) => (right.reliabilityWeight + right.freshnessWeight) - (left.reliabilityWeight + left.freshnessWeight))
@@ -2097,15 +2141,26 @@ export const applySourceStrategyPlan = (
 ): SearchDecision => {
   const strategy = buildSourceStrategyPlan(decision, provider);
   const maxBaseQueries = provider === "bing" ? (strategy.vertical === "news" ? 5 : 1) : 5;
+  const filteredBaseQueries = filterCompanySpecificSiteQueries(
+    decision,
+    strategy.vertical,
+    decision.queries.slice(0, maxBaseQueries),
+  );
   const queries = unique([
-    ...decision.queries.slice(0, maxBaseQueries),
+    ...filteredBaseQueries.queries,
     ...strategy.targetedQueries,
   ]).slice(0, provider === "bing" ? (strategy.vertical === "news" ? 5 : 3) : 6);
   return {
     ...decision,
     vertical: strategy.vertical,
     queries,
-    sourceStrategy: strategy,
+    sourceStrategy: {
+      ...strategy,
+      droppedTargetedQueries: [
+        ...filteredBaseQueries.dropped,
+        ...strategy.droppedTargetedQueries,
+      ],
+    },
   };
 };
 

@@ -80,6 +80,8 @@ export type EvidenceDiagnostics = {
 
 export type NewsReadBudgetDiagnostics = UrlReaderDiagnostics & EvidenceDiagnostics & {
   queryDiversification?: string;
+  droppedQueryDiversification?: string;
+  droppedQueryReason?: string;
   eventClusterCount?: string;
   selectedRoundupSources?: string;
   duplicateClusterDrops?: string;
@@ -443,6 +445,8 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
     rejectedCount: lookupDebugField(parts, "rejectedCount"),
     excerptChars: lookupDebugField(parts, "excerptChars"),
     queryDiversification: lookupDebugField(parts, "queryDiversification"),
+    droppedQueryDiversification: lookupDebugField(parts, "droppedQueryDiversification"),
+    droppedQueryReason: lookupDebugField(parts, "droppedQueryReason"),
     eventClusterCount: lookupDebugField(parts, "eventClusterCount"),
     selectedRoundupSources: lookupDebugField(parts, "selectedRoundupSources"),
     duplicateClusterDrops: lookupDebugField(parts, "duplicateClusterDrops"),
@@ -525,6 +529,8 @@ export const formatNewsReadDiagnostics = (raw: string): string[] => {
     `rejectedCount: ${diagnostics.rejectedCount ?? "0"}`,
     `excerptChars: ${diagnostics.excerptChars ?? "0"}`,
     `queryDiversification: ${diagnostics.queryDiversification || "single"}`,
+    ...(diagnostics.droppedQueryDiversification ? [`droppedQueryDiversification: ${diagnostics.droppedQueryDiversification}`] : []),
+    ...(diagnostics.droppedQueryReason ? [`droppedQueryReason: ${diagnostics.droppedQueryReason}`] : []),
     `eventClusterCount: ${diagnostics.eventClusterCount ?? "0"}`,
     `newsClusteringEnabled: ${diagnostics.clustering?.enabled ?? "no"}`,
     `candidateCountBeforeClustering: ${diagnostics.clustering?.candidateCountBeforeClustering ?? "0"}`,

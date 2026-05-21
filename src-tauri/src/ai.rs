@@ -538,6 +538,8 @@ pub struct NotexSearchSelfCheckCaseResult {
     pub focus_entity_source: String,
     pub entity_filter_applied: bool,
     pub rejected_wrong_entity_count: usize,
+    pub query_diversification: Vec<String>,
+    pub dropped_query_diversification: Vec<String>,
     pub selected_news_sources: Vec<String>,
     pub bing_fallback_planned: bool,
     pub local_search_triggered: bool,
@@ -8511,6 +8513,24 @@ fn normalize_news_focus_entity(value: &str) -> Option<&'static str> {
     }
 }
 
+fn news_site_query_entity(query: &str) -> Option<&'static str> {
+    let lower = query.to_ascii_lowercase();
+    if lower.contains("site:openai.com") {
+        Some("openai")
+    } else if lower.contains("site:anthropic.com") {
+        Some("anthropic")
+    } else if lower.contains("site:blog.google")
+        || lower.contains("site:deepmind.google")
+        || lower.contains("site:google.com")
+    {
+        Some("google_ai")
+    } else if lower.contains("site:microsoft.com") {
+        Some("microsoft_ai")
+    } else {
+        None
+    }
+}
+
 fn infer_news_focus_entities(request: &WebSearchRequestInput) -> (Vec<String>, String) {
     if let Some(raw_user_query) = request
         .raw_user_query
@@ -9904,12 +9924,28 @@ fn discover_no_key_direct_sources_with_report(
             None
         }
     });
+    let report_query = if news_route.company_specific_news && news_route.query_focus_entities.len() == 1 {
+        let focus_entity = news_route.query_focus_entities[0].as_str();
+        request
+            .queries
+            .iter()
+            .filter(|query| {
+                news_site_query_entity(query)
+                    .map(|entity| entity == focus_entity)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        combined.clone()
+    };
     let report = DirectDiscoveryReport {
         attempted: final_skipped_reason.is_none(),
         skipped_reason: final_skipped_reason,
         intent: request.intent.clone(),
         freshness: request.freshness.clone().unwrap_or_default(),
-        query: combined,
+        query: report_query,
         raw_user_query: request.raw_user_query.clone(),
         topic_keywords: direct_discovery_topic_keywords(request),
         topic_tags: news_route.topic_tags.clone(),
@@ -9997,6 +10033,38 @@ fn self_check_request(
         max_results: Some(8),
         provider: Some(WEB_SEARCH_BING_PROVIDER.to_string()),
     }
+}
+
+fn with_extra_self_check_queries(
+    mut request: WebSearchRequestInput,
+    queries: &[&str],
+) -> WebSearchRequestInput {
+    request
+        .queries
+        .extend(queries.iter().map(|query| query.to_string()));
+    request
+}
+
+fn self_check_filtered_query_diversification(
+    request: &WebSearchRequestInput,
+    route: Option<&NewsSourceRoute>,
+) -> (Vec<String>, Vec<String>) {
+    let Some(route) = route else {
+        return (request.queries.clone(), Vec::new());
+    };
+    if !route.company_specific_news || route.query_focus_entities.len() != 1 {
+        return (request.queries.clone(), Vec::new());
+    }
+    let focus_entity = route.query_focus_entities[0].as_str();
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    for query in &request.queries {
+        match news_site_query_entity(query) {
+            Some(entity) if entity != focus_entity => dropped.push(query.clone()),
+            _ => kept.push(query.clone()),
+        }
+    }
+    (kept, dropped)
 }
 
 fn run_local_self_check_query(
@@ -10257,6 +10325,8 @@ fn build_self_check_case(
     } else {
         None
     };
+    let (query_diversification, dropped_query_diversification) =
+        self_check_filtered_query_diversification(&request, route.as_ref());
     let selected_news_sources = route
         .as_ref()
         .map(|route| {
@@ -10394,6 +10464,22 @@ fn build_self_check_case(
             if !candidate_gate_protected {
                 failures.push("direct candidate was not protected by candidate evidence state".to_string());
             }
+            if query_diversification.iter().any(|query| {
+                let lower = query.to_ascii_lowercase();
+                lower.contains("site:anthropic.com")
+                    || lower.contains("site:google.com")
+                    || lower.contains("site:blog.google")
+                    || lower.contains("site:deepmind.google")
+                    || lower.contains("site:microsoft.com")
+            }) {
+                failures.push("OpenAI query diversification kept a non-OpenAI company site query".to_string());
+            }
+            if !dropped_query_diversification
+                .iter()
+                .any(|query| query.to_ascii_lowercase().contains("site:anthropic.com"))
+            {
+                failures.push("OpenAI self-check did not drop polluted site:anthropic.com diversification".to_string());
+            }
         }
         "news_anthropic" => {
             if !news_registry_triggered {
@@ -10425,6 +10511,15 @@ fn build_self_check_case(
             }
             if !candidate_gate_protected {
                 failures.push("direct candidate was not protected by candidate evidence state".to_string());
+            }
+            if query_diversification.iter().any(|query| {
+                let lower = query.to_ascii_lowercase();
+                lower.contains("site:openai.com")
+                    || lower.contains("site:google.com")
+                    || lower.contains("site:blog.google")
+                    || lower.contains("site:deepmind.google")
+            }) {
+                failures.push("Anthropic query diversification kept a non-Anthropic company site query".to_string());
             }
         }
         "docs_react" => {
@@ -10510,6 +10605,8 @@ fn build_self_check_case(
         focus_entity_source: focus_entity_source.clone(),
         entity_filter_applied,
         rejected_wrong_entity_count,
+        query_diversification: query_diversification.clone(),
+        dropped_query_diversification: dropped_query_diversification.clone(),
         selected_news_sources: selected_news_sources.clone(),
         bing_fallback_planned,
         local_search_triggered,
@@ -10532,6 +10629,8 @@ fn build_self_check_case(
             "companySpecificNews": company_specific_news,
             "entityFilterApplied": entity_filter_applied,
             "rejectedWrongEntityCount": rejected_wrong_entity_count,
+            "queryDiversification": query_diversification,
+            "droppedQueryDiversification": dropped_query_diversification,
             "rejectedWrongEntitySamples": route.as_ref().map(|route| route.rejected_wrong_entity_samples.clone()).unwrap_or_default(),
             "bingFallbackPlanned": bing_fallback_planned,
             "candidateRequiresUrlReaderAndEvidenceGate": candidate_gate_protected,
@@ -10580,15 +10679,23 @@ pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckR
         build_self_check_case(
             "recent OpenAI news",
             "news_openai",
-            self_check_request(
-                Some("recent OpenAI news"),
-                "OpenAI latest news product model partnership site openai.com",
-                "general_web",
-                Some("news"),
-                Some("news"),
-                &["AI", "Anthropic", "ChatGPT", "DeepMind", "Gemini", "Google", "OpenAI", "artificial intelligence", "models"],
-                &[],
-                None,
+            with_extra_self_check_queries(
+                self_check_request(
+                    Some("recent OpenAI news"),
+                    "OpenAI latest news product model partnership site openai.com",
+                    "general_web",
+                    Some("news"),
+                    Some("news"),
+                    &["AI", "Anthropic", "ChatGPT", "DeepMind", "Gemini", "Google", "OpenAI", "artificial intelligence", "models"],
+                    &[],
+                    None,
+                ),
+                &[
+                    "OpenAI news site:anthropic.com",
+                    "OpenAI latest news site:google.com",
+                    "OpenAI model update site:deepmind.google",
+                    "OpenAI AI news site:microsoft.com",
+                ],
             ),
             None,
             false,
@@ -10596,15 +10703,22 @@ pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckR
         build_self_check_case(
             "recent Anthropic news",
             "news_anthropic",
-            self_check_request(
-                Some("recent Anthropic news"),
-                "Anthropic latest news Claude model partnership",
-                "general_web",
-                Some("news"),
-                Some("news"),
-                &["AI", "Anthropic", "Claude", "Google", "OpenAI", "artificial intelligence", "models"],
-                &[],
-                None,
+            with_extra_self_check_queries(
+                self_check_request(
+                    Some("recent Anthropic news"),
+                    "Anthropic latest news Claude model partnership",
+                    "general_web",
+                    Some("news"),
+                    Some("news"),
+                    &["AI", "Anthropic", "Claude", "Google", "OpenAI", "artificial intelligence", "models"],
+                    &[],
+                    None,
+                ),
+                &[
+                    "Anthropic news site:openai.com",
+                    "Anthropic latest news site:google.com",
+                    "Claude model update site:deepmind.google",
+                ],
             ),
             None,
             false,

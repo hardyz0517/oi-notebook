@@ -361,6 +361,8 @@ export interface NotexSearchSelfCheckCaseResult {
   focusEntitySource: string;
   entityFilterApplied: boolean;
   rejectedWrongEntityCount: number;
+  queryDiversification: string[];
+  droppedQueryDiversification: string[];
   selectedNewsSources: string[];
   bingFallbackPlanned: boolean;
   localSearchTriggered: boolean;

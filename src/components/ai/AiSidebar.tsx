@@ -2310,6 +2310,11 @@ function WebSearchPlanCard({
                   定向搜索词：{sourceStrategy.targetedQueries.join(" | ")}
                 </div>
               )}
+              {sourceStrategy.droppedTargetedQueries && sourceStrategy.droppedTargetedQueries.length > 0 && (
+                <div className="min-w-0 break-words text-muted-foreground">
+                  Dropped query diversification：{sourceStrategy.droppedTargetedQueries.map((item) => `${item.query} (${item.reason})`).join(" | ")}
+                </div>
+              )}
               {sourceStrategy.preferredDomains.length > 0 && (
                 <div className="min-w-0 break-words text-muted-foreground">
                   优先站点：{sourceStrategy.preferredDomains.slice(0, 8).join(" / ")}
@@ -4068,6 +4073,12 @@ export default function AiSidebar({
           `rejectedCount=${rankedSources.filter((source) => source.evidenceStatus === "rejected").length}`,
           `excerptChars=${excerptResults.reduce((sum, result) => sum + (result.excerpt?.length ?? 0), 0)}`,
           `queryDiversification=${encodeDebugValue(activeDecision.queries.length > 1 ? activeDecision.queries.join(" / ") : "single")}`,
+          activeDecision.sourceStrategy?.droppedTargetedQueries && activeDecision.sourceStrategy.droppedTargetedQueries.length > 0
+            ? `droppedQueryDiversification=${encodeDebugValue(activeDecision.sourceStrategy.droppedTargetedQueries.map((item) => item.query).join(" / "))}`
+            : undefined,
+          activeDecision.sourceStrategy?.droppedTargetedQueries && activeDecision.sourceStrategy.droppedTargetedQueries.length > 0
+            ? `droppedQueryReason=${encodeDebugValue(Array.from(new Set(activeDecision.sourceStrategy.droppedTargetedQueries.map((item) => item.reason))).join(","))}`
+            : undefined,
           `eventClusterCount=${getNewsEventClusterCount(rankedSources)}`,
           `selectedRoundupSources=${selectedRoundupSources.length}`,
           `duplicateClusterDrops=${duplicateClusterDrops}`,

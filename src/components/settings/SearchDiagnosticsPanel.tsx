@@ -1130,7 +1130,7 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
   id: `notex-self-check-${item.expectedCategory}-${item.query}`,
   title: item.query,
   status: item.pass ? "pass" : "fail",
-  summary: `${item.expectedCategory}; intent=${item.actualIntent}; vertical=${item.vertical}; freshness=${item.freshness}; newsRegistry=${item.newsRegistryTriggered}; companySpecific=${item.companySpecificNews}; focus=${item.queryFocusEntities.join(",") || "none"}; focusSource=${item.focusEntitySource}; clustering=${item.newsClusteringTriggered}; clusters=${item.clusterCount}/${item.selectedClusterCount}; localResults=${item.localResultCount}; displayedLocalSources=${item.displayedLocalSourceCount}`,
+  summary: `${item.expectedCategory}; intent=${item.actualIntent}; vertical=${item.vertical}; freshness=${item.freshness}; newsRegistry=${item.newsRegistryTriggered}; companySpecific=${item.companySpecificNews}; focus=${item.queryFocusEntities.join(",") || "none"}; focusSource=${item.focusEntitySource}; queryDiversification=${item.queryDiversification?.join(" | ") || "none"}; clustering=${item.newsClusteringTriggered}; clusters=${item.clusterCount}/${item.selectedClusterCount}; localResults=${item.localResultCount}; displayedLocalSources=${item.displayedLocalSourceCount}`,
   detail: item.reason,
   safeDebugInfo: [
     `selectedNewsSources=${item.selectedNewsSources.join(" | ") || "none"}`,
@@ -1139,6 +1139,8 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
     `focusEntitySource=${item.focusEntitySource}`,
     `companySpecificNews=${item.companySpecificNews}`,
     `entityFilterApplied=${item.entityFilterApplied}`,
+    `queryDiversification=${item.queryDiversification?.join(" | ") || "none"}`,
+    `droppedQueryDiversification=${item.droppedQueryDiversification?.join(" | ") || "none"}`,
     `rejectedWrongEntityCount=${item.rejectedWrongEntityCount}`,
     `newsClusteringTriggered=${item.newsClusteringTriggered}`,
     `diversityApplied=${item.diversityApplied}`,
