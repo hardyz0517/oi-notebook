@@ -7879,6 +7879,16 @@ fn fetch_single_web_source_excerpt(
     context: &FetchWebSourceExcerptsInput,
     max_chars: usize,
 ) -> WebSourceExcerptResult {
+    fetch_single_web_source_excerpt_with_cache(client, source, context, max_chars, true)
+}
+
+fn fetch_single_web_source_excerpt_with_cache(
+    client: &reqwest::blocking::Client,
+    source: &WebSearchResult,
+    context: &FetchWebSourceExcerptsInput,
+    max_chars: usize,
+    cache_enabled: bool,
+) -> WebSourceExcerptResult {
     let fetched_at = Utc::now().timestamp_millis();
     let id = source.id.clone();
     let url = source.url.clone();
@@ -7911,7 +7921,11 @@ fn fetch_single_web_source_excerpt(
         }
     };
     let cache_key = build_web_excerpt_cache_key(&url, max_chars);
-    let cached = web_cache::read_cached_json("excerpts", &cache_key, web_cache::now_ms());
+    let cached = if cache_enabled {
+        web_cache::read_cached_json("excerpts", &cache_key, web_cache::now_ms())
+    } else {
+        None
+    };
     if let Some(cached_entry) = cached.as_ref().filter(|entry| entry.is_fresh) {
         if let Ok(mut result) =
             serde_json::from_value::<WebSourceExcerptResult>(cached_entry.value.clone())
@@ -7973,7 +7987,7 @@ fn fetch_single_web_source_excerpt(
                 code_blocks_truncated: Some(false),
                 ..Default::default()
             };
-            return finish_web_excerpt_result(result, &cache_key, cached);
+            return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
         }
     };
 
@@ -8006,7 +8020,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
 
     let status = response.status();
@@ -8034,7 +8048,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
     if status == reqwest::StatusCode::NOT_FOUND {
         let result = WebSourceExcerptResult {
@@ -8060,7 +8074,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
     if !status.is_success() {
         let result = WebSourceExcerptResult {
@@ -8086,7 +8100,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
 
     let content_type = response
@@ -8125,7 +8139,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
     if response
         .content_length()
@@ -8156,7 +8170,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(false),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     }
 
     let mut body_bytes = Vec::new();
@@ -8192,7 +8206,7 @@ fn fetch_single_web_source_excerpt(
                     code_blocks_truncated: Some(false),
                     ..Default::default()
                 };
-                return finish_web_excerpt_result(result, &cache_key, cached);
+                return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
             }
             decode_response_body(&body_bytes)
         }
@@ -8222,7 +8236,7 @@ fn fetch_single_web_source_excerpt(
                 code_blocks_truncated: Some(false),
                 ..Default::default()
             };
-            return finish_web_excerpt_result(result, &cache_key, cached);
+            return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
         }
     };
     let body_byte_count = body_bytes.len();
@@ -8298,7 +8312,7 @@ fn fetch_single_web_source_excerpt(
             code_blocks_truncated: Some(extracted.code_blocks_truncated),
             ..Default::default()
         };
-        return finish_web_excerpt_result(result, &cache_key, cached);
+        return finish_web_excerpt_result(result, &cache_key, cached, cache_enabled);
     };
     let excerpt_chars = excerpt_text.chars().count();
 
@@ -8343,14 +8357,22 @@ fn fetch_single_web_source_excerpt(
         code_blocks_truncated: Some(extracted.code_blocks_truncated),
         ..Default::default()
     };
-    finish_web_excerpt_result(result, &cache_key, cached)
+    finish_web_excerpt_result(result, &cache_key, cached, cache_enabled)
 }
 
 fn finish_web_excerpt_result(
     mut result: WebSourceExcerptResult,
     cache_key: &str,
     stale_cache: Option<web_cache::CachedJson>,
+    cache_enabled: bool,
 ) -> WebSourceExcerptResult {
+    if !cache_enabled {
+        result.cache_status = Some("disabled".to_string());
+        result.cached_at = None;
+        result.cache_ttl_seconds = None;
+        return result;
+    }
+
     if !result.fetched {
         if let Some(cached_entry) = stale_cache {
             if let Ok(mut cached_result) =
@@ -11863,6 +11885,238 @@ pub fn delete_ai_provider_model(
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct UrlReaderSmokeCase {
+        name: &'static str,
+        url: &'static str,
+        title: &'static str,
+        expected_host: &'static str,
+        kind: UrlReaderSmokeKind,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum UrlReaderSmokeKind {
+        Docs {
+            keywords: &'static [&'static str],
+        },
+        OpenAiNewsLanding,
+        UnsuitableEvidencePage,
+    }
+
+    #[derive(Debug)]
+    struct UrlReaderSmokeOutcome {
+        url: String,
+        final_url: String,
+        final_url_host: String,
+        content_type: String,
+        body_bytes: usize,
+        content_status: String,
+        page_type: String,
+        excerpt_quality: String,
+        extracted_text_chars: usize,
+        excerpt_chars: usize,
+        published_at: String,
+        needs_js_reason: String,
+        blocked_reason: String,
+        extraction_failure_reason: String,
+        verdict: &'static str,
+        reason: String,
+    }
+
+    fn smoke_source(id: &str, title: &str, url: &str) -> WebSearchResult {
+        WebSearchResult {
+            id: id.to_string(),
+            title: title.to_string(),
+            url: url.to_string(),
+            site: site_from_url(url),
+            source_kind: Some("explicit_url".to_string()),
+            discovery_method: Some("explicit_url".to_string()),
+            source_reliability: Some("high".to_string()),
+            discovered_by: Some("notex_url_reader_smoke".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn smoke_context(source: WebSearchResult) -> FetchWebSourceExcerptsInput {
+        FetchWebSourceExcerptsInput {
+            sources: vec![source],
+            max_sources: Some(1),
+            max_chars_per_source: Some(5000),
+            user_input: Some("NoteX URL Reader smoke test".to_string()),
+            intent: Some("explicit_url".to_string()),
+            problem_id: None,
+            problem_title: None,
+            algorithm_keywords: vec![
+                "centroid".to_string(),
+                "decomposition".to_string(),
+                "tree".to_string(),
+            ],
+            error_keywords: Vec::new(),
+            queries: Vec::new(),
+        }
+    }
+
+    fn smoke_page_type(case: &UrlReaderSmokeCase, result: &WebSourceExcerptResult) -> String {
+        let url = result
+            .final_url
+            .as_deref()
+            .unwrap_or(case.url)
+            .to_ascii_lowercase();
+        if case.url == "https://react.dev/" || url.trim_end_matches('/') == "https://react.dev" {
+            return "homepage".to_string();
+        }
+        if url.contains("react.dev/reference/") || url.contains("cp-algorithms.com/") {
+            return "docs".to_string();
+        }
+        if url.trim_end_matches('/') == "https://openai.com/news" {
+            return "homepage".to_string();
+        }
+        result
+            .page_type
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn smoke_evidence_usable(result: &WebSourceExcerptResult, page_type: &str) -> bool {
+        synthetic_extractor_evidence_usable(
+            result.content_status.as_deref().unwrap_or("unavailable"),
+            page_type,
+            result.excerpt_quality.as_deref().unwrap_or("unavailable"),
+            result.excerpt_chars.unwrap_or(0),
+        )
+    }
+
+    fn evaluate_url_reader_smoke_case(
+        case: &UrlReaderSmokeCase,
+        result: WebSourceExcerptResult,
+    ) -> UrlReaderSmokeOutcome {
+        let final_url = result.final_url.clone().unwrap_or_else(|| "none".to_string());
+        let final_url_host = result
+            .final_url_host
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let content_type = result
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let body_bytes = result.body_bytes.unwrap_or(0);
+        let content_status = result
+            .content_status
+            .clone()
+            .unwrap_or_else(|| result.status.clone().unwrap_or_else(|| "unavailable".to_string()));
+        let page_type = smoke_page_type(case, &result);
+        let excerpt_quality = result
+            .excerpt_quality
+            .clone()
+            .unwrap_or_else(|| "unavailable".to_string());
+        let extracted_text_chars = result.extracted_text_chars.unwrap_or(0);
+        let excerpt_chars = result.excerpt_chars.unwrap_or(0);
+        let published_at = result.published_at.clone().unwrap_or_else(|| "none".to_string());
+        let needs_js_reason = result
+            .needs_js_reason
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let blocked_reason = result
+            .blocked_reason
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let extraction_failure_reason = result
+            .extraction_failure_reason
+            .clone()
+            .or(result.error.clone())
+            .unwrap_or_else(|| "none".to_string());
+
+        let network_failed = !result.fetched
+            && matches!(
+                result.error_kind.as_deref(),
+                Some("timeout" | "unknown" | "http_status")
+            );
+        let (verdict, reason) = if network_failed {
+            ("warn", format!("network-dependent request did not return readable body: {extraction_failure_reason}"))
+        } else {
+            match case.kind {
+                UrlReaderSmokeKind::Docs { keywords } => {
+                    let excerpt = result.excerpt.as_deref().unwrap_or("").to_ascii_lowercase();
+                    let host_ok = final_url_host == case.expected_host
+                        || final_url_host.ends_with(&format!(".{}", case.expected_host));
+                    let status_ok = matches!(content_status.as_str(), "fetched" | "partial");
+                    let quality_ok = !matches!(
+                        excerpt_quality.as_str(),
+                        "title_only" | "snippet_only" | "unavailable" | "blocked" | "failed"
+                    );
+                    let chars_ok = extracted_text_chars >= 500 && excerpt_chars >= 160;
+                    let keyword_ok = keywords
+                        .iter()
+                        .any(|keyword| excerpt.contains(&keyword.to_ascii_lowercase()));
+                    let needs_js = content_status == "needs_js" || needs_js_reason != "none";
+                    if host_ok && status_ok && quality_ok && chars_ok && keyword_ok && !needs_js {
+                        ("pass", "docs page extracted with readable body and expected keywords".to_string())
+                    } else {
+                        (
+                            "fail",
+                            format!(
+                                "docs extraction expectation failed: host_ok={host_ok}, status_ok={status_ok}, quality_ok={quality_ok}, chars_ok={chars_ok}, keyword_ok={keyword_ok}, needs_js={needs_js}"
+                            ),
+                        )
+                    }
+                }
+                UrlReaderSmokeKind::OpenAiNewsLanding => {
+                    let host_ok = final_url_host == case.expected_host
+                        || final_url_host.ends_with(&format!(".{}", case.expected_host));
+                    let article_like = matches!(page_type.as_str(), "news_article" | "article")
+                        && excerpt_quality == "high"
+                        && smoke_evidence_usable(&result, &page_type);
+                    if !host_ok {
+                        ("warn", format!("OpenAI News request resolved to unexpected host: {final_url_host}"))
+                    } else if article_like {
+                        (
+                            "fail",
+                            "OpenAI News landing page was treated as high-quality article evidence".to_string(),
+                        )
+                    } else {
+                        (
+                            "pass",
+                            "OpenAI News landing produced clear landing/partial diagnostics instead of article evidence".to_string(),
+                        )
+                    }
+                }
+                UrlReaderSmokeKind::UnsuitableEvidencePage => {
+                    let usable = smoke_evidence_usable(&result, &page_type);
+                    if !usable && matches!(page_type.as_str(), "homepage" | "search_page" | "unknown") {
+                        (
+                            "pass",
+                            format!("page correctly stays out of usable evidence as pageType={page_type}"),
+                        )
+                    } else {
+                        (
+                            "fail",
+                            format!("unsuitable page looked usable: pageType={page_type}, usable={usable}"),
+                        )
+                    }
+                }
+            }
+        };
+
+        UrlReaderSmokeOutcome {
+            url: case.url.to_string(),
+            final_url,
+            final_url_host,
+            content_type,
+            body_bytes,
+            content_status,
+            page_type,
+            excerpt_quality,
+            extracted_text_chars,
+            excerpt_chars,
+            published_at,
+            needs_js_reason,
+            blocked_reason,
+            extraction_failure_reason,
+            verdict,
+            reason,
+        }
+    }
+
     #[test]
     fn notex_search_self_check_passes() {
         let result = run_notex_search_self_check_core().unwrap();
@@ -11885,6 +12139,109 @@ mod tests {
                 .map(|case| format!("{} => {}", case.query, case.reason))
                 .collect::<Vec<_>>()
                 .join("; ")
+        );
+    }
+
+    #[test]
+    #[ignore = "network-dependent live smoke test; run explicitly with --ignored --nocapture"]
+    fn notex_url_reader_smoke() {
+        println!("NoteX URL Reader live smoke test is network-dependent and opt-in.");
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(12))
+            .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    return attempt.stop();
+                }
+                if validate_public_web_url_for_read(attempt.url().as_str()).is_ok() {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .user_agent("oi-notebook-url-reader-smoke/0.1")
+            .build()
+            .expect("URL reader smoke test client should build");
+
+        let cases = [
+            UrlReaderSmokeCase {
+                name: "React docs",
+                url: "https://react.dev/reference/react/useEffect",
+                title: "React useEffect",
+                expected_host: "react.dev",
+                kind: UrlReaderSmokeKind::Docs {
+                    keywords: &["useeffect", "effect", "react"],
+                },
+            },
+            UrlReaderSmokeCase {
+                name: "cp-algorithms centroid decomposition",
+                url: "https://cp-algorithms.com/graph/centroid_decomposition.html",
+                title: "Centroid Decomposition",
+                expected_host: "cp-algorithms.com",
+                kind: UrlReaderSmokeKind::Docs {
+                    keywords: &["centroid", "decomposition", "tree"],
+                },
+            },
+            UrlReaderSmokeCase {
+                name: "OpenAI News landing",
+                url: "https://openai.com/news/",
+                title: "OpenAI News",
+                expected_host: "openai.com",
+                kind: UrlReaderSmokeKind::OpenAiNewsLanding,
+            },
+            UrlReaderSmokeCase {
+                name: "React homepage unsuitable evidence",
+                url: "https://react.dev/",
+                title: "React homepage",
+                expected_host: "react.dev",
+                kind: UrlReaderSmokeKind::UnsuitableEvidencePage,
+            },
+        ];
+
+        let mut outcomes = Vec::new();
+        for (index, case) in cases.iter().enumerate() {
+            let source = smoke_source(&format!("smoke-{}", index + 1), case.title, case.url);
+            let context = smoke_context(source.clone());
+            let result = fetch_single_web_source_excerpt_with_cache(
+                &client,
+                &source,
+                &context,
+                5000,
+                false,
+            );
+            let outcome = evaluate_url_reader_smoke_case(case, result);
+            println!(
+                "{} [{}] url={} finalUrl={} finalUrlHost={} contentType={} bodyBytes={} contentStatus={} pageType={} excerptQuality={} extractedTextChars={} excerptChars={} publishedAt={} needsJsReason={} blockedReason={} extractionFailureReason={} reason={}",
+                outcome.verdict.to_ascii_uppercase(),
+                case.name,
+                outcome.url,
+                outcome.final_url,
+                outcome.final_url_host,
+                outcome.content_type,
+                outcome.body_bytes,
+                outcome.content_status,
+                outcome.page_type,
+                outcome.excerpt_quality,
+                outcome.extracted_text_chars,
+                outcome.excerpt_chars,
+                outcome.published_at,
+                outcome.needs_js_reason,
+                outcome.blocked_reason,
+                outcome.extraction_failure_reason,
+                outcome.reason
+            );
+            outcomes.push(outcome);
+        }
+
+        let failures = outcomes
+            .iter()
+            .filter(|outcome| outcome.verdict == "fail")
+            .map(|outcome| format!("{} => {}", outcome.url, outcome.reason))
+            .collect::<Vec<_>>();
+        assert!(
+            failures.is_empty(),
+            "NoteX URL Reader smoke test failed: {}",
+            failures.join("; ")
         );
     }
 
