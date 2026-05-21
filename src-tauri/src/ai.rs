@@ -547,6 +547,13 @@ pub struct NotexSearchSelfCheckCaseResult {
     pub query: String,
     pub expected_category: String,
     pub actual_intent: String,
+    pub search_mode: String,
+    pub search_mode_reason: String,
+    pub mode_guards: Vec<String>,
+    pub allow_news_registry: bool,
+    pub allow_bing_fallback: bool,
+    pub allow_local_index: bool,
+    pub prefer_url_reader: bool,
     pub vertical: String,
     pub freshness: String,
     pub news_registry_triggered: bool,
@@ -10723,6 +10730,7 @@ fn build_self_check_case(
         .freshness
         .clone()
         .unwrap_or_else(|| "none".to_string());
+    let search_mode = self_check_search_mode_decision(&request, query, explicit_url_path_used);
 
     let mut failures = Vec::<String>::new();
     let extractor_quality_checks = if expected_category == "explicit_url" {
@@ -10739,6 +10747,9 @@ fn build_self_check_case(
     }
     match expected_category {
         "news_ai" => {
+            if search_mode.mode != "news_recent" || !search_mode.allow_news_registry || !search_mode.allow_bing_fallback {
+                failures.push(format!("AI news search mode was not news_recent with registry and Bing fallback: {}", search_mode.mode));
+            }
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
             }
@@ -10762,6 +10773,9 @@ fn build_self_check_case(
             }
         }
         "news_openai" => {
+            if search_mode.mode != "news_recent" || !search_mode.allow_news_registry || !search_mode.allow_bing_fallback {
+                failures.push(format!("OpenAI news search mode was not news_recent with registry and Bing fallback: {}", search_mode.mode));
+            }
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
             }
@@ -10823,6 +10837,9 @@ fn build_self_check_case(
             }
         }
         "news_anthropic" => {
+            if search_mode.mode != "news_recent" || !search_mode.allow_news_registry || !search_mode.allow_bing_fallback {
+                failures.push(format!("Anthropic news search mode was not news_recent with registry and Bing fallback: {}", search_mode.mode));
+            }
             if !news_registry_triggered {
                 failures.push("news registry was not triggered".to_string());
             }
@@ -10864,6 +10881,9 @@ fn build_self_check_case(
             }
         }
         "docs_react" => {
+            if search_mode.mode != "docs_technical" || search_mode.allow_news_registry {
+                failures.push(format!("React docs search mode was not docs_technical without news registry: {}", search_mode.mode));
+            }
             if news_registry_triggered {
                 failures.push("React docs query triggered news registry".to_string());
             }
@@ -10884,6 +10904,9 @@ fn build_self_check_case(
             }
         }
         "oi_algorithm" => {
+            if search_mode.mode != "oi_algorithm" || !search_mode.allow_local_index || search_mode.allow_news_registry {
+                failures.push(format!("OI query search mode was not oi_algorithm with local index and no news registry: {}", search_mode.mode));
+            }
             if news_registry_triggered {
                 failures.push("OI query triggered news registry".to_string());
             }
@@ -10898,6 +10921,9 @@ fn build_self_check_case(
             }
         }
         "translation_guard" => {
+            if search_mode.mode != "no_search" || search_mode.allow_news_registry {
+                failures.push(format!("translation query search mode was not no_search without news registry: {}", search_mode.mode));
+            }
             if news_registry_triggered {
                 failures.push("translation query triggered news registry".to_string());
             }
@@ -10911,7 +10937,21 @@ fn build_self_check_case(
                 failures.push("translation query unexpectedly ran local search".to_string());
             }
         }
+        "no_search" => {
+            if search_mode.mode != "no_search" || search_mode.allow_news_registry || search_mode.prefer_url_reader {
+                failures.push(format!("ordinary rewrite search mode was not no_search: {}", search_mode.mode));
+            }
+            if news_registry_triggered {
+                failures.push("ordinary rewrite query triggered news registry".to_string());
+            }
+            if local_search_triggered {
+                failures.push("ordinary rewrite query unexpectedly ran local search".to_string());
+            }
+        }
         "explicit_url" => {
+            if search_mode.mode != "explicit_url" || !search_mode.prefer_url_reader || search_mode.allow_news_registry {
+                failures.push(format!("explicit URL search mode was not explicit_url with URL Reader and no news registry: {}", search_mode.mode));
+            }
             if news_registry_triggered {
                 failures.push("explicit URL query triggered news registry".to_string());
             }
@@ -10937,6 +10977,13 @@ fn build_self_check_case(
         query: query.to_string(),
         expected_category: expected_category.to_string(),
         actual_intent,
+        search_mode: search_mode.mode.clone(),
+        search_mode_reason: search_mode.reason.clone(),
+        mode_guards: search_mode.guards.clone(),
+        allow_news_registry: search_mode.allow_news_registry,
+        allow_bing_fallback: search_mode.allow_bing_fallback,
+        allow_local_index: search_mode.allow_local_index,
+        prefer_url_reader: search_mode.prefer_url_reader,
         vertical,
         freshness,
         news_registry_triggered,
@@ -10964,6 +11011,13 @@ fn build_self_check_case(
         reason,
         raw_diagnostics: json!({
             "topicKeywords": keywords,
+            "searchMode": search_mode.mode,
+            "searchModeReason": search_mode.reason,
+            "modeGuards": search_mode.guards,
+            "allowNewsRegistry": search_mode.allow_news_registry,
+            "allowBingFallback": search_mode.allow_bing_fallback,
+            "allowLocalIndex": search_mode.allow_local_index,
+            "preferUrlReader": search_mode.prefer_url_reader,
             "selectedNewsSources": selected_news_sources,
             "queryFocusEntities": query_focus_entities,
             "focusEntitySource": focus_entity_source,
@@ -10998,6 +11052,70 @@ fn explicit_url_path_detected(query: &str) -> bool {
     extract_http_urls_from_text(query)
         .iter()
         .any(|url| validate_public_web_url_for_read(url).is_ok())
+}
+
+#[derive(Debug, Clone)]
+struct SearchModeSelfCheckDecision {
+    mode: String,
+    reason: String,
+    guards: Vec<String>,
+    allow_news_registry: bool,
+    allow_bing_fallback: bool,
+    allow_local_index: bool,
+    prefer_url_reader: bool,
+}
+
+fn self_check_search_mode_decision(
+    request: &WebSearchRequestInput,
+    query: &str,
+    explicit_url_path_used: bool,
+) -> SearchModeSelfCheckDecision {
+    let vertical = request.vertical.as_deref().unwrap_or("").to_ascii_lowercase();
+    let intent = request.intent.to_ascii_lowercase();
+    let freshness = request.freshness.as_deref().unwrap_or("").to_ascii_lowercase();
+    let raw_query = request.raw_user_query.as_deref().unwrap_or(query);
+    let mut guards = Vec::new();
+    let (mode, reason) = if explicit_url_path_used {
+        guards.push("explicit_url_highest_priority".to_string());
+        ("explicit_url", "explicit_url_detected")
+    } else if is_translation_or_word_lookup_query(raw_query) || is_translation_or_word_lookup_query(query) {
+        guards.push("translation_guard_before_news".to_string());
+        ("no_search", "translation_or_word_lookup_guard")
+    } else if !request.problem_id.as_deref().unwrap_or("").trim().is_empty()
+        || !request.algorithm_keywords.is_empty()
+        || vertical.contains("oi")
+        || vertical.contains("algorithm")
+        || intent.contains("algorithm")
+        || intent.contains("oi_")
+    {
+        guards.push("oi_before_general_web".to_string());
+        ("oi_algorithm", "problem_or_algorithm_intent")
+    } else if vertical.contains("docs") || intent.contains("docs") || intent.contains("technical") {
+        guards.push("docs_before_general_web".to_string());
+        ("docs_technical", "technical_docs_intent")
+    } else if vertical.contains("news")
+        || freshness.contains("news")
+        || intent.contains("news")
+        || is_direct_news_discovery_request(request)
+    {
+        guards.push("news_registry_requires_mode".to_string());
+        ("news_recent", "news_or_recent_intent")
+    } else if intent.contains("general_web") {
+        guards.push("fallback_only".to_string());
+        ("general_web", "general_web_fallback")
+    } else {
+        guards.push("no_search_without_need".to_string());
+        ("no_search", "normal_answer")
+    };
+    SearchModeSelfCheckDecision {
+        mode: mode.to_string(),
+        reason: reason.to_string(),
+        guards,
+        allow_news_registry: mode == "news_recent",
+        allow_bing_fallback: matches!(mode, "news_recent" | "docs_technical" | "oi_algorithm" | "general_web"),
+        allow_local_index: mode == "local_first" || mode == "oi_algorithm",
+        prefer_url_reader: matches!(mode, "explicit_url" | "news_recent" | "docs_technical" | "oi_algorithm" | "general_web"),
+    }
 }
 
 pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckResult, String> {
@@ -11148,6 +11266,22 @@ pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckR
                 Some("translate the word recent"),
                 "translate the word recent",
                 "general_knowledge",
+                None,
+                None,
+                &[],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
+        build_self_check_case(
+            "polish this paragraph: search mode policy keeps ordinary writing local",
+            "no_search",
+            self_check_request(
+                Some("polish this paragraph: search mode policy keeps ordinary writing local"),
+                "polish this paragraph: search mode policy keeps ordinary writing local",
+                "no_search",
                 None,
                 None,
                 &[],

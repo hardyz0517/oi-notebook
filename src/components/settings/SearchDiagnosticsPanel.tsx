@@ -368,9 +368,12 @@ const buildSearchPreparationOfflineDiagnostics = (): DiagnosticItem[] => {
       id,
       title: input,
       status: passed ? "pass" : "fail",
-      summary: `plannerTimedOut=true; ruleFallbackUsed=${directScheduled}; directDiscoveryScheduled=${directScheduled}; downgradedToNormalAnswer=${normalDowngradeBlocked ? "no" : "allowed"}`,
+      summary: `plannerTimedOut=true; searchMode=${decision.searchMode ?? "none"}; ruleFallbackUsed=${directScheduled}; directDiscoveryScheduled=${directScheduled}; downgradedToNormalAnswer=${normalDowngradeBlocked ? "no" : "allowed"}`,
       detail,
       safeDebugInfo: [
+        `searchMode=${decision.searchMode ?? "none"}`,
+        `searchModeReason=${decision.searchModeReason ?? "none"}`,
+        `modeGuards=${decision.modeGuards?.join(" | ") || "none"}`,
         `intent=${decision.intent}`,
         `vertical=${decision.vertical ?? "none"}`,
         `newsIntent=${decision.newsIntent === true}`,
@@ -460,7 +463,7 @@ const buildDecisionDiagnostics = (): DiagnosticItem[] => {
       status: passed ? "pass" : warned ? "warn" : "fail",
       summary: summarizeDecision(decision),
       detail: `预期：${item.expected}`,
-      safeDebugInfo: [`queryPreview=${queryPreview(decision)}`, `topicKeywords=${decision.topicKeywords?.join(", ") || "none"}`, `confidence=${decision.confidence ?? "n/a"}`],
+      safeDebugInfo: [`searchMode=${decision.searchMode ?? "none"}`, `searchModeReason=${decision.searchModeReason ?? "none"}`, `queryPreview=${queryPreview(decision)}`, `topicKeywords=${decision.topicKeywords?.join(", ") || "none"}`, `confidence=${decision.confidence ?? "n/a"}`],
     });
   });
 };
@@ -1130,9 +1133,16 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
   id: `notex-self-check-${item.expectedCategory}-${item.query}`,
   title: item.query,
   status: item.pass ? "pass" : "fail",
-  summary: `${item.expectedCategory}; intent=${item.actualIntent}; vertical=${item.vertical}; freshness=${item.freshness}; newsRegistry=${item.newsRegistryTriggered}; companySpecific=${item.companySpecificNews}; focus=${item.queryFocusEntities.join(",") || "none"}; focusSource=${item.focusEntitySource}; queryDiversification=${item.queryDiversification?.join(" | ") || "none"}; clustering=${item.newsClusteringTriggered}; clusters=${item.clusterCount}/${item.selectedClusterCount}; localResults=${item.localResultCount}; displayedLocalSources=${item.displayedLocalSourceCount}`,
+  summary: `${item.expectedCategory}; mode=${item.searchMode}; intent=${item.actualIntent}; vertical=${item.vertical}; freshness=${item.freshness}; newsRegistry=${item.newsRegistryTriggered}; companySpecific=${item.companySpecificNews}; focus=${item.queryFocusEntities.join(",") || "none"}; focusSource=${item.focusEntitySource}; queryDiversification=${item.queryDiversification?.join(" | ") || "none"}; clustering=${item.newsClusteringTriggered}; clusters=${item.clusterCount}/${item.selectedClusterCount}; localResults=${item.localResultCount}; displayedLocalSources=${item.displayedLocalSourceCount}`,
   detail: item.reason,
   safeDebugInfo: [
+    `searchMode=${item.searchMode}`,
+    `searchModeReason=${item.searchModeReason}`,
+    `modeGuards=${item.modeGuards.join(" | ") || "none"}`,
+    `allowNewsRegistry=${item.allowNewsRegistry}`,
+    `allowBingFallback=${item.allowBingFallback}`,
+    `allowLocalIndex=${item.allowLocalIndex}`,
+    `preferUrlReader=${item.preferUrlReader}`,
     `selectedNewsSources=${item.selectedNewsSources.join(" | ") || "none"}`,
     `bingFallbackPlanned=${item.bingFallbackPlanned}`,
     `queryFocusEntities=${item.queryFocusEntities.join(",") || "none"}`,

@@ -4,7 +4,67 @@ export type WebSearchMode = "off" | "auto";
 
 export type WebSearchProvider = "bing" | "bocha" | "brave";
 
-export type SearchMode = WebSearchMode;
+export type SearchMode =
+  | "no_search"
+  | "local_first"
+  | "explicit_url"
+  | "docs_technical"
+  | "oi_algorithm"
+  | "news_recent"
+  | "general_web"
+  | "deep_research";
+
+export type SearchModeReason =
+  | "explicit_url_detected"
+  | "translation_or_word_lookup_guard"
+  | "problem_or_algorithm_intent"
+  | "technical_docs_intent"
+  | "news_or_recent_intent"
+  | "local_context_only"
+  | "web_search_disabled"
+  | "public_search_consent_missing"
+  | "general_web_fallback"
+  | "normal_answer";
+
+export type SearchModeDecision = {
+  mode: SearchMode;
+  intent: SearchIntent;
+  shouldSearch: boolean;
+  preferLocal: boolean;
+  preferWeb: boolean;
+  preferUrlReader: boolean;
+  preferNews: boolean;
+  preferDocs: boolean;
+  preferOiSources: boolean;
+  allowBingFallback: boolean;
+  allowNewsRegistry: boolean;
+  allowLocalIndex: boolean;
+  requiresFreshness: boolean;
+  requiresEvidence: boolean;
+  reason: SearchModeReason;
+  confidence: number;
+  guards: string[];
+  explicitUrlDetected: boolean;
+  localFirstEligible: boolean;
+  newsRecentEligible: boolean;
+  docsTechnicalEligible: boolean;
+  oiAlgorithmEligible: boolean;
+  webSearchAllowed: boolean;
+  publicSearchConsent: boolean;
+  disabledReasons: string[];
+  finalPipeline: string;
+};
+
+export type SearchModePolicyInput = {
+  rawUserQuery: string;
+  currentNoteAvailable?: boolean;
+  explicitUrls?: string[];
+  webSearchToggle?: WebSearchMode;
+  userRequestedSearch?: boolean;
+  localIndexAvailable?: boolean;
+  publicSearchConsent?: boolean;
+  decision: SearchDecision;
+};
 
 export type WebSourceReliability =
   | "official"
@@ -624,6 +684,11 @@ export type WebSourceExcerptResult = {
 export type SearchDecision = {
   shouldSearch: boolean;
   intent: ResearchIntent;
+  searchMode?: SearchMode;
+  searchModeDecision?: SearchModeDecision;
+  searchModeReason?: SearchModeReason;
+  searchModeConfidence?: number;
+  modeGuards?: string[];
   rawQuestion?: string;
   problemId?: string;
   problemTitle?: string;
@@ -3566,6 +3631,178 @@ const hasKeyword = (text: string, keywords: string[]): boolean =>
 
 const clampConfidence = (value: number): number => Math.max(0, Math.min(1, Number(value.toFixed(2))));
 
+const isTranslationOrWordLookupQuery = (input: string): boolean => {
+  const lower = input.toLocaleLowerCase();
+  return NEWS_OFF_TOPIC_PATTERNS.some((pattern) => pattern.test(input)) ||
+    lower.includes("translate") ||
+    lower.includes("translation") ||
+    lower.includes("dictionary") ||
+    lower.includes("meaning") ||
+    input.includes("英语怎么说") ||
+    input.includes("英文怎么说") ||
+    input.includes("怎么翻译") ||
+    input.includes("这个词");
+};
+
+const searchModePipeline = (mode: SearchMode): string => {
+  switch (mode) {
+    case "explicit_url":
+      return "explicit_url -> url_reader -> evidence_gate";
+    case "news_recent":
+      return "news_registry -> candidate_discovery -> url_reader -> evidence_gate";
+    case "docs_technical":
+      return "docs_direct_sources -> candidate_discovery -> url_reader -> evidence_gate";
+    case "oi_algorithm":
+      return "local_index -> oi_sources -> url_reader -> evidence_gate";
+    case "local_first":
+      return "local_index -> note_context";
+    case "general_web":
+      return "general_web -> candidate_discovery -> url_reader -> evidence_gate";
+    case "deep_research":
+      return "disabled_future_mode";
+    case "no_search":
+    default:
+      return "normal_answer";
+  }
+};
+
+export const buildSearchModeDecision = (input: SearchModePolicyInput): SearchModeDecision => {
+  const decision = input.decision;
+  const rawUserQuery = input.rawUserQuery || decision.rawQuestion || decision.queries.join(" ");
+  const explicitUrls = input.explicitUrls ?? extractExplicitUrls(rawUserQuery).urls;
+  const explicitUrlDetected = explicitUrls.length > 0;
+  const webSearchAllowed = input.webSearchToggle !== "off";
+  const publicSearchConsent = input.publicSearchConsent !== false;
+  const disabledReasons = [
+    webSearchAllowed ? undefined : "web_search_toggle_off",
+    publicSearchConsent ? undefined : "public_search_consent_missing",
+  ].filter((item): item is string => Boolean(item));
+  const canonicalIntent = mapResearchIntentToSearchIntent(
+    decision.intent,
+    decision.vertical,
+    decision.newsIntent ? "news" : decision.recencyIntent ? "recent" : "none",
+  );
+  const oiAlgorithmEligible = canonicalIntent === "oi_algorithm" ||
+    decision.vertical === "oi" ||
+    decision.vertical === "algorithm" ||
+    Boolean(decision.problemId) ||
+    Boolean(decision.algorithmKeywords?.length);
+  const docsTechnicalEligible = canonicalIntent === "docs_technical" || decision.vertical === "docs";
+  const newsRecentEligible = canonicalIntent === "news_recent" ||
+    decision.vertical === "news" ||
+    decision.newsIntent === true;
+  const localFirstEligible = input.currentNoteAvailable === true && !decision.shouldSearch;
+  const guards: string[] = [];
+  let mode: SearchMode;
+  let reason: SearchModeReason;
+
+  if (explicitUrlDetected) {
+    mode = "explicit_url";
+    reason = "explicit_url_detected";
+    guards.push("explicit_url_highest_priority");
+  } else if (isTranslationOrWordLookupQuery(rawUserQuery)) {
+    mode = "no_search";
+    reason = "translation_or_word_lookup_guard";
+    guards.push("translation_guard_before_news");
+  } else if (oiAlgorithmEligible) {
+    mode = "oi_algorithm";
+    reason = "problem_or_algorithm_intent";
+    guards.push("oi_before_general_web");
+  } else if (docsTechnicalEligible) {
+    mode = "docs_technical";
+    reason = "technical_docs_intent";
+    guards.push("docs_before_general_web");
+  } else if (newsRecentEligible) {
+    mode = "news_recent";
+    reason = "news_or_recent_intent";
+    guards.push("news_registry_requires_mode");
+  } else if (localFirstEligible) {
+    mode = "local_first";
+    reason = "local_context_only";
+    guards.push("local_index_without_public_web");
+  } else if (!decision.shouldSearch) {
+    mode = "no_search";
+    reason = "normal_answer";
+    guards.push("no_search_without_need");
+  } else {
+    mode = "general_web";
+    reason = "general_web_fallback";
+    guards.push("fallback_only");
+  }
+
+  if (mode !== "no_search" && mode !== "local_first" && mode !== "explicit_url" && !webSearchAllowed) {
+    reason = "web_search_disabled";
+    guards.push("public_web_disabled");
+  }
+  if (mode !== "no_search" && mode !== "local_first" && !publicSearchConsent) {
+    reason = "public_search_consent_missing";
+    guards.push("public_search_consent_required");
+  }
+
+  const preferNews = mode === "news_recent";
+  const preferDocs = mode === "docs_technical";
+  const preferOiSources = mode === "oi_algorithm";
+  const preferUrlReader = mode === "explicit_url" || preferNews || preferDocs || preferOiSources || mode === "general_web";
+  const allowPublicWeb = webSearchAllowed && publicSearchConsent;
+
+  return {
+    mode,
+    intent: canonicalIntent,
+    shouldSearch: mode !== "no_search" && (mode === "local_first" || mode === "oi_algorithm" || allowPublicWeb),
+    preferLocal: mode === "local_first" || mode === "oi_algorithm",
+    preferWeb: allowPublicWeb && ["explicit_url", "docs_technical", "oi_algorithm", "news_recent", "general_web"].includes(mode),
+    preferUrlReader: allowPublicWeb && preferUrlReader,
+    preferNews,
+    preferDocs,
+    preferOiSources,
+    allowBingFallback: allowPublicWeb && (mode === "news_recent" || mode === "docs_technical" || mode === "oi_algorithm" || mode === "general_web"),
+    allowNewsRegistry: allowPublicWeb && mode === "news_recent",
+    allowLocalIndex: input.localIndexAvailable !== false && (mode === "local_first" || mode === "oi_algorithm"),
+    requiresFreshness: mode === "news_recent",
+    requiresEvidence: ["explicit_url", "docs_technical", "oi_algorithm", "news_recent", "general_web"].includes(mode),
+    reason,
+    confidence: clampConfidence(
+      mode === "explicit_url" ? 1 :
+      mode === "no_search" && reason === "translation_or_word_lookup_guard" ? 0.94 :
+      Math.max(decision.confidence ?? 0, newsRecentEligible || docsTechnicalEligible || oiAlgorithmEligible ? 0.74 : 0.42),
+    ),
+    guards,
+    explicitUrlDetected,
+    localFirstEligible,
+    newsRecentEligible,
+    docsTechnicalEligible,
+    oiAlgorithmEligible,
+    webSearchAllowed,
+    publicSearchConsent,
+    disabledReasons,
+    finalPipeline: searchModePipeline(mode),
+  };
+};
+
+const withSearchModeDecision = (
+  decision: SearchDecision,
+  input?: Partial<Omit<SearchModePolicyInput, "decision">>,
+): SearchDecision => {
+  const modeDecision = buildSearchModeDecision({
+    rawUserQuery: input?.rawUserQuery ?? decision.rawQuestion ?? decision.queries.join(" "),
+    decision,
+    currentNoteAvailable: input?.currentNoteAvailable,
+    explicitUrls: input?.explicitUrls,
+    webSearchToggle: input?.webSearchToggle,
+    userRequestedSearch: input?.userRequestedSearch,
+    localIndexAvailable: input?.localIndexAvailable,
+    publicSearchConsent: input?.publicSearchConsent,
+  });
+  return {
+    ...decision,
+    searchMode: modeDecision.mode,
+    searchModeDecision: modeDecision,
+    searchModeReason: modeDecision.reason,
+    searchModeConfidence: modeDecision.confidence,
+    modeGuards: modeDecision.guards,
+  };
+};
+
 export function buildSearchDecision(
   input: string,
   context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
@@ -3676,7 +3913,7 @@ export function buildSearchDecision(
       errorKeywords.length > 0 ? "debug_issue" :
       discussionKeywords.length > 0 ? "oi_discussion" :
       "oi_problem";
-    return {
+    return withSearchModeDecision({
       shouldSearch,
       intent,
       rawQuestion: question,
@@ -3691,14 +3928,14 @@ export function buildSearchDecision(
       queries: shouldSearch ? buildProblemQueries(problemId, problemTitle, discussionKeywords, errorKeywords, question) : [],
       confidence,
       reason: reasons.join("，") || "识别到题号，并且联网可能有帮助。",
-    };
+    });
   }
 
   if (
     algorithmKeywords.length > 0 &&
     (explicitWebSearchRequested || generalWebKeywords.length > 0 || discussionKeywords.length > 0 || errorKeywords.length > 0)
   ) {
-    return {
+    return withSearchModeDecision({
       shouldSearch,
       intent: "algorithm_reference",
       rawQuestion: question,
@@ -3711,11 +3948,11 @@ export function buildSearchDecision(
       queries: shouldSearch ? buildAlgorithmQueries(algorithmKeywords, errorKeywords) : [],
       confidence,
       reason: reasons.join("，") || "用户在查算法外部资料。",
-    };
+    });
   }
 
   if (errorKeywords.length > 0 && (solutionKeywords.length > 0 || discussionKeywords.length > 0)) {
-    return {
+    return withSearchModeDecision({
       shouldSearch,
       intent: "debug_issue",
       rawQuestion: question,
@@ -3727,11 +3964,11 @@ export function buildSearchDecision(
       queries: shouldSearch ? [compactQuery(`${question} ${errorKeywords.join(" ")}`)] : [],
       confidence,
       reason: reasons.join("，") || "问题偏向调试排查，联网可能补充经验来源。",
-    };
+    });
   }
 
   if (technicalDocsKeywords.length > 0) {
-    return {
+    return withSearchModeDecision({
       shouldSearch,
       intent: "general_web",
       rawQuestion: question,
@@ -3742,11 +3979,11 @@ export function buildSearchDecision(
       queries: shouldSearch ? [compactQuery(question)] : [],
       confidence,
       reason: reasons.join("；") || "识别到技术文档查询，优先尝试官方文档来源。",
-    };
+    });
   }
 
   if (generalWebKeywords.length > 0 || explicitWebSearchRequested || recentInfoRequested) {
-    return {
+    return withSearchModeDecision({
       shouldSearch,
       intent: "general_web",
       rawQuestion: question,
@@ -3757,10 +3994,10 @@ export function buildSearchDecision(
       queries: shouldSearch ? buildGeneralWebQueries(question, recentInfoRequested || newsIntent, topicKeywords) : [],
       confidence,
       reason: reasons.join("，") || "用户在请求外部网页资料。",
-    };
+    });
   }
 
-  return {
+  return withSearchModeDecision({
     shouldSearch: false,
     intent: "no_search",
     rawQuestion: question,
@@ -3773,5 +4010,5 @@ export function buildSearchDecision(
     reason: algorithmKeywords.length > 0 && explanationOnlyRequested
       ? "当前更像算法概念解释，本地回答通常已足够。"
       : "当前问题主要可由笔记上下文和模型自身能力回答，无需联网。",
-  };
+  });
 }

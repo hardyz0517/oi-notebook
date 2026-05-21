@@ -352,6 +352,13 @@ export interface NotexSearchSelfCheckCaseResult {
   query: string;
   expectedCategory: string;
   actualIntent: string;
+  searchMode: string;
+  searchModeReason: string;
+  modeGuards: string[];
+  allowNewsRegistry: boolean;
+  allowBingFallback: boolean;
+  allowLocalIndex: boolean;
+  preferUrlReader: boolean;
   vertical: string;
   freshness: string;
   newsRegistryTriggered: boolean;

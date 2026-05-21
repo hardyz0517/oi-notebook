@@ -2798,6 +2798,7 @@ const buildWebContextDecision = (
   if (!requestWebSearchEnabled) {
     return explicitPlan.shouldRead || explicitPlan.blockedUrls.length > 0
       ? {
+        ...buildSearchDecision(question, context),
         shouldSearch: true,
         intent: "general_web",
         queries: [],

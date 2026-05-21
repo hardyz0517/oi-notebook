@@ -6,6 +6,19 @@ export type SearchPreparationDiagnostics = {
   timedOutStage?: string;
   ruleIntent: string;
   ruleFreshness: string;
+  searchMode?: string;
+  searchModeReason?: string;
+  searchModeConfidence?: string;
+  modeGuards?: string;
+  explicitUrlDetected?: string;
+  localFirstEligible?: string;
+  newsRecentEligible?: string;
+  docsTechnicalEligible?: string;
+  oiAlgorithmEligible?: string;
+  webSearchAllowed?: string;
+  publicSearchConsent?: string;
+  disabledReasons?: string;
+  finalPipeline?: string;
   plannerStarted: boolean;
   plannerTimedOut: boolean;
   plannerFailedReason?: string;
@@ -119,6 +132,19 @@ export const createSearchPreparationDiagnostics = (decision: SearchDecision): Se
   searchPreparationTimedOut: false,
   ruleIntent: decision.intent,
   ruleFreshness: decision.newsIntent ? "news" : decision.recencyIntent ? "recent" : "none",
+  searchMode: decision.searchModeDecision?.mode ?? decision.searchMode,
+  searchModeReason: decision.searchModeDecision?.reason ?? decision.searchModeReason,
+  searchModeConfidence: decision.searchModeDecision?.confidence?.toString() ?? decision.searchModeConfidence?.toString(),
+  modeGuards: decision.searchModeDecision?.guards.join("|") ?? decision.modeGuards?.join("|"),
+  explicitUrlDetected: decision.searchModeDecision ? (decision.searchModeDecision.explicitUrlDetected ? "yes" : "no") : undefined,
+  localFirstEligible: decision.searchModeDecision ? (decision.searchModeDecision.localFirstEligible ? "yes" : "no") : undefined,
+  newsRecentEligible: decision.searchModeDecision ? (decision.searchModeDecision.newsRecentEligible ? "yes" : "no") : undefined,
+  docsTechnicalEligible: decision.searchModeDecision ? (decision.searchModeDecision.docsTechnicalEligible ? "yes" : "no") : undefined,
+  oiAlgorithmEligible: decision.searchModeDecision ? (decision.searchModeDecision.oiAlgorithmEligible ? "yes" : "no") : undefined,
+  webSearchAllowed: decision.searchModeDecision ? (decision.searchModeDecision.webSearchAllowed ? "yes" : "no") : undefined,
+  publicSearchConsent: decision.searchModeDecision ? (decision.searchModeDecision.publicSearchConsent ? "yes" : "no") : undefined,
+  disabledReasons: decision.searchModeDecision?.disabledReasons.join("|"),
+  finalPipeline: decision.searchModeDecision?.finalPipeline,
   plannerStarted: false,
   plannerTimedOut: false,
   ruleFallbackUsed: false,
@@ -151,6 +177,19 @@ export const formatSearchPreparationDiagnostics = (diagnostics: SearchPreparatio
   diagnostics.timedOutStage ? `timedOutStage=${encodeDebugValue(diagnostics.timedOutStage)}` : undefined,
   `ruleIntent=${encodeDebugValue(diagnostics.ruleIntent)}`,
   `ruleFreshness=${encodeDebugValue(diagnostics.ruleFreshness)}`,
+  diagnostics.searchMode ? `searchMode=${encodeDebugValue(diagnostics.searchMode)}` : undefined,
+  diagnostics.searchModeReason ? `searchModeReason=${encodeDebugValue(diagnostics.searchModeReason)}` : undefined,
+  diagnostics.searchModeConfidence ? `searchModeConfidence=${encodeDebugValue(diagnostics.searchModeConfidence)}` : undefined,
+  diagnostics.modeGuards ? `modeGuards=${encodeDebugValue(diagnostics.modeGuards)}` : undefined,
+  diagnostics.explicitUrlDetected ? `explicitUrlDetected=${encodeDebugValue(diagnostics.explicitUrlDetected)}` : undefined,
+  diagnostics.localFirstEligible ? `localFirstEligible=${encodeDebugValue(diagnostics.localFirstEligible)}` : undefined,
+  diagnostics.newsRecentEligible ? `newsRecentEligible=${encodeDebugValue(diagnostics.newsRecentEligible)}` : undefined,
+  diagnostics.docsTechnicalEligible ? `docsTechnicalEligible=${encodeDebugValue(diagnostics.docsTechnicalEligible)}` : undefined,
+  diagnostics.oiAlgorithmEligible ? `oiAlgorithmEligible=${encodeDebugValue(diagnostics.oiAlgorithmEligible)}` : undefined,
+  diagnostics.webSearchAllowed ? `webSearchAllowed=${encodeDebugValue(diagnostics.webSearchAllowed)}` : undefined,
+  diagnostics.publicSearchConsent ? `publicSearchConsent=${encodeDebugValue(diagnostics.publicSearchConsent)}` : undefined,
+  diagnostics.disabledReasons ? `disabledReasons=${encodeDebugValue(diagnostics.disabledReasons)}` : undefined,
+  diagnostics.finalPipeline ? `finalPipeline=${encodeDebugValue(diagnostics.finalPipeline)}` : undefined,
   `plannerStarted=${diagnostics.plannerStarted ? "yes" : "no"}`,
   `plannerTimedOut=${diagnostics.plannerTimedOut ? "yes" : "no"}`,
   diagnostics.plannerFailedReason ? `plannerFailedReason=${encodeDebugValue(diagnostics.plannerFailedReason)}` : undefined,
@@ -318,6 +357,19 @@ export const parseSearchPreparationDiagnostics = (raw: string): SearchPreparatio
     timedOutStage: lookupDebugField(parts, "timedOutStage"),
     ruleIntent: lookupDebugField(parts, "ruleIntent") ?? "unknown",
     ruleFreshness: lookupDebugField(parts, "ruleFreshness") ?? "none",
+    searchMode: lookupDebugField(parts, "searchMode"),
+    searchModeReason: lookupDebugField(parts, "searchModeReason"),
+    searchModeConfidence: lookupDebugField(parts, "searchModeConfidence"),
+    modeGuards: lookupDebugField(parts, "modeGuards"),
+    explicitUrlDetected: lookupDebugField(parts, "explicitUrlDetected"),
+    localFirstEligible: lookupDebugField(parts, "localFirstEligible"),
+    newsRecentEligible: lookupDebugField(parts, "newsRecentEligible"),
+    docsTechnicalEligible: lookupDebugField(parts, "docsTechnicalEligible"),
+    oiAlgorithmEligible: lookupDebugField(parts, "oiAlgorithmEligible"),
+    webSearchAllowed: lookupDebugField(parts, "webSearchAllowed"),
+    publicSearchConsent: lookupDebugField(parts, "publicSearchConsent"),
+    disabledReasons: lookupDebugField(parts, "disabledReasons"),
+    finalPipeline: lookupDebugField(parts, "finalPipeline"),
     plannerStarted: lookupDebugField(parts, "plannerStarted") === "yes",
     plannerTimedOut: lookupDebugField(parts, "plannerTimedOut") === "yes",
     plannerFailedReason: lookupDebugField(parts, "plannerFailedReason"),
@@ -569,6 +621,19 @@ export const formatSearchPreparationDiagnosticsForDisplay = (raw: string): strin
     diagnostics.timedOutStage ? `timedOutStage：${diagnostics.timedOutStage}` : undefined,
     `ruleIntent：${diagnostics.ruleIntent}`,
     `ruleFreshness：${diagnostics.ruleFreshness}`,
+    diagnostics.searchMode ? `searchMode：${diagnostics.searchMode}` : undefined,
+    diagnostics.searchModeReason ? `searchModeReason：${diagnostics.searchModeReason}` : undefined,
+    diagnostics.searchModeConfidence ? `searchModeConfidence：${diagnostics.searchModeConfidence}` : undefined,
+    diagnostics.modeGuards ? `modeGuards：${diagnostics.modeGuards}` : undefined,
+    diagnostics.explicitUrlDetected ? `explicitUrlDetected：${diagnostics.explicitUrlDetected}` : undefined,
+    diagnostics.localFirstEligible ? `localFirstEligible：${diagnostics.localFirstEligible}` : undefined,
+    diagnostics.newsRecentEligible ? `newsRecentEligible：${diagnostics.newsRecentEligible}` : undefined,
+    diagnostics.docsTechnicalEligible ? `docsTechnicalEligible：${diagnostics.docsTechnicalEligible}` : undefined,
+    diagnostics.oiAlgorithmEligible ? `oiAlgorithmEligible：${diagnostics.oiAlgorithmEligible}` : undefined,
+    diagnostics.webSearchAllowed ? `webSearchAllowed：${diagnostics.webSearchAllowed}` : undefined,
+    diagnostics.publicSearchConsent ? `publicSearchConsent：${diagnostics.publicSearchConsent}` : undefined,
+    diagnostics.disabledReasons ? `disabledReasons：${diagnostics.disabledReasons}` : undefined,
+    diagnostics.finalPipeline ? `finalPipeline：${diagnostics.finalPipeline}` : undefined,
     `plannerStarted：${diagnostics.plannerStarted ? "yes" : "no"}`,
     `plannerTimedOut：${diagnostics.plannerTimedOut ? "yes" : "no"}`,
     diagnostics.plannerFailedReason ? `plannerFailedReason：${diagnostics.plannerFailedReason}` : undefined,
