@@ -1660,11 +1660,20 @@ const isHttpUrl = (href: string): boolean => /^https?:\/\//i.test(href);
 
 const getCitationStatusLabel = (citation: WebSourceCitation): string => {
   if (citation.isConstructed && citation.excerptStatus !== "fetched") return "公开资料入口";
-  if (citation.excerptStatus === "fetched" && (citation.excerptQuality === "partial" || citation.excerptQuality === "medium")) return "部分摘要";
-  if (citation.excerptStatus === "fetched") return "已读取摘要";
+  if (citation.excerptStatus === "fetched" && (citation.excerptQuality === "partial" || citation.excerptQuality === "medium")) return "已读取部分正文";
+  if (citation.excerptStatus === "fetched") return "已读取正文";
   if (citation.excerptQuality === "blocked" || citation.excerptStatus === "unavailable") return "正文不可用";
   if (citation.excerptStatus === "failed") return "读取失败";
-  return "仅搜索摘要";
+  return "已作为来源使用";
+};
+
+const getCitationSourceTypeLabel = (citation: WebSourceCitation): string => {
+  if (citation.sourceKind === "explicit_url") return "用户提供的网页";
+  if (citation.sourceKind === "docs_page") return "官方文档";
+  if (citation.sourceKind === "official_news" || citation.sourceType === "official") return "官方来源";
+  if (citation.sourceKind === "official_blog" || citation.sourceType === "blog") return "博客";
+  if (citation.sourceKind === "rss_item" || citation.sourceKind === "media_article") return "新闻";
+  return "网页";
 };
 
 type CitationDisplayEntry = {
@@ -1975,6 +1984,8 @@ type WebSourceCitation = {
   url?: string;
   site?: string;
   reliabilityLabel?: string;
+  sourceType?: WebSource["sourceType"];
+  sourceKind?: WebSource["sourceKind"];
   excerptStatus?: WebSource["excerptStatus"];
   excerptQuality?: WebSource["excerptQuality"];
   isConstructed?: boolean;
@@ -2453,6 +2464,8 @@ const getSourceCitations = (sources: WebSource[] | undefined): WebSourceCitation
       url: source.url,
       site: source.site,
       reliabilityLabel: getReliabilityLabel(source),
+      sourceType: source.sourceType,
+      sourceKind: source.sourceKind,
       excerptStatus: source.excerptStatus,
       excerptQuality: source.excerptQuality,
       isConstructed: source.isConstructed,
@@ -2543,19 +2556,65 @@ const getSourceCardDescription = (source: WebSource): string | undefined => {
   return source.snippet;
 };
 
-const getWebSearchStageText = (status?: AiChatMessage["webSearchStatus"], fallback?: string): string => {
-  if (fallback?.trim()) return fallback.trim();
-  if (status === "planning") return "正在准备搜索计划...";
-  if (status === "searching") return "正在搜索公开网页...";
-  if (status === "filtering") return "正在筛选相关来源...";
-  if (status === "fetching_excerpts") return "正在读取网页摘录...";
-  if (status === "answering") return "正在生成回答...";
-  if (status === "failed") return "联网搜索失败，正在降级回答";
+const getSearchModeForDisplay = (decision?: SearchDecision): string =>
+  decision?.searchModeDecision?.mode ?? decision?.searchMode ?? (
+    decision?.vertical === "news" ? "news_recent" :
+      decision?.vertical === "docs" ? "docs_technical" :
+        decision?.vertical === "oi" || decision?.vertical === "algorithm" ? "oi_algorithm" :
+          decision?.vertical === "explicit_url" ? "explicit_url" :
+            decision?.intent === "no_search" ? "no_search" : "general_web"
+  );
+
+const getUserFacingSearchError = (message: string | undefined, decision?: SearchDecision): string => {
+  const text = message?.trim() ?? "";
+  const mode = getSearchModeForDisplay(decision);
+  if (mode === "no_search") return "";
+  if (mode === "news_recent") {
+    return "当前没有读取到足够可靠的近期新闻来源，因此不能可靠总结最新动态。";
+  }
+  if (mode === "explicit_url") {
+    if (/needs_js|browser|render|渲染/i.test(text)) return "这个页面可能需要浏览器渲染，当前无法读取正文。";
+    if (/blocked|403|401|auth|授权|限制|拦截/i.test(text)) return "这个页面暂时无法公开读取。";
+    return "找到了这个页面，但没有成功读取到可引用的正文。";
+  }
+  if (/needs_js|render|渲染/i.test(text)) return "这个页面可能需要浏览器渲染，当前无法读取正文。";
+  if (/blocked|403|401|auth|授权|限制|拦截/i.test(text)) return "这个页面暂时无法公开读取。";
+  if (/候选|正文|usable|evidence|not_fetched|too_short|snippet_only|title_only/i.test(text)) {
+    return "找到了相关页面，但没有成功读取到可引用的正文。";
+  }
+  if (mode === "docs_technical") return "没有找到足够可靠的公开资料。";
+  if (mode === "general_web") return "没有找到可引用的公开资料。";
+  return text || "没有找到可引用来源。";
+};
+
+const getWebSearchStageText = (
+  status?: AiChatMessage["webSearchStatus"],
+  fallback?: string,
+  decision?: SearchDecision,
+): string => {
+  const mode = getSearchModeForDisplay(decision);
+  if (mode === "no_search") return "";
+  if (status === "failed") return getUserFacingSearchError(fallback, decision);
+  if (status === "planning" || status === "searching") {
+    if (mode === "news_recent") return "正在检索近期公开新闻...";
+    if (mode === "explicit_url") return "正在读取你提供的网页...";
+    if (mode === "docs_technical") return "正在查找官方文档或可靠资料...";
+    if (mode === "oi_algorithm" || mode === "local_first") return "正在查找相关本地笔记和资料...";
+    return "正在查找公开资料...";
+  }
+  if (status === "filtering") return "正在整理可引用来源...";
+  if (status === "fetching_excerpts") {
+    if (mode === "news_recent") return "正在读取新闻正文...";
+    if (mode === "explicit_url") return "正在读取你提供的网页...";
+    if (mode === "docs_technical") return "正在读取相关文档...";
+    return "正在读取网页正文...";
+  }
+  if (status === "answering") return "正在基于已读来源生成回答...";
   return "";
 };
 
-function WebSearchProgressCard({ status, text }: { status?: AiChatMessage["webSearchStatus"]; text?: string }) {
-  const stageText = getWebSearchStageText(status, text);
+function WebSearchProgressCard({ status, text, decision }: { status?: AiChatMessage["webSearchStatus"]; text?: string; decision?: SearchDecision }) {
+  const stageText = getWebSearchStageText(status, text, decision);
   if (!stageText || status === "done") return null;
   return (
     <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50/70 px-2.5 py-1 text-[11px] leading-5 text-emerald-800 dark:border-emerald-300/20 dark:bg-emerald-400/[0.08] dark:text-emerald-100">
@@ -3146,7 +3205,7 @@ function AssistantCitationList({
       <div className="mt-1 grid gap-1">
         {citations.map((citation) => {
           const statusLabel = getCitationStatusLabel(citation);
-          const meta = Array.from(new Set([citation.site, citation.reliabilityLabel].filter(Boolean)));
+          const meta = Array.from(new Set([citation.site, getCitationSourceTypeLabel(citation)].filter(Boolean)));
           return (
             <button
               key={citation.citationId}
@@ -5709,7 +5768,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       replaceMessage(conversationId, assistantMessage.id, (message) => ({
         ...message,
         webSearchStatus: status,
-        webSearchStatusText: text ?? getWebSearchStageText(status),
+        webSearchStatusText: text ?? getWebSearchStageText(status, undefined, searchDecision),
       }));
     };
     const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
@@ -5780,7 +5839,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           : undefined,
         localNoteSearchError: localNoteSearchResult.error,
         webSearchStatus: "failed",
-        webSearchStatusText: searchError ?? "没有成功读取到足够相关的近期新闻来源",
+        webSearchStatusText: getUserFacingSearchError(searchError, effectiveSearchDecision),
         ...finishAssistantTiming(message),
       }));
       streamTextBufferRef.current.delete(streamId);
@@ -5964,7 +6023,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         replaceMessage(conversationId, assistantMessage.id, (current) => ({
           ...current,
           webSearchStatus: status,
-          webSearchStatusText: text ?? getWebSearchStageText(status),
+          webSearchStatusText: text ?? getWebSearchStageText(status, undefined, searchDecision),
         }));
       };
       const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
@@ -6035,7 +6094,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             : undefined,
           localNoteSearchError: localNoteSearchResult.error,
           webSearchStatus: "failed",
-          webSearchStatusText: searchError ?? "没有成功读取到足够相关的近期新闻来源",
+        webSearchStatusText: getUserFacingSearchError(searchError, effectiveSearchDecision),
           ...finishAssistantTiming(current),
         }));
         streamTextBufferRef.current.delete(streamId);
@@ -6850,7 +6909,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         />
                       )}
                       {message.searchDecision?.shouldSearch && (
-                        <WebSearchProgressCard status={message.webSearchStatus} text={message.webSearchStatusText} />
+                        <WebSearchProgressCard status={message.webSearchStatus} text={message.webSearchStatusText} decision={message.searchDecision} />
                       )}
                       <LocalNoteSearchProgressCard
                         status={message.localNoteSearchStatus}
@@ -6859,7 +6918,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       {!developerModeEnabled && message.searchDecision?.shouldSearch && message.searchError && (
                         <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-amber-200/70 bg-amber-50/70 px-2.5 py-1 text-[11px] leading-5 text-amber-800 dark:border-amber-300/20 dark:bg-amber-400/[0.08] dark:text-amber-100">
                           <Info className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 truncate">{message.searchError}</span>
+                          <span className="min-w-0 truncate">{getUserFacingSearchError(message.searchError, message.searchDecision)}</span>
                         </div>
                       )}
                       {developerModeEnabled && message.searchDecision?.shouldSearch && (

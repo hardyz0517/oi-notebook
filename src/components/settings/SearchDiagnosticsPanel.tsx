@@ -54,19 +54,20 @@ const STATUS_LABELS: Record<DiagnosticStatus, string> = {
 const STATUS_ORDER: DiagnosticStatus[] = ["pass", "warn", "fail", "skipped", "running"];
 
 const emptyCategories = (): DiagnosticCategory[] => [
-  { id: "decision", title: "搜索决策", items: [] },
+  { id: "decision", title: "Search Mode / 搜索模式", items: [] },
   { id: "query-planner", title: "AI 搜索规划", items: [] },
-  { id: "url-reading", title: "URL 阅读规则", items: [] },
+  { id: "direct-discovery", title: "Direct Discovery / 直接发现", items: [] },
+  { id: "url-reading", title: "URL Reader / 网页读取", items: [] },
   { id: "provider-config", title: "Provider 配置", items: [] },
   {
     id: "provider-test",
     title: "当前 Provider 测试",
     items: [{ id: "provider-test-skipped", title: "在线连通性测试", status: "skipped", summary: "不会自动发起公网请求；点击“测试当前 Provider”后才运行。" }],
   },
-  { id: "web-cache", title: "Web Cache", items: [] },
-  { id: "local-index", title: "本地索引", items: [] },
-  { id: "local-search", title: "本地检索", items: [] },
-  { id: "notex-self-check", title: "NoteX 搜索自检", items: [] },
+  { id: "web-cache", title: "Web Cache / 网页缓存", items: [] },
+  { id: "local-index", title: "Local Index / 本地索引", items: [] },
+  { id: "local-search", title: "Local Search / 本地检索", items: [] },
+  { id: "notex-self-check", title: "Self Check / 自检", items: [] },
   { id: "citations", title: "引用渲染", items: [] },
   { id: "prompt-contract", title: "Prompt 合约", items: [] },
 ];
