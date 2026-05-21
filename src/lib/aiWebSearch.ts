@@ -350,6 +350,24 @@ export type NewsCluster = Pick<
   "eventCluster" | "clusterLabel" | "clusterReason" | "clusterSize" | "selectedForRoundup" | "droppedAsDuplicateCluster"
 >;
 
+export type NewsSourceFreshnessStatus =
+  | "fresh_today"
+  | "fresh_yesterday"
+  | "fresh_72h"
+  | "recent_week"
+  | "stale"
+  | "undated";
+
+export type NewsFreshnessPolicy = {
+  currentDate: string;
+  strictWindowHours: number;
+  fallbackWindowDays: number;
+  maxNewsAgeDays: number;
+  requestedFreshness: "today" | "default_recent" | "explicit_range";
+  freshnessWindowLabel: string;
+  explicitRange: boolean;
+};
+
 export type WebSource = {
   id: string;
   title: string;
@@ -370,6 +388,11 @@ export type WebSource = {
   searchStage?: "api" | "rss" | "html" | "html-fallback" | string;
   dateHint?: string;
   freshnessScore?: number;
+  sourcePublishedAt?: string;
+  sourceAgeHours?: number;
+  sourceAgeDays?: number;
+  freshnessStatus?: NewsSourceFreshnessStatus;
+  staleReason?: string;
   searchDiagnostics?: string;
   newsLike?: boolean;
   filteredReason?: string;
@@ -579,6 +602,11 @@ export type WebSearchResult = {
   searchStage?: "api" | "rss" | "html" | "html-fallback" | string;
   dateHint?: string;
   freshnessScore?: number;
+  sourcePublishedAt?: string;
+  sourceAgeHours?: number;
+  sourceAgeDays?: number;
+  freshnessStatus?: NewsSourceFreshnessStatus;
+  staleReason?: string;
   searchDiagnostics?: string;
   newsLike?: boolean;
   filteredReason?: string;
@@ -2353,7 +2381,7 @@ const getCoreKeywordMatches = (source: WebSource, decision: SearchDecision, user
 };
 
 const parseSourceDateHint = (source: WebSource): Date | null => {
-  const dateHint = source.dateHint?.trim();
+  const dateHint = source.publishedAt?.trim() || source.dateHint?.trim();
   const candidates = [
     dateHint,
     source.title,
@@ -2375,6 +2403,68 @@ const parseSourceDateHint = (source: WebSource): Date | null => {
     }
   }
   return null;
+};
+
+const hasExplicitNewsDateRange = (query: string): boolean =>
+  /(?:近|最近)\s*(?:一|1)\s*个?月|(?:本|这个|上个)?月|月以来|以来|\b20\d{2}\s*[-年/]\s*(?:0?[1-9]|1[0-2])\s*月?|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+20\d{2}/i.test(query);
+
+const isTodayFreshnessQuery = (query: string): boolean =>
+  /今天|今日|刚刚|现在|latest|breaking|today|now/i.test(query);
+
+export const getNewsFreshnessPolicy = (query: string, now = new Date()): NewsFreshnessPolicy => {
+  const explicitRange = hasExplicitNewsDateRange(query);
+  const today = isTodayFreshnessQuery(query);
+  if (explicitRange) {
+    return {
+      currentDate: now.toISOString().slice(0, 10),
+      strictWindowHours: 72,
+      fallbackWindowDays: 45,
+      maxNewsAgeDays: 45,
+      requestedFreshness: "explicit_range",
+      freshnessWindowLabel: "用户明确时间范围",
+      explicitRange: true,
+    };
+  }
+  return {
+    currentDate: now.toISOString().slice(0, 10),
+    strictWindowHours: today ? 24 : 72,
+    fallbackWindowDays: today ? 2 : 7,
+    maxNewsAgeDays: today ? 3 : 7,
+    requestedFreshness: today ? "today" : "default_recent",
+    freshnessWindowLabel: today ? "近 24-48 小时" : "近几天到近一周",
+    explicitRange: false,
+  };
+};
+
+export const assessNewsSourceFreshness = (
+  source: WebSource,
+  policy: NewsFreshnessPolicy,
+  now = new Date(),
+): Pick<WebSource, "sourcePublishedAt" | "sourceAgeHours" | "sourceAgeDays" | "freshnessStatus" | "staleReason"> => {
+  const date = parseSourceDateHint(source);
+  if (!date) {
+    return {
+      freshnessStatus: "undated",
+      staleReason: "no published date available",
+    };
+  }
+  const ageHours = Math.max(0, (now.getTime() - date.getTime()) / (60 * 60 * 1000));
+  const ageDays = ageHours / 24;
+  let freshnessStatus: NewsSourceFreshnessStatus;
+  if (ageHours <= 24) freshnessStatus = "fresh_today";
+  else if (ageHours <= 48) freshnessStatus = "fresh_yesterday";
+  else if (ageHours <= policy.strictWindowHours) freshnessStatus = "fresh_72h";
+  else if (ageDays <= policy.maxNewsAgeDays) freshnessStatus = "recent_week";
+  else freshnessStatus = "stale";
+  return {
+    sourcePublishedAt: date.toISOString().slice(0, 10),
+    sourceAgeHours: Math.round(ageHours * 10) / 10,
+    sourceAgeDays: Math.round(ageDays * 10) / 10,
+    freshnessStatus,
+    staleReason: freshnessStatus === "stale"
+      ? `published ${Math.round(ageDays * 10) / 10} days before current date; max news age is ${policy.maxNewsAgeDays} days`
+      : undefined,
+  };
 };
 
 export const getWebSourceFreshnessScore = (source: WebSource): number => {
@@ -3006,6 +3096,14 @@ const scoreWebSourceRank = (
   const dateScore = getDateRankScore(source, recentInfoRequested);
   if (dateScore !== 0) reasons.push(dateScore > 0 ? "has recent date hint" : "weak or old date hint");
   score += dateScore;
+  if (recentInfoRequested && source.freshnessStatus === "stale") {
+    score -= 120;
+    reasons.push("stale news outside freshness window");
+  }
+  if (recentInfoRequested && source.freshnessStatus === "undated") {
+    score -= 12;
+    reasons.push("undated news source");
+  }
 
   if (source.excerptStatus === "fetched") {
     score += source.cacheStatus === "stale" ? 4 : 12;
@@ -3053,6 +3151,7 @@ export const rankPreparedWebSources = (
   context?: Pick<NoteChatContextPayload, "noteTitle" | "tags" | "summary" | "selectedText">,
 ): WebSource[] => {
   const recentInfoRequested = isRecentGeneralWebDecision(decision, userInput);
+  const freshnessPolicy = recentInfoRequested ? getNewsFreshnessPolicy(userInput || decision.rawQuestion || "") : undefined;
   const focus = getQueryFocusEntities(userInput || decision.rawQuestion, decision.queries);
   const focusEntities = focus.entities;
   const companySpecificNews = recentInfoRequested && focusEntities.length === 1;
@@ -3063,11 +3162,29 @@ export const rankPreparedWebSources = (
   let selectedStrongCount = 0;
   const ranked = sources
     .map((source, index) => {
-      const rank = scoreWebSourceRank(source, decision, userInput, context, 0);
+      const freshness = freshnessPolicy ? assessNewsSourceFreshness(source, freshnessPolicy) : {};
+      const sourceWithFreshness = { ...source, ...freshness };
+      const rank = scoreWebSourceRank(sourceWithFreshness, decision, userInput, context, 0);
       const relevance: WebSourceRelevance = source.relevance ?? (
         (rank.rankScore ?? 0) >= (recentInfoRequested ? 34 : 28) ? "strong" : "candidate"
       );
-      return { ...source, ...rank, relevance, index };
+      const staleForRecentNews = recentInfoRequested && freshnessPolicy && !freshnessPolicy.explicitRange && freshness.freshnessStatus === "stale";
+      const undatedLowPriority = recentInfoRequested && freshness.freshnessStatus === "undated";
+      return {
+        ...sourceWithFreshness,
+        ...rank,
+        relevance: staleForRecentNews ? "unrelated" as const : relevance,
+        selected: staleForRecentNews ? false : source.selected,
+        finalIncludedInPrompt: staleForRecentNews ? false : source.finalIncludedInPrompt,
+        injectedIntoAnswer: staleForRecentNews ? false : source.injectedIntoAnswer,
+        selectedForRoundup: staleForRecentNews ? false : source.selectedForRoundup,
+        staleReason: staleForRecentNews
+          ? freshness.staleReason ?? "news source is outside the default recent-news freshness window"
+          : undatedLowPriority
+            ? freshness.staleReason
+            : source.staleReason,
+        index,
+      };
     })
     .sort((left, right) => (right.rankScore ?? 0) - (left.rankScore ?? 0) || left.index - right.index)
     .map(({ index: _index, ...source }) => source);
@@ -3078,13 +3195,18 @@ export const rankPreparedWebSources = (
     const selectedKeys = new Set<string>();
     const selectedClusterCounts = new Map<string, number>();
     const sourceKey = (source: WebSource): string => `${source.id || source.url}`;
-    const usableNewsSources = clustered.filter((source) => source.usableEvidence === true && isNewsSourceForClustering(source));
+    const usableNewsSources = clustered.filter((source) =>
+      source.usableEvidence === true &&
+      isNewsSourceForClustering(source) &&
+      (freshnessPolicy?.explicitRange === true || (source.freshnessStatus !== "stale" && source.freshnessStatus !== "undated")),
+    );
     const clusterCount = new Set(usableNewsSources.map((source) => source.eventCluster ?? "other-ai-news")).size;
     const maxPerCluster = clusterCount <= 1 ? Math.min(3, readBudget.maxPromptSources) : 2;
     const trySelect = (source: WebSource, requireEmptyCluster: boolean) => {
       if (selectedKeys.size >= readBudget.maxPromptSources) return;
       if (source.usableEvidence !== true) return;
       const relevance = source.relevance ?? "strong";
+      if (freshnessPolicy?.explicitRange !== true && (source.freshnessStatus === "stale" || source.freshnessStatus === "undated")) return;
       if (relevance !== "strong" && (source.rankScore ?? 0) < 36) return;
       const cluster = source.eventCluster ?? "other-ai-news";
       const currentCount = selectedClusterCounts.get(cluster) ?? 0;
@@ -3104,6 +3226,7 @@ export const rankPreparedWebSources = (
       const duplicateCluster = source.usableEvidence === true &&
         isNewsSourceForClustering(source) &&
         !selected &&
+        source.freshnessStatus !== "stale" &&
         (selectedClusterCounts.get(cluster) ?? 0) >= maxPerCluster;
       return {
         ...source,
@@ -3126,6 +3249,9 @@ export const rankPreparedWebSources = (
         ? source.entityMatchStrength ?? classifyFocusEntityMatch(source, focusEntities, getWebSourceUrlParts(source).host).strength
         : undefined;
       const entityAllowed = !companySpecificNews || entityMatch === "primary" || entityMatch === "secondary";
+      const freshnessAllowed = !recentInfoRequested ||
+        freshnessPolicy?.explicitRange === true ||
+        (source.freshnessStatus !== "stale" && source.freshnessStatus !== "undated");
       const cluster = source.eventCluster ?? "other-ai-news";
       const maxPerCluster = recentInfoRequested && isNewsSourceForClustering(source) ? 2 : Number.POSITIVE_INFINITY;
       const currentClusterCount = selectedClusterCounts.get(cluster) ?? 0;
@@ -3135,7 +3261,7 @@ export const rankPreparedWebSources = (
           : selectedCandidateCount < 2 && (source.rankScore ?? 0) >= candidateThreshold
       );
       const duplicateCluster = baseSelect && currentClusterCount >= maxPerCluster;
-      const shouldSelect = baseSelect && entityAllowed && !duplicateCluster;
+      const shouldSelect = baseSelect && entityAllowed && freshnessAllowed && !duplicateCluster;
       if (shouldSelect && relevance === "strong") selectedStrongCount += 1;
       if (shouldSelect && relevance === "candidate") selectedCandidateCount += 1;
       if (shouldSelect) selectedClusterCounts.set(cluster, currentClusterCount + 1);
@@ -3152,6 +3278,7 @@ export const rankPreparedWebSources = (
         entityMatchStrength: entityMatch ?? source.entityMatchStrength,
         entityFilterApplied: companySpecificNews || source.entityFilterApplied,
         rejectedWrongEntityReason: entityAllowed ? source.rejectedWrongEntityReason : "company-specific news requires primary or secondary focus entity match",
+        staleReason: freshnessAllowed ? source.staleReason : source.staleReason ?? "news source is outside the default recent-news freshness window",
       };
     });
 };

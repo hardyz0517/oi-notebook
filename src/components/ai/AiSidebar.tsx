@@ -31,7 +31,7 @@ import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { renderMarkdownForTheme } from "@/lib/markdown";
-import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPlan, buildSearchDecision, evaluateWebSourceEvidence, getWebReadBudgetPlan, limitWebSearchQueriesForProvider, markAiQueryPlannerFallback, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, shouldUseAiQueryPlanner, validateAiSearchQueryPlan, WEB_CACHE_STATUSES, WEB_CONTENT_STATUSES, WEB_DISCOVERY_METHODS, WEB_EVIDENCE_STATUSES, WEB_PAGE_TYPES, WEB_SOURCE_EXCERPT_STATUSES, WEB_SOURCE_KINDS, WEB_SOURCE_RELIABILITIES, WEB_SOURCE_STRENGTHS, type AiSearchPlannerContext, type AiSearchPlannerState, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
+import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPlan, buildSearchDecision, evaluateWebSourceEvidence, getNewsFreshnessPolicy, getWebReadBudgetPlan, limitWebSearchQueriesForProvider, markAiQueryPlannerFallback, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, shouldUseAiQueryPlanner, validateAiSearchQueryPlan, WEB_CACHE_STATUSES, WEB_CONTENT_STATUSES, WEB_DISCOVERY_METHODS, WEB_EVIDENCE_STATUSES, WEB_PAGE_TYPES, WEB_SOURCE_EXCERPT_STATUSES, WEB_SOURCE_KINDS, WEB_SOURCE_RELIABILITIES, WEB_SOURCE_STRENGTHS, type AiSearchPlannerContext, type AiSearchPlannerState, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { createSearchPreparationDiagnostics, encodeDebugValue, formatBingDiagnostics, formatDirectDiscoveryDiagnostics, formatNewsReadDiagnostics, formatSearchPreparationDiagnostics, formatSearchPreparationDiagnosticsForDisplay, getDebugReasonLabel, getSearchStageDebugLabel, mergeSearchDebug } from "@/lib/searchDiagnostics";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
@@ -970,6 +970,21 @@ const sanitizeSourcesForStorage = (value: unknown): WebSource[] | undefined => {
         : undefined,
       freshnessScore: typeof source.freshnessScore === "number" && Number.isFinite(source.freshnessScore)
         ? source.freshnessScore
+        : undefined,
+      sourcePublishedAt: typeof source.sourcePublishedAt === "string" && source.sourcePublishedAt.trim()
+        ? source.sourcePublishedAt.trim()
+        : undefined,
+      sourceAgeHours: typeof source.sourceAgeHours === "number" && Number.isFinite(source.sourceAgeHours)
+        ? source.sourceAgeHours
+        : undefined,
+      sourceAgeDays: typeof source.sourceAgeDays === "number" && Number.isFinite(source.sourceAgeDays)
+        ? source.sourceAgeDays
+        : undefined,
+      freshnessStatus: typeof source.freshnessStatus === "string" && source.freshnessStatus.trim()
+        ? source.freshnessStatus.trim() as WebSource["freshnessStatus"]
+        : undefined,
+      staleReason: typeof source.staleReason === "string" && source.staleReason.trim()
+        ? source.staleReason.trim()
         : undefined,
       searchDiagnostics: typeof source.searchDiagnostics === "string" && source.searchDiagnostics.trim()
         ? source.searchDiagnostics.trim()
@@ -2428,7 +2443,12 @@ const isValidLocalCitationId = (citationId: string | undefined): citationId is s
   typeof citationId === "string" && /^N\d{1,2}$/.test(citationId);
 
 const getPromptCitationCandidates = (sources: WebSource[]): WebSource[] => {
-  const evidenceSources = sources.filter((source) => source.usableEvidence === true && source.evidenceStatus === "usable");
+  const evidenceSources = sources.filter((source) =>
+    source.usableEvidence === true &&
+    source.evidenceStatus === "usable" &&
+    source.injectedIntoAnswer !== false &&
+    source.finalIncludedInPrompt !== false,
+  );
   const selectedSources = evidenceSources.filter((source) => source.selected === true && source.relevance !== "unrelated");
   const candidates = selectedSources.length > 0
     ? selectedSources
@@ -2986,6 +3006,10 @@ function WebSearchSourcesCard({
                 typeof source.extractedTextChars === "number" ? `Extracted chars：${source.extractedTextChars}` : undefined,
                 typeof source.excerptChars === "number" ? `Excerpt chars：${source.excerptChars}` : undefined,
                 source.publishedAt ? `Published：${source.publishedAt}` : undefined,
+                source.sourcePublishedAt ? `Freshness date：${source.sourcePublishedAt}` : undefined,
+                source.freshnessStatus ? `Freshness：${source.freshnessStatus}` : undefined,
+                typeof source.sourceAgeDays === "number" ? `Age days：${source.sourceAgeDays}` : undefined,
+                source.staleReason ? `Stale reason：${source.staleReason}` : undefined,
                 `Strength：${source.sourceStrength ?? "rejected"}`,
                 `Usable：${source.usableEvidence === true ? "是" : "否"}`,
                 source.rejectedReason ? `拒绝原因：${source.rejectedReason}` : undefined,
@@ -4161,6 +4185,22 @@ export default function AiSidebar({
       const selectedRoundupSources = rankedSources.filter((source) => source.selectedForRoundup === true);
       const duplicateClusterDrops = rankedSources.filter((source) => source.droppedAsDuplicateCluster === true).length;
       const roundupClusterSummary = Array.from(new Set(selectedRoundupSources.map((source) => source.eventCluster).filter(Boolean))).join(",");
+      const freshnessPolicy = newsRoundup ? getNewsFreshnessPolicy(options?.userInput || activeDecision.rawQuestion || "") : undefined;
+      const staleSources = rankedSources.filter((source) => source.freshnessStatus === "stale");
+      const undatedSources = rankedSources.filter((source) => source.freshnessStatus === "undated");
+      const freshSources = rankedSources.filter((source) => source.freshnessStatus && source.freshnessStatus !== "stale" && source.freshnessStatus !== "undated");
+      const freshUsableSources = rankedSources.filter((source) =>
+        source.usableEvidence === true &&
+        source.evidenceStatus === "usable" &&
+        source.injectedIntoAnswer === true &&
+        source.freshnessStatus &&
+        source.freshnessStatus !== "stale" &&
+        source.freshnessStatus !== "undated",
+      );
+      const oldestIncludedPublishedAt = freshUsableSources
+        .map((source) => source.sourcePublishedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()[0];
       const newsClusteredSources = rankedSources.filter((source) => source.eventCluster);
       const newsClusterIds = Array.from(new Set(newsClusteredSources.map((source) => source.eventCluster).filter(Boolean)));
       const selectedClusterIds = Array.from(new Set(rankedSources
@@ -4195,6 +4235,20 @@ export default function AiSidebar({
           `excerptChars=${excerptResults.reduce((sum, result) => sum + (result.excerpt?.length ?? 0), 0)}`,
           `contentStatusMix=${encodeDebugValue(summarizeCounts(rankedSources.map((source) => source.contentStatus)))}`,
           `excerptQualityMix=${encodeDebugValue(summarizeCounts(rankedSources.map((source) => source.excerptQuality)))}`,
+          freshnessPolicy ? `currentDate=${freshnessPolicy.currentDate}` : undefined,
+          freshnessPolicy ? `newsFreshnessPolicy=${freshnessPolicy.requestedFreshness}` : undefined,
+          freshnessPolicy ? `strictWindowHours=${freshnessPolicy.strictWindowHours}` : undefined,
+          freshnessPolicy ? `fallbackWindowDays=${freshnessPolicy.fallbackWindowDays}` : undefined,
+          freshnessPolicy ? `maxNewsAgeDays=${freshnessPolicy.maxNewsAgeDays}` : undefined,
+          freshnessPolicy ? `freshnessWindowLabel=${encodeDebugValue(freshnessPolicy.freshnessWindowLabel)}` : undefined,
+          "freshnessFilterApplied=yes",
+          `freshSourceCount=${freshSources.length}`,
+          `staleSourceCount=${staleSources.length}`,
+          `undatedSourceCount=${undatedSources.length}`,
+          `staleRejectedCount=${staleSources.filter((source) => source.injectedIntoAnswer === false || source.finalIncludedInPrompt === false).length}`,
+          `freshUsableEvidenceCount=${freshUsableSources.length}`,
+          `oldestIncludedPublishedAt=${oldestIncludedPublishedAt ?? "none"}`,
+          `staleRejectedSamples=${encodeDebugValue(staleSources.slice(0, 4).map((source) => `${source.title}:${source.sourcePublishedAt ?? source.dateHint ?? "unknown"}`).join(" | ") || "none")}`,
           `urlReaderFailures=${encodeDebugValue(rankedSources.filter((source) => source.rejectedReason || source.extractionFailureReason || source.needsJsReason || source.blockedReason).slice(0, 4).map((source) => `${source.title}:${source.rejectedReason ?? source.extractionFailureReason ?? source.needsJsReason ?? source.blockedReason}`).join(" | ") || "none")}`,
           `queryDiversification=${encodeDebugValue(activeDecision.queries.length > 1 ? activeDecision.queries.join(" / ") : "single")}`,
           activeDecision.sourceStrategy?.droppedTargetedQueries && activeDecision.sourceStrategy.droppedTargetedQueries.length > 0

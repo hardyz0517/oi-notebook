@@ -279,7 +279,7 @@ pub struct AiSearchQueryPlan {
     pub confidence: f64,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchResult {
     pub id: String,
@@ -309,6 +309,16 @@ pub struct WebSearchResult {
     pub date_hint: Option<String>,
     #[serde(default)]
     pub freshness_score: Option<i64>,
+    #[serde(default)]
+    pub source_published_at: Option<String>,
+    #[serde(default)]
+    pub source_age_hours: Option<f64>,
+    #[serde(default)]
+    pub source_age_days: Option<f64>,
+    #[serde(default)]
+    pub freshness_status: Option<String>,
+    #[serde(default)]
+    pub stale_reason: Option<String>,
     #[serde(default)]
     pub search_diagnostics: Option<String>,
     #[serde(default)]
@@ -2304,6 +2314,28 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             .unwrap_or_else(|| "unknown".to_string());
         let selected_for_roundup = source.selected_for_roundup.unwrap_or(false);
         let dropped_as_duplicate_cluster = source.dropped_as_duplicate_cluster.unwrap_or(false);
+        let source_published_at = source
+            .source_published_at
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("none");
+        let source_age_days = source
+            .source_age_days
+            .map(|value| format!("{value:.1}"))
+            .unwrap_or_else(|| "unknown".to_string());
+        let freshness_status = source
+            .freshness_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown");
+        let stale_reason = source
+            .stale_reason
+            .as_deref()
+            .map(truncate_search_context_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "none".to_string());
         let source_origin = if source.source_kind.as_deref() == Some("explicit_url") {
             "user-provided explicit public URL"
         } else if source.is_constructed == Some(true) {
@@ -2332,7 +2364,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         citation_ids.push(citation_id.clone());
 
         entries.push(format!(
-            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster label: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nFinal URL host: {}\nRead status: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
+            "[{}]\nCitation ID: {}\nCitation marker to use in answer: [[{}]]\nSource id: {}\nTitle: {}\nSite: {}\nURL: {}\nSnippet: {}\nSource origin: {}\nConstructed reason: {}\nDiscovery method: {}\nDate hint: {}\nSource published at: {}\nSource age days: {}\nFreshness status: {}\nStale reason: {}\nNews-like: {}\nEvidence status: {}\nUsable evidence: {}\nInjected into answer: {}\nPage type: {}\nContent status: {}\nSource strength: {}\nEvidence reason: {}\nEvent cluster: {}\nEvent cluster label: {}\nEvent cluster reason: {}\nEvent cluster size: {}\nSelected for roundup: {}\nDropped as duplicate cluster: {}\nSource type: {}\nReliability: {} ({})\nReliability reason: {}\nRelevance: {} ({})\nRelevance reason: {}\nRank score: {}\nRank reason: {}\nCache status: {}\nCached at: {}\nFinal URL host: {}\nRead status: {}\nWeb excerpt status: {}\nWeb excerpt quality: {}\nWeb excerpt extractor: {}\nWeb excerpt reason: {}\nCode blocks truncated: {}\nWeb excerpt error: {}\nWeb excerpt: {}",
             citation_id,
             citation_id,
             citation_id,
@@ -2345,6 +2377,10 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
             constructed_reason,
             discovery_method,
             date_hint,
+            source_published_at,
+            source_age_days,
+            freshness_status,
+            stale_reason,
             news_like,
             evidence_status,
             usable_evidence,
@@ -2408,6 +2444,7 @@ You may use these summaries to answer, but follow these rules strictly:\n\
 - If Cache status is stale, treat that source as potentially outdated and state time-sensitive claims cautiously.\n\
 - Sources are already ordered by relevance, reliability, freshness, quality, and excerpt availability. Prefer higher-ranked sources when deciding what to use, and avoid relying on weak candidate sources unless they contain concrete evidence.\n\
 - For time-sensitive or news-like questions, the search results may be incomplete. Pay attention to explicit publication dates or date hints in titles/snippets/excerpts; if a source lacks dates, do not present its claims as definitely latest.\n\
+- For default recent/latest/news questions, treat Freshness status stale as background only, not a main news item. Do not describe stale sources as current news. Treat undated sources cautiously and do not use them to claim latest news unless other fresh dated sources support the point.\n\
 - For recent/news questions, if there are no fetched, clearly news-like recent web sources in this context, do not answer from model memory or historical knowledge. Do not mention old training cutoffs or substitute older events; say that no sufficiently recent public source was successfully read.\n\
 - If the only relevant source is a constructed official problem-page link, acknowledge the official page was identified but say the search result summaries are insufficient to summarize editorials, discussions, or common pitfalls.\n\
 - Strongly related sources may be used cautiously for the target problem. Candidate or related-algorithm sources are only background algorithm material and must not be presented as target-problem-specific evidence.\n\
@@ -4449,6 +4486,11 @@ fn brave_result_to_web_source(result: BraveWebResult) -> Option<WebSearchResult>
         search_stage: Some("api".to_string()),
         date_hint: None,
         freshness_score: None,
+        source_published_at: None,
+        source_age_hours: None,
+        source_age_days: None,
+        freshness_status: None,
+        stale_reason: None,
         search_diagnostics: None,
         news_like: None,
         filtered_reason: None,
@@ -4548,6 +4590,11 @@ fn bocha_result_to_web_source(result: BochaWebResult) -> Option<WebSearchResult>
         search_stage: Some("api".to_string()),
         date_hint: None,
         freshness_score: None,
+        source_published_at: None,
+        source_age_hours: None,
+        source_age_days: None,
+        freshness_status: None,
+        stale_reason: None,
         search_diagnostics: None,
         news_like: None,
         filtered_reason: None,
@@ -5190,6 +5237,11 @@ fn bing_result_to_web_source(
         search_stage: Some(stage.to_string()),
         date_hint,
         freshness_score: None,
+        source_published_at: None,
+        source_age_hours: None,
+        source_age_days: None,
+        freshness_status: None,
+        stale_reason: None,
         search_diagnostics: None,
         news_like: None,
         filtered_reason: None,
@@ -8420,6 +8472,11 @@ fn finish_web_excerpt_result(
             search_stage: None,
             date_hint: None,
             freshness_score: None,
+            source_published_at: None,
+            source_age_hours: None,
+            source_age_days: None,
+            freshness_status: None,
+            stale_reason: None,
             search_diagnostics: None,
             news_like: None,
             filtered_reason: None,
@@ -11055,6 +11112,145 @@ fn explicit_url_path_detected(query: &str) -> bool {
 }
 
 #[derive(Debug, Clone)]
+struct NewsFreshnessSelfCheckSource {
+    id: &'static str,
+    published_at: Option<&'static str>,
+}
+
+fn freshness_age_days(today: &str, published_at: &str) -> Option<i64> {
+    let parse = |value: &str| -> Option<(i32, i32, i32)> {
+        let mut parts = value.split('-');
+        Some((
+            parts.next()?.parse::<i32>().ok()?,
+            parts.next()?.parse::<i32>().ok()?,
+            parts.next()?.parse::<i32>().ok()?,
+        ))
+    };
+    let ordinal = |(year, month, day): (i32, i32, i32)| -> i64 {
+        let mut total = 0i64;
+        for y in 1970..year {
+            total += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 366 } else { 365 };
+        }
+        let month_days = [31, if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        for index in 0..(month - 1).max(0) as usize {
+            total += month_days.get(index).copied().unwrap_or(30) as i64;
+        }
+        total + day as i64
+    };
+    Some(ordinal(parse(today)?) - ordinal(parse(published_at)?))
+}
+
+fn classify_news_freshness_status(today: &str, published_at: Option<&str>, explicit_range: bool) -> (&'static str, bool) {
+    if explicit_range {
+        return ("explicit_range_allowed", true);
+    }
+    let Some(published_at) = published_at else {
+        return ("undated", false);
+    };
+    let Some(age_days) = freshness_age_days(today, published_at) else {
+        return ("undated", false);
+    };
+    if age_days <= 0 {
+        ("fresh_today", true)
+    } else if age_days <= 1 {
+        ("fresh_yesterday", true)
+    } else if age_days <= 3 {
+        ("fresh_72h", true)
+    } else if age_days <= 7 {
+        ("recent_week", true)
+    } else {
+        ("stale", false)
+    }
+}
+
+fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
+    let today = "2026-05-21";
+    let default_sources = vec![
+        NewsFreshnessSelfCheckSource { id: "may21", published_at: Some("2026-05-21") },
+        NewsFreshnessSelfCheckSource { id: "may20", published_at: Some("2026-05-20") },
+        NewsFreshnessSelfCheckSource { id: "may17", published_at: Some("2026-05-17") },
+        NewsFreshnessSelfCheckSource { id: "apr16", published_at: Some("2026-04-16") },
+        NewsFreshnessSelfCheckSource { id: "undated", published_at: None },
+    ];
+    let classified = default_sources
+        .iter()
+        .map(|source| {
+            let (status, allowed) = classify_news_freshness_status(today, source.published_at, false);
+            json!({
+                "id": source.id,
+                "publishedAt": source.published_at.unwrap_or("none"),
+                "freshnessStatus": status,
+                "mainNewsAllowed": allowed,
+            })
+        })
+        .collect::<Vec<_>>();
+    let stale_rejected = classify_news_freshness_status(today, Some("2026-04-16"), false) == ("stale", false);
+    let recent_week_kept = classify_news_freshness_status(today, Some("2026-05-17"), false) == ("recent_week", true);
+    let explicit_month_allows_april = classify_news_freshness_status(today, Some("2026-04-16"), true).1;
+    let undated_not_primary = !classify_news_freshness_status(today, None, false).1;
+    let mut failures = Vec::new();
+    if !stale_rejected {
+        failures.push("April 16 source was not rejected as stale for default recent news".to_string());
+    }
+    if !recent_week_kept {
+        failures.push("May 17 source was not retained as recent_week within fallback window".to_string());
+    }
+    if !explicit_month_allows_april {
+        failures.push("explicit April query did not allow April source".to_string());
+    }
+    if !undated_not_primary {
+        failures.push("undated source was allowed as primary latest news".to_string());
+    }
+    let pass = failures.is_empty();
+    NotexSearchSelfCheckCaseResult {
+        query: "synthetic news freshness policy for 2026-05-21".to_string(),
+        expected_category: "freshness_policy".to_string(),
+        actual_intent: "news_recent".to_string(),
+        search_mode: "news_recent".to_string(),
+        search_mode_reason: "news_or_recent_intent".to_string(),
+        mode_guards: vec!["news_registry_requires_mode".to_string(), "freshness_window_applied".to_string()],
+        allow_news_registry: true,
+        allow_bing_fallback: true,
+        allow_local_index: false,
+        prefer_url_reader: true,
+        vertical: "news".to_string(),
+        freshness: "news".to_string(),
+        news_registry_triggered: true,
+        news_clustering_triggered: true,
+        company_specific_news: false,
+        query_focus_entities: Vec::new(),
+        focus_entity_source: "none".to_string(),
+        entity_filter_applied: false,
+        rejected_wrong_entity_count: 0,
+        query_diversification: vec!["AI news".to_string()],
+        dropped_query_diversification: Vec::new(),
+        selected_news_sources: vec!["may21".to_string(), "may20".to_string(), "may17".to_string()],
+        bing_fallback_planned: true,
+        local_search_triggered: false,
+        local_result_count: 0,
+        displayed_local_source_count: 0,
+        has_algorithm_term_matched_re: false,
+        has_post_navigation_false_positive: false,
+        explicit_url_path_used: false,
+        cluster_count: 3,
+        selected_cluster_count: 3,
+        diversity_applied: true,
+        single_cluster_warning: false,
+        pass,
+        reason: if pass { "pass".to_string() } else { failures.join("; ") },
+        raw_diagnostics: json!({
+            "currentDate": today,
+            "strictWindowHours": 72,
+            "fallbackWindowDays": 7,
+            "maxNewsAgeDays": 7,
+            "defaultRecent": classified,
+            "aprilExplicitRangeAllowed": explicit_month_allows_april,
+            "undatedPrimaryAllowed": !undated_not_primary,
+        }),
+    }
+}
+
+#[derive(Debug, Clone)]
 struct SearchModeSelfCheckDecision {
     mode: String,
     reason: String,
@@ -11301,6 +11497,7 @@ pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckR
                 explicit_url_path_detected(query),
             )
         },
+        build_news_freshness_self_check_case(),
     ];
     let passed = cases.iter().filter(|case| case.pass).count();
     let total = cases.len();

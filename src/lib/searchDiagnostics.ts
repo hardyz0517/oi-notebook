@@ -98,6 +98,20 @@ export type NewsReadBudgetDiagnostics = UrlReaderDiagnostics & EvidenceDiagnosti
   queryDiversification?: string;
   droppedQueryDiversification?: string;
   droppedQueryReason?: string;
+  currentDate?: string;
+  newsFreshnessPolicy?: string;
+  strictWindowHours?: string;
+  fallbackWindowDays?: string;
+  maxNewsAgeDays?: string;
+  freshnessWindowLabel?: string;
+  freshnessFilterApplied?: string;
+  freshSourceCount?: string;
+  staleSourceCount?: string;
+  undatedSourceCount?: string;
+  staleRejectedCount?: string;
+  freshUsableEvidenceCount?: string;
+  oldestIncludedPublishedAt?: string;
+  staleRejectedSamples?: string;
   eventClusterCount?: string;
   selectedRoundupSources?: string;
   duplicateClusterDrops?: string;
@@ -511,6 +525,20 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
     queryDiversification: lookupDebugField(parts, "queryDiversification"),
     droppedQueryDiversification: lookupDebugField(parts, "droppedQueryDiversification"),
     droppedQueryReason: lookupDebugField(parts, "droppedQueryReason"),
+    currentDate: lookupDebugField(parts, "currentDate"),
+    newsFreshnessPolicy: lookupDebugField(parts, "newsFreshnessPolicy"),
+    strictWindowHours: lookupDebugField(parts, "strictWindowHours"),
+    fallbackWindowDays: lookupDebugField(parts, "fallbackWindowDays"),
+    maxNewsAgeDays: lookupDebugField(parts, "maxNewsAgeDays"),
+    freshnessWindowLabel: lookupDebugField(parts, "freshnessWindowLabel"),
+    freshnessFilterApplied: lookupDebugField(parts, "freshnessFilterApplied"),
+    freshSourceCount: lookupDebugField(parts, "freshSourceCount"),
+    staleSourceCount: lookupDebugField(parts, "staleSourceCount"),
+    undatedSourceCount: lookupDebugField(parts, "undatedSourceCount"),
+    staleRejectedCount: lookupDebugField(parts, "staleRejectedCount"),
+    freshUsableEvidenceCount: lookupDebugField(parts, "freshUsableEvidenceCount"),
+    oldestIncludedPublishedAt: lookupDebugField(parts, "oldestIncludedPublishedAt"),
+    staleRejectedSamples: lookupDebugField(parts, "staleRejectedSamples"),
     eventClusterCount: lookupDebugField(parts, "eventClusterCount"),
     selectedRoundupSources: lookupDebugField(parts, "selectedRoundupSources"),
     duplicateClusterDrops: lookupDebugField(parts, "duplicateClusterDrops"),
@@ -594,6 +622,20 @@ export const formatNewsReadDiagnostics = (raw: string): string[] => {
     `excerptChars: ${diagnostics.excerptChars ?? "0"}`,
     `contentStatusMix: ${diagnostics.contentStatusMix || "none"}`,
     `excerptQualityMix: ${diagnostics.excerptQualityMix || "none"}`,
+    `currentDate: ${diagnostics.currentDate || "none"}`,
+    `newsFreshnessPolicy: ${diagnostics.newsFreshnessPolicy || "none"}`,
+    `strictWindowHours: ${diagnostics.strictWindowHours || "0"}`,
+    `fallbackWindowDays: ${diagnostics.fallbackWindowDays || "0"}`,
+    `maxNewsAgeDays: ${diagnostics.maxNewsAgeDays || "0"}`,
+    `freshnessWindowLabel: ${diagnostics.freshnessWindowLabel || "none"}`,
+    `freshnessFilterApplied: ${diagnostics.freshnessFilterApplied || "no"}`,
+    `freshSourceCount: ${diagnostics.freshSourceCount ?? "0"}`,
+    `staleSourceCount: ${diagnostics.staleSourceCount ?? "0"}`,
+    `undatedSourceCount: ${diagnostics.undatedSourceCount ?? "0"}`,
+    `staleRejectedCount: ${diagnostics.staleRejectedCount ?? "0"}`,
+    `freshUsableEvidenceCount: ${diagnostics.freshUsableEvidenceCount ?? "0"}`,
+    `oldestIncludedPublishedAt: ${diagnostics.oldestIncludedPublishedAt || "none"}`,
+    `staleRejectedSamples: ${diagnostics.staleRejectedSamples || "none"}`,
     `urlReaderFailures: ${diagnostics.urlReaderFailures || "none"}`,
     `queryDiversification: ${diagnostics.queryDiversification || "single"}`,
     ...(diagnostics.droppedQueryDiversification ? [`droppedQueryDiversification: ${diagnostics.droppedQueryDiversification}`] : []),
