@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "oi-notebook",
-        "width": 1280,
-        "height": 780,
+        "width": 1520,
+        "height": 920,
         "minWidth": 1120,
-        "minHeight": 700,
+        "minHeight": 720,
         "decorations": false
       },
       {

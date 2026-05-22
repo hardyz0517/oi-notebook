@@ -6,4 +6,7 @@ export interface NoteFileInfo {
   path: string;
   /** ISO 8601 / RFC 3339 格式的最后修改时间，如 "2026-04-24T10:00:00+00:00" */
   modified: string;
+  /** true 表示这是 notes/ 下的目录节点，用于文件树展示和文件夹操作。 */
+  isDirectory?: boolean;
+  displayTitle?: string;
 }

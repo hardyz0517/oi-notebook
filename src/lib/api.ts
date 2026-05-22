@@ -1082,6 +1082,36 @@ export async function renameNote(
   }
 }
 
+export async function createNoteFolder(relativePath: string): Promise<void> {
+  try {
+    await invoke<void>("create_note_folder", { relativePath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function renameNoteFolder(
+  oldRelativePath: string,
+  newRelativePath: string,
+): Promise<void> {
+  try {
+    await invoke<void>("rename_note_folder", {
+      oldRelativePath,
+      newRelativePath,
+    });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function deleteNoteFolder(relativePath: string): Promise<void> {
+  try {
+    await invoke<void>("delete_note_folder", { relativePath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 /**
  * 在默认浏览器中打开本地 Astro 博客。
  * 对应 Rust 命令：open_blog

@@ -1,68 +1,44 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Folder, FolderOpen, Pencil, Trash2 } from "lucide-react";
+﻿import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, FileText, Folder, FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NoteFileInfo } from "@/types/note";
 
 interface FileTreeProps {
   files: NoteFileInfo[];
   activeFilePath: string | null;
+  activeDirectoryPath: string | null;
+  rootCollapsed: boolean;
+  createFolderRequest: { parentPath: string; requestId: number } | null;
   onSelectFile: (path: string) => void;
-  onDeleteFile: (path: string) => void;
-  onRenameFile: (path: string) => void;
+  onSelectDirectory: (path: string) => void;
+  onClearSelection: () => void;
+  onCreateFolder: (parentPath: string, name: string) => Promise<string>;
+  onDeleteItem: (path: string, isDirectory: boolean) => void;
+  onRenameItem: (path: string, isDirectory: boolean) => void;
 }
 
-function stripMdExtension(name: string): string {
-  return name.endsWith(".md") ? name.slice(0, -3) : name;
+interface TreeNode {
+  name: string;
+  path: string;
+  displayTitle?: string;
+  isDirectory: boolean;
+  modified: string;
+  children: TreeNode[];
 }
-
-type GroupKey = "tricks" | "problems" | "luogu" | "inbox" | "other";
-
-const GROUP_ORDER: GroupKey[] = ["tricks", "problems", "luogu", "inbox", "other"];
-const GROUP_META: Record<GroupKey, { label: string; directory: string; emptyText: string }> = {
-  tricks: {
-    label: "\u6280\u5de7",
-    directory: "tricks",
-    emptyText: "\u8fd8\u6ca1\u6709\u624b\u5199\u6280\u5de7\u7b14\u8bb0",
-  },
-  problems: {
-    label: "\u9898\u89e3",
-    directory: "problems",
-    emptyText: "\u8fd8\u6ca1\u6709\u9898\u89e3\u7b14\u8bb0",
-  },
-  luogu: {
-    label: "\u6d1b\u8c37",
-    directory: "luogu",
-    emptyText: "\u8fd8\u6ca1\u6709\u6d1b\u8c37\u540c\u6b65\u7b14\u8bb0",
-  },
-  inbox: {
-    label: "\u6536\u4ef6\u7bb1",
-    directory: "inbox",
-    emptyText: "\u8fd8\u6ca1\u6709\u901f\u8bb0",
-  },
-  other: {
-    label: "\u5176\u4ed6",
-    directory: "misc",
-    emptyText: "\u6682\u65e0\u5176\u4ed6\u7b14\u8bb0",
-  },
-};
 
 const COLLAPSED_FOLDERS_STORAGE_KEY = "oi-notebook.collapsedFolders";
+const STANDARD_DIRECTORY_ORDER = ["tricks", "problems", "luogu", "inbox"];
+const TREE_DEPTH_INDENT = 11;
+const FOLDER_ROW_LEFT = 1;
+const FILE_ROW_LEFT = 18;
 
-interface FileGroup {
-  id: string;
-  label: string;
-  directory: string;
-  emptyText: string;
-  files: NoteFileInfo[];
+function stripMdExtension(name: string): string {
+  return name.toLowerCase().endsWith(".md") ? name.slice(0, -3) : name;
 }
 
-function normalizeFolderKey(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function getTopLevelDirectory(path: string): string | null {
-  const slashIndex = path.indexOf("/");
-  return slashIndex === -1 ? null : path.slice(0, slashIndex);
+function getNodeDisplayTitle(node: TreeNode): string {
+  if (node.isDirectory) return node.name;
+  return node.displayTitle?.trim() || stripMdExtension(node.name);
 }
 
 function readStoredStringArray(key: string): string[] {
@@ -79,54 +55,114 @@ function readStoredStringArray(key: string): string[] {
   }
 }
 
-function buildGroups(files: NoteFileInfo[]): FileGroup[] {
-  const standardGroups: FileGroup[] = GROUP_ORDER
-    .filter((key) => key !== "other")
-    .map((key) => ({
-      id: key,
-      label: GROUP_META[key].label,
-      directory: GROUP_META[key].directory,
-      emptyText: GROUP_META[key].emptyText,
-      files: [],
-    }));
-  const otherGroup: FileGroup = {
-    id: "other",
-    label: GROUP_META.other.label,
-    directory: GROUP_META.other.directory,
-    emptyText: GROUP_META.other.emptyText,
-    files: [],
+function makeDirectoryNode(path: string): TreeNode {
+  const name = path.split("/").pop() ?? path;
+  return {
+    name,
+    path,
+    isDirectory: true,
+    modified: "",
+    children: [],
+  };
+}
+
+function compareNodes(a: TreeNode, b: TreeNode): number {
+  if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+
+  const aTop = !a.path.includes("/") ? STANDARD_DIRECTORY_ORDER.indexOf(a.path) : -1;
+  const bTop = !b.path.includes("/") ? STANDARD_DIRECTORY_ORDER.indexOf(b.path) : -1;
+  if (aTop !== -1 || bTop !== -1) {
+    if (aTop === -1) return 1;
+    if (bTop === -1) return -1;
+    if (aTop !== bTop) return aTop - bTop;
+  }
+
+  return a.name.localeCompare(b.name, "zh-CN", { sensitivity: "base" });
+}
+
+function buildTree(entries: NoteFileInfo[]): TreeNode[] {
+  const root: TreeNode[] = [];
+  const directories = new Map<string, TreeNode>();
+
+  const ensureDirectory = (path: string): TreeNode => {
+    const normalized = path.replace(/\/+$/g, "");
+    const existing = directories.get(normalized);
+    if (existing) return existing;
+
+    const node = makeDirectoryNode(normalized);
+    directories.set(normalized, node);
+    const slashIndex = normalized.lastIndexOf("/");
+    if (slashIndex === -1) {
+      root.push(node);
+    } else {
+      ensureDirectory(normalized.slice(0, slashIndex)).children.push(node);
+    }
+    return node;
   };
 
-  const standardByDirectory = new Map<string, FileGroup>(
-    standardGroups.map((group) => [normalizeFolderKey(group.directory), group]),
-  );
-
-  for (const file of files) {
-    const dir = getTopLevelDirectory(file.path);
-    const normalizedDir = dir === null ? "" : normalizeFolderKey(dir);
-    const standardGroup = standardByDirectory.get(normalizedDir);
-    if (standardGroup) {
-      standardGroup.files.push(file);
+  for (const entry of entries) {
+    const path = entry.path.replace(/\\/g, "/").replace(/\/+$/g, "");
+    if (!path) continue;
+    if (entry.isDirectory) {
+      const node = ensureDirectory(path);
+      node.name = entry.name;
+      node.modified = entry.modified;
       continue;
     }
 
-    otherGroup.files.push(file);
+    const slashIndex = path.lastIndexOf("/");
+    const fileNode: TreeNode = {
+      name: entry.name,
+      path,
+      displayTitle: entry.displayTitle,
+      isDirectory: false,
+      modified: entry.modified,
+      children: [],
+    };
+
+    if (slashIndex === -1) {
+      root.push(fileNode);
+    } else {
+      ensureDirectory(path.slice(0, slashIndex)).children.push(fileNode);
+    }
   }
 
-  return [...standardGroups, otherGroup].filter((group) => group.id !== "other" || group.files.length > 0);
+  const sortBranch = (nodes: TreeNode[]) => {
+    nodes.sort(compareNodes);
+    for (const node of nodes) sortBranch(node.children);
+  };
+  sortBranch(root);
+
+  return root;
+}
+
+function hasActiveDescendant(node: TreeNode, activeFilePath: string | null): boolean {
+  if (!activeFilePath) return false;
+  if (!node.isDirectory) return node.path === activeFilePath;
+  return activeFilePath === node.path || activeFilePath.startsWith(`${node.path}/`);
 }
 
 export default function FileTree({
   files,
   activeFilePath,
+  activeDirectoryPath,
+  rootCollapsed,
+  createFolderRequest,
   onSelectFile,
-  onDeleteFile,
-  onRenameFile,
+  onSelectDirectory,
+  onClearSelection,
+  onCreateFolder,
+  onDeleteItem,
+  onRenameItem,
 }: FileTreeProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     () => new Set(readStoredStringArray(COLLAPSED_FOLDERS_STORAGE_KEY)),
   );
-  const groups = useMemo(() => buildGroups(files), [files]);
+  const [inlineFolderParent, setInlineFolderParent] = useState<string | null>(null);
+  const [inlineFolderName, setInlineFolderName] = useState("");
+  const [inlineFolderError, setInlineFolderError] = useState<string | null>(null);
+  const inlineInputRef = useRef<HTMLInputElement | null>(null);
+  const tree = useMemo(() => buildTree(files), [files]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -135,121 +171,270 @@ export default function FileTree({
     );
   }, [collapsedFolders]);
 
-  const toggleFolder = (folderId: string) => {
+  useEffect(() => {
+    if (!createFolderRequest) return;
+    const parentPath = createFolderRequest.parentPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    setInlineFolderParent(parentPath);
+    setInlineFolderName("");
+    setInlineFolderError(null);
     setCollapsedFolders((current) => {
       const next = new Set(current);
-      if (next.has(folderId)) {
-        next.delete(folderId);
+      if (parentPath) {
+        const parts = parentPath.split("/");
+        for (let index = 0; index < parts.length; index += 1) {
+          next.delete(parts.slice(0, index + 1).join("/"));
+        }
+      }
+      return next;
+    });
+    if (parentPath) {
+      onSelectDirectory(parentPath);
+    } else {
+      onSelectDirectory("");
+    }
+  }, [createFolderRequest, onSelectDirectory]);
+
+  useEffect(() => {
+    if (inlineFolderParent === null) return;
+    window.setTimeout(() => {
+      inlineInputRef.current?.focus();
+      inlineInputRef.current?.select();
+    }, 0);
+  }, [inlineFolderParent]);
+
+  const toggleFolder = (folderPath: string) => {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folderPath)) {
+        next.delete(folderPath);
       } else {
-        next.add(folderId);
+        next.add(folderPath);
       }
       return next;
     });
   };
 
-  return (
-    <div className="app-file-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden">
-      <div className="app-file-tree w-full px-1.5 py-1.5">
-        {groups.map((group, index) => {
-          const groupFiles = group.files;
-          const count = groupFiles.length;
-          const isCollapsed = collapsedFolders.has(group.id);
-          const hasActiveFile = groupFiles.some((file) => file.path === activeFilePath);
-          const FolderIcon = isCollapsed ? Folder : FolderOpen;
+  const cancelInlineFolder = () => {
+    setInlineFolderParent(null);
+    setInlineFolderName("");
+    setInlineFolderError(null);
+  };
 
-          return (
-            <section key={group.id} className={cn("app-file-group", index > 0 && "mt-2.5")}>
+  const commitInlineFolder = async () => {
+    if (inlineFolderParent === null) return;
+    const name = inlineFolderName.trim();
+    if (!name) {
+      setInlineFolderError("Folder name is required");
+      return;
+    }
+
+    try {
+      const createdPath = await onCreateFolder(inlineFolderParent, name);
+      setInlineFolderParent(null);
+      setInlineFolderName("");
+      setInlineFolderError(null);
+      if (createdPath) onSelectDirectory(createdPath);
+    } catch (error) {
+      setInlineFolderError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const renderInlineFolderInput = (parentPath: string, depth: number) => {
+    if (inlineFolderParent !== parentPath) return null;
+    return (
+      <li key={`inline-folder:${parentPath || "root"}`} className="grid gap-0.5 py-px">
+        <div
+          className="flex min-w-0 items-center rounded-[2px] border border-ring/70 bg-background px-1"
+          style={{ marginLeft: `${FILE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px`, marginRight: "3px", height: "27px" }}
+        >
+          <Folder className="mr-1 shrink-0 text-muted-foreground/95" size={16} strokeWidth={2} />
+          <input
+            ref={inlineInputRef}
+            value={inlineFolderName}
+            onChange={(event) => {
+              setInlineFolderName(event.target.value);
+              setInlineFolderError(null);
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void commitInlineFolder();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelInlineFolder();
+              }
+            }}
+            onBlur={cancelInlineFolder}
+            className="h-6 min-w-0 flex-1 bg-transparent text-[14.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
+            placeholder="New folder"
+          />
+        </div>
+        {inlineFolderError && (
+          <p
+            className="pr-2 text-[10px] leading-4 text-destructive"
+            style={{ paddingLeft: `${FILE_ROW_LEFT + 4 + depth * TREE_DEPTH_INDENT}px` }}
+          >
+            {inlineFolderError}
+          </p>
+        )}
+      </li>
+    );
+  };
+
+  const renderNode = (node: TreeNode, depth: number): ReactNode => {
+    const isCollapsed = collapsedFolders.has(node.path);
+    const isActive = node.isDirectory ? node.path === activeDirectoryPath : node.path === activeFilePath;
+    const hasActive = hasActiveDescendant(node, activeFilePath);
+    const FolderIcon = isCollapsed ? Folder : FolderOpen;
+
+    if (node.isDirectory) {
+      return (
+        <li key={`folder:${node.path}`} className="group/tree-node">
+          <div className="group relative">
+            <button
+              type="button"
+              className={cn(
+                "app-file-row app-file-folder-row relative flex w-full min-w-0 items-center border border-transparent pr-1 text-left transition-colors duration-100",
+                isActive || hasActive ? "text-accent-foreground" : "text-foreground/92",
+              )}
+              style={{ paddingLeft: `${FOLDER_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
+              data-active={isActive ? "true" : "false"}
+              onClick={() => {
+                onSelectDirectory(node.path);
+                toggleFolder(node.path);
+              }}
+              aria-expanded={!isCollapsed}
+              title={node.path}
+            >
+              <ChevronRight
+                className={cn("mr-0.5 shrink-0 transition-transform", !isCollapsed && "rotate-90")}
+                size={14}
+                strokeWidth={2.15}
+              />
+              <FolderIcon className="mr-1 shrink-0 text-muted-foreground/95" size={16} strokeWidth={2} />
+              <span className="min-w-0 truncate text-[14.5px] font-medium leading-[26px]">{node.name}</span>
+            </button>
+
+            <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <button
                 type="button"
-                className={cn(
-                  "app-file-group-header mb-0.5 flex w-full items-center justify-between rounded-sm px-1.5 text-left transition-colors hover:bg-muted/45",
-                  hasActiveFile && isCollapsed && "app-file-group-header-active",
-                )}
-                onClick={() => toggleFolder(group.id)}
-                aria-expanded={!isCollapsed}
-                title={`${isCollapsed ? "展开" : "折叠"} ${group.label}`}
+                title="Rename folder"
+                aria-label="Rename folder"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRenameItem(node.path, true);
+                }}
+                className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
               >
-                <div className="flex min-w-0 items-center gap-1 text-muted-foreground/85">
-                  <ChevronRight
-                    className={cn(
-                      "app-file-group-chevron shrink-0 transition-transform",
-                      !isCollapsed && "rotate-90",
-                    )}
-                    size={13}
-                    strokeWidth={2.35}
-                  />
-                  <FolderIcon className="app-file-group-icon shrink-0" size={16} strokeWidth={2.15} />
-                  <div className="app-file-group-label min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90">
-                    {group.label}
-                  </div>
-                </div>
-                <span className="app-file-group-count shrink-0 text-[10px] text-muted-foreground/65">{count}</span>
+                <Pencil />
               </button>
+              <button
+                type="button"
+                title="Delete folder"
+                aria-label="Delete folder"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteItem(node.path, true);
+                }}
+                className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
+              >
+                <Trash2 />
+              </button>
+            </div>
+          </div>
+          {isCollapsed ? null : (
+            <ul className="w-full space-y-px">
+              {renderInlineFolderInput(node.path, depth + 1)}
+              {node.children.length === 0 && inlineFolderParent !== node.path ? (
+                <li
+                  className="app-file-empty py-1 text-[11px] leading-4 text-muted-foreground/75"
+                  style={{ paddingLeft: `${FILE_ROW_LEFT + 1 + depth * TREE_DEPTH_INDENT}px` }}
+                >
+                  Empty folder
+                </li>
+              ) : null}
+              {node.children.map((child) => renderNode(child, depth + 1))}
+            </ul>
+          )}
+        </li>
+      );
+    }
 
-              {isCollapsed ? null : count === 0 ? (
-                <p className="app-file-empty px-7 py-1.5 text-[10px] leading-4 text-muted-foreground/75">
-                  {group.emptyText}
-                </p>
-              ) : (
-                <ul className="w-full space-y-px pl-1">
-                  {groupFiles.map((file) => {
-                    const isActive = file.path === activeFilePath;
+    return (
+      <li key={`file:${node.path}`} className="group relative">
+        <button
+          type="button"
+          onClick={() => onSelectFile(node.path)}
+          title={node.path}
+          data-active={isActive ? "true" : "false"}
+          className={cn(
+            "app-file-row relative flex w-full min-w-0 items-center border border-transparent pr-1 text-left transition-colors duration-100",
+            isActive ? "text-accent-foreground" : "text-foreground/92",
+          )}
+          style={{ paddingLeft: `${FILE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
+        >
+          <FileText className="mr-1 shrink-0 text-muted-foreground/88" size={16} strokeWidth={1.95} />
+          <span className="app-file-name min-w-0 truncate text-[14.5px] font-normal leading-[26px]">
+            {getNodeDisplayTitle(node)}
+          </span>
+        </button>
 
-                    return (
-                      <li key={file.path} className="group relative">
-                        <button
-                          type="button"
-                          onClick={() => onSelectFile(file.path)}
-                          title={file.path}
-                          data-active={isActive ? "true" : "false"}
-                          className={cn(
-                            "app-file-row relative flex w-full min-w-0 items-center rounded-sm border border-transparent py-1 pl-2.5 pr-11 text-left transition-colors duration-100",
-                            isActive
-                              ? "text-accent-foreground"
-                              : "text-foreground/92",
-                          )}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <p className="app-file-name truncate text-[12px] font-medium leading-5">
-                              {stripMdExtension(file.name)}
-                            </p>
-                          </div>
-                        </button>
+        <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <button
+            type="button"
+            title="Rename"
+            aria-label="Rename"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRenameItem(node.path, false);
+            }}
+            className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+          >
+            <Pencil />
+          </button>
+          <button
+            type="button"
+            title="Delete"
+            aria-label="Delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteItem(node.path, false);
+            }}
+            className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
+          >
+            <Trash2 />
+          </button>
+        </div>
+      </li>
+    );
+  };
 
-                        <div className="app-file-actions absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                          <button
-                            type="button"
-                            title="\u91cd\u547d\u540d"
-                            aria-label="\u91cd\u547d\u540d"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onRenameFile(file.path);
-                            }}
-                            className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
-                          >
-                            <Pencil />
-                          </button>
-                          <button
-                            type="button"
-                            title="\u5220\u9664"
-                            aria-label="\u5220\u9664"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteFile(file.path);
-                            }}
-                            className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
-                          >
-                            <Trash2 />
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-          );
-        })}
+  return (
+    <div
+      className="app-file-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden"
+      onMouseDown={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest(".app-file-row, .app-file-actions, input")) return;
+        onClearSelection();
+      }}
+    >
+      <div className="app-file-tree w-full px-1 py-1">
+        {rootCollapsed ? null : (
+          <ul className="w-full space-y-px">
+            {renderInlineFolderInput("", 0)}
+            {tree.length === 0 && inlineFolderParent !== "" ? (
+              <li
+                className="app-file-empty py-1 text-[11px] leading-4 text-muted-foreground/75"
+                style={{ paddingLeft: `${FILE_ROW_LEFT + 1}px` }}
+              >
+                No notes yet
+              </li>
+            ) : null}
+            {tree.map((node) => renderNode(node, 0))}
+          </ul>
+        )}
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ pub struct NoteFileInfo {
     pub path: String,
     /// ISO 8601 / RFC 3339 格式的最后修改时间，如 "2026-04-24T10:00:00+00:00"
     pub modified: String,
+    pub is_directory: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,6 +151,132 @@ fn safe_note_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, Stri
     }
 
     Ok(target)
+}
+
+fn has_windows_invalid_char(value: &str) -> bool {
+    value
+        .chars()
+        .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+}
+
+fn validate_note_relative_path(relative_path: &str, expect_file: bool) -> Result<String, String> {
+    let normalized = relative_path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+    if Path::new(&normalized).is_absolute()
+        || normalized.starts_with('/')
+        || relative_path.trim().starts_with('\\')
+    {
+        return Err(format!("Invalid path: {relative_path} cannot be absolute"));
+    }
+
+    let mut segments = Vec::new();
+    for segment in normalized.split('/') {
+        if segment.trim().is_empty() {
+            return Err(format!("Invalid path: {relative_path} contains an empty segment"));
+        }
+        if segment == "." || segment == ".." || segment.contains("..") {
+            return Err(format!("Invalid path: {relative_path} contains traversal"));
+        }
+        if has_windows_invalid_char(segment) {
+            return Err(format!("Invalid name: {segment} contains Windows-invalid characters"));
+        }
+        segments.push(segment);
+    }
+
+    if expect_file && !normalized.to_ascii_lowercase().ends_with(".md") {
+        return Err("Note file path must end with .md".to_string());
+    }
+
+    Ok(segments.join("/"))
+}
+
+fn validate_note_file_path(relative_path: &str) -> Result<String, String> {
+    validate_note_relative_path(relative_path, true)
+}
+
+fn validate_note_folder_path(relative_path: &str) -> Result<String, String> {
+    let normalized = validate_note_relative_path(relative_path, false)?;
+    if normalized.to_ascii_lowercase().ends_with(".md") {
+        return Err("Folder name cannot end with .md".to_string());
+    }
+    Ok(normalized)
+}
+
+fn case_fold_path(value: &Path) -> String {
+    value.to_string_lossy().replace('\\', "/").to_lowercase()
+}
+
+fn case_fold_name(value: &str) -> String {
+    value.to_lowercase()
+}
+
+fn find_case_insensitive_child(parent: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    if !parent.exists() {
+        return Ok(None);
+    }
+
+    let wanted = case_fold_name(name);
+    for entry in fs::read_dir(parent)
+        .map_err(|e| format!("Failed to read directory {}: {e}", parent.display()))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {e}"))?;
+        let entry_name = entry.file_name().to_string_lossy().to_string();
+        if case_fold_name(&entry_name) == wanted {
+            return Ok(Some(entry.path()));
+        }
+    }
+
+    Ok(None)
+}
+
+fn ensure_case_insensitive_available(
+    target_path: &Path,
+    original_path: Option<&Path>,
+) -> Result<(), String> {
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "Target path has no parent".to_string())?;
+    let name = target_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Target name is not valid UTF-8".to_string())?;
+
+    if let Some(existing) = find_case_insensitive_child(parent, name)? {
+        if let Some(original) = original_path {
+            if case_fold_path(&existing) == case_fold_path(original) {
+                return Ok(());
+            }
+        }
+        return Err(format!("A same-name item already exists in this directory: {name}"));
+    }
+
+    Ok(())
+}
+
+fn rename_path_case_safe(old_path: &Path, new_path: &Path) -> Result<(), String> {
+    if case_fold_path(old_path) == case_fold_path(new_path) && old_path != new_path {
+        let parent = old_path
+            .parent()
+            .ok_or_else(|| "Original path has no parent".to_string())?;
+        let original_name = old_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "Original name is not valid UTF-8".to_string())?;
+        let mut temp_path = parent.join(format!(".oinb-rename-{original_name}.tmp"));
+        let mut counter = 0_u32;
+        while temp_path.exists() {
+            counter += 1;
+            temp_path = parent.join(format!(".oinb-rename-{counter}-{original_name}.tmp"));
+        }
+        fs::rename(old_path, &temp_path)
+            .map_err(|e| format!("Failed to rename through temporary path: {e}"))?;
+        return fs::rename(&temp_path, new_path)
+            .map_err(|e| format!("Failed to finish case-only rename: {e}"));
+    }
+
+    fs::rename(old_path, new_path).map_err(|e| format!("Rename failed: {e}"))
 }
 
 fn validate_note_reference_path(notes_dir: &Path, relative_path: &str) -> Result<String, String> {
@@ -572,9 +699,6 @@ fn search_notes_in_dir(notes_dir: &Path, query: &str) -> Result<Vec<NoteSearchRe
     {
         let entry = entry.map_err(|e| format!("遍历 notes 目录失败: {e}"))?;
         let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
-            continue;
-        }
 
         let relative = path
             .strip_prefix(&canonical_notes_dir)
@@ -583,6 +707,10 @@ fn search_notes_in_dir(notes_dir: &Path, query: &str) -> Result<Vec<NoteSearchRe
             .to_str()
             .ok_or_else(|| format!("路径包含非 UTF-8 字符: {path:?}"))?
             .replace('\\', "/");
+
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
 
         let content =
             fs::read_to_string(path).map_err(|e| format!("读取笔记失败 ({path_str}): {e}"))?;
@@ -666,7 +794,11 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
         let path = entry.path();
 
         // 只处理普通 .md 文件，跳过子目录和其它扩展名的文件
-        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+        let is_directory = path.is_dir();
+        if !is_directory && (!path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md")) {
+            continue;
+        }
+        if is_directory && path.file_name().and_then(|n| n.to_str()) == Some("assets") {
             continue;
         }
 
@@ -699,6 +831,7 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
             name,
             path: path_str,
             modified: modified.to_rfc3339(),
+            is_directory,
         });
     }
 
@@ -723,6 +856,8 @@ pub fn read_note(relative_path: String) -> Result<String, String> {
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
+    let relative_path = validate_note_file_path(&relative_path)?;
+
     let path = safe_note_path(&notes_dir, &relative_path)?;
 
     if !path.exists() {
@@ -746,7 +881,12 @@ pub fn write_note(relative_path: String, content: String) -> Result<Option<Strin
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
+    let relative_path = validate_note_file_path(&relative_path)?;
+
     let path = safe_note_path(&notes_dir, &relative_path)?;
+    if !path.exists() {
+        ensure_case_insensitive_available(&path, None)?;
+    }
 
     // 支持 "tricks/qpow.md" 这类带子目录的路径——确保父目录存在
     if let Some(parent) = path.parent() {
@@ -854,6 +994,8 @@ pub fn delete_note(relative_path: String) -> Result<(), String> {
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
 
+    let relative_path = validate_note_file_path(&relative_path)?;
+
     let path = safe_note_path(&notes_dir, &relative_path)?;
 
     if !path.exists() {
@@ -870,25 +1012,82 @@ pub fn delete_note(relative_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn rename_note(old_relative_path: String, new_relative_path: String) -> Result<(), String> {
     let notes_dir = get_notes_dir()?;
-    fs::create_dir_all(&notes_dir).map_err(|e| format!("创建 notes 目录失败：{e}"))?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
 
+    let old_relative_path = validate_note_file_path(&old_relative_path)?;
+    let new_relative_path = validate_note_file_path(&new_relative_path)?;
     let old_path = safe_note_path(&notes_dir, &old_relative_path)?;
     let new_path = safe_note_path(&notes_dir, &new_relative_path)?;
 
+    if old_relative_path == new_relative_path {
+        return Ok(());
+    }
     if !old_path.exists() {
-        return Err(format!("原笔记不存在：{old_relative_path}"));
+        return Err(format!("Original note does not exist: {old_relative_path}"));
     }
-    if new_path.exists() {
-        return Err(format!("目标文件名已存在：{new_relative_path}"));
-    }
+    ensure_case_insensitive_available(&new_path, Some(&old_path))?;
 
-    // 支持跨子目录重命名（如 inbox/note.md → tricks/note.md）——确保目标父目录存在
     if let Some(parent) = new_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建笔记父目录失败：{e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create note parent directory: {e}"))?;
     }
 
-    fs::rename(&old_path, &new_path)
-        .map_err(|e| format!("重命名笔记失败（{old_relative_path} → {new_relative_path}）：{e}"))
+    rename_path_case_safe(&old_path, &new_path)
+        .map_err(|e| format!("Rename note failed ({old_relative_path} -> {new_relative_path}): {e}"))
+}
+
+#[tauri::command]
+pub fn create_note_folder(relative_path: String) -> Result<(), String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+
+    let relative_path = validate_note_folder_path(&relative_path)?;
+    let path = safe_note_path(&notes_dir, &relative_path)?;
+    ensure_case_insensitive_available(&path, None)?;
+
+    fs::create_dir_all(&path)
+        .map_err(|e| format!("Create folder failed ({relative_path}): {e}"))
+}
+
+#[tauri::command]
+pub fn rename_note_folder(old_relative_path: String, new_relative_path: String) -> Result<(), String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+
+    let old_relative_path = validate_note_folder_path(&old_relative_path)?;
+    let new_relative_path = validate_note_folder_path(&new_relative_path)?;
+    let old_path = safe_note_path(&notes_dir, &old_relative_path)?;
+    let new_path = safe_note_path(&notes_dir, &new_relative_path)?;
+
+    if old_relative_path == new_relative_path {
+        return Ok(());
+    }
+    if !old_path.is_dir() {
+        return Err(format!("Original folder does not exist: {old_relative_path}"));
+    }
+    ensure_case_insensitive_available(&new_path, Some(&old_path))?;
+
+    if let Some(parent) = new_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create target parent folder: {e}"))?;
+    }
+
+    rename_path_case_safe(&old_path, &new_path)
+        .map_err(|e| format!("Rename folder failed ({old_relative_path} -> {new_relative_path}): {e}"))
+}
+
+#[tauri::command]
+pub fn delete_note_folder(relative_path: String) -> Result<(), String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+
+    let relative_path = validate_note_folder_path(&relative_path)?;
+    let path = safe_note_path(&notes_dir, &relative_path)?;
+
+    if !path.is_dir() {
+        return Err(format!("Folder does not exist: {relative_path}"));
+    }
+
+    fs::remove_dir_all(&path)
+        .map_err(|e| format!("Delete folder failed ({relative_path}): {e}"))
 }
 
 #[cfg(test)]

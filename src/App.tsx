@@ -1,8 +1,12 @@
 ﻿import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FileText, FolderOpen, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
+import { history, historyKeymap } from "@codemirror/commands";
+import { markdown } from "@codemirror/lang-markdown";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type ViewUpdate } from "@codemirror/view";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,9 +23,9 @@ import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from 
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, generateNoteMetadata, polishNoteBody, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, updateLuoguLastSubmissionId, testLuoguConnection, previewLuoguSubmissionPage, syncLuoguInsights, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex } from "@/lib/api";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
-import { mergeFrontmatterFields, mergeFrontmatterMetadata, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
+import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
@@ -93,8 +97,10 @@ const SETTINGS_CENTER_DEFAULT_HEIGHT = 780;
 const SETTINGS_CENTER_MAXIMIZED_MARGIN_X = 24;
 const SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP = 56;
 const SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM = 40;
-const AI_CONFIG_MISSING_MESSAGE =
-  "AI 还没有配置：当前版本的 AI 配置保存在本机数据目录的 .oinb/config.json。release/安装版需要重新配置，请到 AI 设置填写 base_url / api_key / model。";
+const PROMPT_EDITOR_FONT_SIZE_MIN = 12;
+const PROMPT_EDITOR_FONT_SIZE_MAX = 22;
+const PROMPT_EDITOR_FONT_SIZE_DEFAULT = 14;
+const PROMPT_EDITOR_FONT_SIZE_STEP = 1;
 const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
 const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
 const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
@@ -294,8 +300,8 @@ function getResizedSettingsCenterRect(handle: SettingsResizeHandle, startRect: S
   });
 }
 
-type NewNoteDirectory = "tricks" | "problems";
-type NoteTemplateId = "blank" | "trick" | "solution";
+type DialogMode = "create" | "rename" | "create-folder";
+type NoteLocationOptionId = "root" | "current" | "tricks" | "problems" | "custom";
 type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "rules" | "account" | "manual" | "advanced";
 type LuoguImportStep = "scan" | "preview";
@@ -598,9 +604,7 @@ const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
   missingInsightStrategy: "draft",
 };
 
-function getDefaultTemplateForDirectory(directory: NewNoteDirectory): NoteTemplateId {
-  return directory === "tricks" ? "trick" : "solution";
-}
+const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
 
 function cloneAiConfig(config: AiConfig): AiConfig {
   return {
@@ -762,17 +766,10 @@ function extractCursorParagraph(markdownContent: string, cursorOffset: number | 
   return paragraphText ? { text: paragraphText, isCode: false } : null;
 }
 
-function buildNoteTemplate(templateId: NoteTemplateId, title: string): string {
-  if (templateId === "blank") return "";
-
+function buildNewNoteMarkdown(title: string, tags: string[]): string {
   const quotedTitle = quoteYamlString(title);
-  const frontmatter = `---\ntitle: ${quotedTitle}\ntags: []\ndifficulty: ""\nsource: ""\nsummary: ""\ndraft: false\n---`;
-
-  if (templateId === "trick") {
-    return `${frontmatter}\n\n## 结论\n\n\n## 适用条件\n\n\n## 例子\n\n\n## 代码\n\n\`\`\`cpp\n\n\`\`\`\n`;
-  }
-
-  return `${frontmatter}\n\n## 题意\n\n\n## 思路\n\n\n## 证明\n\n\n## 代码\n\n\`\`\`cpp\n\n\`\`\`\n\n## 复杂度\n\n\n`;
+  const tagText = tags.length > 0 ? `[${tags.map(quoteYamlString).join(", ")}]` : "[]";
+  return `---\ntitle: ${quotedTitle}\ntags: ${tagText}\ncreatedAt: ${quoteYamlString(new Date().toISOString())}\n---\n`;
 }
 
 function getErrorMessage(e: unknown): string {
@@ -1115,6 +1112,8 @@ function getInitialDeveloperMode(): boolean {
 
 function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
   const file = files.find((item) => item.path === path);
+  const title = file?.displayTitle?.trim();
+  if (title) return title;
   const name = file?.name ?? path.split("/").pop() ?? path;
   return name.replace(/\.md$/i, "") || path;
 }
@@ -1143,14 +1142,6 @@ function getInitialOpenTabsActivePath(): string | null {
   const stored = window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
   const path = stored?.trim();
   return path || null;
-}
-
-function isAiConfigMissingError(message: string): boolean {
-  return (
-    message.includes("base_url is missing") ||
-    message.includes("api_key is missing") ||
-    message.includes("model is missing")
-  );
 }
 
 interface PromptUsageInfo {
@@ -1193,6 +1184,205 @@ function SettingRow({ title, description, children, align = "center" }: { title:
     </div>
   );
 }
+
+interface PromptCodeEditorHandle {
+  focus: () => void;
+  hasFocus: () => boolean;
+  insertVariable: (variableName: string) => boolean;
+}
+
+interface PromptCodeEditorProps {
+  value: string;
+  fontSize: number;
+  disabled?: boolean;
+  readOnly?: boolean;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onFontSizeChange: (updater: (currentSize: number) => number) => void;
+}
+
+const promptEditorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    minHeight: "0",
+    backgroundColor: "transparent",
+    color: "var(--foreground)",
+    fontSize: "var(--prompt-editor-font-size, 14px)",
+  },
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": {
+    overflow: "auto",
+    fontFamily: "var(--font-mono)",
+    lineHeight: "1.55",
+    scrollbarColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent",
+    scrollbarWidth: "thin",
+  },
+  ".cm-scroller::-webkit-scrollbar": { width: "10px", height: "10px" },
+  ".cm-scroller::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+  ".cm-scroller::-webkit-scrollbar-thumb": {
+    backgroundColor: "color-mix(in oklch, var(--muted-foreground) 30%, transparent)",
+    border: "3px solid transparent",
+    backgroundClip: "content-box",
+  },
+  ".cm-scroller::-webkit-scrollbar-thumb:hover": {
+    backgroundColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    borderRight: "1px solid color-mix(in oklch, var(--border) 28%, transparent)",
+    color: "color-mix(in oklch, var(--muted-foreground) 86%, transparent)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "calc(var(--prompt-editor-font-size, 14px) * 0.86)",
+    lineHeight: "1.55",
+    userSelect: "none",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "2.35rem",
+    padding: "0 0.55rem 0 0.25rem",
+    textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
+  },
+  ".cm-content": {
+    minHeight: "100%",
+    padding: "10px 14px 18px 10px",
+    caretColor: "var(--foreground)",
+  },
+  ".cm-line": {
+    padding: "0",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "color-mix(in oklch, var(--muted) 18%, transparent)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "color-mix(in oklch, var(--muted) 16%, transparent)",
+    color: "var(--foreground)",
+  },
+  ".cm-selectionBackground": {
+    backgroundColor: "var(--editor-selection-bg-unfocused, var(--muted))",
+  },
+  "&.cm-focused .cm-selectionBackground, ::selection": {
+    backgroundColor: "var(--editor-selection-bg, var(--accent))",
+  },
+  ".cm-cursor": {
+    borderLeftColor: "var(--foreground)",
+  },
+});
+
+const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProps>(function PromptCodeEditor(
+  { value, fontSize, disabled = false, readOnly = false, onChange, onSave, onFontSizeChange },
+  ref,
+) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+  const editableCompartmentRef = useRef(new Compartment());
+
+  onChangeRef.current = onChange;
+  onSaveRef.current = onSave;
+
+  useImperativeHandle(ref, () => ({
+    focus: () => viewRef.current?.focus(),
+    hasFocus: () => viewRef.current?.hasFocus ?? false,
+    insertVariable: (variableName: string) => {
+      const view = viewRef.current;
+      if (!view) return false;
+      view.dispatch(view.state.replaceSelection(variableName));
+      view.focus();
+      return true;
+    },
+  }), []);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const editableCompartment = editableCompartmentRef.current;
+    const view = new EditorView({
+      parent: containerRef.current,
+      state: EditorState.create({
+        doc: valueRef.current,
+        extensions: [
+          markdown(),
+          lineNumbers(),
+          highlightActiveLine(),
+          highlightActiveLineGutter(),
+          EditorView.lineWrapping,
+          history(),
+          editableCompartment.of(EditorView.editable.of(!disabled && !readOnly)),
+          Prec.highest(keymap.of([
+            {
+              key: "Mod-s",
+              run: () => {
+                onSaveRef.current();
+                return true;
+              },
+            },
+          ])),
+          keymap.of(historyKeymap),
+          EditorView.domEventHandlers({
+            keydown(event) {
+              event.stopPropagation();
+              return false;
+            },
+          }),
+          EditorView.updateListener.of((update: ViewUpdate) => {
+            if (!update.docChanged) return;
+            const nextValue = update.state.doc.toString();
+            valueRef.current = nextValue;
+            onChangeRef.current(nextValue);
+          }),
+          promptEditorTheme,
+        ],
+      }),
+    });
+
+    viewRef.current = view;
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(!disabled && !readOnly)),
+    });
+  }, [disabled, readOnly]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || value === valueRef.current) return;
+    valueRef.current = value;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: value },
+    });
+  }, [value]);
+
+  const handleWheelCapture = (event: WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onFontSizeChange((currentSize) =>
+      clampNumberRange(
+        currentSize + (event.deltaY < 0 ? PROMPT_EDITOR_FONT_SIZE_STEP : -PROMPT_EDITOR_FONT_SIZE_STEP),
+        PROMPT_EDITOR_FONT_SIZE_MIN,
+        PROMPT_EDITOR_FONT_SIZE_MAX,
+      ),
+    );
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={cn("prompt-code-editor h-full min-h-0 w-full", (disabled || readOnly) && "opacity-70")}
+      style={{ "--prompt-editor-font-size": `${fontSize}px` } as CSSProperties}
+      onWheelCapture={handleWheelCapture}
+    />
+  );
+});
 
 function getPromptUsageInfo(fileName: string): PromptUsageInfo {
   if (fileName === "luogu-insight.md") {
@@ -1641,11 +1831,20 @@ export default function App() {
   }, []);
   const [isDirty, setIsDirty] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
-  const [dialogMode, setDialogMode] = useState<null | "create" | "rename">(null);
+  const [dialogMode, setDialogMode] = useState<DialogMode | null>(null);
   const [dialogValue, setDialogValue] = useState("");
-  const [newNoteDirectory, setNewNoteDirectory] = useState<NewNoteDirectory>("tricks");
-  const [newNoteTemplate, setNewNoteTemplate] = useState<NoteTemplateId>("trick");
+  const [newNoteLocationOption, setNewNoteLocationOption] = useState<NoteLocationOptionId>("current");
+  const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
+  const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
+  const [folderParentDirectory, setFolderParentDirectory] = useState("");
+  const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
+  const [activeTreeDirectoryPath, setActiveTreeDirectoryPath] = useState<string | null>(null);
+  const [activeTreeFilePath, setActiveTreeFilePath] = useState<string | null>(null);
+  const [isTreeRootCollapsed, setIsTreeRootCollapsed] = useState(false);
+  const [createFolderRequest, setCreateFolderRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
+  const [displayTitleByPath, setDisplayTitleByPath] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameTargetIsDirectory, setRenameTargetIsDirectory] = useState(false);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
   const [isPushingGit, setIsPushingGit] = useState(false);
   const [isLuoguDialogOpen, setIsLuoguDialogOpen] = useState(false);
@@ -1707,9 +1906,6 @@ export default function App() {
   const [promptContent, setPromptContent] = useState("");
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
-  const [isGeneratingNoteMetadata, setIsGeneratingNoteMetadata] = useState(false);
-  const [isPolishingNoteBody, setIsPolishingNoteBody] = useState(false);
-  const [polishedBodyPreview, setPolishedBodyPreview] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdvancedActionsOpen, setIsAdvancedActionsOpen] = useState(false);
   const [activeSettingsTarget, setActiveSettingsTarget] = useState<SettingsTarget>({ type: "category", category: "appearance" });
@@ -1718,16 +1914,9 @@ export default function App() {
   const [isSettingsCenterMaximized, setIsSettingsCenterMaximized] = useState(false);
   const [isPolishingPrompt, setIsPolishingPrompt] = useState(false);
   const [promptPolishMessage, setPromptPolishMessage] = useState<string | null>(null);
-  const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>(() => ({
-    appearance: false,
-    ai: true,
-    luogu: false,
-    blog: false,
-    data: false,
-    about: false,
-    diagnostics: false,
-    git: false,
-  }));
+  const [promptEditorFontSize, setPromptEditorFontSize] = useState(PROMPT_EDITOR_FONT_SIZE_DEFAULT);
+  const [promptEditorReturnTarget, setPromptEditorReturnTarget] = useState<SettingsTarget | null>(null);
+  const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>({});
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(getInitialDeveloperMode);
   const [searchQuery, setSearchQuery] = useState("");
   const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
@@ -1745,7 +1934,8 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsCenterPanelRef = useRef<HTMLDivElement>(null);
-  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptEditorRef = useRef<PromptCodeEditorHandle>(null);
+  const promptEditorHadFocusBeforeVariableClickRef = useRef(false);
   const settingsCenterRestoreRectRef = useRef<SettingsCenterRect | null>(null);
   const promptPolishRunRef = useRef(0);
   const searchRequestSeqRef = useRef(0);
@@ -1754,6 +1944,7 @@ export default function App() {
   const isMountedRef = useRef(true);
   const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
   const hasRestoredOpenTabsRef = useRef(false);
+  const skipNextReadForPathRef = useRef<string | null>(null);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
     frontmatterPrefix: "",
@@ -2043,6 +2234,10 @@ export default function App() {
   const appZoomLabel = `${Math.round(appZoom * 100)}%`;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
   const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
+  const selectedPromptUsage = useMemo(
+    () => getPromptUsageInfo(selectedPromptFileName),
+    [selectedPromptFileName],
+  );
   const chromeZoom = 1 + (appZoom - 1) * 0.45;
   const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
   const activeReadingDensity =
@@ -2088,27 +2283,41 @@ export default function App() {
   const dashboardNotes = useMemo(
     () =>
       [...files]
+        .filter((file) => !file.isDirectory)
         .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
         .slice(0, 6),
     [files],
   );
-  const activeNoteFile = useMemo(
-    () => files.find((file) => file.path === currentFilePath) ?? null,
-    [files, currentFilePath],
+  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  const displayFiles = useMemo<NoteFileInfo[]>(
+    () =>
+      files.map((file) => ({
+        ...file,
+        displayTitle: file.isDirectory ? undefined : displayTitleByPath[file.path]?.trim() || undefined,
+      })),
+    [displayTitleByPath, files],
   );
+  const activeNoteFile = useMemo(
+    () => displayFiles.find((file) => !file.isDirectory && file.path === currentFilePath) ?? null,
+    [displayFiles, currentFilePath],
+  );
+  const noteDirectories = useMemo(
+    () => files.filter((file) => file.isDirectory).map((file) => file.path).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" })),
+    [files],
+  );
+  const currentNoteDirectory = useMemo(() => {
+    if (!currentFilePath || !currentFilePath.includes("/")) return "";
+    return currentFilePath.slice(0, currentFilePath.lastIndexOf("/"));
+  }, [currentFilePath]);
   const openTabs = useMemo<OpenFileTab[]>(
     () =>
       openTabPaths.map((path) => ({
         kind: "file",
         path,
-        displayName: getNoteDisplayName(path, files),
-        title:
-          path === currentFilePath && frontmatter.fields.title.trim()
-            ? frontmatter.fields.title.trim()
-            : undefined,
+        displayName: getNoteDisplayName(path, displayFiles),
         dirty: path === currentFilePath && isDirty,
       })),
-    [currentFilePath, files, frontmatter.fields.title, isDirty, openTabPaths],
+    [currentFilePath, displayFiles, isDirty, openTabPaths],
   );
   const reviewTabs = useMemo<OpenReviewTab[]>(
     () =>
@@ -2179,12 +2388,12 @@ export default function App() {
   } as CSSProperties;
   const trimmedSearchQuery = searchQuery.trim();
   const searchResults = useMemo(() => {
-    if (trimmedSearchQuery === "") return buildLocalSearchResults(files, "");
+    if (trimmedSearchQuery === "") return buildLocalSearchResults(noteFiles, "");
 
-    if (searchError) return buildLocalSearchResults(files, searchQuery);
+    if (searchError) return buildLocalSearchResults(noteFiles, searchQuery);
 
     return backendSearchResults.map(toSearchResultItem);
-  }, [backendSearchResults, files, searchError, searchQuery, trimmedSearchQuery]);
+  }, [backendSearchResults, noteFiles, searchError, searchQuery, trimmedSearchQuery]);
 
   const updateAppZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setAppZoom((currentZoom) => {
@@ -2233,135 +2442,365 @@ export default function App() {
     );
   };
 
-  function validateFilename(name: string): string | null {
-    const trimmed = name.trim();
-    if (!trimmed) return "文件名不能为空";
-    // TODO(后续 Phase): 支持跨目录重命名（拖拽或对话框选目标目录）
-    if (trimmed.includes("/") || trimmed.includes("\\")) return "文件名不能包含路径分隔符";
-    if (trimmed.includes("..")) return "文件名不能包含 ..";
-    if (trimmed.toLowerCase().endsWith(".md")) return "不需要输入 .md 后缀";
-    return null;
-  }
-
-  const openCreateDialog = () => {
-    setDialogMode("create");
-    setDialogValue("");
-    setNewNoteDirectory("tricks");
-    setNewNoteTemplate(getDefaultTemplateForDirectory("tricks"));
+  const updatePromptEditorFontSize = (updater: (currentSize: number) => number) => {
+    setPromptEditorFontSize((currentSize) =>
+      clampNumberRange(updater(currentSize), PROMPT_EDITOR_FONT_SIZE_MIN, PROMPT_EDITOR_FONT_SIZE_MAX),
+    );
   };
 
-  const openRenameDialog = (path: string) => {
-    // 提取纯文件名（不含目录前缀），如 "inbox/quick-xxx.md" → "quick-xxx"
+  const normalizeFileName = (name: string): string => {
+    const trimmed = name.trim();
+    return trimmed.toLowerCase().endsWith(".md") ? trimmed : `${trimmed}.md`;
+  };
+
+  const validateNamePart = (name: string, kind: "file" | "folder"): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) return kind === "file" ? "文件名不能为空" : "文件夹名不能为空";
+    if (/[<>:"/\\|?*]/.test(trimmed)) return "名称不能包含 Windows 非法字符 < > : \" / \\ | ? *";
+    if (trimmed.includes("..")) return "名称不能包含路径穿越片段 ..";
+    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "名称不能是绝对路径";
+    return null;
+  };
+
+  const validateDirectoryPathInput = (path: string): string | null => {
+    const trimmed = path.trim();
+    if (!trimmed) return null;
+    if (/[<>:"\\|?*]/.test(trimmed)) return "目录不能包含 Windows 非法字符 < > : \" \\ | ? *";
+    if (trimmed.includes("..")) return "目录不能包含路径穿越片段 ..";
+    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "目录不能是绝对路径";
+    if (trimmed.split("/").some((part) => part.trim() === "")) return "目录不能包含空路径段";
+    return null;
+  };
+
+  const joinNotePath = (directory: string, filename: string): string => {
+    const normalizedDirectory = directory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return normalizedDirectory ? `${normalizedDirectory}/${filename}` : filename;
+  };
+
+  const getResolvedNewNoteDirectory = (): string => {
+    if (newNoteLocationOption === "root") return "";
+    if (newNoteLocationOption === "tricks") return "tricks";
+    if (newNoteLocationOption === "problems") return "problems";
+    if (newNoteLocationOption === "custom") return newNoteCustomDirectory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return currentNoteDirectory;
+  };
+
+  const findEntryCaseInsensitive = (path: string, isDirectory: boolean) => {
+    const normalized = path.toLowerCase();
+    return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
+  };
+
+  const setDisplayTitleForPath = (path: string, title: string) => {
+    const trimmed = title.trim();
+    setDisplayTitleByPath((current) => {
+      if (trimmed) {
+        if (current[path] === trimmed) return current;
+        return { ...current, [path]: trimmed };
+      }
+      if (!(path in current)) return current;
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
+  };
+
+  const updatePathReferences = (oldPath: string, newPath: string, isDirectory: boolean) => {
+    const rewritePath = (path: string) => {
+      if (isDirectory) {
+        return path === oldPath || path.startsWith(`${oldPath}/`)
+          ? `${newPath}${path.slice(oldPath.length)}`
+          : path;
+      }
+      return path === oldPath ? newPath : path;
+    };
+
+    setOpenTabPaths((current) => current.map(rewritePath));
+    setPendingFileSelection((current) => current ? { ...current, path: rewritePath(current.path) } : current);
+    setPendingAssetsByFile((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [path, assets] of Object.entries(current)) {
+        const rewritten = rewritePath(path);
+        if (rewritten !== path) changed = true;
+        next[rewritten] = [...(next[rewritten] ?? []), ...assets];
+      }
+      return changed ? next : current;
+    });
+    setDisplayTitleByPath((current) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [path, title] of Object.entries(current)) {
+        const rewritten = rewritePath(path);
+        if (rewritten !== path) changed = true;
+        next[rewritten] = title;
+      }
+      return changed ? next : current;
+    });
+    setOpenReviewTabs((current) =>
+      current.map((tab) => {
+        const rewritten = rewritePath(tab.preview.notePath);
+        return rewritten === tab.preview.notePath
+          ? tab
+          : { ...tab, preview: { ...tab.preview, notePath: rewritten } };
+      }),
+    );
+    setCurrentFilePath((current) => {
+      if (!current) return current;
+      const rewritten = rewritePath(current);
+      if (rewritten !== current) {
+        skipNextReadForPathRef.current = rewritten;
+      }
+      return rewritten;
+    });
+    setActiveWorkspaceTabId((current) => {
+      if (!current || current.startsWith("review:")) return current;
+      return rewritePath(current);
+    });
+    setActiveTreeDirectoryPath((current) => current ? rewritePath(current) : current);
+    setActiveTreeFilePath((current) => current ? rewritePath(current) : current);
+    const savedPath = savedSnapshotRef.current.path;
+    if (savedPath) {
+      const rewritten = rewritePath(savedPath);
+      if (rewritten !== savedPath) {
+        savedSnapshotRef.current = {
+          ...savedSnapshotRef.current,
+          path: rewritten,
+        };
+      }
+    }
+  };
+
+  const getDefaultTreeCreateParent = () => {
+    if (activeTreeDirectoryPath !== null) return activeTreeDirectoryPath;
+    if (activeTreeFilePath) {
+      const slashIndex = activeTreeFilePath.lastIndexOf("/");
+      return slashIndex === -1 ? "" : activeTreeFilePath.slice(0, slashIndex);
+    }
+    return "";
+  };
+
+  const openCreateDialog = () => {
+    const parentPath = getDefaultTreeCreateParent();
+    setDialogMode("create");
+    setDialogValue("");
+    setNewNoteLocationOption(parentPath ? "custom" : "root");
+    setNewNoteCustomDirectory(parentPath);
+    setNewNoteTags([]);
+    setFolderParentDirectory(parentPath);
+  };
+
+  const openCreateFolderDialog = () => {
+    setReturnToCreateAfterFolder(dialogMode === "create");
+    setDialogMode("create-folder");
+    setDialogValue("");
+    setFolderParentDirectory(dialogMode === "create" ? getResolvedNewNoteDirectory() : currentNoteDirectory);
+  };
+
+  const getDefaultFolderCreateParent = () => {
+    return getDefaultTreeCreateParent();
+  };
+
+  const requestInlineCreateFolder = () => {
+    closeDialog();
+    const parentPath = getDefaultFolderCreateParent();
+    setIsTreeRootCollapsed(false);
+    setCreateFolderRequest({ parentPath, requestId: Date.now() });
+  };
+
+  const handleSelectTreeDirectory = useCallback((path: string) => {
+    setActiveTreeDirectoryPath(path);
+    setActiveTreeFilePath(null);
+  }, []);
+
+  const handleClearTreeSelection = useCallback(() => {
+    setActiveTreeDirectoryPath(null);
+    setActiveTreeFilePath(null);
+  }, []);
+
+  const openRenameDialog = (path: string, isDirectory = false) => {
     const filename = path.split("/").pop() ?? path;
-    const baseName = filename.replace(/\.md$/i, "");
+    const baseName = isDirectory ? filename : filename.replace(/\.md$/i, "");
     setDialogMode("rename");
     setDialogValue(baseName);
     setRenameTarget(path);
+    setRenameTargetIsDirectory(isDirectory);
   };
 
   const closeDialog = () => {
     setDialogMode(null);
     setDialogValue("");
-    setNewNoteDirectory("tricks");
-    setNewNoteTemplate(getDefaultTemplateForDirectory("tricks"));
+    setNewNoteLocationOption("current");
+    setNewNoteCustomDirectory("");
+    setNewNoteTags([]);
+    setFolderParentDirectory("");
+    setReturnToCreateAfterFolder(false);
     setRenameTarget(null);
+    setRenameTargetIsDirectory(false);
   };
 
-  const updateNewNoteDirectory = (directory: NewNoteDirectory) => {
-    setNewNoteDirectory(directory);
-    setNewNoteTemplate(getDefaultTemplateForDirectory(directory));
+  const toggleNewNoteTag = (tag: string) => {
+    setNewNoteTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
   };
 
   const handleCreate = async () => {
-    const err = validateFilename(dialogValue);
-    if (err) { toast.error(err); return; }
-    const newPath = `${newNoteDirectory}/${dialogValue.trim()}.md`;
-    if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
-    // dirty 检查必须在创建文件之前——避免用户取消后留下孤儿文件
+    const fileErr = validateNamePart(dialogValue, "file");
+    if (fileErr) { toast.error(fileErr); return; }
+    const directory = getResolvedNewNoteDirectory();
+    const directoryErr = validateDirectoryPathInput(directory);
+    if (directoryErr) { toast.error(directoryErr); return; }
+
+    const filename = normalizeFileName(dialogValue);
+    const newPath = joinNotePath(directory, filename);
+    if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
+
     if (isDirty) {
       const ok = window.confirm("当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。确定吗？");
       if (!ok) return;
     }
+
     try {
-      const templateMarkdown = buildNoteTemplate(newNoteTemplate, dialogValue.trim());
-      await writeNote(newPath, templateMarkdown);
+      if (directory && !findEntryCaseInsensitive(directory, true)) {
+        await createNoteFolder(directory);
+      }
+      await writeNote(newPath, buildNewNoteMarkdown(dialogValue.trim().replace(/\.md$/i, ""), newNoteTags));
       const updated = await listNotes();
       setFiles(updated);
       closeDialog();
+      setDisplayTitleForPath(newPath, dialogValue.trim().replace(/\.md$/i, ""));
       setCurrentFilePath(newPath);
-      toast.success("已创建");
+      setActiveWorkspaceTabId(newPath);
+      setIsDirty(false);
+      toast.success("已创建空白笔记");
     } catch (e) {
-      toast.error(`创建失败: ${e}`);
+      toast.error(`创建失败: ${getErrorMessage(e)}`);
     }
   };
+
+  const handleCreateFolder = async () => {
+    const nameErr = validateNamePart(dialogValue, "folder");
+    if (nameErr) { toast.error(nameErr); return; }
+    const parentErr = validateDirectoryPathInput(folderParentDirectory);
+    if (parentErr) { toast.error(parentErr); return; }
+
+    const newPath = joinNotePath(folderParentDirectory, dialogValue.trim());
+    if (findEntryCaseInsensitive(newPath, true)) { toast.error("同目录已存在同名文件夹"); return; }
+    if (findEntryCaseInsensitive(`${newPath}.md`, false)) { toast.error("同目录已存在同名笔记"); return; }
+
+    try {
+      await createNoteFolder(newPath);
+      const updated = await listNotes();
+      setFiles(updated);
+      setNewNoteCustomDirectory(newPath);
+      setNewNoteLocationOption("custom");
+      if (returnToCreateAfterFolder) {
+        setDialogMode("create");
+        setDialogValue("");
+        setFolderParentDirectory("");
+        setReturnToCreateAfterFolder(false);
+      } else {
+        closeDialog();
+      }
+      toast.success("已创建文件夹");
+    } catch (e) {
+      toast.error(`创建文件夹失败: ${getErrorMessage(e)}`);
+    }
+  };
+
+  const handleCreateFolderAt = useCallback(async (parentPath: string, name: string) => {
+    const nameErr = validateNamePart(name, "folder");
+    if (nameErr) throw new Error(nameErr);
+    const parentErr = validateDirectoryPathInput(parentPath);
+    if (parentErr) throw new Error(parentErr);
+
+    const newPath = joinNotePath(parentPath, name.trim());
+    if (findEntryCaseInsensitive(newPath, true)) throw new Error("同目录已存在同名文件夹");
+    if (findEntryCaseInsensitive(`${newPath}.md`, false)) throw new Error("同目录已存在同名笔记");
+
+    await createNoteFolder(newPath);
+    const updated = await listNotes();
+    setFiles(updated);
+    setActiveTreeDirectoryPath(newPath);
+    toast.success("已创建文件夹");
+    return newPath;
+  }, [files]);
 
   const handleRename = async () => {
     if (!renameTarget) return;
-    const err = validateFilename(dialogValue);
-    if (err) { toast.error(err); return; }
-    // 保留原目录前缀，如 "inbox/quick-xxx.md" → "inbox/new-name.md"
+    const nameErr = validateNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
+    if (nameErr) { toast.error(nameErr); return; }
+
     const lastSlashIdx = renameTarget.lastIndexOf("/");
     const dirPrefix = lastSlashIdx === -1 ? "" : renameTarget.slice(0, lastSlashIdx + 1);
-    const newPath = `${dirPrefix}${dialogValue.trim()}.md`;
+    const normalizedName = renameTargetIsDirectory ? dialogValue.trim() : normalizeFileName(dialogValue);
+    const newPath = `${dirPrefix}${normalizedName}`;
     if (newPath === renameTarget) { closeDialog(); return; }
-    if (files.some((f) => f.path === newPath)) { toast.error("文件名已存在"); return; }
-    if (renameTarget === currentFilePath && isDirty) {
-      const ok = window.confirm("当前笔记有未保存的改动，重命名前请先保存。确定继续吗？未保存的改动将丢失。");
-      if (!ok) return;
+
+    const existing = findEntryCaseInsensitive(newPath, renameTargetIsDirectory);
+    if (existing && existing.path.toLowerCase() !== renameTarget.toLowerCase()) {
+      toast.error(renameTargetIsDirectory ? "同目录已存在同名文件夹" : "同目录已存在同名笔记");
+      return;
     }
+
     try {
-      await renameNote(renameTarget, newPath);
-      try {
-        await commitRenamedNote(renameTarget, newPath);
-        toast.success("已重命名并提交");
-      } catch (commitError) {
-        toast.warning(`重命名成功，Git 提交失败：${commitError}`);
+      if (renameTargetIsDirectory) {
+        await renameNoteFolder(renameTarget, newPath);
+      } else {
+        await renameNote(renameTarget, newPath);
+        try {
+          await commitRenamedNote(renameTarget, newPath);
+          toast.success("已重命名并提交");
+        } catch (commitError) {
+          toast.warning(`重命名成功，Git 提交失败：${getErrorMessage(commitError)}`);
+        }
       }
       const updated = await listNotes();
+      updatePathReferences(renameTarget, newPath, renameTargetIsDirectory);
       setFiles(updated);
-      setOpenTabPaths((current) => current.map((path) => (path === renameTarget ? newPath : path)));
-      if (renameTarget === currentFilePath) {
-        setCurrentFilePath(newPath);
-        setIsDirty(false);
-      }
       closeDialog();
+      if (renameTargetIsDirectory) toast.success("已重命名文件夹");
     } catch (e) {
-      toast.error(`重命名失败: ${e}`);
+      toast.error(`重命名失败: ${getErrorMessage(e)}`);
     }
   };
 
-  const handleDelete = async (path: string) => {
+  const handleDelete = async (path: string, isDirectory = false) => {
     const ok = window.confirm(`确定删除"${path}"吗？此操作不可撤销。`);
     if (!ok) return;
     try {
-      await deleteNote(path);
-      try {
-        const commitStatus = await commitDeletedNote(path);
-        if (commitStatus === "committed") {
-          toast.success("已删除并提交");
-        } else {
-          toast.success("已删除");
+      if (isDirectory) {
+        await deleteNoteFolder(path);
+      } else {
+        await deleteNote(path);
+        try {
+          const commitStatus = await commitDeletedNote(path);
+          toast.success(commitStatus === "committed" ? "已删除并提交" : "已删除");
+        } catch (commitError) {
+          toast.warning(`删除成功，Git 提交失败：${getErrorMessage(commitError)}`);
         }
-      } catch (commitError) {
-        toast.warning(`删除成功，Git 提交失败：${commitError}`);
       }
       const updated = await listNotes();
       setFiles(updated);
-      setOpenTabPaths((current) => current.filter((tabPath) => tabPath !== path));
-      if (path === currentFilePath) {
+      setOpenTabPaths((current) => current.filter((tabPath) => isDirectory ? tabPath !== path && !tabPath.startsWith(`${path}/`) : tabPath !== path));
+      if (isDirectory) {
+        setActiveTreeDirectoryPath((current) => current && (current === path || current.startsWith(`${path}/`)) ? null : current);
+      }
+      setActiveTreeFilePath((current) => current && (current === path || (isDirectory && current.startsWith(`${path}/`))) ? null : current);
+      if (currentFilePath && (currentFilePath === path || (isDirectory && currentFilePath.startsWith(`${path}/`)))) {
         setCurrentFilePath(null);
+        setActiveWorkspaceTabId(null);
         setIsDirty(false);
       }
+      if (isDirectory) toast.success("已删除文件夹");
     } catch (e) {
-      toast.error(`删除失败: ${e}`);
+      toast.error(`删除失败: ${getErrorMessage(e)}`);
     }
   };
 
   const handleDialogConfirm = () => {
-    if (dialogMode === "create") handleCreate();
-    else if (dialogMode === "rename") handleRename();
+    if (dialogMode === "create") void handleCreate();
+    else if (dialogMode === "rename") void handleRename();
+    else if (dialogMode === "create-folder") void handleCreateFolder();
   };
-
   const handleOpenBlog = async () => {
     try {
       await openBlog();
@@ -3015,6 +3454,7 @@ export default function App() {
 
   const handleEditPrompt = (fileName: string) => {
     if (isLoadingPrompt || isSavingPrompt || isPolishingPrompt) return;
+    setPromptEditorReturnTarget(activeSettingsTarget);
     setSettingsView("prompt-editor");
     void loadPromptContent(fileName);
   };
@@ -3069,16 +3509,10 @@ export default function App() {
   };
 
   const handleCopyPromptVariable = async (variableName: string) => {
-    const textarea = promptTextareaRef.current;
-    if (textarea && document.activeElement === textarea) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      setPromptContent((current) => `${current.slice(0, start)}${variableName}${current.slice(end)}`);
-      window.requestAnimationFrame(() => {
-        textarea.focus();
-        const nextCursor = start + variableName.length;
-        textarea.setSelectionRange(nextCursor, nextCursor);
-      });
+    const editor = promptEditorRef.current;
+    const shouldInsert = editor?.hasFocus() || promptEditorHadFocusBeforeVariableClickRef.current;
+    promptEditorHadFocusBeforeVariableClickRef.current = false;
+    if (shouldInsert && editor?.insertVariable(variableName)) {
       toast.success(`已插入变量 ${variableName}`);
       return;
     }
@@ -3746,6 +4180,9 @@ export default function App() {
     };
     setFrontmatterPrefix(loaded.frontmatterPrefix);
     setMarkdown(loaded.body);
+    if (path) {
+      setDisplayTitleForPath(path, parseFrontmatterFields(content).fields.title);
+    }
     setIsDirty(false);
     if (loaded.warning) {
       toast.warning(loaded.warning);
@@ -3795,6 +4232,9 @@ export default function App() {
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, loaded.frontmatterPrefix, loaded.body);
     setFrontmatterPrefix(loaded.frontmatterPrefix);
     setMarkdown(loaded.body);
+    if (Object.prototype.hasOwnProperty.call(patch, "title")) {
+      setDisplayTitleForPath(currentFilePath, String(patch.title ?? ""));
+    }
     setIsDirty(nextDirty);
   };
 
@@ -3972,85 +4412,6 @@ export default function App() {
     });
   };
 
-  const handleGenerateNoteMetadata = async () => {
-    if (!currentFilePath) {
-      toast.info("请先打开一个笔记");
-      return;
-    }
-    if (!frontmatter.canMerge) {
-      toast.warning(frontmatter.warning ?? "当前 frontmatter 暂不能改写");
-      return;
-    }
-    if (!frontmatter.canEditTags) {
-      toast.warning(frontmatter.warning ?? "当前 tags 暂不能通过表单改写");
-      return;
-    }
-
-    setIsGeneratingNoteMetadata(true);
-    try {
-      const metadata = await generateNoteMetadata(currentFilePath, markdown);
-      const nextMarkdown = mergeFrontmatterMetadata(fullMarkdown, metadata);
-      if (nextMarkdown !== fullMarkdown) {
-        const loaded = splitLoadedMarkdown(nextMarkdown);
-        const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, loaded.frontmatterPrefix, loaded.body);
-        setFrontmatterPrefix(loaded.frontmatterPrefix);
-        setMarkdown(loaded.body);
-        setIsDirty(nextDirty);
-      }
-      toast.success("AI 元数据已生成，请确认后保存");
-    } catch (e) {
-      const message = getErrorMessage(e);
-      if (isAiConfigMissingError(message)) {
-        toast.error(AI_CONFIG_MISSING_MESSAGE);
-      } else {
-        toast.error(`AI 元数据生成失败：${message}`);
-      }
-    } finally {
-      setIsGeneratingNoteMetadata(false);
-    }
-  };
-
-  const handlePolishNoteBody = async () => {
-    if (!currentFilePath) {
-      toast.info("请先打开一个笔记");
-      return;
-    }
-
-    if (!markdown.trim()) {
-      toast.warning("当前笔记正文为空，无法润色");
-      return;
-    }
-
-    setIsPolishingNoteBody(true);
-    try {
-      const result = await polishNoteBody(currentFilePath, markdown);
-      setPolishedBodyPreview(result.polished_body);
-    } catch (e) {
-      const message = getErrorMessage(e);
-      if (isAiConfigMissingError(message)) {
-        toast.error(AI_CONFIG_MISSING_MESSAGE);
-      } else {
-        toast.error(`AI 全文润色失败：${message}`);
-      }
-    } finally {
-      setIsPolishingNoteBody(false);
-    }
-  };
-
-  const handleApplyPolishedBody = () => {
-    if (polishedBodyPreview === null) return;
-
-    const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, polishedBodyPreview);
-    setMarkdown(polishedBodyPreview);
-    setIsDirty(nextDirty);
-    setPolishedBodyPreview(null);
-    toast.success("润色稿已应用，请确认后保存");
-  };
-
-  const handleCancelPolishedBody = () => {
-    setPolishedBodyPreview(null);
-  };
-
   const finishFileSelection = (path: string, closeSearchOnSuccess: boolean) => {
     setCurrentFilePath(path);
     setActiveWorkspaceTabId(path);
@@ -4072,6 +4433,8 @@ export default function App() {
   };
 
   const handleSelectFile = (path: string, options?: { closeSearchOnSuccess?: boolean }): boolean => {
+    setActiveTreeDirectoryPath(null);
+    setActiveTreeFilePath(path);
     if (path === currentFilePath) {
       setActiveWorkspaceTabId(path);
       if (options?.closeSearchOnSuccess) {
@@ -4125,7 +4488,6 @@ export default function App() {
     if (!isClosingActiveTab) return;
 
     setPendingFileSelection(null);
-    setPolishedBodyPreview(null);
     setIsDirty(false);
 
     const nextPath = nextTabs[tabIndex] ?? nextTabs[tabIndex - 1] ?? null;
@@ -4147,7 +4509,7 @@ export default function App() {
       toast.error("本地笔记路径无效");
       return false;
     }
-    if (!files.some((file) => file.path === normalizedPath)) {
+    if (!noteFiles.some((file) => file.path === normalizedPath)) {
       toast.warning("这条本地笔记可能已被移动或删除");
       return false;
     }
@@ -4309,6 +4671,67 @@ export default function App() {
     window.addEventListener("pointercancel", handlePointerUp);
   };
 
+  const beginSettingsCenterDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, a, [role='button'], [data-no-window-drag='true']")) return;
+    if (isSettingsCenterMaximized) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startRect = clampSettingsCenterRect(settingsCenterRect);
+    const panel = settingsCenterPanelRef.current;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    const previousPanelWillChange = panel?.style.willChange ?? "";
+    let latestRect = startRect;
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+    if (panel) {
+      panel.style.transition = "none";
+      panel.style.animation = "none";
+      panel.style.willChange = "left, top";
+    }
+
+    const applyRectToPanel = (rect: SettingsCenterRect) => {
+      if (!panel) return;
+      panel.style.left = `${rect.left}px`;
+      panel.style.top = `${rect.top}px`;
+      panel.style.transform = "none";
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      latestRect = clampSettingsCenterRect({
+        ...startRect,
+        left: startRect.left + moveEvent.clientX - startX,
+        top: startRect.top + moveEvent.clientY - startY,
+      });
+      applyRectToPanel(latestRect);
+    };
+
+    const handlePointerUp = () => {
+      const finalRect = clampSettingsCenterRect(latestRect);
+      applyRectToPanel(finalRect);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      if (panel) {
+        panel.style.willChange = previousPanelWillChange;
+      }
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      setSettingsCenterRect(finalRect);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  };
+
   const handleCloseWindow = async () => {
     try {
       await getCurrentWindow().close();
@@ -4331,16 +4754,20 @@ export default function App() {
   };
 
   const openSettingsSection = (target: SettingsSection | SettingsCategory) => {
+    const wasSettingsOpen = isAdvancedActionsOpen;
     setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+    if (!wasSettingsOpen) setExpandedSettingsGroups({});
     if (target in SETTINGS_SECTION_FALLBACK) {
       const category = target as SettingsCategory;
       if (category === "editor") {
         activateSettingsTarget({ type: "page", page: SETTINGS_SECTION_FALLBACK.editor });
       } else if (visibleSettingsCategoryIds.has(category as SettingsGroupId)) {
         activateSettingsTarget({ type: "category", category: category as SettingsGroupId });
-        setExpandedSettingsGroups((current) => (
-          current[category] === true ? current : { ...current, [category]: true }
-        ));
+        if (wasSettingsOpen) {
+          setExpandedSettingsGroups((current) => (
+            current[category] === true ? current : { ...current, [category]: true }
+          ));
+        }
       } else {
         activateSettingsTarget({ type: "category", category: "appearance" });
       }
@@ -4364,10 +4791,12 @@ export default function App() {
       return;
     }
     activateSettingsTarget({ type: "page", page: section });
-    setExpandedSettingsGroups((current) => {
-      const groupId = SETTINGS_SECTION_LABELS[section]?.groupId;
-      return groupId && current[groupId] !== true ? { ...current, [groupId]: true } : current;
-    });
+    if (wasSettingsOpen) {
+      setExpandedSettingsGroups((current) => {
+        const groupId = SETTINGS_SECTION_LABELS[section]?.groupId;
+        return groupId && current[groupId] !== true ? { ...current, [groupId]: true } : current;
+      });
+    }
     setSettingsView("main");
     setIsAdvancedActionsOpen(true);
     if (section.startsWith("ai-") && !aiConfigDraft && !isLoadingAiConfig) {
@@ -4382,16 +4811,13 @@ export default function App() {
 
   const openSettingsCenter = () => {
     setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+    setExpandedSettingsGroups({});
     activateSettingsTarget({ type: "category", category: "appearance" });
     setSettingsView("main");
     setIsAdvancedActionsOpen(true);
   };
 
   const toggleSettingsGroup = (groupId: string) => {
-    if (activeSettingsTarget.type === "page" && groupId === activeSettingsGroupId) {
-      setExpandedSettingsGroups((current) => ({ ...current, [groupId]: true }));
-      return;
-    }
     setExpandedSettingsGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
   };
 
@@ -4404,7 +4830,29 @@ export default function App() {
     if (hasAiConfigDraftChanges && aiConfig) {
       setAiConfigDraft(cloneAiConfig(aiConfig));
     }
+    setPromptEditorReturnTarget(null);
+    setExpandedSettingsGroups({});
     setIsAdvancedActionsOpen(false);
+  };
+
+  const closePromptEditorToSettings = () => {
+    promptPolishRunRef.current += 1;
+    setIsPolishingPrompt(false);
+    setPromptPolishMessage(null);
+    if (promptEditorReturnTarget) {
+      activateSettingsTarget(promptEditorReturnTarget);
+    } else {
+      activateSettingsTarget({ type: "page", page: "ai-prompts" });
+    }
+    setSettingsView("main");
+  };
+
+  const handleSettingsCenterCloseRequest = () => {
+    if (settingsView === "prompt-editor") {
+      closePromptEditorToSettings();
+      return;
+    }
+    closeSettingsCenter();
   };
 
   const handleActivityNotes = () => {
@@ -4441,11 +4889,15 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === "s")) return;
       e.preventDefault();
+      if (isAdvancedActionsOpen && settingsView === "prompt-editor") {
+        void handleSavePrompt();
+        return;
+      }
       void handleSaveCurrentNote();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSaveCurrentNote]);
+  }, [handleSaveCurrentNote, isAdvancedActionsOpen, settingsView, selectedPromptFileName, promptContent, isLoadingPrompt, isSavingPrompt, isPolishingPrompt]);
 
   // Ctrl+K / Cmd+K 打开当前窗口内搜索面板
   useEffect(() => {
@@ -4523,22 +4975,16 @@ export default function App() {
   }, [isAdvancedActionsOpen]);
 
   useEffect(() => {
-    if (activeSettingsTarget.type === "page") {
-      setExpandedSettingsGroups((current) => (
-        current[activeSettingsGroupId] === true ? current : { ...current, [activeSettingsGroupId]: true }
-      ));
-    }
     if (settingsView === "main") {
       const settingsContent = settingsContentRef.current;
       if (settingsContent) settingsContent.scrollTop = 0;
     }
-  }, [activeSettingsGroupId, activeSettingsTarget, settingsView]);
+  }, [settingsView]);
 
   useEffect(() => {
     if (settingsView !== "prompt-editor" || selectedPromptFileName || isLoadingPrompt) return;
     setSettingsView("main");
     setActiveSettingsTarget({ type: "page", page: "ai-prompts" });
-    setExpandedSettingsGroups((current) => ({ ...current, ai: true }));
   }, [isLoadingPrompt, selectedPromptFileName, settingsView]);
 
   useEffect(() => {
@@ -4761,13 +5207,13 @@ export default function App() {
   useEffect(() => {
     if (!hasLoadedNotes) return;
 
-    const validPaths = new Set(files.map((file) => file.path));
+    const validPaths = new Set(noteFiles.map((file) => file.path));
     setOpenTabPaths((current) => current.filter((path) => validPaths.has(path)));
 
     if (currentFilePath && !validPaths.has(currentFilePath)) {
       setCurrentFilePath(null);
     }
-  }, [currentFilePath, files, hasLoadedNotes]);
+  }, [currentFilePath, noteFiles, hasLoadedNotes]);
 
   useEffect(() => {
     if (!currentFilePath) return;
@@ -4789,7 +5235,7 @@ export default function App() {
   useEffect(() => {
     if (!hasLoadedNotes || hasRestoredOpenTabsRef.current) return;
 
-    const validPaths = new Set(files.map((file) => file.path));
+    const validPaths = new Set(noteFiles.map((file) => file.path));
     const restoredPaths = openTabPaths.filter((path) => validPaths.has(path));
     const storedActivePath = initialOpenTabsActivePathRef.current;
     const activePath =
@@ -4804,7 +5250,7 @@ export default function App() {
     if (!currentFilePath && activePath) {
       setCurrentFilePath(activePath);
     }
-  }, [currentFilePath, files, hasLoadedNotes, openTabPaths]);
+  }, [currentFilePath, noteFiles, hasLoadedNotes, openTabPaths]);
 
   useEffect(() => {
     window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, JSON.stringify(openTabPaths));
@@ -4836,6 +5282,11 @@ export default function App() {
       return;
     }
 
+    if (skipNextReadForPathRef.current === currentFilePath) {
+      skipNextReadForPathRef.current = null;
+      return;
+    }
+
     let cancelled = false;
 
     readNote(currentFilePath)
@@ -4852,6 +5303,24 @@ export default function App() {
       cancelled = true;
     };
   }, [currentFilePath]);
+
+  const folderNameValidationMessage =
+    dialogMode === "create-folder" && dialogValue.trim()
+      ? validateNamePart(dialogValue, "folder")
+      : null;
+  const folderParentValidationMessage =
+    dialogMode === "create-folder" && folderParentDirectory.trim()
+      ? validateDirectoryPathInput(folderParentDirectory)
+      : null;
+  const folderDialogHelpText =
+    folderNameValidationMessage ??
+    folderParentValidationMessage ??
+    "名称不能包含路径穿越或 Windows 非法字符";
+  const canConfirmFolderDialog =
+    dialogMode === "create-folder" &&
+    Boolean(dialogValue.trim()) &&
+    !folderNameValidationMessage &&
+    !folderParentValidationMessage;
 
   return (
     <>
@@ -4956,164 +5425,220 @@ export default function App() {
         </div>
       </DialogContent>
     </Dialog>
-    <Dialog open={dialogMode !== null} onOpenChange={(open) => !open && closeDialog()}>
-      <DialogContent>
-        <DialogHeader>
+    <Dialog open={dialogMode === "create" || dialogMode === "rename"} onOpenChange={(open) => !open && closeDialog()}>
+      <DialogContent className="flex max-h-[min(86vh,760px)] w-[min(720px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>
-            {dialogMode === "create" ? "新建笔记" : "重命名笔记"}
+            {dialogMode === "create" ? "新建笔记" : renameTargetIsDirectory ? "重命名文件夹" : "重命名笔记"}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 py-2">
-          {dialogMode === "create" && (
-            <div className="grid gap-2">
-              <Label>保存位置</Label>
-              <div className="grid gap-2">
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
-                    newNoteDirectory === "tricks"
-                      ? "border-ring bg-accent/50"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="note-directory"
-                    value="tricks"
-                    checked={newNoteDirectory === "tricks"}
-                    onChange={() => updateNewNoteDirectory("tricks")}
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium text-foreground">tricks/</span>
-                    <span className="text-xs leading-5 text-muted-foreground">
-                      技巧笔记：算法 trick、模板、结论整理
-                    </span>
-                  </span>
-                </label>
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
-                    newNoteDirectory === "problems"
-                      ? "border-ring bg-accent/50"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="note-directory"
-                    value="problems"
-                    checked={newNoteDirectory === "problems"}
-                    onChange={() => updateNewNoteDirectory("problems")}
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium text-foreground">problems/</span>
-                    <span className="text-xs leading-5 text-muted-foreground">
-                      题解笔记：题目分析、解法记录
-                    </span>
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-          {dialogMode === "create" && (
-            <div className="grid gap-2">
-              <Label>模板</Label>
-              <div className="grid gap-2">
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
-                    newNoteTemplate === "blank"
-                      ? "border-ring bg-accent/50"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="note-template"
-                    value="blank"
-                    checked={newNoteTemplate === "blank"}
-                    onChange={() => setNewNoteTemplate("blank")}
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium text-foreground">空白</span>
-                    <span className="text-xs leading-5 text-muted-foreground">
-                      创建空 Markdown，由保存流程补全基础 frontmatter
-                    </span>
-                  </span>
-                </label>
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
-                    newNoteTemplate === "trick"
-                      ? "border-ring bg-accent/50"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="note-template"
-                    value="trick"
-                    checked={newNoteTemplate === "trick"}
-                    onChange={() => setNewNoteTemplate("trick")}
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium text-foreground">Trick 模板</span>
-                    <span className="text-xs leading-5 text-muted-foreground">
-                      结论、适用条件、例子、代码
-                    </span>
-                  </span>
-                </label>
-                <label
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors hover:bg-accent/40 ${
-                    newNoteTemplate === "solution"
-                      ? "border-ring bg-accent/50"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="note-template"
-                    value="solution"
-                    checked={newNoteTemplate === "solution"}
-                    onChange={() => setNewNoteTemplate("solution")}
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium text-foreground">题解模板</span>
-                    <span className="text-xs leading-5 text-muted-foreground">
-                      题意、思路、证明、代码、复杂度
-                    </span>
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-          <div className="grid gap-2">
-            <Label htmlFor="filename">文件名</Label>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          <div className="grid gap-5">
+            {dialogMode === "create" && (
+              <section className="grid gap-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>保存位置</Label>
+                  <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={openCreateFolderDialog}>
+                    <FolderPlus className="h-3.5 w-3.5" />新建文件夹
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {[
+                    { id: "root" as const, title: "笔记根目录", description: "直接创建在 notes 根目录" },
+                    { id: "current" as const, title: currentNoteDirectory ? `当前：${currentNoteDirectory}/` : "当前：根目录", description: "沿用当前打开笔记所在文件夹" },
+                    { id: "tricks" as const, title: "tricks/", description: "技巧、模板、结论整理" },
+                    { id: "problems" as const, title: "problems/", description: "题解与训练记录" },
+                    { id: "custom" as const, title: "自定义文件夹", description: "选择已有目录或输入新目录" },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={cn(
+                        "flex min-h-16 items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/40",
+                        newNoteLocationOption === option.id ? "border-ring bg-accent/50" : "border-border bg-background",
+                      )}
+                      onClick={() => setNewNoteLocationOption(option.id)}
+                    >
+                      <span className={cn("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", newNoteLocationOption === option.id ? "border-primary bg-primary text-primary-foreground" : "border-border")}>
+                        {newNoteLocationOption === option.id && <Check className="h-3 w-3" />}
+                      </span>
+                      <span className="grid min-w-0 gap-1">
+                        <span className="truncate font-medium text-foreground">{option.title}</span>
+                        <span className="text-xs leading-4 text-muted-foreground">{option.description}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {newNoteLocationOption === "custom" && (
+                  <div className="grid gap-2 rounded-md border border-border bg-muted/15 p-3">
+                    <Label htmlFor="custom-directory">自定义文件夹</Label>
+                    <Input
+                      id="custom-directory"
+                      value={newNoteCustomDirectory}
+                      onChange={(e) => setNewNoteCustomDirectory(e.target.value)}
+                      placeholder="例如 review/2026，不需要前后斜杠"
+                      list="note-directory-options"
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                    <div className="max-h-36 overflow-y-auto rounded-sm border border-border/70 bg-background/60 py-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "block w-full truncate px-2 py-1 text-left text-xs transition-colors hover:bg-accent/40",
+                          newNoteCustomDirectory.trim() === "" && "bg-accent/45 text-accent-foreground",
+                        )}
+                        onClick={() => setNewNoteCustomDirectory("")}
+                      >
+                        笔记根目录
+                      </button>
+                      {noteDirectories.map((directory) => (
+                        <button
+                          key={directory}
+                          type="button"
+                          className={cn(
+                            "block w-full truncate px-2 py-1 text-left font-mono text-xs transition-colors hover:bg-accent/40",
+                            newNoteCustomDirectory.trim() === directory && "bg-accent/45 text-accent-foreground",
+                          )}
+                          style={{ paddingLeft: `${8 + directory.split("/").length * 10}px` }}
+                          onClick={() => setNewNoteCustomDirectory(directory)}
+                          title={directory}
+                        >
+                          {directory}/
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {dialogMode === "create" && (
+              <section className="grid gap-2.5">
+                <Label>标签</Label>
+                <div className="flex flex-wrap gap-2">
+                  {COMMON_NOTE_TAGS.map((tag) => {
+                    const selected = newNoteTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:bg-accent/45",
+                          selected ? "border-ring bg-primary text-primary-foreground" : "border-border bg-background text-foreground/90",
+                        )}
+                        aria-pressed={selected}
+                        onClick={() => toggleNewNoteTag(tag)}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <section className="grid gap-2.5">
+              <Label htmlFor="filename">文件名</Label>
+              <Input
+                id="filename"
+                value={dialogValue}
+                onChange={(e) => setDialogValue(e.target.value)}
+                placeholder={renameTargetIsDirectory ? "输入文件夹名" : "不需要输入 .md"}
+                autoFocus
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleDialogConfirm();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    closeDialog();
+                  }
+                }}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                {dialogMode === "rename" && renameTarget
+                  ? renameTargetIsDirectory
+                    ? "只会修改当前文件夹名称，子文件路径会同步更新"
+                    : "可以输入 abc 或 abc.md，保存时不会丢失或重复 .md 后缀"
+                  : "创建空白 Markdown 文件，只写入 title、tags、createdAt frontmatter"}
+              </p>
+              <datalist id="note-directory-options">
+                {noteDirectories.map((directory) => (
+                  <option key={directory} value={directory} />
+                ))}
+              </datalist>
+            </section>
+          </div>
+        </div>
+        <DialogFooter className="shrink-0 border-t border-border bg-background px-6 py-4">
+          <Button variant="outline" onClick={closeDialog}>取消</Button>
+          <Button onClick={handleDialogConfirm} disabled={!dialogValue.trim()}>
+            {dialogMode === "create" ? "创建" : "重命名"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={dialogMode === "create-folder"} onOpenChange={(open) => !open && closeDialog()}>
+      <DialogContent className="w-[min(400px,calc(100vw-32px))] max-w-none gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle className="text-sm">新建文件夹</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 px-4 py-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="compact-folder-parent" className="text-xs">父级目录</Label>
             <Input
-              id="filename"
-              value={dialogValue}
-              onChange={(e) => setDialogValue(e.target.value)}
-              placeholder="不需要输入 .md"
-              autoFocus
+              id="compact-folder-parent"
+              className="h-8 text-xs"
+              value={folderParentDirectory}
+              onChange={(e) => setFolderParentDirectory(e.target.value)}
+              placeholder="根目录"
+              list="compact-note-directory-options"
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                e.stopPropagation();
+                if (e.key === "Escape") {
                   e.preventDefault();
-                  handleDialogConfirm();
+                  closeDialog();
                 }
               }}
             />
-            <p className="text-xs text-muted-foreground">
-              {dialogMode === "rename" && renameTarget && renameTarget.includes("/")
-                ? `当前位于 ${renameTarget.slice(0, renameTarget.lastIndexOf("/"))}/，目录会保留`
-                : "系统会自动加上 .md 后缀"}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="compact-folder-name" className="text-xs">文件夹名</Label>
+            <Input
+              id="compact-folder-name"
+              className="h-8 text-sm"
+              value={dialogValue}
+              onChange={(e) => setDialogValue(e.target.value)}
+              placeholder="输入文件夹名"
+              autoFocus
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && canConfirmFolderDialog) {
+                  e.preventDefault();
+                  handleDialogConfirm();
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeDialog();
+                }
+              }}
+            />
+            <p className={cn("min-h-4 text-[11px] leading-4", folderNameValidationMessage || folderParentValidationMessage ? "text-destructive" : "text-muted-foreground")}>
+              {folderDialogHelpText}
             </p>
           </div>
+          <datalist id="compact-note-directory-options">
+            {noteDirectories.map((directory) => (
+              <option key={directory} value={directory} />
+            ))}
+          </datalist>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={closeDialog}>取消</Button>
-          <Button onClick={handleDialogConfirm}>
-            {dialogMode === "create" ? "创建" : "重命名"}
+        <DialogFooter className="border-t border-border bg-background px-4 py-3">
+          <Button variant="outline" size="sm" onClick={closeDialog}>取消</Button>
+          <Button size="sm" onClick={handleDialogConfirm} disabled={!canConfirmFolderDialog}>
+            创建
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -6319,38 +6844,16 @@ export default function App() {
         </section>
       </div>
     )}
-    <Dialog open={polishedBodyPreview !== null} onOpenChange={(open) => !open && handleCancelPolishedBody()}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>AI 全文润色预览</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-2 py-2">
-          <textarea
-            value={polishedBodyPreview ?? ""}
-            readOnly
-            rows={18}
-            className="min-h-[28rem] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={handleCancelPolishedBody}>
-            取消
-          </Button>
-          <Button onClick={handleApplyPolishedBody}>
-            应用到正文
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
     <Dialog
       open={isAdvancedActionsOpen}
       onOpenChange={(open) => {
         if (open) {
           setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
+          setExpandedSettingsGroups({});
           setIsAdvancedActionsOpen(true);
           return;
         }
-        closeSettingsCenter();
+        handleSettingsCenterCloseRequest();
       }}
     >
       <DialogContent
@@ -6372,22 +6875,40 @@ export default function App() {
           <button
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            onClick={closeSettingsCenter}
-            title="关闭设置中心"
-            aria-label="关闭设置中心"
+            onClick={handleSettingsCenterCloseRequest}
+            title={settingsView === "prompt-editor" ? "返回设置" : "关闭设置中心"}
+            aria-label={settingsView === "prompt-editor" ? "返回设置" : "关闭设置中心"}
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
-        <DialogHeader className="shrink-0 border-b border-border/80 bg-muted/10 px-5 py-3 pr-24 text-left">
-          <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <DialogHeader
+          className={cn(
+            "settings-center-drag-handle shrink-0 border-b border-border/80 bg-muted/10 px-5 pr-24 text-left",
+            isSettingsCenterMaximized ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+            settingsView === "prompt-editor" ? "py-2" : "py-3",
+          )}
+          onPointerDown={beginSettingsCenterDrag}
+        >
+          <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <DialogTitle className="text-base">{settingsView === "prompt-editor" ? "Prompt 编辑" : "设置中心"}</DialogTitle>
-              <div className="text-xs leading-5 text-muted-foreground">
-                {settingsView === "prompt-editor"
-                  ? selectedPromptFileName || "读取 Prompt 模板中"
-                  : "左侧选择设置页，右侧只显示当前页。"}
-              </div>
+              {settingsView === "prompt-editor" ? (
+                <>
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <DialogTitle className="text-base">Prompt 编辑</DialogTitle>
+                    <span className="font-mono text-xs text-muted-foreground">{selectedPromptFileName || "读取 Prompt 模板中"}</span>
+                    <span className="text-xs text-muted-foreground">{promptContent.length.toLocaleString()} 字符</span>
+                  </div>
+                  <div className="truncate text-xs leading-4 text-muted-foreground">
+                    {selectedPromptUsage.title} · {promptPolishMessage ?? selectedPromptUsage.scope}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <DialogTitle className="text-base">设置中心</DialogTitle>
+                  <div className="text-xs leading-5 text-muted-foreground">左侧选择设置页，右侧只显示当前页。</div>
+                </>
+              )}
             </div>
             {settingsView === "main" && hasAiConfigDraftChanges && (
               <div className="flex shrink-0 flex-wrap items-center gap-2 pr-1">
@@ -6397,6 +6918,26 @@ export default function App() {
                 <Button type="button" size="sm" onClick={() => void handleSaveAiConfigDraft()} disabled={isSavingAiConfig}>
                   <Save className="h-3.5 w-3.5" />
                   {isSavingAiConfig ? "保存中..." : "保存 AI 更改"}
+                </Button>
+              </div>
+            )}
+            {settingsView === "prompt-editor" && (
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5 pr-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                  onClick={() => void handlePolishPrompt()}
+                  disabled={!selectedPromptFileName || !promptContent.trim() || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
+                  title="让 AI 在不改变核心结构的前提下优化当前 Prompt 表达"
+                >
+                  {isPolishingPrompt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {isPolishingPrompt ? "润色中..." : "AI 润色 Prompt"}
+                </Button>
+                <Button type="button" size="sm" className="h-7 px-2.5 text-xs" onClick={() => void handleSavePrompt()} disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}>
+                  <Save className="h-3.5 w-3.5" />
+                  {isSavingPrompt ? "保存中..." : "保存 Prompt"}
                 </Button>
               </div>
             )}
@@ -6471,57 +7012,21 @@ export default function App() {
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
             {settingsView === "prompt-editor" ? (
               <div className="flex h-full min-h-0 flex-col overflow-hidden">
-                <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/80 bg-background/95 px-6 py-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setSettingsView("main")}>
-                      <ChevronRight className="h-3.5 w-3.5 rotate-180" />
-                      返回设置
-                    </Button>
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
-                        <span>{getPromptUsageInfo(selectedPromptFileName).title}</span>
-                        <span className="font-mono text-xs font-normal text-muted-foreground">{selectedPromptFileName}</span>
-                        <span className="text-xs font-normal text-muted-foreground">{promptContent.length.toLocaleString()} 字符</span>
-                      </div>
-                      <div className="text-xs leading-5 text-muted-foreground">{getPromptUsageInfo(selectedPromptFileName).purpose}</div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handlePolishPrompt()}
-                      disabled={!selectedPromptFileName || !promptContent.trim() || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
-                      title="让 AI 在不改变核心结构的前提下优化当前 Prompt 表达"
-                    >
-                      {isPolishingPrompt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      {isPolishingPrompt ? "润色中..." : "AI 润色 Prompt"}
-                    </Button>
-                    <Button type="button" size="sm" onClick={() => void handleSavePrompt()} disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}>
-                      <Save className="h-3.5 w-3.5" />
-                      {isSavingPrompt ? "保存中..." : "保存 Prompt"}
-                    </Button>
-                  </div>
-                </div>
-                <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <section className="grid min-h-0 min-w-0 gap-3 p-0">
-                    <div className="grid gap-1">
-                      <div className="text-sm font-semibold text-foreground">任务需求 / Prompt 内容</div>
-                      <div className="text-xs leading-5 text-muted-foreground">直接编辑模板内容；保留实际需要的变量和返回格式约束。</div>
-                    </div>
-                    <div className="relative min-h-[60vh] min-w-0">
-                      <textarea
-                        ref={promptTextareaRef}
+                <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(120px,28vh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <div className="relative min-h-0 min-w-0 overflow-hidden bg-background">
+                    <div className="h-full min-h-[320px]">
+                      <PromptCodeEditor
+                        ref={promptEditorRef}
                         value={promptContent}
-                        onChange={(event) => setPromptContent(event.target.value)}
+                        fontSize={promptEditorFontSize}
+                        onChange={setPromptContent}
+                        onSave={() => void handleSavePrompt()}
+                        onFontSizeChange={updatePromptEditorFontSize}
                         disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt}
                         readOnly={isPolishingPrompt}
-                        spellCheck={false}
-                        className="h-full min-h-[60vh] w-full resize-none rounded-sm border border-border bg-background px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
                       />
                       {isPolishingPrompt && (
-                        <div className="absolute inset-0 grid place-items-center rounded-sm border border-primary/20 bg-background/75 backdrop-blur-[1px]">
+                        <div className="absolute inset-0 z-20 grid place-items-center bg-background/72 backdrop-blur-[1px]">
                           <div className="grid justify-items-center gap-3 rounded-sm border border-border/80 bg-background px-5 py-4 text-center shadow-lg">
                             <Loader2 className="h-5 w-5 animate-spin text-primary" />
                             <div className="grid gap-1">
@@ -6532,26 +7037,26 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    <div className={cn("text-xs leading-5", promptPolishMessage?.startsWith("润色失败") ? "text-destructive" : "text-muted-foreground")}>
-                      {promptPolishMessage ?? "不要写入 API Key、Cookie、密码或本机绝对路径。"}
-                    </div>
-                  </section>
-                  <aside className="grid content-start gap-3 border-t border-border/70 pt-4 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
-                    <div className="grid gap-1">
+                  </div>
+                  <aside className="prompt-variable-panel min-h-0 min-w-0 overflow-y-auto overflow-x-hidden border-t border-border/70 bg-muted/10 p-3 lg:border-l lg:border-t-0">
+                    <div className="mb-2 grid gap-0.5">
                       <div className="text-sm font-semibold text-foreground">可用变量</div>
-                      <div className="text-xs leading-5 text-muted-foreground">编辑器聚焦时点击会插入；否则复制变量名。</div>
+                      <div className="text-xs leading-4 text-muted-foreground">编辑器聚焦时点击插入；否则复制变量名。</div>
                     </div>
-                    {getPromptUsageInfo(selectedPromptFileName).variables.length > 0 ? (
-                      <div className="grid gap-2">
-                        {getPromptUsageInfo(selectedPromptFileName).variables.map((variable) => (
+                    {selectedPromptUsage.variables.length > 0 ? (
+                      <div className="grid gap-1.5">
+                        {selectedPromptUsage.variables.map((variable) => (
                           <button
                             key={variable.name}
                             type="button"
-                            className="grid gap-1 rounded-sm border border-border/70 bg-muted/10 px-2.5 py-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                            className="grid min-w-0 max-w-full gap-1 rounded-sm border border-border/60 bg-background/35 px-2 py-1.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                            onMouseDown={() => {
+                              promptEditorHadFocusBeforeVariableClickRef.current = promptEditorRef.current?.hasFocus() ?? false;
+                            }}
                             onClick={() => void handleCopyPromptVariable(variable.name)}
                           >
-                            <span className="font-mono text-xs font-semibold text-foreground">{variable.name}</span>
-                            <span className="text-xs leading-5 text-muted-foreground">{variable.meaning}</span>
+                            <span className="min-w-0 whitespace-normal break-words font-mono text-xs font-semibold leading-4 text-foreground [overflow-wrap:anywhere]">{variable.name}</span>
+                            <span className="min-w-0 whitespace-normal break-words text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">{variable.meaning}</span>
                           </button>
                         ))}
                       </div>
@@ -6934,14 +7439,14 @@ export default function App() {
     </Dialog>
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
-      <header className="app-top-toolbar flex min-h-9 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-1">
+      <header className="app-top-toolbar flex min-h-8 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-0.5">
         <div className="flex min-w-0 items-center gap-2.5" data-tauri-drag-region>
-          <div className="flex h-9 min-w-0 items-center">
-            <span className="app-brand-mark grid h-9 w-9 shrink-0 place-items-center">
+          <div className="flex h-8 min-w-0 items-center">
+            <span className="app-brand-mark grid h-8 w-8 shrink-0 place-items-center">
               <img
                 src={APP_ICON_URL}
                 alt=""
-                className="h-6 w-6 object-contain"
+                className="h-5 w-5 object-contain"
                 draggable={false}
                 aria-hidden="true"
               />
@@ -6953,7 +7458,7 @@ export default function App() {
           <div className="flex items-center" aria-label="窗口控制">
             <button
               type="button"
-              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               onClick={() => void handleMinimizeWindow()}
               title="最小化"
               aria-label="最小化窗口"
@@ -6962,7 +7467,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               onClick={() => void handleToggleMaximizeWindow()}
               title="最大化 / 还原"
               aria-label="最大化或还原窗口"
@@ -6971,7 +7476,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="flex h-7 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
+              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
               onClick={() => void handleCloseWindow()}
               title="关闭"
               aria-label="关闭窗口"
@@ -7059,40 +7564,67 @@ export default function App() {
               className="app-notes-sidebar flex shrink-0 flex-col overflow-hidden bg-background/70"
               style={leftSidebarStyle}
             >
-              <div className="app-notes-sidebar-header flex h-9 shrink-0 items-center justify-between border-b border-border/70 px-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  笔记
-                </span>
-                <div className="flex items-center gap-1.5">
+              <div className="app-notes-sidebar-header group flex h-8 shrink-0 items-center justify-between border-b border-border/70 px-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "app-file-row app-file-root-row flex min-w-0 flex-1 items-center border border-transparent pr-1 text-left transition-colors duration-100",
+                    activeTreeDirectoryPath === "" || activeTreeFilePath ? "text-accent-foreground" : "text-foreground/92",
+                  )}
+                  style={{ paddingLeft: "1px" }}
+                  data-active={activeTreeDirectoryPath === "" ? "true" : "false"}
+                  onClick={() => {
+                    setActiveTreeDirectoryPath("");
+                    setActiveTreeFilePath(null);
+                    setIsTreeRootCollapsed((current) => !current);
+                  }}
+                  aria-expanded={!isTreeRootCollapsed}
+                  title="notes"
+                >
+                  <ChevronRight
+                    className={cn("mr-0.5 shrink-0 transition-transform", !isTreeRootCollapsed && "rotate-90")}
+                    size={14}
+                    strokeWidth={2.15}
+                  />
+                  <FolderOpen className="mr-1 shrink-0 text-muted-foreground/95" size={16} strokeWidth={2} />
+                  <span className="min-w-0 truncate text-[14.5px] font-semibold leading-[27px]">notes</span>
+                </button>
+                <div className="app-notes-sidebar-actions flex items-center gap-0.5">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="app-notes-sidebar-action h-[30px] w-[30px]"
-                    onClick={() => setIsSearchOpen(true)}
-                    title="搜索笔记 Ctrl+K"
-                    aria-label="搜索笔记"
-                  >
-                    <Search size={18} strokeWidth={2.2} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="app-notes-sidebar-action h-[30px] w-[30px]"
+                    className="app-notes-sidebar-action h-6 w-6"
                     onClick={openCreateDialog}
                     title="新建笔记"
                     aria-label="新建笔记"
                   >
-                    <Plus size={18} strokeWidth={2.2} />
+                    <FilePlus size={15} strokeWidth={1.85} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="app-notes-sidebar-action h-6 w-6"
+                    onClick={requestInlineCreateFolder}
+                    title="新建文件夹"
+                    aria-label="新建文件夹"
+                  >
+                    <FolderPlus size={15} strokeWidth={1.85} />
                   </Button>
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileTree
-                  files={files}
-                  activeFilePath={currentFilePath}
+                  files={displayFiles}
+                  activeFilePath={activeTreeFilePath}
+                  activeDirectoryPath={activeTreeDirectoryPath}
+                  rootCollapsed={isTreeRootCollapsed}
+                  createFolderRequest={createFolderRequest}
                   onSelectFile={handleSelectFile}
-                  onDeleteFile={handleDelete}
-                  onRenameFile={openRenameDialog}
+                  onSelectDirectory={handleSelectTreeDirectory}
+                  onClearSelection={handleClearTreeSelection}
+                  onCreateFolder={handleCreateFolderAt}
+                  onDeleteItem={handleDelete}
+                  onRenameItem={openRenameDialog}
                 />
               </div>
             </aside>
@@ -7446,36 +7978,9 @@ export default function App() {
                         )}
                       </summary>
                       <div className="app-frontmatter-body grid gap-3 px-4 py-3">
-                        <div className="app-frontmatter-actions flex items-center justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5 px-2 text-xs"
-                            onClick={handlePolishNoteBody}
-                            disabled={!currentFilePath || isPolishingNoteBody}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            AI 全文润色
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5 px-2 text-xs"
-                            onClick={handleGenerateNoteMetadata}
-                            disabled={
-                              !currentFilePath ||
-                              !frontmatter.canMerge ||
-                              !frontmatter.canEditTags ||
-                              isGeneratingNoteMetadata
-                            }
-                          >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            AI 补全元数据
-                          </Button>
-                        </div>
                         <div className="app-frontmatter-grid grid grid-cols-1 gap-3 lg:grid-cols-2">
                           <div className="app-frontmatter-field grid gap-1.5">
-                            <Label htmlFor="frontmatter-title">title</Label>
+                            <Label htmlFor="frontmatter-title">标题</Label>
                             <Input
                               id="frontmatter-title"
                               value={frontmatter.fields.title}
@@ -7484,17 +7989,17 @@ export default function App() {
                             />
                           </div>
                           <div className="app-frontmatter-field grid gap-1.5">
-                            <Label htmlFor="frontmatter-tags">tags</Label>
+                            <Label htmlFor="frontmatter-tags">标签</Label>
                             <Input
                               id="frontmatter-tags"
                               value={frontmatter.fields.tags.join(", ")}
                               disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
-                              placeholder="DP, 线段树, trick"
+                              placeholder="用逗号分隔标签"
                               onChange={(e) => updateTagsFromInput(e.target.value)}
                             />
                           </div>
                           <div className="app-frontmatter-field grid gap-1.5">
-                            <Label htmlFor="frontmatter-difficulty">difficulty</Label>
+                            <Label htmlFor="frontmatter-difficulty">难度</Label>
                             <Input
                               id="frontmatter-difficulty"
                               value={frontmatter.fields.difficulty}
@@ -7503,7 +8008,7 @@ export default function App() {
                             />
                           </div>
                           <div className="app-frontmatter-field grid gap-1.5">
-                            <Label htmlFor="frontmatter-source">source</Label>
+                            <Label htmlFor="frontmatter-source">来源</Label>
                             <Input
                               id="frontmatter-source"
                               value={frontmatter.fields.source}
@@ -7513,7 +8018,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="app-frontmatter-field app-frontmatter-summary grid gap-1.5">
-                          <Label htmlFor="frontmatter-summary">summary</Label>
+                          <Label htmlFor="frontmatter-summary">摘要</Label>
                           <textarea
                             id="frontmatter-summary"
                             value={frontmatter.fields.summary}
@@ -7531,7 +8036,7 @@ export default function App() {
                             className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
                             onChange={(e) => updateFrontmatter({ draft: e.target.checked })}
                           />
-                          draft
+                          草稿
                         </label>
                       </div>
                     </details>
@@ -7632,7 +8137,7 @@ export default function App() {
         />
         </div>
       </div>
-      <footer className="app-status-bar shrink-0 border-t border-border/80 bg-muted/15 px-3 py-1.5 text-[11px] text-muted-foreground">
+      <footer className="app-status-bar shrink-0 border-t border-border/80 bg-muted/15 px-3 py-0.5 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <div className="app-status-group flex min-w-0 flex-wrap items-center gap-y-1">
             <button
