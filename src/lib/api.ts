@@ -690,12 +690,14 @@ export async function writeLuoguPreparedNote(
   relativePath: string,
   markdown: string,
   autoCommit = true,
+  writeMode: "createNew" | "overwrite" = "createNew",
 ): Promise<WriteLuoguPreparedNoteResult> {
   try {
     return await invoke<WriteLuoguPreparedNoteResult>("write_luogu_prepared_note", {
       relativePath,
       markdown,
       autoCommit,
+      writeMode,
     });
   } catch (e) {
     throw toError(e);

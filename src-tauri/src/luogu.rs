@@ -1251,11 +1251,6 @@ fn safe_luogu_note_path_for_write(
             "Luogu write failed: illegal note path '{relative_path}'"
         ));
     }
-    if !normalized.starts_with("luogu/") {
-        return Err(format!(
-            "Luogu write failed: note path must be under notes/luogu: '{relative_path}'"
-        ));
-    }
     if !normalized.to_ascii_lowercase().ends_with(".md") {
         return Err(format!(
             "Luogu write failed: note path must end with .md: '{relative_path}'"
@@ -1267,28 +1262,24 @@ fn safe_luogu_note_path_for_write(
                 "Luogu write failed: illegal note path segment in '{relative_path}'"
             ));
         }
+        if segment.chars().any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+            return Err(format!(
+                "Luogu write failed: illegal note path segment in '{relative_path}'"
+            ));
+        }
     }
 
     fs::create_dir_all(notes_dir)
         .map_err(|e| format!("Luogu write failed: cannot create notes directory: {e}"))?;
-    let luogu_dir = notes_dir.join("luogu");
-    fs::create_dir_all(&luogu_dir)
-        .map_err(|e| format!("Luogu write failed: cannot create notes/luogu directory: {e}"))?;
 
     let canonical_notes = notes_dir
         .canonicalize()
         .map_err(|e| format!("Luogu write failed: cannot resolve notes directory: {e}"))?;
-    let canonical_luogu = luogu_dir
-        .canonicalize()
-        .map_err(|e| format!("Luogu write failed: cannot resolve notes/luogu directory: {e}"))?;
-    if !canonical_luogu.starts_with(&canonical_notes) {
-        return Err("Luogu write failed: notes/luogu escapes notes directory".to_string());
-    }
 
     let target_path = canonical_notes.join(&normalized);
-    if !target_path.starts_with(&canonical_luogu) {
+    if !target_path.starts_with(&canonical_notes) {
         return Err(format!(
-            "Luogu write failed: note path '{relative_path}' escapes notes/luogu"
+            "Luogu write failed: note path '{relative_path}' escapes notes directory"
         ));
     }
 
@@ -1867,8 +1858,7 @@ pub fn import_luogu_submission(
     ))
 }
 
-#[tauri::command]
-pub fn prepare_luogu_submission_note(
+fn prepare_luogu_submission_note_blocking(
     submission_id: String,
     rules: Option<LuoguPrepareRules>,
 ) -> Result<PrepareLuoguSubmissionNoteResult, String> {
@@ -1905,10 +1895,23 @@ pub fn prepare_luogu_submission_note(
 }
 
 #[tauri::command]
+pub async fn prepare_luogu_submission_note(
+    submission_id: String,
+    rules: Option<LuoguPrepareRules>,
+) -> Result<PrepareLuoguSubmissionNoteResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        prepare_luogu_submission_note_blocking(submission_id, rules)
+    })
+    .await
+    .map_err(|error| format!("Luogu preview task failed: {error}"))?
+}
+
+#[tauri::command]
 pub fn write_luogu_prepared_note(
     relative_path: String,
     markdown: String,
     auto_commit: Option<bool>,
+    write_mode: Option<String>,
 ) -> Result<WriteLuoguPreparedNoteResult, String> {
     let notes_dir = get_notes_dir()?;
     let (relative_path, target_path) =
@@ -1932,11 +1935,16 @@ pub fn write_luogu_prepared_note(
         })?;
     }
 
-    let mut file = match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&target_path)
-    {
+    let allow_overwrite = write_mode.as_deref() == Some("overwrite");
+    let mut open_options = OpenOptions::new();
+    open_options.write(true);
+    if allow_overwrite {
+        open_options.create(true).truncate(true);
+    } else {
+        open_options.create_new(true);
+    }
+
+    let mut file = match open_options.open(&target_path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Ok(WriteLuoguPreparedNoteResult {

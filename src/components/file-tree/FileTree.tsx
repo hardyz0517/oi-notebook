@@ -320,8 +320,8 @@ export default function FileTree({
             <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <button
                 type="button"
-                title="Rename folder"
-                aria-label="Rename folder"
+                title="重命名文件夹"
+                aria-label="重命名文件夹"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRenameItem(node.path, true);
@@ -332,8 +332,8 @@ export default function FileTree({
               </button>
               <button
                 type="button"
-                title="Delete folder"
-                aria-label="Delete folder"
+                title="删除文件夹"
+                aria-label="删除文件夹"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteItem(node.path, true);
@@ -352,7 +352,7 @@ export default function FileTree({
                   className="app-file-empty py-1 text-[11px] leading-4 text-muted-foreground/75"
                   style={{ paddingLeft: `${FILE_ROW_LEFT + 1 + depth * TREE_DEPTH_INDENT}px` }}
                 >
-                  Empty folder
+                  空文件夹
                 </li>
               ) : null}
               {node.children.map((child) => renderNode(child, depth + 1))}
@@ -384,8 +384,8 @@ export default function FileTree({
         <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
             type="button"
-            title="Rename"
-            aria-label="Rename"
+            title="重命名"
+            aria-label="重命名"
             onClick={(e) => {
               e.stopPropagation();
               onRenameItem(node.path, false);
@@ -396,8 +396,8 @@ export default function FileTree({
           </button>
           <button
             type="button"
-            title="Delete"
-            aria-label="Delete"
+            title="删除"
+            aria-label="删除"
             onClick={(e) => {
               e.stopPropagation();
               onDeleteItem(node.path, false);

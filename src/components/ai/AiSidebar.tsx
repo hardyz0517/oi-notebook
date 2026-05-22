@@ -6834,8 +6834,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       event.stopPropagation();
                       startRenameConversation(conversation);
                     }}
-                    title="Rename chat"
-                    aria-label={`Rename chat ${conversation.title}`}
+                    title="重命名对话"
+                    aria-label={`重命名对话 ${conversation.title}`}
                   >
                     <PenLine className="h-3.5 w-3.5" />
                   </button>
@@ -6846,8 +6846,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       event.stopPropagation();
                       requestDeleteConversation(conversation.id);
                     }}
-                    title="Delete chat"
-                    aria-label={`Delete chat ${conversation.title}`}
+                    title="删除对话"
+                    aria-label={`删除对话 ${conversation.title}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
