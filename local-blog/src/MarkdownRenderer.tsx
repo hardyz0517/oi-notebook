@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type AnchorHTMLAttributes,
@@ -19,6 +20,12 @@ import { rehypeTableMerge } from "./rehypeTableMerge";
 
 type MarkdownRendererProps = {
   markdown: string;
+};
+
+export type MarkdownHeading = {
+  id: string;
+  level: 2 | 3;
+  text: string;
 };
 
 const safeExternalProtocols = new Set(["http:", "https:", "mailto:"]);
@@ -192,7 +199,7 @@ function CodeBlock({ children, metaString }: { children: ReactNode; metaString?:
   };
 
   const copyLabel =
-    copyState === "copied" ? "Code copied" : copyState === "failed" ? "Copy failed" : "Copy code";
+    copyState === "copied" ? "已复制代码" : copyState === "failed" ? "复制失败" : "复制代码";
 
   return (
     <div className="code-block">
@@ -224,7 +231,7 @@ function CodeBlock({ children, metaString }: { children: ReactNode; metaString?:
   );
 }
 
-const components: Components = {
+const baseComponents: Components = {
   a({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { children?: ReactNode }) {
     if (!href || !isSafeLinkUrl(href)) {
       return <span>{children}</span>;
@@ -279,6 +286,140 @@ const components: Components = {
   },
 };
 
+function normalizeHeadingText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function slugifyHeading(value: string) {
+  const normalized = normalizeHeadingText(value)
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[`~!@#$%^&*()+=[\]{}\\|;:'",.<>/?，。！？；：“”‘’（）【】《》、]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return normalized || "section";
+}
+
+function createUniqueHeadingId(text: string, counts: Map<string, number>) {
+  const baseId = slugifyHeading(text);
+  const count = counts.get(baseId) ?? 0;
+  counts.set(baseId, count + 1);
+
+  return count === 0 ? baseId : `${baseId}-${count + 1}`;
+}
+
+function stripHeadingMarkup(value: string) {
+  return normalizeHeadingText(
+    value
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+      .replace(/[*_~]/g, ""),
+  );
+}
+
+export function extractMarkdownHeadings(markdown: string, articleTitle = ""): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
+  const counts = new Map<string, number>();
+  const normalizedArticleTitle = normalizeHeadingText(articleTitle);
+  const normalizedMarkdown = normalizeDisplayMath(markdown);
+  let inFence = false;
+
+  for (const rawLine of normalizedMarkdown.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+
+    if (/^(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+
+    if (inFence) {
+      continue;
+    }
+
+    const match = line.match(/^(#{2,3})\s+(.+?)\s*#*\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const level = match[1].length as 2 | 3;
+    const text = stripHeadingMarkup(match[2]);
+    if (!text || text === normalizedArticleTitle) {
+      continue;
+    }
+
+    const id = createUniqueHeadingId(text, counts);
+
+    headings.push({
+      id,
+      level,
+      text,
+    });
+  }
+
+  return headings;
+}
+
+function normalizeDisplayMath(markdown: string) {
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const segments: string[] = [];
+  let buffer: string[] = [];
+  let inFence = false;
+
+  const flush = () => {
+    if (buffer.length === 0) {
+      return;
+    }
+
+    const segment = buffer
+      .join("\n")
+      .replace(/\$\$([\s\S]*?)\$\$/g, (_match, content: string) => {
+        const formula = content.trim();
+        return formula ? `\n\n$$\n${formula}\n$$\n\n` : "\n\n$$\n\n$$\n\n";
+      });
+    segments.push(segment);
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      if (!inFence) {
+        flush();
+      }
+      inFence = !inFence;
+      segments.push(line);
+      continue;
+    }
+
+    if (inFence) {
+      segments.push(line);
+      continue;
+    }
+
+    buffer.push(line);
+  }
+
+  flush();
+
+  return segments.join("\n");
+}
+
+function createHeadingComponent(level: 2 | 3, counts: Map<string, number>) {
+  const Tag = `h${level}` as const;
+
+  return function Heading({ children, ...props }: HTMLAttributes<HTMLHeadingElement> & { children?: ReactNode }) {
+    const text = normalizeHeadingText(getNodeText(children));
+    const id = createUniqueHeadingId(text, counts);
+
+    return (
+      <Tag {...props} id={id}>
+        {children}
+      </Tag>
+    );
+  };
+}
+
 function getCodeMetaString(node: unknown): string | undefined {
   if (!node || typeof node !== "object") {
     return undefined;
@@ -290,6 +431,13 @@ function getCodeMetaString(node: unknown): string | undefined {
 
 export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const normalizedMarkdown = useMemo(() => normalizeDisplayMath(markdown), [markdown]);
+  const headingCounts = new Map<string, number>();
+  const components = {
+    ...baseComponents,
+    h2: createHeadingComponent(2, headingCounts),
+    h3: createHeadingComponent(3, headingCounts),
+  } satisfies Components;
 
   useEffect(() => {
     const root = rootRef.current;
@@ -353,7 +501,7 @@ export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
       root.removeEventListener("click", handleClick);
       root.removeEventListener("keydown", handleKeyDown);
     };
-  }, [markdown]);
+  }, [normalizedMarkdown]);
 
   return (
     <div ref={rootRef} className="prose-content">
@@ -362,7 +510,7 @@ export function MarkdownRenderer({ markdown }: MarkdownRendererProps) {
         rehypePlugins={[rehypeKatex, rehypeTableMerge]}
         remarkPlugins={[remarkGfm, remarkDirective, remarkLuoguCallouts, remarkMath]}
       >
-        {markdown}
+        {normalizedMarkdown}
       </ReactMarkdown>
     </div>
   );

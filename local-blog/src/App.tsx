@@ -1,6 +1,6 @@
-import type { FormEvent, ReactNode } from "react";
+﻿import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { extractMarkdownHeadings, MarkdownRenderer, type MarkdownHeading } from "./MarkdownRenderer";
 
 type NoteSummary = {
   title: string;
@@ -9,6 +9,7 @@ type NoteSummary = {
   excerpt: string | null;
   tags: string[];
   category: string;
+  articleClass?: string;
   created: string | null;
   updated: string | null;
   date: string | null;
@@ -22,6 +23,20 @@ type NoteMetadata = {
   tags?: string[];
   created?: string | null;
   updated?: string | null;
+  draft?: boolean;
+};
+
+type ParsedFrontmatter = {
+  title?: string;
+  summary?: string;
+  tags?: string[];
+  category?: string;
+  type?: string;
+  kind?: string;
+  source?: string;
+  created?: string;
+  updated?: string;
+  date?: string;
   draft?: boolean;
 };
 
@@ -44,13 +59,19 @@ type NotesResponse = {
 };
 
 type Route =
-  | { name: "home" }
-  | { name: "tags" }
-  | { name: "tag"; tag: string }
-  | { name: "categories" }
-  | { name: "category"; category: string }
-  | { name: "search"; query: string }
+  | { name: "home"; page: number }
+  | { name: "articles"; page: number; year: string | null }
+  | { name: "tags"; page: number }
+  | { name: "tag"; tag: string; page: number }
+  | { name: "categories"; page: number }
+  | { name: "category"; category: string; page: number }
+  | { name: "search"; query: string; page: number }
   | { name: "note"; encodedPath: string; relativePath: string };
+
+type ReturnTarget = {
+  href: string;
+  label: string;
+};
 
 type CountItem = {
   name: string;
@@ -58,29 +79,70 @@ type CountItem = {
 };
 
 const categoryLabels: Record<string, string> = {
-  tricks: "技巧",
-  problems: "题解",
-  luogu: "洛谷",
-  inbox: "收件箱",
+  tricks: "\u6280\u5de7",
+  problems: "\u9898\u89e3",
+  luogu: "\u6d1b\u8c37",
+  inbox: "\u6536\u4ef6\u7bb1",
+  uncategorized: "\u672a\u5206\u7c7b",
 };
 
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
+const articleClassWords = ["\u9898\u89e3", "\u590d\u76d8", "\u5fc3\u5f97", "\u6280\u5de7", "\u6a21\u677f", "\u6742\u8c08"] as const;
+const summaryFallback = "\u8fd9\u7bc7\u7b14\u8bb0\u8fd8\u6ca1\u6709\u6458\u8981\uff0c\u6253\u5f00\u6587\u7ae0\u9875\u53ef\u4ee5\u7ee7\u7eed\u9605\u8bfb\u5168\u6587\u3002";
+const homePageSize = 9;
+const archivePageSize = 40;
+const resultPageSize = 12;
+
+const frontmatterKeys = new Set([
+  "title",
+  "summary",
+  "tags",
+  "category",
+  "type",
+  "kind",
+  "source",
+  "created",
+  "updated",
+  "date",
+  "draft",
+]);
+
+function getHashPath(hash: string) {
+  const queryStart = hash.indexOf("?");
+  return queryStart === -1 ? hash : hash.slice(0, queryStart);
+}
+
+function getHashParams(hash: string) {
+  const queryStart = hash.indexOf("?");
+  return new URLSearchParams(queryStart === -1 ? "" : hash.slice(queryStart + 1));
+}
+
+function parseRoutePage(hash: string) {
+  const page = Number(getHashParams(hash).get("page") ?? "1");
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
+}
+
+function withPageParam(hashPath: string, page = 1, extraParams?: Record<string, string>) {
+  const params = new URLSearchParams(extraParams);
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+  const query = params.toString();
+  return query ? `${hashPath}?${query}` : hashPath;
+}
 
 function getRouteFromHash(): Route {
   const hash = window.location.hash || "#/";
+  const hashPath = getHashPath(hash);
+  const page = parseRoutePage(hash);
   const notePrefix = "#/note/";
   const tagPrefix = "#/tag/";
   const categoryPrefix = "#/category/";
   const searchPrefix = "#/search";
 
-  if (hash.startsWith(notePrefix)) {
-    const encodedPath = hash.slice(notePrefix.length);
+  if (hashPath.startsWith(notePrefix)) {
+    const encodedPath = hashPath.slice(notePrefix.length);
     if (!encodedPath) {
-      return { name: "home" };
+      return { name: "home", page: 1 };
     }
 
     try {
@@ -98,65 +160,507 @@ function getRouteFromHash(): Route {
     }
   }
 
-  if (hash === "#/tags") {
-    return { name: "tags" };
+  if (hashPath === "#/articles") {
+    return { name: "articles", page, year: getHashParams(hash).get("year") };
   }
 
-  if (hash.startsWith(tagPrefix)) {
+  if (hashPath === "#/tags") {
+    return { name: "tags", page };
+  }
+
+  if (hashPath.startsWith(tagPrefix)) {
     try {
-      return { name: "tag", tag: decodeURIComponent(hash.slice(tagPrefix.length)) };
+      return { name: "tag", tag: decodeURIComponent(hashPath.slice(tagPrefix.length)), page };
     } catch {
-      return { name: "tags" };
+      return { name: "tags", page: 1 };
     }
   }
 
-  if (hash === "#/categories") {
-    return { name: "categories" };
+  if (hashPath === "#/categories") {
+    return { name: "categories", page };
   }
 
-  if (hash.startsWith(categoryPrefix)) {
+  if (hashPath.startsWith(categoryPrefix)) {
     try {
       return {
         name: "category",
-        category: decodeURIComponent(hash.slice(categoryPrefix.length)),
+        category: decodeURIComponent(hashPath.slice(categoryPrefix.length)),
+        page,
       };
     } catch {
-      return { name: "categories" };
+      return { name: "categories", page: 1 };
     }
   }
 
-  if (hash.startsWith(searchPrefix)) {
-    const queryStart = hash.indexOf("?");
-    if (queryStart === -1) {
-      return { name: "search", query: "" };
-    }
-
-    const params = new URLSearchParams(hash.slice(queryStart + 1));
-    return { name: "search", query: params.get("q")?.trim() ?? "" };
+  if (hashPath === searchPrefix) {
+    const params = getHashParams(hash);
+    return { name: "search", query: params.get("q")?.trim() ?? "", page };
   }
 
-  return { name: "home" };
+  return { name: "home", page };
 }
 
-function getNoteHref(relativePath: string) {
-  return `#/note/${encodeURIComponent(relativePath)}`;
+function stripHashPrefix(hashHref: string) {
+  return hashHref.startsWith("#") ? hashHref.slice(1) : hashHref;
 }
 
-function getTagHref(tag: string) {
-  return `#/tag/${encodeURIComponent(tag)}`;
+function getNoteHref(relativePath: string, fromHref?: string) {
+  const noteHref = `#/note/${encodeURIComponent(relativePath)}`;
+  if (!fromHref) {
+    return noteHref;
+  }
+
+  const params = new URLSearchParams({ from: stripHashPrefix(fromHref) });
+  return `${noteHref}?${params.toString()}`;
 }
 
-function getCategoryHref(category: string) {
-  return `#/category/${encodeURIComponent(category)}`;
+function getHomeHref(page = 1) {
+  return withPageParam("#/", page);
 }
 
-function getSearchHref(query: string) {
+function getArticlesHref(page = 1, year?: string | null) {
+  return withPageParam("#/articles", page, year ? { year } : undefined);
+}
+
+function getTagHref(tag: string, page = 1) {
+  return withPageParam(`#/tag/${encodeURIComponent(tag)}`, page);
+}
+
+function getCategoryHref(category: string, page = 1) {
+  return withPageParam(`#/category/${encodeURIComponent(category)}`, page);
+}
+
+function getSearchHref(query: string, page = 1) {
   const trimmed = query.trim();
-  return trimmed ? `#/search?q=${encodeURIComponent(trimmed)}` : "#/search";
+  return withPageParam("#/search", page, trimmed ? { q: trimmed } : undefined);
+}
+
+function getRouteReturnHref(route: Exclude<Route, { name: "note"; encodedPath: string; relativePath: string }>) {
+  if (route.name === "home") return getHomeHref(route.page);
+  if (route.name === "articles") return getArticlesHref(route.page, route.year);
+  if (route.name === "tags") return withPageParam("#/tags", route.page);
+  if (route.name === "tag") return getTagHref(route.tag, route.page);
+  if (route.name === "categories") return withPageParam("#/categories", route.page);
+  if (route.name === "category") return getCategoryHref(route.category, route.page);
+  if (route.name === "search") return getSearchHref(route.query, route.page);
+  return "#/articles";
+}
+
+function isSafeReturnPath(path: string) {
+  if (!path.startsWith("/") || path.startsWith("//") || /[\u0000-\u001f\u007f]/.test(path)) {
+    return false;
+  }
+
+  const hashPath = getHashPath(`#${path}`);
+  return (
+    hashPath === "#/" ||
+    hashPath === "#/articles" ||
+    hashPath === "#/tags" ||
+    hashPath.startsWith("#/tag/") ||
+    hashPath === "#/categories" ||
+    hashPath.startsWith("#/category/") ||
+    hashPath === "#/search"
+  );
+}
+
+function getReturnLabel(path: string) {
+  const hashPath = getHashPath(`#${path}`);
+  if (hashPath === "#/") return "\u8fd4\u56de\u9996\u9875";
+  if (hashPath === "#/tags" || hashPath.startsWith("#/tag/")) return "\u8fd4\u56de\u6807\u7b7e";
+  if (hashPath === "#/categories" || hashPath.startsWith("#/category/")) return "\u8fd4\u56de\u5206\u7c7b";
+  if (hashPath === "#/search") return "\u8fd4\u56de\u641c\u7d22";
+  return "\u8fd4\u56de\u6587\u7ae0\u5217\u8868";
+}
+
+function getNoteReturnTarget(): ReturnTarget {
+  const from = getHashParams(window.location.hash).get("from");
+  if (from && isSafeReturnPath(from)) {
+    return {
+      href: `#${from}`,
+      label: getReturnLabel(from),
+    };
+  }
+
+  return {
+    href: "#/articles",
+    label: "\u8fd4\u56de\u6587\u7ae0\u5217\u8868",
+  };
 }
 
 function getCategoryLabel(category: string) {
   return categoryLabels[category] ?? category;
+}
+
+function trimYamlValue(value: string) {
+  return value
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
+}
+
+function parseTagsValue(value: string) {
+  const trimmed = trimYamlValue(value);
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed
+      .slice(1, -1)
+      .split(",")
+      .map(trimYamlValue)
+      .filter(Boolean);
+  }
+
+  return trimmed
+    .split(",")
+    .map(trimYamlValue)
+    .filter(Boolean);
+}
+
+function parseBooleanValue(value: string) {
+  const normalized = trimYamlValue(value).toLocaleLowerCase("en-US");
+  if (["true", "yes", "1"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "no", "0"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
+
+function parseFrontmatterYaml(yaml: string): ParsedFrontmatter {
+  const metadata: ParsedFrontmatter = {};
+  const lines = yaml.replace(/\r\n/g, "\n").split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+
+    const key = match[1].toLocaleLowerCase("en-US");
+    const value = match[2] ?? "";
+    if (!frontmatterKeys.has(key)) {
+      continue;
+    }
+
+    if (key === "tags") {
+      if (value.trim()) {
+        metadata.tags = parseTagsValue(value);
+        continue;
+      }
+
+      const tags: string[] = [];
+      for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+        const itemMatch = lines[nextIndex].match(/^\s*-\s*(.+)$/);
+        if (!itemMatch) {
+          break;
+        }
+
+        const tag = trimYamlValue(itemMatch[1]);
+        if (tag) {
+          tags.push(tag);
+        }
+        index = nextIndex;
+      }
+      metadata.tags = tags;
+      continue;
+    }
+
+    if (key === "draft") {
+      const parsed = parseBooleanValue(value);
+      if (parsed !== undefined) {
+        metadata.draft = parsed;
+      }
+      continue;
+    }
+
+    const text = trimYamlValue(value);
+    if (!text) {
+      continue;
+    }
+
+    if (key === "title") metadata.title = text;
+    if (key === "summary") metadata.summary = text;
+    if (key === "category") metadata.category = text;
+    if (key === "type") metadata.type = text;
+    if (key === "kind") metadata.kind = text;
+    if (key === "created") metadata.created = text;
+    if (key === "updated") metadata.updated = text;
+    if (key === "date") metadata.date = text;
+  }
+
+  return metadata;
+}
+
+function splitFrontmatter(value: string | null | undefined) {
+  const text = (value ?? "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  if (!text.trim()) {
+    return { metadata: {} as ParsedFrontmatter, body: "" };
+  }
+
+  const fenced = text.match(/^---\n([\s\S]*?)\n(?:---|\.\.\.)\s*(?:\n|$)([\s\S]*)$/);
+  if (fenced) {
+    return {
+      metadata: parseFrontmatterYaml(fenced[1]),
+      body: fenced[2].trim(),
+    };
+  }
+
+  const lines = text.split("\n");
+  const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+  const firstLine = firstContentIndex === -1 ? "" : lines[firstContentIndex];
+  if (!/^\s*(title|summary|tags|category|type|kind|source|created|updated|date|draft):\s*/i.test(firstLine)) {
+    return { metadata: {} as ParsedFrontmatter, body: text.trim() };
+  }
+
+  const yamlLines: string[] = [];
+  let bodyStart = firstContentIndex;
+  for (let index = firstContentIndex; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (
+      line.trim() === "" ||
+      /^\s*(title|summary|tags|category|type|kind|source|created|updated|date|draft):\s*/i.test(line) ||
+      /^\s*-\s+/.test(line)
+    ) {
+      yamlLines.push(line);
+      bodyStart = index + 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    metadata: parseFrontmatterYaml(yamlLines.join("\n")),
+    body: lines.slice(bodyStart).join("\n").trim(),
+  };
+}
+
+function stripMarkdownForSummary(value: string) {
+  const text = splitFrontmatter(value).body;
+
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/~~~[\s\S]*?~~~/g, " ")
+    .replace(/\$\$[\s\S]*?\$\$/g, " ")
+    .replace(/\\\[[\s\S]*?\\\]/g, " ")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)]\((?:https?:\/\/|\/)[^)]+\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/(?:Problem|URL|Submission)[\:\uff1a]\s*\S+/gi, " ")
+    .replace(/`([^`]{1,24})`/g, "$1")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/\$([^$\n]{1,24})\$/g, "$1")
+    .replace(/\$[^$\n]*\$/g, " ")
+    .replace(/^\s*\|.*\|\s*$/gm, " ")
+    .replace(/^\s*[-:| ]{3,}\s*$/gm, " ")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)\u3001]\s+/gm, "")
+    .replace(/^\s*(title|summary|tags|category|type|kind|source|raw|internal|debug|created|updated|date|draft):.*$/gim, " ")
+    .replace(/^\s*-\s*['"]?[^'"\n]+['"]?\s*$/gm, " ")
+    .replace(/[{}[\]]/g, " ")
+    .replace(/[*_~>#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isInvalidSummary(value: string) {
+  const text = value.trim();
+  if (!text) {
+    return true;
+  }
+
+  if (/\b(title|tags|summary|draft|source|raw|internal|debug)\s*:/i.test(text)) {
+    return true;
+  }
+
+  if (/^(---|\.\.\.|```|~~~)/.test(text) || /https?:\/\/\S+/i.test(text)) {
+    return true;
+  }
+
+  if (/^\|.*\|$/.test(text) || /\$\$|\\\[|\\\]|\\\(|\\\)/.test(text)) {
+    return true;
+  }
+
+  if (/(^|[\s,\uff0c])(?:title|tags|summary|draft|source|created|updated|date)(?=[\s,\uff0c:\uff1a]|$)/i.test(text)) {
+    return true;
+  }
+
+  if (/^[-,\s"'[\]{}:]+$/.test(text)) {
+    return true;
+  }
+
+  const codeMarks = (text.match(/[`|{}[\]\\<>]/g) ?? []).length;
+  if (codeMarks / Math.max(text.length, 1) > 0.06) {
+    return true;
+  }
+
+  if (/[;=<>]{2,}|(?:const|let|var|function|return|include|define)\s+/i.test(text)) {
+    return true;
+  }
+
+  const metadataMarks = (text.match(/[`|{}[\]:]/g) ?? []).length;
+  if (metadataMarks / Math.max(text.length, 1) > 0.08) {
+    return true;
+  }
+
+  const wordLikeTags = text
+    .split(/[,\uff0c\u3001\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (
+    wordLikeTags.length >= 2 &&
+    wordLikeTags.length <= 8 &&
+    wordLikeTags.every((part) => part.length <= 6) &&
+    wordLikeTags.join("").length < 28 &&
+    wordLikeTags.join("").length === text.replace(/[,\uff0c\u3001\s]+/g, "").length
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function limitSummary(value: string, maxLength = 112) {
+  const normalized = stripMarkdownForSummary(value);
+  const limited = normalized.length > maxLength ? `${normalized.slice(0, maxLength).trimEnd()} [...]` : normalized;
+  return isInvalidSummary(limited) ? "" : limited;
+}
+
+function createCleanSummary(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const summary = limitSummary(value ?? "");
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return summaryFallback;
+}
+
+function createCleanSummaryWithLimit(maxLength: number, ...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const summary = limitSummary(value ?? "", maxLength);
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return summaryFallback;
+}
+
+function getFilenameTitle(relativePath: string) {
+  const filename = relativePath.split(/[\\/]/).pop() ?? relativePath;
+  return decodeURIComponent(filename.replace(/\.[^.]+$/, "")) || "\u672a\u547d\u540d\u6587\u7ae0";
+}
+
+function normalizeTags(tags: string[] | undefined) {
+  return Array.from(
+    new Set(
+      (tags ?? [])
+        .map((tag) => tag.trim())
+        .filter((tag) => tag && !/^(title|summary|tags|category|type|kind|created|updated|date|draft):/i.test(tag)),
+    ),
+  );
+}
+
+function matchArticleClass(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+
+  return articleClassWords.find((word) => text.includes(word)) ?? null;
+}
+
+function inferArticleClass({
+  relativePath,
+  category,
+  tags,
+  metadata,
+}: {
+  relativePath: string;
+  category: string;
+  tags: string[];
+  metadata: ParsedFrontmatter;
+}) {
+  const fromFrontmatter =
+    matchArticleClass(metadata.category) ?? matchArticleClass(metadata.type) ?? matchArticleClass(metadata.kind);
+  if (fromFrontmatter) {
+    return fromFrontmatter;
+  }
+
+  const fromTags = tags.map(matchArticleClass).find(Boolean);
+  if (fromTags) {
+    return fromTags;
+  }
+
+  const normalizedPath = relativePath.replace(/\\/g, "/").toLocaleLowerCase("en-US");
+  const normalizedCategory = category.trim().toLocaleLowerCase("en-US");
+  if (normalizedPath.startsWith("problems/") || normalizedCategory === "problems") {
+    return "\u9898\u89e3";
+  }
+  if (normalizedPath.startsWith("tricks/") || normalizedCategory === "tricks") {
+    return "\u6280\u5de7";
+  }
+  if (normalizedPath.startsWith("luogu/") || normalizedCategory === "luogu") {
+    return tags.includes("\u590d\u76d8") ? "\u590d\u76d8" : "\u9898\u89e3";
+  }
+
+  return "\u672a\u5206\u7c7b";
+}
+
+function normalizeNoteSummary(note: NoteSummary): NoteSummary {
+  const titleParts = splitFrontmatter(note.title);
+  const summaryParts = splitFrontmatter(note.summary);
+  const excerptParts = splitFrontmatter(note.excerpt);
+  const metadata = { ...titleParts.metadata, ...summaryParts.metadata, ...excerptParts.metadata };
+  const tags = metadata.tags ? normalizeTags(metadata.tags) : normalizeTags(note.tags);
+  const summaryText = createCleanSummary(metadata.summary, summaryParts.body, excerptParts.body);
+  const excerptText = createCleanSummary(excerptParts.body, metadata.summary, summaryParts.body);
+
+  return {
+    ...note,
+    title: (metadata.title ?? titleParts.body) || getFilenameTitle(note.relativePath),
+    summary: summaryText || null,
+    excerpt: excerptText || null,
+    tags,
+    articleClass: inferArticleClass({
+      relativePath: note.relativePath,
+      category: note.category,
+      tags,
+      metadata,
+    }),
+    created: metadata.created ?? note.created,
+    updated: metadata.updated ?? note.updated,
+    date: metadata.date ?? note.date,
+    draft: metadata.draft ?? note.draft,
+  };
+}
+
+function normalizeNoteDetail(note: NoteDetail): NoteDetail {
+  const bodyParts = splitFrontmatter(note.body);
+  const metadata = { ...note.metadata, ...bodyParts.metadata };
+
+  return {
+    ...note,
+    title: metadata.title?.trim() || note.title || getFilenameTitle(note.relativePath),
+    tags: bodyParts.metadata.tags ? normalizeTags(bodyParts.metadata.tags) : normalizeTags(note.tags),
+    created: bodyParts.metadata.created ?? note.created,
+    updated: bodyParts.metadata.updated ?? note.updated,
+    date: bodyParts.metadata.date ?? note.date,
+    draft: bodyParts.metadata.draft ?? note.draft,
+    summary: bodyParts.metadata.summary ?? note.summary,
+    metadata,
+    body: bodyParts.body,
+  };
 }
 
 function formatDate(value: string | null) {
@@ -169,7 +673,7 @@ function formatDate(value: string | null) {
     return null;
   }
 
-  return dateFormatter.format(date);
+  return `${date.getFullYear()} \u5e74 ${date.getMonth() + 1} \u6708 ${date.getDate()} \u65e5`;
 }
 
 function formatOptionalDate(...values: Array<string | null | undefined>) {
@@ -183,17 +687,46 @@ function formatOptionalDate(...values: Array<string | null | undefined>) {
   return null;
 }
 
+function getNoteDateValue(note: NoteSummary) {
+  return note.date ?? note.updated ?? note.created ?? null;
+}
+
+function getNoteDate(note: NoteSummary) {
+  const value = getNoteDateValue(note);
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getNoteYear(note: NoteSummary) {
+  return getNoteDate(note)?.getFullYear().toString() ?? "\u672a\u77e5\u5e74\u4efd";
+}
+
+function formatArchiveDay(note: NoteSummary) {
+  const date = getNoteDate(note);
+  if (!date) {
+    return "\u65e5\u671f\u672a\u77e5";
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return month + " \u6708 " + day + " \u65e5";
+}
+
 function getNoteExcerpt(note: NoteSummary) {
-  return (
-    note.summary?.trim() ||
-    note.excerpt?.trim() ||
-    "这篇笔记还没有摘要，打开文章页后可以继续阅读正文。"
-  );
+  return createCleanSummary(note.summary, note.excerpt);
 }
 
 function getShortNoteExcerpt(note: NoteSummary) {
   const excerpt = getNoteExcerpt(note);
-  return excerpt.length > 64 ? `${excerpt.slice(0, 64)}...` : excerpt;
+  return excerpt.length > 64 ? excerpt.slice(0, 64) + " [...]" : excerpt;
+}
+
+function getHomeExcerpt(note: NoteSummary, maxLength: number) {
+  return createCleanSummaryWithLimit(maxLength, note.summary, note.excerpt);
 }
 
 function normalizeSearchText(value: string) {
@@ -221,12 +754,12 @@ function getCategoryCounts(notes: NoteSummary[]) {
   const counts = new Map<string, number>();
 
   for (const note of notes) {
-    const category = note.category.trim() || "uncategorized";
+    const category = note.articleClass?.trim() || "\u672a\u5206\u7c7b";
     counts.set(category, (counts.get(category) ?? 0) + 1);
   }
 
   return Array.from(counts, ([name, count]) => ({ name, count })).sort(
-    (a, b) => b.count - a.count || getCategoryLabel(a.name).localeCompare(getCategoryLabel(b.name), "zh-CN"),
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"),
   );
 }
 
@@ -241,13 +774,41 @@ function searchNotes(notes: NoteSummary[], query: string) {
       note.title,
       note.summary ?? "",
       note.excerpt ?? "",
-      note.category,
-      getCategoryLabel(note.category),
+      note.articleClass ?? "",
       note.relativePath,
       ...note.tags,
     ];
 
     return fields.some((field) => normalizeSearchText(field).includes(normalizedQuery));
+  });
+}
+
+function paginateNotes(notes: NoteSummary[], page: number, pageSize: number) {
+  const totalPages = Math.max(1, Math.ceil(notes.length / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const start = (currentPage - 1) * pageSize;
+
+  return {
+    currentPage,
+    totalPages,
+    items: notes.slice(start, start + pageSize),
+  };
+}
+
+function groupNotesByYear(notes: NoteSummary[]) {
+  const groups = new Map<string, NoteSummary[]>();
+
+  for (const note of notes) {
+    const year = getNoteYear(note);
+    const group = groups.get(year) ?? [];
+    group.push(note);
+    groups.set(year, group);
+  }
+
+  return Array.from(groups, ([year, yearNotes]) => ({ year, notes: yearNotes })).sort((a, b) => {
+    if (a.year === "\u672a\u77e5\u5e74\u4efd") return 1;
+    if (b.year === "\u672a\u77e5\u5e74\u4efd") return -1;
+    return Number(b.year) - Number(a.year);
   });
 }
 
@@ -268,7 +829,7 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error("HTTP " + response.status);
       }
 
       const data = (await response.json()) as NotesResponse;
@@ -276,14 +837,14 @@ export default function App() {
         throw new Error("Invalid notes response");
       }
 
-      setNotes(data.notes);
+      setNotes(data.notes.map(normalizeNoteSummary));
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
 
       console.error("Failed to load local blog notes", err);
-      setNotesError("无法读取本地笔记");
+      setNotesError("鏃犳硶璇诲彇鏈湴绗旇");
       setNotes([]);
     } finally {
       if (!signal?.aborted) {
@@ -311,33 +872,30 @@ export default function App() {
 
   return (
     <main className="site-shell">
-      <header className="site-header">
-        <a className="brand" href="#/" aria-label="OI Notebook 首页">
-          OI Notebook
-        </a>
-        <nav className="nav-links" aria-label="博客导航">
-          <a href="#/">首页</a>
-          <a href="#/">文章</a>
-          <a href="#/tags">标签</a>
-          <a href="#/categories">分类</a>
-          <a href="#/search">搜索</a>
-        </nav>
-      </header>
+        <header className="site-header">
+          <div className="masthead-title">
+            <a className="brand" href="#/" aria-label={"OI Notebook \u9996\u9875"}>
+              OI Notebook
+            </a>
+            <p>{"\u4e00\u4e2a\u672c\u5730\u7b97\u6cd5\u7b14\u8bb0\u4e0e\u9898\u89e3\u535a\u5ba2"}</p>
+          </div>
+          <SiteNav route={route} />
+        </header>
 
-      {route.name === "note" ? (
-        <NoteDetailView relativePath={route.relativePath} notes={notes} />
-      ) : (
-        <IndexView
-          route={route}
-          notes={notes}
-          tagCounts={tagCounts}
-          categoryCounts={categoryCounts}
-          isLoading={isLoadingNotes}
-          error={notesError}
-          onRetry={() => void loadNotes()}
-        />
-      )}
-    </main>
+        {route.name === "note" ? (
+          <NoteDetailView relativePath={route.relativePath} notes={notes} />
+        ) : (
+          <IndexView
+            route={route}
+            notes={notes}
+            tagCounts={tagCounts}
+            categoryCounts={categoryCounts}
+            isLoading={isLoadingNotes}
+            error={notesError}
+            onRetry={() => void loadNotes()}
+          />
+        )}
+      </main>
   );
 }
 
@@ -358,58 +916,96 @@ function IndexView({
   error: string | null;
   onRetry: () => void;
 }) {
-  if (route.name === "tags") {
+  if (route.name === "articles") {
     return (
-      <ListingPage eyebrow="Tags" title="标签" description="按算法主题和训练关键词浏览笔记。">
+      <ArticleArchiveView
+        notes={notes}
+        isLoading={isLoading}
+        error={error}
+        onRetry={onRetry}
+        page={route.page}
+        targetYear={route.year}
+        sourceHref={getRouteReturnHref(route)}
+      />
+    );
+  }
+
+  if (route.name === "tags") {
+    const paged = paginateNotes(notes, route.page, resultPageSize);
+
+    return (
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6807\u7b7e"}>
         <TagCloud tags={tagCounts} />
         <PostResults
-          notes={notes}
+          notes={paged.items}
           isLoading={isLoading}
           error={error}
           onRetry={onRetry}
-          emptyTitle="还没有可展示的标签"
-          emptyDescription="给笔记添加 tags 后，这里会自动汇总标签入口。"
+          sourceHref={getRouteReturnHref(route)}
+          variant="list"
+          emptyTitle={"\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u6807\u7b7e"}
+          emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6c47\u603b\u6807\u7b7e\u5165\u53e3\u3002"}
         />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => withPageParam("#/tags", page)} />
       </ListingPage>
     );
   }
 
   if (route.name === "tag") {
     const filteredNotes = notes.filter((note) => note.tags.includes(route.tag));
+    const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
 
     return (
-      <ListingPage eyebrow="Tag" title={`标签：${route.tag}`} description="这个标签下的全部文章。">
-        <PostResults notes={filteredNotes} isLoading={isLoading} error={error} onRetry={onRetry} />
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6807\u7b7e \u2192 " + route.tag}>
+        <PostResults
+          notes={paged.items}
+          isLoading={isLoading}
+          error={error}
+          onRetry={onRetry}
+          sourceHref={getRouteReturnHref(route)}
+          variant="list"
+        />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getTagHref(route.tag, page)} />
       </ListingPage>
     );
   }
 
   if (route.name === "categories") {
+    const paged = paginateNotes(notes, route.page, resultPageSize);
+
     return (
-      <ListingPage eyebrow="Categories" title="分类" description="按笔记所在目录浏览文章。">
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u5206\u7c7b"}>
         <CategoryList categories={categoryCounts} />
         <PostResults
-          notes={notes}
+          notes={paged.items}
           isLoading={isLoading}
           error={error}
           onRetry={onRetry}
-          emptyTitle="还没有可展示的分类"
-          emptyDescription="保存第一篇笔记后，这里会自动按目录汇总分类。"
+          sourceHref={getRouteReturnHref(route)}
+          variant="list"
+          emptyTitle={"\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u5206\u7c7b"}
+          emptyDescription={"\u4fdd\u5b58\u7b2c\u4e00\u7bc7\u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6309\u6587\u7ae0\u5927\u7c7b\u6c47\u603b\u5206\u7c7b\u3002"}
         />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => withPageParam("#/categories", page)} />
       </ListingPage>
     );
   }
 
   if (route.name === "category") {
-    const filteredNotes = notes.filter((note) => note.category === route.category);
+    const filteredNotes = notes.filter((note) => (note.articleClass ?? "\u672a\u5206\u7c7b") === route.category);
+    const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
 
     return (
-      <ListingPage
-        eyebrow="Category"
-        title={`分类：${getCategoryLabel(route.category)}`}
-        description="这个分类下的全部文章。"
-      >
-        <PostResults notes={filteredNotes} isLoading={isLoading} error={error} onRetry={onRetry} />
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u5206\u7c7b \u2192 " + route.category}>
+        <PostResults
+          notes={paged.items}
+          isLoading={isLoading}
+          error={error}
+          onRetry={onRetry}
+          sourceHref={getRouteReturnHref(route)}
+          variant="list"
+        />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCategoryHref(route.category, page)} />
       </ListingPage>
     );
   }
@@ -422,47 +1018,70 @@ function IndexView({
         isLoading={isLoading}
         error={error}
         onRetry={onRetry}
+        page={route.page}
       />
     );
   }
 
-  const recentNotes = notes.slice(0, 4);
+  const latestNote = notes[0] ?? null;
+  const articleNotes = notes.slice(1);
+  const paged = paginateNotes(articleNotes, route.page, homePageSize);
 
   return (
     <>
-      <section className="page-header hero" id="top">
-        <p className="eyebrow">LOCAL BLOG</p>
-        <h1>OI Notebook</h1>
-        <p className="subtitle">本地算法笔记与题解博客</p>
-      </section>
+      <RecentUpdates note={latestNote} sourceHref={getRouteReturnHref(route)} />
 
-      <RecentUpdates notes={recentNotes} />
-
-      <section className="home-posts" aria-label="文章摘要流">
-        <PostResults notes={notes} isLoading={isLoading} error={error} onRetry={onRetry} />
+      <section className="home-posts" id="articles" aria-label={"\u6587\u7ae0\u6458\u8981\u6d41"}>
+        <PostResults
+          notes={paged.items}
+          isLoading={isLoading}
+          error={error}
+          onRetry={onRetry}
+          sourceHref={getRouteReturnHref(route)}
+        />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={getHomeHref} />
       </section>
     </>
   );
 }
 
-function ListingPage({
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
+function SiteNav({ route }: { route: Route }) {
+  const activeName =
+    route.name === "note" || route.name === "articles"
+      ? "articles"
+      : route.name === "tag"
+        ? "tags"
+        : route.name === "category"
+          ? "categories"
+          : route.name;
+
+  return (
+    <div className="primary-nav-row">
+      <nav className="nav-links" aria-label={"\u535a\u5ba2\u5bfc\u822a"}>
+        <a className={activeName === "home" ? "active" : undefined} href="#/">
+          {"\u4e3b\u9875"}
+        </a>
+        <a className={activeName === "articles" ? "active" : undefined} href="#/articles">
+          {"\u6587\u7ae0\u5217\u8868"}
+        </a>
+        <a className={activeName === "tags" ? "active" : undefined} href="#/tags">
+          {"\u6807\u7b7e"}
+        </a>
+        <a className={activeName === "categories" ? "active" : undefined} href="#/categories">
+          {"\u5206\u7c7b"}
+        </a>
+      </nav>
+      <a className={activeName === "search" ? "search-link active" : "search-link"} href="#/search" aria-label={"\u641c\u7d22"} title={"\u641c\u7d22"} />
+    </div>
+  );
+}
+
+function ListingPage({ breadcrumb, children }: { breadcrumb: string; children: ReactNode }) {
   return (
     <>
-      <section className="page-header listing-header">
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </section>
+      <nav className="breadcrumb" aria-label={"\u9762\u5305\u5c51"}>
+        {breadcrumb}
+      </nav>
       <section className="listing-content">{children}</section>
     </>
   );
@@ -474,7 +1093,7 @@ function TagCloud({ tags }: { tags: CountItem[] }) {
   }
 
   return (
-    <div className="term-list" aria-label="标签列表">
+    <div className="term-list" aria-label={"\u6807\u7b7e\u5217\u8868"}>
       {tags.map((tag) => (
         <a className="term-pill" href={getTagHref(tag.name)} key={tag.name}>
           <span>{tag.name}</span>
@@ -491,12 +1110,109 @@ function CategoryList({ categories }: { categories: CountItem[] }) {
   }
 
   return (
-    <div className="category-list" aria-label="分类列表">
+    <div className="category-list" aria-label={"\u5206\u7c7b\u5217\u8868"}>
       {categories.map((category) => (
         <a className="category-item" href={getCategoryHref(category.name)} key={category.name}>
           <span>{getCategoryLabel(category.name)}</span>
-          <small>{category.count} 篇文章</small>
+          <small>{category.count + " \u7bc7\u6587\u7ae0"}</small>
         </a>
+      ))}
+    </div>
+  );
+}
+
+function ArticleArchiveView({
+  notes,
+  isLoading,
+  error,
+  onRetry,
+  page,
+  targetYear,
+  sourceHref,
+}: {
+  notes: NoteSummary[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  page: number;
+  targetYear: string | null;
+  sourceHref: string;
+}) {
+  const paged = paginateNotes(notes, page, archivePageSize);
+  const yearGroups = groupNotesByYear(paged.items);
+  const allYearGroups = groupNotesByYear(notes);
+  const years = allYearGroups.map((group) => group.year);
+  const yearCounts = new Map(allYearGroups.map((group) => [group.year, group.notes.length]));
+  const yearPageLookup = new Map<string, number>();
+
+  notes.forEach((note, index) => {
+    const year = getNoteYear(note);
+    if (!yearPageLookup.has(year)) {
+      yearPageLookup.set(year, Math.floor(index / archivePageSize) + 1);
+    }
+  });
+
+  useEffect(() => {
+    if (!targetYear || isLoading || error) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById("year-" + targetYear)?.scrollIntoView({ block: "start" });
+    });
+  }, [error, isLoading, targetYear, paged.currentPage]);
+
+  return (
+    <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u7ae0\u5217\u8868"}>
+      {years.length > 0 ? (
+        <nav className="year-index" aria-label={"\u5e74\u4efd\u7d22\u5f15"}>
+          {years.map((year) => (
+            <a href={getArticlesHref(yearPageLookup.get(year) ?? 1, year)} key={year}>
+              {year}
+            </a>
+          ))}
+        </nav>
+      ) : null}
+      {isLoading ? (
+        <LoadingState />
+      ) : error ? (
+        <ErrorState onRetry={onRetry} />
+      ) : notes.length === 0 ? (
+        <EmptyState title="\u6682\u65e0\u6587\u7ae0" description="\u4fdd\u5b58\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5e74\u4efd\u5f52\u6863\u3002" />
+      ) : (
+        <ArchiveList groups={yearGroups} yearCounts={yearCounts} sourceHref={sourceHref} />
+      )}
+      <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={getArticlesHref} />
+    </ListingPage>
+  );
+}
+
+function ArchiveList({
+  groups,
+  yearCounts,
+  sourceHref,
+}: {
+  groups: Array<{ year: string; notes: NoteSummary[] }>;
+  yearCounts: Map<string, number>;
+  sourceHref: string;
+}) {
+  return (
+    <div className="archive-list">
+      {groups.map((group) => (
+        <section className="archive-year" id={"year-" + group.year} key={group.year}>
+          <h2>
+            {group.year} <span>({yearCounts.get(group.year) ?? group.notes.length})</span>
+          </h2>
+          <ol>
+            {group.notes.map((note) => (
+              <li key={note.relativePath}>
+                <time dateTime={getNoteDateValue(note) ?? undefined}>{formatArchiveDay(note)}</time>
+                <a href={getNoteHref(note.relativePath, sourceHref)}>{note.title}</a>
+                <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
       ))}
     </div>
   );
@@ -508,15 +1224,19 @@ function SearchView({
   isLoading,
   error,
   onRetry,
+  page,
 }: {
   query: string;
   notes: NoteSummary[];
   isLoading: boolean;
   error: string | null;
   onRetry: () => void;
+  page: number;
 }) {
   const [draftQuery, setDraftQuery] = useState(query);
   const results = useMemo(() => searchNotes(notes, query), [notes, query]);
+  const paged = paginateNotes(query ? results : [], page, resultPageSize);
+  const sourceHref = getSearchHref(query, paged.currentPage);
 
   useEffect(() => {
     setDraftQuery(query);
@@ -524,43 +1244,52 @@ function SearchView({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    window.location.hash = getSearchHref(draftQuery);
+    window.location.hash = getSearchHref(draftQuery, 1);
   };
 
   return (
-    <ListingPage eyebrow="Search" title="搜索" description="在标题、摘要、标签、分类和路径中查找文章。">
+    <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u641c\u7d22"}>
       <form className="search-form" onSubmit={handleSubmit}>
-        <input
-          aria-label="搜索文章"
-          placeholder="搜索 title、tag、summary..."
-          type="search"
-          value={draftQuery}
-          onChange={(event) => setDraftQuery(event.target.value)}
-        />
-        <button type="submit">搜索</button>
+        <label className="search-label" htmlFor="local-blog-search">
+          {"\u641c\u7d22\u6587\u7ae0"}
+        </label>
+        <div className="search-field">
+          <input
+            id="local-blog-search"
+            aria-label={"\u641c\u7d22\u6587\u7ae0"}
+            placeholder={"\u641c\u7d22\u6807\u9898\u3001\u6458\u8981\u6216\u6b63\u6587"}
+            type="search"
+            value={draftQuery}
+            onChange={(event) => setDraftQuery(event.target.value)}
+          />
+          <button type="submit">{"\u641c\u7d22"}</button>
+        </div>
         {query ? (
           <a className="clear-search" href="#/search">
-            清除
+            {"\u6e05\u9664"}
           </a>
         ) : null}
       </form>
 
       <p className="result-count">
-        {query ? `找到 ${results.length} 篇相关文章` : "输入关键词开始搜索"}
+        {query ? "\u627e\u5230 " + results.length + " \u7bc7\u76f8\u5173\u6587\u7ae0" : "\u8f93\u5165\u5173\u952e\u8bcd\u5f00\u59cb\u641c\u7d22"}
       </p>
 
       <PostResults
-        notes={query ? results : []}
+        notes={paged.items}
         isLoading={isLoading}
         error={error}
         onRetry={onRetry}
-        emptyTitle={query ? "没有找到相关文章" : "还没有输入搜索词"}
+        sourceHref={sourceHref}
+        variant="list"
+        emptyTitle={query ? "\u6ca1\u6709\u627e\u5230\u76f8\u5173\u6587\u7ae0" : "\u8fd8\u6ca1\u6709\u8f93\u5165\u641c\u7d22\u8bcd"}
         emptyDescription={
           query
-            ? "换一个标题、标签、分类或摘要里的关键词再试试。"
-            : "可以搜索中文标题、tag、summary、excerpt、分类名或相对路径。"
+            ? "\u6362\u4e00\u4e2a\u6807\u9898\u3001\u6807\u7b7e\u3001\u5206\u7c7b\u6216\u6458\u8981\u91cc\u7684\u5173\u952e\u8bcd\u518d\u8bd5\u8bd5\u3002"
+            : "\u53ef\u4ee5\u641c\u7d22\u4e2d\u6587\u6807\u9898\u3001\u6807\u7b7e\u3001\u6458\u8981\u3001\u5206\u7c7b\u540d\u6216\u76f8\u5bf9\u8def\u5f84\u3002"
         }
       />
+      <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(nextPage) => getSearchHref(query, nextPage)} />
     </ListingPage>
   );
 }
@@ -570,15 +1299,19 @@ function PostResults({
   isLoading,
   error,
   onRetry,
+  sourceHref,
   emptyTitle,
   emptyDescription,
+  variant = "grid",
 }: {
   notes: NoteSummary[];
   isLoading: boolean;
   error: string | null;
   onRetry: () => void;
+  sourceHref?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  variant?: "grid" | "list";
 }) {
   if (isLoading) {
     return <LoadingState />;
@@ -592,62 +1325,68 @@ function PostResults({
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
 
-  return <PostGrid notes={notes} />;
+  return variant === "list" ? (
+    <ArticleResultList notes={notes} sourceHref={sourceHref} />
+  ) : (
+    <PostGrid notes={notes} sourceHref={sourceHref} />
+  );
 }
 
-function RecentUpdates({ notes }: { notes: NoteSummary[] }) {
-  if (notes.length === 0) {
-    return null;
+function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceHref?: string }) {
+  if (!note) {
+    return (
+      <section className="recent-updates" aria-label={"\u6700\u65b0\u6587\u7ae0"}>
+        <section className="status-panel compact-status">
+          <h2>{"\u6682\u65e0\u6587\u7ae0"}</h2>
+          <p>{"\u5199\u4e0b\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u6587\u7ae0\u6458\u8981\u3002"}</p>
+        </section>
+      </section>
+    );
   }
 
-  return (
-    <section className="recent-updates" aria-label="最近更新">
-      <div className="recent-heading">
-        <p className="eyebrow">Recent Updates</p>
-        <h2>最近更新</h2>
-      </div>
-      <div className="recent-strip">
-        {notes.map((note) => {
-          const displayDate = formatOptionalDate(note.date, note.updated, note.created);
+  const displayDate = formatOptionalDate(note.date, note.updated, note.created);
 
-          return (
-            <article className="recent-card" key={note.relativePath}>
-              <a href={getNoteHref(note.relativePath)}>
-                <div className="post-meta">
-                  <span>{getCategoryLabel(note.category)}</span>
-                  {displayDate ? (
-                    <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time>
-                  ) : null}
-                </div>
-                <h3>{note.title}</h3>
-                <p>{getShortNoteExcerpt(note)}</p>
-              </a>
-            </article>
-          );
-        })}
-      </div>
+  return (
+    <section className="recent-updates" aria-label={"\u6700\u65b0\u6587\u7ae0"}>
+      <article className="recent-card">
+        <a href={getNoteHref(note.relativePath, sourceHref)}>
+          <div className="post-meta">
+            <span>{note.articleClass ?? inferArticleClass({ relativePath: note.relativePath, category: note.category, tags: note.tags, metadata: {} })}</span>
+            {displayDate ? (
+              <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time>
+            ) : null}
+          </div>
+          <div className="recent-card-main">
+            <h3>{note.title}</h3>
+            <p>{getHomeExcerpt(note, 132)}</p>
+          </div>
+          <div className="recent-card-action">
+            <span>{"\u9605\u8bfb\u66f4\u591a"}</span>
+          </div>
+        </a>
+      </article>
     </section>
   );
 }
 
-function PostGrid({ notes }: { notes: NoteSummary[] }) {
+function PostGrid({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: string }) {
   return (
     <div className="post-grid">
       {notes.map((note) => (
         <article className="post-card" key={note.relativePath}>
-          <a className="post-card-link" href={getNoteHref(note.relativePath)}>
+          <a className="post-card-link" href={getNoteHref(note.relativePath, sourceHref)}>
             <div className="post-meta">
-              <span>{getCategoryLabel(note.category)}</span>
+              <span>{note.articleClass ?? inferArticleClass({ relativePath: note.relativePath, category: note.category, tags: note.tags, metadata: {} })}</span>
               {formatOptionalDate(note.date, note.updated, note.created) ? (
                 <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
                   {formatOptionalDate(note.date, note.updated, note.created)}
                 </time>
               ) : null}
-              {note.draft ? <span className="draft-badge">草稿</span> : null}
+              {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
             </div>
             <h2>{note.title}</h2>
-            <p>{getNoteExcerpt(note)}</p>
-            <span className="read-more">阅读全文</span>
+            <p>{getHomeExcerpt(note, 78)}</p>
+            <span className="read-more">{"\u9605\u8bfb\u66f4\u591a"}</span>
           </a>
         </article>
       ))}
@@ -655,14 +1394,108 @@ function PostGrid({ notes }: { notes: NoteSummary[] }) {
   );
 }
 
+function ArticleResultList({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: string }) {
+  return (
+    <div className="result-list">
+      {notes.map((note) => {
+        const displayDate = formatOptionalDate(note.date, note.updated, note.created);
+
+        return (
+          <article className="result-item" key={note.relativePath}>
+            <a href={getNoteHref(note.relativePath, sourceHref)}>
+              <div className="post-meta">
+                <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
+                {displayDate ? <time dateTime={getNoteDateValue(note) ?? undefined}>{displayDate}</time> : null}
+              </div>
+              <h2>{note.title}</h2>
+              <p>{getNoteExcerpt(note)}</p>
+            </a>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function Pagination({
+  currentPage,
+  totalPages,
+  getPageHref,
+}: {
+  currentPage: number;
+  totalPages: number;
+  getPageHref: (page: number) => string;
+}) {
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  const pages = getPaginationItems(currentPage, totalPages);
+
+  return (
+    <nav className="pagination" aria-label={"\u5206\u9875"}>
+      {currentPage > 1 ? (
+        <a className="pagination-prev" href={getPageHref(currentPage - 1)}>
+          {"\u2190 \u4e0a\u4e00\u9875"}
+        </a>
+      ) : null}
+      {pages.map((item, index) =>
+        item === "ellipsis" ? (
+          <span className="pagination-ellipsis" key={"ellipsis-" + index}>
+            ...
+          </span>
+        ) : (
+          <a
+            className={item === currentPage ? "active" : undefined}
+            aria-current={item === currentPage ? "page" : undefined}
+            href={getPageHref(item)}
+            key={item}
+          >
+            {item}
+          </a>
+        ),
+      )}
+      {currentPage < totalPages ? (
+        <a className="pagination-next" href={getPageHref(currentPage + 1)}>
+          {"\u4e0b\u4e00\u9875 \u2192"}
+        </a>
+      ) : null}
+    </nav>
+  );
+}
+
+function getPaginationItems(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+  const sortedPages = Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+  const items: Array<number | "ellipsis"> = [];
+
+  for (const page of sortedPages) {
+    const previous = items[items.length - 1];
+    if (typeof previous === "number" && page - previous > 1) {
+      items.push("ellipsis");
+    }
+    items.push(page);
+  }
+
+  return items;
+}
+
 function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: NoteSummary[] }) {
   const [note, setNote] = useState<NoteDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const returnTarget = getNoteReturnTarget();
 
   const loadNote = async (signal?: AbortSignal) => {
     if (!relativePath) {
-      setError("无法读取这篇笔记");
+      setError("\u65e0\u6cd5\u8bfb\u53d6\u8fd9\u7bc7\u7b14\u8bb0");
       setNote(null);
       setIsLoading(false);
       return;
@@ -673,13 +1506,13 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
 
     try {
       const params = new URLSearchParams({ path: relativePath });
-      const response = await fetch(`/api/note?${params.toString()}`, {
+      const response = await fetch("/api/note?" + params.toString(), {
         headers: { Accept: "application/json" },
         signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error("HTTP " + response.status);
       }
 
       const data = (await response.json()) as NoteDetail;
@@ -687,14 +1520,14 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
         throw new Error("Invalid note response");
       }
 
-      setNote(data);
+      setNote(normalizeNoteDetail(data));
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
 
       console.error("Failed to load local blog note", err);
-      setError("无法读取这篇笔记");
+      setError("\u65e0\u6cd5\u8bfb\u53d6\u8fd9\u7bc7\u7b14\u8bb0");
       setNote(null);
     } finally {
       if (!signal?.aborted) {
@@ -710,13 +1543,65 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
     return () => controller.abort();
   }, [relativePath]);
 
+  const tocItems = useMemo(
+    () => (note ? extractMarkdownHeadings(note.body, note.title) : []),
+    [note],
+  );
+
+  useEffect(() => {
+    if (tocItems.length === 0) {
+      setActiveHeadingId(null);
+      return;
+    }
+
+    setActiveHeadingId(tocItems[0].id);
+
+    const headings = tocItems
+      .map((item) => document.getElementById(item.id))
+      .filter((element): element is HTMLElement => Boolean(element));
+
+    if (headings.length === 0) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+
+        if (visibleEntries[0]?.target.id) {
+          setActiveHeadingId(visibleEntries[0].target.id);
+        }
+      },
+      {
+        rootMargin: "-96px 0px -62% 0px",
+        threshold: [0, 1],
+      },
+    );
+
+    headings.forEach((heading) => observer.observe(heading));
+
+    return () => observer.disconnect();
+  }, [tocItems]);
+
+  const scrollToHeading = (id: string) => {
+    const heading = document.getElementById(id);
+    if (!heading) {
+      return;
+    }
+
+    heading.scrollIntoView({ block: "start", behavior: "smooth" });
+    setActiveHeadingId(id);
+  };
+
   if (isLoading) {
     return (
       <article className="note-page">
-        <a className="back-link" href="#/">
-          返回文章
+        <a className="back-link" href={returnTarget.href}>
+          {returnTarget.label}
         </a>
-        <LoadingState title="??????" description="Local Blog ?????? Markdown ???" />
+        <LoadingState title="\u6b63\u5728\u52a0\u8f7d" description="\u6b63\u5728\u8bfb\u53d6\u8fd9\u7bc7 Markdown \u6587\u7ae0\u3002" />
       </article>
     );
   }
@@ -724,12 +1609,12 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
   if (error || !note) {
     return (
       <article className="note-page">
-        <a className="back-link" href="#/">
-          返回文章
+        <a className="back-link" href={returnTarget.href}>
+          {returnTarget.label}
         </a>
         <ErrorState
-          title="无法读取这篇笔记"
-          description="这篇笔记可能不存在、路径无效，或本地博客服务暂时无法读取它。"
+          title={"\u65e0\u6cd5\u8bfb\u53d6\u8fd9\u7bc7\u7b14\u8bb0"}
+          description="\u8fd9\u7bc7\u7b14\u8bb0\u53ef\u80fd\u4e0d\u5b58\u5728\u3001\u8def\u5f84\u65e0\u6548\uff0c\u6216\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u8bfb\u53d6\u5b83\u3002"
           onRetry={() => void loadNote()}
         />
       </article>
@@ -738,48 +1623,64 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
 
   const displayDate = formatOptionalDate(note.updated, note.created, note.date);
   const summary = note.summary?.trim() || note.metadata.summary?.trim();
+  const articleClass = inferArticleClass({
+    relativePath: note.relativePath,
+    category: note.category,
+    tags: note.tags,
+    metadata: {},
+  });
   const currentIndex = notes.findIndex((summaryNote) => summaryNote.relativePath === note.relativePath);
   const previousNote = currentIndex > 0 ? notes[currentIndex - 1] : null;
   const nextNote = currentIndex !== -1 && currentIndex < notes.length - 1 ? notes[currentIndex + 1] : null;
 
   return (
-    <article className="note-page">
-      <a className="back-link" href="#/">
-        返回文章
-      </a>
+    <div className="note-reader-shell">
+      <main className="note-reader-main">
+        <a className="back-link" href={returnTarget.href}>
+          {returnTarget.label}
+        </a>
 
-      <header className="note-header">
-        <div className="post-meta">
-          <a href={getCategoryHref(note.category)}>{getCategoryLabel(note.category)}</a>
-          {displayDate ? <time>{displayDate}</time> : null}
-          {note.draft ? <span className="draft-badge">草稿</span> : null}
-        </div>
-        <h1>{note.title}</h1>
-        {summary ? <p className="note-summary">{summary}</p> : null}
-        {note.tags.length > 0 ? (
-          <div className="tag-row" aria-label={`${note.title} 标签`}>
-            {note.tags.map((tag) => (
-              <a href={getTagHref(tag)} key={tag}>
-                {tag}
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </header>
+        <article className="note-page">
+          <header className="note-header">
+            <div className="post-meta">
+              <a href={getCategoryHref(articleClass)}>{articleClass}</a>
+              {displayDate ? <time>{displayDate}</time> : null}
+              {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
+            </div>
+            <h1>{note.title}</h1>
+            {summary ? <p className="note-summary">{summary}</p> : null}
+            {note.tags.length > 0 ? (
+              <div className="tag-row" aria-label={note.title + " \u6807\u7b7e"}>
+                {note.tags.map((tag) => (
+                  <a href={getTagHref(tag)} key={tag}>
+                    {tag}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </header>
 
-      <MarkdownRenderer markdown={note.body} />
+          <MarkdownRenderer markdown={note.body} />
 
-      {currentIndex !== -1 ? <NoteNavigation previousNote={previousNote} nextNote={nextNote} /> : null}
-    </article>
+          {currentIndex !== -1 ? (
+            <NoteNavigation previousNote={previousNote} nextNote={nextNote} sourceHref={returnTarget.href} />
+          ) : null}
+        </article>
+      </main>
+
+      <ArticleToc items={tocItems} activeId={activeHeadingId} onSelect={scrollToHeading} />
+    </div>
   );
 }
 
 function NoteNavigation({
   previousNote,
   nextNote,
+  sourceHref,
 }: {
   previousNote: NoteSummary | null;
   nextNote: NoteSummary | null;
+  sourceHref: string;
 }) {
   return (
     <nav className="note-navigation" aria-label={"\u6587\u7ae0\u5bfc\u822a"}>
@@ -787,14 +1688,50 @@ function NoteNavigation({
         label={"\u4e0a\u4e00\u7bc7"}
         note={previousNote}
         emptyLabel={"\u5df2\u7ecf\u662f\u6700\u65b0\u6587\u7ae0"}
+        sourceHref={sourceHref}
       />
       <NoteNavigationItem
         label={"\u4e0b\u4e00\u7bc7"}
         note={nextNote}
         emptyLabel={"\u6ca1\u6709\u66f4\u65e9\u6587\u7ae0"}
         align="next"
+        sourceHref={sourceHref}
       />
     </nav>
+  );
+}
+
+function ArticleToc({
+  items,
+  activeId,
+  onSelect,
+}: {
+  items: MarkdownHeading[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <aside className="article-toc" aria-label={"\u6587\u7ae0\u76ee\u5f55"}>
+      <div className="article-toc-inner">
+        <p className="article-toc-title">{"\u76ee\u5f55"}</p>
+        {items.length > 0 ? (
+          <nav>
+            {items.map((item) => (
+              <button
+                type="button"
+                className={"article-toc-link article-toc-level-" + item.level + (activeId === item.id ? " article-toc-link-active" : "")}
+                key={item.id}
+                onClick={() => onSelect(item.id)}
+              >
+                {item.text}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <p className="article-toc-empty">{"\u6682\u65e0\u76ee\u5f55"}</p>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -802,14 +1739,16 @@ function NoteNavigationItem({
   label,
   note,
   emptyLabel,
+  sourceHref,
   align = "previous",
 }: {
   label: string;
   note: NoteSummary | null;
   emptyLabel: string;
+  sourceHref: string;
   align?: "previous" | "next";
 }) {
-  const className = `note-nav-card note-nav-${align}${note ? "" : " note-nav-card-disabled"}`;
+  const className = "note-nav-card note-nav-" + align + (note ? "" : " note-nav-card-disabled");
 
   if (!note) {
     return (
@@ -823,11 +1762,11 @@ function NoteNavigationItem({
   const displayDate = formatOptionalDate(note.date, note.updated, note.created);
 
   return (
-    <a className={className} href={getNoteHref(note.relativePath)}>
+    <a className={className} href={getNoteHref(note.relativePath, sourceHref)}>
       <span className="note-nav-label">{label}</span>
       <h2>{note.title}</h2>
       <div className="note-nav-meta">
-        <span>{getCategoryLabel(note.category)}</span>
+        <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
         {displayDate ? <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time> : null}
       </div>
     </a>
@@ -835,15 +1774,15 @@ function NoteNavigationItem({
 }
 
 function LoadingState({
-  title = "????????",
-  description = "Local Blog ?????? notes??????????????",
+  title = "\u6b63\u5728\u52a0\u8f7d",
+  description = "\u6b63\u5728\u4ece\u672c\u5730\u535a\u5ba2\u670d\u52a1\u8bfb\u53d6\u6587\u7ae0\u5217\u8868\u3002",
 }: {
   title?: string;
   description?: string;
 }) {
   return (
     <section className="status-panel" aria-live="polite">
-      <p className="eyebrow">Loading</p>
+      <p className="eyebrow">{"\u6b63\u5728\u52a0\u8f7d"}</p>
       <h2>{title}</h2>
       <p>{description}</p>
     </section>
@@ -851,8 +1790,8 @@ function LoadingState({
 }
 
 function ErrorState({
-  title = "无法读取本地笔记",
-  description = "请确认本地博客服务正在运行，然后重新尝试读取文章列表。",
+  title = "\u65e0\u6cd5\u8bfb\u53d6\u672c\u5730\u7b14\u8bb0",
+  description = "\u8bf7\u786e\u8ba4\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6b63\u5728\u8fd0\u884c\uff0c\u7136\u540e\u91cd\u65b0\u5c1d\u8bd5\u8bfb\u53d6\u6587\u7ae0\u5217\u8868\u3002",
   onRetry,
 }: {
   title?: string;
@@ -861,13 +1800,13 @@ function ErrorState({
 }) {
   return (
     <section className="status-panel status-panel-error" role="alert">
-      <p className="eyebrow">Error</p>
+      <p className="eyebrow">{"\u52a0\u8f7d\u5931\u8d25"}</p>
       <h2>{title}</h2>
       <p>{description}</p>
       <div className="status-actions">
-        <a href="#/">返回首页</a>
+        <a href="#/">{"\u8fd4\u56de\u9996\u9875"}</a>
         <button type="button" onClick={onRetry}>
-          重试
+          {"\u91cd\u8bd5"}
         </button>
       </div>
     </section>
@@ -875,15 +1814,15 @@ function ErrorState({
 }
 
 function EmptyState({
-  title = "还没有可展示的笔记",
-  description = "回到桌面端写下第一篇 Markdown 笔记，保存后刷新这里就能看到文章摘要流。",
+  title = "\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u7b14\u8bb0",
+  description = "\u56de\u5230\u684c\u9762\u7aef\u5199\u4e0b\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\uff0c\u4fdd\u5b58\u540e\u5237\u65b0\u8fd9\u91cc\u5c31\u80fd\u770b\u5230\u6587\u7ae0\u6458\u8981\u6d41\u3002",
 }: {
   title?: string;
   description?: string;
 }) {
   return (
     <section className="status-panel">
-      <p className="eyebrow">Empty</p>
+      <p className="eyebrow">{"\u6682\u65e0\u6587\u7ae0"}</p>
       <h2>{title}</h2>
       <p>{description}</p>
     </section>

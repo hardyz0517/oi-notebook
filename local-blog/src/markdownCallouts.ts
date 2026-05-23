@@ -296,12 +296,12 @@ function createEpigraphCaptionNode(children: MarkdownNode[]): MarkdownNode {
 function defaultTitleFor(calloutType: string) {
   switch (calloutType) {
     case "success":
-      return "Success";
+      return "完成";
     case "warning":
-      return "Warning";
+      return "注意";
     case "error":
-      return "Error";
+      return "错误";
     default:
-      return "Info";
+      return "提示";
   }
 }
