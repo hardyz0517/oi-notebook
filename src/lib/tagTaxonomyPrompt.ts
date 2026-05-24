@@ -118,7 +118,7 @@ export function buildTagTaxonomyPromptContext(input: TagTaxonomyPromptInput): Ta
       "- category 表示文章性质，例如：题解、技巧、学习、杂谈、项目日志。",
       "- tags 表示知识点、训练用途、来源、阶段、项目等维度。",
       "- tags 优先使用预设标签体系中的 canonical path，尽量使用路径式标签。",
-      "- 同义词必须归到 canonical path，例如：拓展 KMP / exKMP -> 算法/字符串/Z 函数；李超树 -> 算法/数据结构/李超线段树。",
+      "- 同义词必须归到 canonical path，例如：拓展 KMP / exKMP -> 算法/字符串/Z 函数；李超树 -> 算法/树形数据结构/李超线段树。",
       "- 如果没有合适标签，可以保留用户原 tag 或建议少量新 tag，但不要编造大量标签。",
       candidateText,
     ].join("\n"),
@@ -160,7 +160,7 @@ function getDisplayedAliasCount(text: string, pathText: string) {
 export function runTagTaxonomyPromptSelfCheck(): TagTaxonomyPromptSelfCheckResult {
   const checks: TagTaxonomyPromptSelfCheckResult["checks"] = [];
   const zFunctionPath = "算法/字符串/Z 函数";
-  const liChaoPath = "算法/数据结构/李超线段树";
+  const liChaoPath = "算法/树形数据结构/李超线段树";
   const kmpContext = buildTagTaxonomyPromptContext({ title: "拓展 KMP 模板" });
   const liChaoContext = buildTagTaxonomyPromptContext({ content: "李超树维护直线最值" });
   const emptyContext = buildTagTaxonomyPromptContext({});
