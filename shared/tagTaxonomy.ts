@@ -63,6 +63,11 @@ export type FindTagSuggestionsOptions = {
   userConfig?: UserTagTaxonomyConfig | null;
 };
 
+export type GetTagSuggestionListOptions = {
+  includeHidden?: boolean;
+  includeDeprecated?: boolean;
+};
+
 export type ArticleTagSuggestion = {
   tag: TagSuggestion;
   score: number;
@@ -965,11 +970,20 @@ export function getArticleTagSearchTerms(note: TaggedArticle) {
   return Array.from(terms);
 }
 
-export function getTagSuggestionList(userConfig?: UserTagTaxonomyConfig | null): TagSuggestion[] {
+export function getTagSuggestionList(
+  userConfig?: UserTagTaxonomyConfig | null,
+  options: GetTagSuggestionListOptions = {},
+): TagSuggestion[] {
   const taxonomy = getResolvedTagTaxonomy(userConfig);
   const seen = new Set<string>();
 
   return taxonomy.entries.flatMap((entry) => {
+    if (!options.includeHidden && entry.hidden) {
+      return [];
+    }
+    if (!options.includeDeprecated && entry.deprecated) {
+      return [];
+    }
     if (seen.has(entry.id)) {
       return [];
     }
@@ -1104,9 +1118,10 @@ export function createTagCompletionContext(userConfig?: UserTagTaxonomyConfig | 
 export function findTagSuggestionsByQuery(query: string, options: FindTagSuggestionsOptions = {}) {
   const limit = options.limit ?? 10;
   const taxonomy = getResolvedTagTaxonomy(options.userConfig);
-  const scored = getTagSuggestionList(options.userConfig)
-    .filter((suggestion) => options.includeHidden || !suggestion.hidden)
-    .filter((suggestion) => options.includeDeprecated || !suggestion.deprecated)
+  const scored = getTagSuggestionList(options.userConfig, {
+    includeHidden: options.includeHidden,
+    includeDeprecated: options.includeDeprecated,
+  })
     .map((suggestion) => ({ suggestion, score: getSuggestionMatchScore(suggestion, query) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || compareTagSuggestions(a.suggestion, b.suggestion, taxonomy));

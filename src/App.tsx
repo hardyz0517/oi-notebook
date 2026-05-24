@@ -2560,6 +2560,7 @@ export default function App() {
   const [tagTaxonomyEntryListQuery, setTagTaxonomyEntryListQuery] = useState("");
   const [tagTaxonomyAliasListQuery, setTagTaxonomyAliasListQuery] = useState("");
   const [tagManagerSearchQuery, setTagManagerSearchQuery] = useState("");
+  const [showHiddenTagsInManager, setShowHiddenTagsInManager] = useState(false);
   const [selectedTagManagerSuggestionId, setSelectedTagManagerSuggestionId] = useState<string | null>(null);
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
@@ -3175,8 +3176,8 @@ export default function App() {
     return filteredTagTaxonomyUserAliases.slice(0, 5);
   }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
   const tagManagerSuggestions = useMemo(
-    () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden),
-    [tagTaxonomyUserConfig],
+    () => getTagSuggestionList(tagTaxonomyUserConfig, { includeHidden: showHiddenTagsInManager }),
+    [showHiddenTagsInManager, tagTaxonomyUserConfig],
   );
   const tagManagerRootGroups = useMemo<TagManagerRootGroup[]>(() => {
     const rootMap = new Map<string, Map<string, TagSuggestion[]>>();
@@ -3307,6 +3308,19 @@ export default function App() {
     await saveUserTagTaxonomyConfig({
       ...currentConfig,
       aliases: nextAliases,
+    });
+  }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
+  const handleSetTagManagerSuggestionHidden = useCallback(async (suggestion: TagSuggestion, hidden: boolean) => {
+    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
+    if (hidden) {
+      hiddenIds.add(suggestion.id);
+    } else {
+      hiddenIds.delete(suggestion.id);
+    }
+    await saveUserTagTaxonomyConfig({
+      ...currentConfig,
+      hiddenIds: Array.from(hiddenIds),
     });
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const luoguStatusLabel =
@@ -8935,6 +8949,15 @@ export default function App() {
                               className="h-8 text-sm"
                             />
                           </div>
+                          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 accent-primary"
+                              checked={showHiddenTagsInManager}
+                              onChange={(event) => setShowHiddenTagsInManager(event.target.checked)}
+                            />
+                            显示隐藏标签
+                          </label>
                           <div className="min-h-0 overflow-y-auto pr-1">
                             {tagManagerSearchQuery.trim() ? (
                               tagManagerSearchResults.length === 0 ? (
@@ -8954,7 +8977,10 @@ export default function App() {
                                       onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
                                     >
                                       <span className="truncate text-sm text-foreground">{suggestion.name}</span>
-                                      <span className="truncate text-[11px] text-muted-foreground">{suggestion.pathText}</span>
+                                      <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+                                        <span className="min-w-0 truncate">{suggestion.pathText}</span>
+                                        {suggestion.hidden && <span className="shrink-0">已隐藏</span>}
+                                      </span>
                                     </button>
                                   ))}
                                 </div>
@@ -8987,9 +9013,14 @@ export default function App() {
                                                 onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
                                               >
                                                 <span className="min-w-0 truncate">{suggestion.name}</span>
-                                                {suggestion.source === "user" && (
-                                                  <span className="shrink-0 rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">user</span>
-                                                )}
+                                                <span className="flex shrink-0 items-center gap-1">
+                                                  {suggestion.hidden && (
+                                                    <span className="rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">已隐藏</span>
+                                                  )}
+                                                  {suggestion.source === "user" && (
+                                                    <span className="rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">user</span>
+                                                  )}
+                                                </span>
                                               </button>
                                             ))}
                                           </div>
@@ -9019,7 +9050,7 @@ export default function App() {
                                     <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] text-muted-foreground">hidden</span>
                                   )}
                                 </div>
-                                <div className="text-xs text-muted-foreground">当前为只读视图。编辑、隐藏、排序和合并规则将在后续支持。</div>
+                                <div className="text-xs text-muted-foreground">当前仅支持隐藏 / 恢复显示；编辑、排序和合并规则将在后续支持。</div>
                               </div>
 
                               <div className="grid gap-3 text-sm">
@@ -9049,6 +9080,30 @@ export default function App() {
                                         </span>
                                       ))}
                                     </div>
+                                  )}
+                                </div>
+                                <div className="grid gap-2 border-t border-border/70 pt-3">
+                                  <div className="text-xs text-muted-foreground">可见性</div>
+                                  <div className="flex min-w-0 flex-wrap items-center gap-3">
+                                    <span className="text-sm text-foreground">
+                                      状态：{selectedTagManagerSuggestion.hidden ? "已隐藏" : "显示中"}
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => void handleSetTagManagerSuggestionHidden(selectedTagManagerSuggestion, !selectedTagManagerSuggestion.hidden)}
+                                      disabled={isSavingTagTaxonomyConfig}
+                                    >
+                                      {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                                      {selectedTagManagerSuggestion.hidden ? "恢复显示" : "隐藏此标签"}
+                                    </Button>
+                                  </div>
+                                  <div className="text-xs leading-5 text-muted-foreground">
+                                    该操作只写入用户配置 hiddenIds，不会修改内置 taxonomy 或任何笔记。
+                                  </div>
+                                  {tagTaxonomySaveError && (
+                                    <div className="text-xs text-destructive">保存失败：{tagTaxonomySaveError}</div>
                                   )}
                                 </div>
                               </div>
