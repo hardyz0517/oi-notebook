@@ -2545,6 +2545,10 @@ export default function App() {
   const [tagTaxonomyEntryAliasesInput, setTagTaxonomyEntryAliasesInput] = useState("");
   const [tagTaxonomyAliasNameInput, setTagTaxonomyAliasNameInput] = useState("");
   const [tagTaxonomyAliasTargetInput, setTagTaxonomyAliasTargetInput] = useState("");
+  const [isTagTaxonomyEntryListExpanded, setIsTagTaxonomyEntryListExpanded] = useState(false);
+  const [isTagTaxonomyAliasListExpanded, setIsTagTaxonomyAliasListExpanded] = useState(false);
+  const [tagTaxonomyEntryListQuery, setTagTaxonomyEntryListQuery] = useState("");
+  const [tagTaxonomyAliasListQuery, setTagTaxonomyAliasListQuery] = useState("");
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
@@ -3126,6 +3130,38 @@ export default function App() {
     () => Object.entries(tagTaxonomyConfig?.aliases ?? {}).sort(([left], [right]) => left.localeCompare(right, "zh-Hans-CN")),
     [tagTaxonomyConfig],
   );
+  const filteredTagTaxonomyUserEntries = useMemo(() => {
+    const query = tagTaxonomyEntryListQuery.trim().toLowerCase();
+    if (!query) return tagTaxonomyUserEntries;
+    return tagTaxonomyUserEntries.filter((entry) => {
+      const searchText = [
+        entry.id,
+        entry.path.join("/"),
+        entry.path.join(" / "),
+        ...(entry.aliases ?? []),
+      ].join("\n").toLowerCase();
+      return searchText.includes(query);
+    });
+  }, [tagTaxonomyEntryListQuery, tagTaxonomyUserEntries]);
+  const displayedTagTaxonomyUserEntries = useMemo(() => {
+    if (tagTaxonomyEntryListQuery.trim() || isTagTaxonomyEntryListExpanded) {
+      return filteredTagTaxonomyUserEntries;
+    }
+    return filteredTagTaxonomyUserEntries.slice(0, 5);
+  }, [filteredTagTaxonomyUserEntries, isTagTaxonomyEntryListExpanded, tagTaxonomyEntryListQuery]);
+  const filteredTagTaxonomyUserAliases = useMemo(() => {
+    const query = tagTaxonomyAliasListQuery.trim().toLowerCase();
+    if (!query) return tagTaxonomyUserAliases;
+    return tagTaxonomyUserAliases.filter(([aliasName, target]) =>
+      `${aliasName}\n${target}`.toLowerCase().includes(query),
+    );
+  }, [tagTaxonomyAliasListQuery, tagTaxonomyUserAliases]);
+  const displayedTagTaxonomyUserAliases = useMemo(() => {
+    if (tagTaxonomyAliasListQuery.trim() || isTagTaxonomyAliasListExpanded) {
+      return filteredTagTaxonomyUserAliases;
+    }
+    return filteredTagTaxonomyUserAliases.slice(0, 5);
+  }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
   const saveUserTagTaxonomyConfig = useCallback(async (nextConfig: UserTagTaxonomyConfig): Promise<boolean> => {
     const normalizedConfig = normalizeUserTagTaxonomyConfig(nextConfig);
     setIsSavingTagTaxonomyConfig(true);
@@ -8401,23 +8437,13 @@ export default function App() {
                         <div className="text-base font-semibold text-foreground">标签体系</div>
                         <div className="text-xs leading-5 text-muted-foreground">用于组织博客文章、桌面端标签建议和 AI 元数据补全；当前仍保留自由输入标签。</div>
                       </div>
-                      <SettingRow
-                        title="当前状态"
-                        description="读取 .oinb/tag-taxonomy.json；失败时自动回退内置默认标签体系。"
-                        align="start"
-                      >
-                        <div className="grid min-w-0 gap-2 text-sm">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <span className={cn(
-                              "inline-flex rounded-sm border px-2 py-0.5 text-xs",
-                              tagTaxonomyConfigError
-                                ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-                                : tagTaxonomyStats.userConfigItemCount > 0
-                                  ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                                  : "border-border/70 bg-muted/20 text-muted-foreground",
-                            )}>
-                              {tagTaxonomyStats.statusLabel}
-                            </span>
+                      <div className="grid gap-5">
+                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                            <div className="grid gap-1">
+                              <div className="text-sm font-semibold text-foreground">状态概览</div>
+                              <div className="text-xs leading-5 text-muted-foreground">读取用户配置后合并内置标签体系；失败时自动回退内置默认体系。</div>
+                            </div>
                             <Button
                               type="button"
                               variant="outline"
@@ -8429,37 +8455,72 @@ export default function App() {
                               重新加载
                             </Button>
                           </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className={cn(
+                              "inline-flex rounded-sm border px-2 py-0.5 text-xs",
+                              tagTaxonomyConfigError
+                                ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                                : tagTaxonomyStats.userConfigItemCount > 0
+                                  ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                                  : "border-border/70 bg-muted/20 text-muted-foreground",
+                            )}>
+                              {tagTaxonomyStats.statusLabel}
+                            </span>
+                            <span className="inline-flex rounded-sm border border-border/70 bg-muted/20 px-2 py-1 font-mono text-xs text-foreground">
+                              .oinb/tag-taxonomy.json
+                            </span>
+                          </div>
                           {tagTaxonomyConfigError && (
                             <div className="text-xs leading-5 text-muted-foreground">
                               读取失败：{tagTaxonomyConfigError}
                             </div>
                           )}
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="配置文件" description="用户自定义博客标签体系配置文件；当前只编辑自定义标签和别名。">
-                        <span className="inline-flex rounded-sm border border-border/70 bg-muted/20 px-2 py-1 font-mono text-xs text-foreground">
-                          .oinb/tag-taxonomy.json
-                        </span>
-                      </SettingRow>
-                      <SettingRow title="用户配置统计" description="统计当前用户配置里的扩展项；为空时使用内置默认体系。" align="start">
-                        <div className="flex min-w-0 flex-wrap gap-2">
-                          {tagTaxonomyStatItems.map((item) => (
-                            <span key={item.label} className="inline-flex items-center gap-1 rounded-sm border border-border/70 bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
-                              <span>{item.label}</span>
-                              <span className="font-medium text-foreground">{item.value}</span>
+                          <div className="flex min-w-0 flex-wrap gap-2">
+                            {tagTaxonomyStatItems.map((item) => (
+                              <span key={item.label} className="inline-flex items-center gap-1 rounded-sm border border-border/70 bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
+                                <span>{item.label}</span>
+                                <span className="font-medium text-foreground">{item.value}</span>
+                              </span>
+                            ))}
+                            <span className="inline-flex items-center gap-1 rounded-sm border border-border/70 bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
+                              <span>可用标签候选</span>
+                              <span className="font-medium text-foreground">{tagTaxonomyStats.availableCandidateCount}</span>
                             </span>
-                          ))}
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="新增自定义标签" description="路径用 / 分隔；别名可选，用逗号分隔。保存后立即用于标签建议和 AI 元数据补全。" align="start">
-                        <div className="grid min-w-0 gap-3">
-                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                          </div>
+                        </section>
+
+                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                            <div className="grid gap-1">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                                <span>自定义标签</span>
+                                <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">共 {tagTaxonomyUserEntries.length} 个</span>
+                              </div>
+                              <div className="text-xs leading-5 text-muted-foreground">保存到 .oinb/tag-taxonomy.json，只影响标签建议和 AI 元数据补全，不会修改已有笔记。</div>
+                            </div>
+                            {tagTaxonomyUserEntries.length > 5 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setIsTagTaxonomyEntryListExpanded((value) => !value)}
+                              >
+                                {isTagTaxonomyEntryListExpanded ? "收起" : `查看全部 ${tagTaxonomyUserEntries.length} 个`}
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid gap-1">
+                            <div className="text-xs leading-5 text-muted-foreground">
+                              当前页面只提供快速新增和删除；内置标签的隐藏、排序和合并会通过用户配置覆盖，不直接修改内置 taxonomy。
+                            </div>
+                          </div>
+                          <div className="grid gap-2 xl:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)_auto]">
                             <div className="grid gap-1.5">
                               <Label htmlFor="tag-taxonomy-entry-path" className="text-xs text-muted-foreground">标签路径</Label>
                               <Input
                                 id="tag-taxonomy-entry-path"
                                 value={tagTaxonomyEntryPathInput}
-                                placeholder="算法/字符串/自定义字符串技巧"
+                                placeholder="测试/自定义/我的标签"
                                 onChange={(event) => setTagTaxonomyEntryPathInput(event.target.value)}
                                 disabled={isSavingTagTaxonomyConfig}
                               />
@@ -8474,55 +8535,87 @@ export default function App() {
                                 disabled={isSavingTagTaxonomyConfig}
                               />
                             </div>
+                            <div className="flex items-end">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full xl:w-auto"
+                                onClick={() => void handleAddTagTaxonomyEntry()}
+                                disabled={isSavingTagTaxonomyConfig}
+                              >
+                                {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                                添加标签
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void handleAddTagTaxonomyEntry()}
-                              disabled={isSavingTagTaxonomyConfig}
-                            >
-                              {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                              添加标签
-                            </Button>
-                            <span className="text-xs text-muted-foreground">保存为 user.* canonical id，不会修改已有笔记。</span>
-                          </div>
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="自定义标签" description="这里只显示 .oinb/tag-taxonomy.json 中的用户 entries，不展示内置标签。" align="start">
-                        {tagTaxonomyUserEntries.length === 0 ? (
-                          <span className="text-sm text-muted-foreground">暂无自定义标签。</span>
-                        ) : (
-                          <div className="grid min-w-0 gap-2">
-                            {tagTaxonomyUserEntries.map((entry) => (
-                              <div key={entry.id} className="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-border/60 py-2 last:border-b-0">
-                                <div className="grid min-w-0 gap-1">
-                                  <span className="break-words text-sm text-foreground">{entry.path.join(" / ")}</span>
-                                  <span className="font-mono text-[11px] text-muted-foreground">{entry.id}</span>
-                                  {entry.aliases && entry.aliases.length > 0 && (
-                                    <span className="text-xs text-muted-foreground">别名：{entry.aliases.join("、")}</span>
-                                  )}
+                          {tagTaxonomyUserEntries.length > 5 && (
+                            <Input
+                              value={tagTaxonomyEntryListQuery}
+                              placeholder="搜索自定义标签"
+                              onChange={(event) => setTagTaxonomyEntryListQuery(event.target.value)}
+                              className="h-8 max-w-md text-sm"
+                            />
+                          )}
+                          {tagTaxonomyUserEntries.length === 0 ? (
+                            <span className="text-sm text-muted-foreground">暂无自定义标签。</span>
+                          ) : displayedTagTaxonomyUserEntries.length === 0 ? (
+                            <span className="text-sm text-muted-foreground">没有匹配的自定义标签。</span>
+                          ) : (
+                            <div className={cn(
+                              "grid min-w-0 gap-0 rounded-sm border border-border/70 bg-muted/10",
+                              (isTagTaxonomyEntryListExpanded || tagTaxonomyEntryListQuery.trim()) && "max-h-72 overflow-y-auto",
+                            )}>
+                              {displayedTagTaxonomyUserEntries.map((entry) => (
+                                <div key={entry.id} className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-b-0">
+                                  <div className="grid min-w-0 gap-1">
+                                    <span className="break-words text-sm text-foreground">{entry.path.join(" / ")}</span>
+                                    <span className="font-mono text-[11px] text-muted-foreground">{entry.id}</span>
+                                    {entry.aliases && entry.aliases.length > 0 && (
+                                      <span className="text-xs text-muted-foreground">别名：{entry.aliases.join("、")}</span>
+                                    )}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-muted-foreground hover:text-destructive"
+                                    onClick={() => void handleDeleteTagTaxonomyEntry(entry.id)}
+                                    disabled={isSavingTagTaxonomyConfig}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    删除
+                                  </Button>
                                 </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-muted-foreground hover:text-destructive"
-                                  onClick={() => void handleDeleteTagTaxonomyEntry(entry.id)}
-                                  disabled={isSavingTagTaxonomyConfig}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  删除
-                                </Button>
+                              ))}
+                            </div>
+                          )}
+                          {tagTaxonomyUserEntries.length > 5 && !tagTaxonomyEntryListQuery.trim() && !isTagTaxonomyEntryListExpanded && (
+                            <div className="text-xs text-muted-foreground">仅显示前 5 个，展开后列表会在区域内滚动。</div>
+                          )}
+                        </section>
+
+                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                            <div className="grid gap-1">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                                <span>自定义别名</span>
+                                <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">共 {tagTaxonomyUserAliases.length} 个</span>
                               </div>
-                            ))}
+                              <div className="text-xs leading-5 text-muted-foreground">别名可指向 canonical id，也可指向已有标签路径；内置 alias 仍由默认体系提供。</div>
+                            </div>
+                            {tagTaxonomyUserAliases.length > 5 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setIsTagTaxonomyAliasListExpanded((value) => !value)}
+                              >
+                                {isTagTaxonomyAliasListExpanded ? "收起" : `查看全部 ${tagTaxonomyUserAliases.length} 个`}
+                              </Button>
+                            )}
                           </div>
-                        )}
-                      </SettingRow>
-                      <SettingRow title="新增别名" description="目标可填写 canonical id，也可填写已存在的标签路径；例如 algorithm.string.z-function。" align="start">
-                        <div className="grid min-w-0 gap-3">
-                          <div className="grid gap-2 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
+                          <div className="grid gap-2 xl:grid-cols-[minmax(180px,0.8fr)_minmax(0,1.7fr)_auto]">
                             <div className="grid gap-1.5">
                               <Label htmlFor="tag-taxonomy-alias-name" className="text-xs text-muted-foreground">别名</Label>
                               <Input
@@ -8543,67 +8636,75 @@ export default function App() {
                                 disabled={isSavingTagTaxonomyConfig}
                               />
                             </div>
+                            <div className="flex items-end">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full xl:w-auto"
+                                onClick={() => void handleAddTagTaxonomyAlias()}
+                                disabled={isSavingTagTaxonomyConfig}
+                              >
+                                {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                                添加别名
+                              </Button>
+                            </div>
                           </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="w-fit"
-                            onClick={() => void handleAddTagTaxonomyAlias()}
-                            disabled={isSavingTagTaxonomyConfig}
-                          >
-                            {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                            添加别名
-                          </Button>
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="自定义别名" description="只显示用户自定义 aliases；内置 alias 仍由默认体系提供。" align="start">
-                        {tagTaxonomyUserAliases.length === 0 ? (
-                          <span className="text-sm text-muted-foreground">暂无自定义别名。</span>
-                        ) : (
-                          <div className="grid min-w-0 gap-2">
-                            {tagTaxonomyUserAliases.map(([aliasName, target]) => (
-                              <div key={aliasName} className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 py-2 last:border-b-0">
-                                <span className="min-w-0 break-words text-sm text-foreground">
-                                  {aliasName}
-                                  <span className="mx-2 text-muted-foreground">→</span>
-                                  <span className="font-mono text-xs text-muted-foreground">{target}</span>
-                                </span>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-muted-foreground hover:text-destructive"
-                                  onClick={() => void handleDeleteTagTaxonomyAlias(aliasName)}
-                                  disabled={isSavingTagTaxonomyConfig}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  删除
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
+                          {tagTaxonomyUserAliases.length > 5 && (
+                            <Input
+                              value={tagTaxonomyAliasListQuery}
+                              placeholder="搜索别名"
+                              onChange={(event) => setTagTaxonomyAliasListQuery(event.target.value)}
+                              className="h-8 max-w-md text-sm"
+                            />
+                          )}
+                          {tagTaxonomyUserAliases.length === 0 ? (
+                            <span className="text-sm text-muted-foreground">暂无自定义别名。</span>
+                          ) : displayedTagTaxonomyUserAliases.length === 0 ? (
+                            <span className="text-sm text-muted-foreground">没有匹配的自定义别名。</span>
+                          ) : (
+                            <div className={cn(
+                              "grid min-w-0 gap-0 rounded-sm border border-border/70 bg-muted/10",
+                              (isTagTaxonomyAliasListExpanded || tagTaxonomyAliasListQuery.trim()) && "max-h-72 overflow-y-auto",
+                            )}>
+                              {displayedTagTaxonomyUserAliases.map(([aliasName, target]) => (
+                                <div key={aliasName} className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-b-0">
+                                  <span className="min-w-0 break-words text-sm text-foreground">
+                                    {aliasName}
+                                    <span className="mx-2 text-muted-foreground">→</span>
+                                    <span className="font-mono text-xs text-muted-foreground">{target}</span>
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-muted-foreground hover:text-destructive"
+                                    onClick={() => void handleDeleteTagTaxonomyAlias(aliasName)}
+                                    disabled={isSavingTagTaxonomyConfig}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    删除
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {tagTaxonomyUserAliases.length > 5 && !tagTaxonomyAliasListQuery.trim() && !isTagTaxonomyAliasListExpanded && (
+                            <div className="text-xs text-muted-foreground">仅显示前 5 个，展开后列表会在区域内滚动。</div>
+                          )}
+                        </section>
+
+                        {tagTaxonomySaveError && (
+                          <section className="border-t border-border/70 pt-4">
+                            <span className="text-sm text-destructive">保存失败：{tagTaxonomySaveError}</span>
+                          </section>
                         )}
-                      </SettingRow>
-                      {tagTaxonomySaveError && (
-                        <SettingRow title="保存状态" description="保存失败不会影响当前内置标签体系 fallback。">
-                          <span className="text-sm text-destructive">保存失败：{tagTaxonomySaveError}</span>
-                        </SettingRow>
-                      )}
-                      <SettingRow
-                        title="候选库"
-                        description="候选库用于博客标签归类、标签建议和 AI prompt 上下文；不会限制用户手动输入自定义标签。"
-                      >
-                        <span className="text-sm text-muted-foreground">
-                          可用标签候选：{tagTaxonomyStats.availableCandidateCount}
-                        </span>
-                      </SettingRow>
-                      <SettingRow
-                        title="旧标签扫描"
-                        description="只读扫描当前笔记库中的 frontmatter tags；本轮仅预览，不会修改任何笔记。"
-                        align="start"
-                      >
-                        <div className="grid min-w-0 gap-3">
+
+                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="grid gap-1">
+                            <div className="text-sm font-semibold text-foreground">旧标签扫描</div>
+                            <div className="text-xs leading-5 text-muted-foreground">扫描当前笔记库中的 frontmatter tags。扫描只读；只有勾选并二次确认后才会修改所选笔记。</div>
+                          </div>
                           <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <Button
                               type="button"
@@ -8644,7 +8745,7 @@ export default function App() {
                           )}
 
                           {tagNormalizationScanResults && (
-                            <div className="grid min-w-0 gap-2">
+                            <div className="grid min-w-0 gap-3">
                               {tagNormalizationScanResults.length === 0 ? (
                                 <span className="text-sm text-muted-foreground">
                                   未发现需要规范化的标签。
@@ -8652,47 +8753,49 @@ export default function App() {
                                 </span>
                               ) : (
                                 <>
-                                  <span className="text-sm text-muted-foreground">
-                                    发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanSuggestionCount} 个标签建议。
-                                    {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
-                                  </span>
-                                  <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={selectAllTagNormalizationScanResults}
-                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan}
-                                    >
-                                      全选
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={clearTagNormalizationScanSelection}
-                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
-                                    >
-                                      全不选
-                                    </Button>
-                                    <span className="text-xs text-muted-foreground">
-                                      已选 {selectedTagNormalizationScanStats.noteCount} 篇，{selectedTagNormalizationScanStats.suggestionCount} 个标签建议
+                                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                                    <span className="text-sm text-muted-foreground">
+                                      发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanSuggestionCount} 个标签建议。
+                                      {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
                                     </span>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => void applySelectedTagNormalizationScanResults()}
-                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
-                                    >
-                                      {isApplyingTagNormalizationScan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                                      {isApplyingTagNormalizationScan ? "应用中..." : "应用所选规范化"}
-                                    </Button>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={selectAllTagNormalizationScanResults}
+                                        disabled={isScanningTagNormalization || isApplyingTagNormalizationScan}
+                                      >
+                                        全选
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={clearTagNormalizationScanSelection}
+                                        disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
+                                      >
+                                        全不选
+                                      </Button>
+                                      <span className="text-xs text-muted-foreground">
+                                        已选 {selectedTagNormalizationScanStats.noteCount} 篇，{selectedTagNormalizationScanStats.suggestionCount} 个标签建议
+                                      </span>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => void applySelectedTagNormalizationScanResults()}
+                                        disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
+                                      >
+                                        {isApplyingTagNormalizationScan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                        {isApplyingTagNormalizationScan ? "应用中..." : "应用所选规范化"}
+                                      </Button>
+                                    </div>
                                     <span className="basis-full text-xs text-muted-foreground">
                                       只会修改已勾选的笔记 frontmatter tags；建议在批量应用前确认 Git 工作区状态，便于回滚。
                                     </span>
                                   </div>
-                                  <div className="max-h-72 overflow-y-auto rounded-sm border border-border/70 bg-muted/10">
+                                  <div className="max-h-80 overflow-y-auto rounded-sm border border-border/70 bg-muted/10">
                                     {tagNormalizationScanResults.map((result) => (
                                       <details key={result.path} className="border-b border-border/60 last:border-b-0">
                                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm text-foreground hover:bg-muted/20">
@@ -8711,7 +8814,7 @@ export default function App() {
                                           </span>
                                           <span className="shrink-0 text-xs text-muted-foreground">{result.suggestions.length} 个建议</span>
                                         </summary>
-                                        <div className="grid gap-1 px-3 pb-3 text-xs text-muted-foreground">
+                                        <div className="grid gap-1 px-10 pb-3 text-xs text-muted-foreground">
                                           {result.suggestions.slice(0, 5).map((suggestion) => (
                                             <div key={`${result.path}:${suggestion.original}:${suggestion.normalized}`} className="min-w-0 break-words">
                                               <span className="text-foreground">{suggestion.original}</span>
@@ -8730,12 +8833,22 @@ export default function App() {
                               )}
                             </div>
                           )}
-                        </div>
-                      </SettingRow>
-                      <SettingRow
-                        title="后续计划"
-                        description="后续会继续支持隐藏项、排序、合并规则和更完整的标签体系管理。"
-                      />
+                        </section>
+
+                        <section className="border-t border-border/70 pt-4">
+                          <div className="grid gap-2">
+                            <div className="text-sm font-semibold text-foreground">可视化标签管理器（后续）</div>
+                            <div className="text-xs leading-5 text-muted-foreground">
+                              后续会在这里支持树形浏览标签体系、搜索内置标签、隐藏内置标签、调整顺序、设置合并规则和集中管理别名。当前页面只提供快速新增和扫描工具。
+                            </div>
+                            <div>
+                              <Button type="button" variant="outline" size="sm" disabled>
+                                打开标签管理器（后续）
+                              </Button>
+                            </div>
+                          </div>
+                        </section>
+                      </div>
                     </section>
                   )}
 
