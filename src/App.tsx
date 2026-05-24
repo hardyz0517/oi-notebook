@@ -488,6 +488,17 @@ type TagNormalizationScanResult = {
   suggestions: TagNormalizationSuggestion[];
 };
 
+type TagNormalizationApplyFailure = {
+  path: string;
+  error: string;
+};
+
+type TagNormalizationApplyResult = {
+  successCount: number;
+  normalizedTagCount: number;
+  failures: TagNormalizationApplyFailure[];
+};
+
 interface PolishReviewTab {
   id: string;
   preview: AiPolishPreview;
@@ -2538,6 +2549,9 @@ export default function App() {
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
   const [tagNormalizationScanIssueCount, setTagNormalizationScanIssueCount] = useState(0);
+  const [selectedTagNormalizationScanPaths, setSelectedTagNormalizationScanPaths] = useState<Set<string>>(() => new Set());
+  const [isApplyingTagNormalizationScan, setIsApplyingTagNormalizationScan] = useState(false);
+  const [tagNormalizationApplyResult, setTagNormalizationApplyResult] = useState<TagNormalizationApplyResult | null>(null);
   const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3085,6 +3099,25 @@ export default function App() {
     () => tagNormalizationScanResults?.reduce((total, result) => total + result.suggestions.length, 0) ?? 0,
     [tagNormalizationScanResults],
   );
+  const selectedTagNormalizationScanStats = useMemo(() => {
+    if (!tagNormalizationScanResults) {
+      return { noteCount: 0, suggestionCount: 0 };
+    }
+
+    return tagNormalizationScanResults.reduce(
+      (stats, result) => {
+        if (!selectedTagNormalizationScanPaths.has(result.path)) {
+          return stats;
+        }
+
+        return {
+          noteCount: stats.noteCount + 1,
+          suggestionCount: stats.suggestionCount + result.suggestions.length,
+        };
+      },
+      { noteCount: 0, suggestionCount: 0 },
+    );
+  }, [selectedTagNormalizationScanPaths, tagNormalizationScanResults]);
   const tagTaxonomyUserEntries = useMemo(
     () => [...(tagTaxonomyConfig?.entries ?? [])].sort((left, right) => left.path.join("/").localeCompare(right.path.join("/"), "zh-Hans-CN")),
     [tagTaxonomyConfig],
@@ -5400,6 +5433,7 @@ export default function App() {
     setIsScanningTagNormalization(true);
     setTagNormalizationScanError(null);
     setTagNormalizationScanIssueCount(0);
+    setSelectedTagNormalizationScanPaths(new Set());
 
     const results: TagNormalizationScanResult[] = [];
     let issueCount = 0;
@@ -5441,6 +5475,111 @@ export default function App() {
       setIsScanningTagNormalization(false);
     }
   }, [isScanningTagNormalization, noteFiles, tagTaxonomyUserConfig]);
+  const toggleTagNormalizationScanSelection = useCallback((path: string) => {
+    setSelectedTagNormalizationScanPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+  const selectAllTagNormalizationScanResults = useCallback(() => {
+    setSelectedTagNormalizationScanPaths(new Set(tagNormalizationScanResults?.map((result) => result.path) ?? []));
+  }, [tagNormalizationScanResults]);
+  const clearTagNormalizationScanSelection = useCallback(() => {
+    setSelectedTagNormalizationScanPaths(new Set());
+  }, []);
+  const applySelectedTagNormalizationScanResults = useCallback(async () => {
+    if (!tagNormalizationScanResults || selectedTagNormalizationScanStats.noteCount === 0 || isApplyingTagNormalizationScan) return;
+
+    const selectedPaths = new Set(selectedTagNormalizationScanPaths);
+    const confirmMessage = [
+      `将修改 ${selectedTagNormalizationScanStats.noteCount} 篇笔记。`,
+      `将规范化 ${selectedTagNormalizationScanStats.suggestionCount} 个标签。`,
+      "只修改 frontmatter.tags，不会改正文。",
+      "建议在批量应用前确认 Git 工作区状态，便于回滚。",
+      "",
+      "确认应用所选规范化？",
+    ].join("\n");
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsApplyingTagNormalizationScan(true);
+    const failures: TagNormalizationApplyFailure[] = [];
+    let successCount = 0;
+    let normalizedTagCount = 0;
+
+    for (const result of tagNormalizationScanResults) {
+      if (!selectedPaths.has(result.path)) continue;
+
+      try {
+        if (result.path === currentFilePath && isDirty) {
+          throw new Error("当前打开的笔记有未保存改动，已跳过");
+        }
+
+        const content = await readNote(result.path);
+        const parsed = parseFrontmatterFields(content);
+
+        if (!parsed.canMerge || !parsed.canEditTags) {
+          throw new Error(parsed.warning ?? "当前 frontmatter 暂不能安全改写 tags");
+        }
+
+        const suggestions = getTagNormalizationSuggestions(parsed.fields.tags, {
+          userConfig: tagTaxonomyUserConfig,
+        });
+        if (suggestions.length === 0) continue;
+
+        const replacements = new Map(suggestions.map((suggestion) => [suggestion.original, suggestion.normalized]));
+        const nextTags = mergeTagsStable(
+          [],
+          parsed.fields.tags.map((tag) => replacements.get(tag.trim()) ?? tag),
+          tagTaxonomyUserConfig,
+        );
+        const nextMarkdown = mergeFrontmatterFields(content, {
+          ...parsed.fields,
+          tags: nextTags,
+        });
+
+        if (nextMarkdown === content) continue;
+
+        await writeNote(result.path, nextMarkdown);
+        successCount += 1;
+        normalizedTagCount += suggestions.length;
+
+        if (result.path === currentFilePath) {
+          applyLoadedMarkdown(nextMarkdown, currentFilePath);
+        }
+      } catch (error) {
+        failures.push({
+          path: result.path,
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
+    setTagNormalizationApplyResult({
+      successCount,
+      normalizedTagCount,
+      failures,
+    });
+    setSelectedTagNormalizationScanPaths(new Set());
+    setIsApplyingTagNormalizationScan(false);
+    void handleScanLegacyTags();
+  }, [
+    applyLoadedMarkdown,
+    currentFilePath,
+    handleScanLegacyTags,
+    isApplyingTagNormalizationScan,
+    isDirty,
+    selectedTagNormalizationScanPaths,
+    selectedTagNormalizationScanStats.noteCount,
+    selectedTagNormalizationScanStats.suggestionCount,
+    tagNormalizationScanResults,
+    tagTaxonomyUserConfig,
+  ]);
   const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
     if (!currentFilePath || currentFilePath !== notePath) {
       throw new Error("当前打开的笔记已变化，请切回原笔记后再应用");
@@ -8483,6 +8622,27 @@ export default function App() {
                             <span className="text-sm text-destructive">扫描失败：{tagNormalizationScanError}</span>
                           )}
 
+                          {tagNormalizationApplyResult && (
+                            <div className="grid gap-1 rounded-sm border border-border/70 bg-muted/10 px-3 py-2 text-sm text-muted-foreground">
+                              <span>
+                                成功修改 {tagNormalizationApplyResult.successCount} 篇笔记，规范化 {tagNormalizationApplyResult.normalizedTagCount} 个标签。
+                              </span>
+                              {tagNormalizationApplyResult.failures.length > 0 && (
+                                <div className="grid gap-1 text-xs">
+                                  <span className="text-destructive">失败 {tagNormalizationApplyResult.failures.length} 个文件：</span>
+                                  {tagNormalizationApplyResult.failures.slice(0, 5).map((failure) => (
+                                    <span key={`${failure.path}:${failure.error}`} className="break-words">
+                                      {failure.path}：{failure.error}
+                                    </span>
+                                  ))}
+                                  {tagNormalizationApplyResult.failures.length > 5 && (
+                                    <span>另有 {tagNormalizationApplyResult.failures.length - 5} 个失败。</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {tagNormalizationScanResults && (
                             <div className="grid min-w-0 gap-2">
                               {tagNormalizationScanResults.length === 0 ? (
@@ -8496,11 +8656,56 @@ export default function App() {
                                     发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanSuggestionCount} 个标签建议。
                                     {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
                                   </span>
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={selectAllTagNormalizationScanResults}
+                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan}
+                                    >
+                                      全选
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={clearTagNormalizationScanSelection}
+                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
+                                    >
+                                      全不选
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">
+                                      已选 {selectedTagNormalizationScanStats.noteCount} 篇，{selectedTagNormalizationScanStats.suggestionCount} 个标签建议
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => void applySelectedTagNormalizationScanResults()}
+                                      disabled={isScanningTagNormalization || isApplyingTagNormalizationScan || selectedTagNormalizationScanStats.noteCount === 0}
+                                    >
+                                      {isApplyingTagNormalizationScan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                      {isApplyingTagNormalizationScan ? "应用中..." : "应用所选规范化"}
+                                    </Button>
+                                    <span className="basis-full text-xs text-muted-foreground">
+                                      只会修改已勾选的笔记 frontmatter tags；建议在批量应用前确认 Git 工作区状态，便于回滚。
+                                    </span>
+                                  </div>
                                   <div className="max-h-72 overflow-y-auto rounded-sm border border-border/70 bg-muted/10">
                                     {tagNormalizationScanResults.map((result) => (
                                       <details key={result.path} className="border-b border-border/60 last:border-b-0">
                                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm text-foreground hover:bg-muted/20">
-                                          <span className="min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                                            checked={selectedTagNormalizationScanPaths.has(result.path)}
+                                            onClick={(event) => event.stopPropagation()}
+                                            onChange={() => toggleTagNormalizationScanSelection(result.path)}
+                                            disabled={isScanningTagNormalization || isApplyingTagNormalizationScan}
+                                            aria-label={`选择 ${result.title}`}
+                                          />
+                                          <span className="min-w-0 flex-1">
                                             <span className="block truncate">{result.title}</span>
                                             <span className="block truncate font-mono text-[11px] text-muted-foreground">{result.path}</span>
                                           </span>
