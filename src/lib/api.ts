@@ -202,6 +202,7 @@ export interface NoteChatContextPayload {
   selectedText: string;
   markdown: string;
   markdownTruncated: boolean;
+  tagTaxonomyContext?: string;
 }
 
 export interface NoteChatAnswer {
@@ -901,11 +902,13 @@ export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckRes
 export async function generateNoteMetadata(
   relativePath: string,
   markdownContent: string,
+  tagTaxonomyContext?: string,
 ): Promise<GeneratedNoteMetadata> {
   try {
     return await invoke<GeneratedNoteMetadata>("generate_note_metadata", {
       relativePath,
       markdownContent,
+      tagTaxonomyContext,
     });
   } catch (e) {
     throw toError(e);

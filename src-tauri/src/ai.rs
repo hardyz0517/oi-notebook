@@ -153,6 +153,8 @@ pub struct NoteChatContextInput {
     pub selected_text: String,
     pub markdown: String,
     pub markdown_truncated: bool,
+    #[serde(default)]
+    pub tag_taxonomy_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -3328,6 +3330,7 @@ pub(crate) fn organize_luogu_insight(
 pub fn generate_note_metadata(
     relative_path: String,
     markdown_content: String,
+    tag_taxonomy_context: Option<String>,
 ) -> Result<GeneratedNoteMetadata, String> {
     let relative_path = relative_path.trim();
     let markdown_content = markdown_content.trim();
@@ -3339,13 +3342,19 @@ pub fn generate_note_metadata(
     }
 
     let config = read_config()?.ai;
+    let tag_context = tag_taxonomy_context
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("No local taxonomy candidates matched. Follow the tag rules conservatively.");
     let user_prompt = render_prompt_template(
         PromptTemplateKind::NoteMetadata,
-        &[("note_path", relative_path), ("content", markdown_content)],
+        &[("note_path", relative_path), ("content", markdown_content), ("tag_context", tag_context)],
     )?;
     let cache_context = json!({
         "note_path": relative_path,
         "content": markdown_content,
+        "tag_context": tag_context,
     });
     let cache_path = ai_cache_path(
         NOTE_METADATA_TASK,
@@ -3491,15 +3500,23 @@ fn suggest_note_tags_blocking(
     } else {
         "Body is the full current note."
     };
+    let tag_taxonomy_context = context
+        .tag_taxonomy_context
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("No local taxonomy candidates matched. Follow the tag rules conservatively.");
 
     let user_prompt = format!(
         "Suggest frontmatter tags for an OI / algorithm / Markdown study note.\n\
 Use the title, path, existing tags, summary, Markdown body, and selected text.\n\
 Do not repeat existing tags. Avoid generic tags unless truly necessary.\n\
-Prefer concrete tags such as dynamic programming, monotonic queue, shortest path, tree DP, math, Luogu, solution, template, debugging, or complexity analysis.\n\
-Tags should be short, usually 2 to 8 items. Preserve the note's language style when possible.\n\
+Use the local tag taxonomy context below. Prefer canonical taxonomy paths when they fit, and output canonical paths instead of aliases.\n\
+Do not force taxonomy labels when they are uncertain; keep only confident tags and avoid inventing many new labels.\n\
+Tags should be short, usually 2 to 8 items. Path-style tags such as 算法/字符串/Z 函数 are preferred when available.\n\
 Output strict JSON only, without markdown fences or extra text.\n\
-The JSON shape must be: {{\"suggestedTags\":[\"dynamic programming\",\"monotonic queue\"],\"reason\":\"These tags match the note content.\"}}\n\n\
+The JSON shape must be: {{\"suggestedTags\":[\"算法/动态规划/DP\",\"训练/记录/复盘\"],\"reason\":\"These tags match the note content.\"}}\n\n\
+Local tag taxonomy context:\n{tag_taxonomy_context}\n\n\
 Title:\n{note_title}\n\n\
 Path:\n{note_path}\n\n\
 Existing tags:\n{tags_text}\n\n\

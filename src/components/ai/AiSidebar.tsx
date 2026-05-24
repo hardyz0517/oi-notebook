@@ -35,6 +35,7 @@ import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPl
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { createSearchPreparationDiagnostics, encodeDebugValue, formatBingDiagnostics, formatDirectDiscoveryDiagnostics, formatNewsReadDiagnostics, formatSearchPreparationDiagnostics, formatSearchPreparationDiagnosticsForDisplay, getDebugReasonLabel, getSearchStageDebugLabel, mergeSearchDebug } from "@/lib/searchDiagnostics";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
+import { buildTagTaxonomyPromptContext } from "@/lib/tagTaxonomyPrompt";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
@@ -4894,10 +4895,18 @@ export default function AiSidebar({
         selectedText: truncatedSelection.text,
         markdown: "",
         markdownTruncated: false,
+        tagTaxonomyContext: "",
       };
     }
 
     const truncatedMarkdown = truncateText(context.markdownBody, NOTE_CHAT_MAX_MARKDOWN_CHARS);
+    const tagTaxonomyContext = buildTagTaxonomyPromptContext({
+      title: context.title,
+      notePath: context.filePath,
+      summary: context.summary,
+      content: context.markdownBody,
+      existingTags: context.tags,
+    }).text;
 
     return {
       noteTitle: context.filePath ? context.title : "",
@@ -4907,6 +4916,7 @@ export default function AiSidebar({
       selectedText: truncatedSelection.text,
       markdown: truncatedMarkdown.text,
       markdownTruncated: truncatedMarkdown.truncated,
+      tagTaxonomyContext,
     };
   };
 
@@ -5636,12 +5646,19 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       const chatContext: NoteChatContextPayload = {
         noteTitle: context.title,
         notePath: context.filePath,
-        tags: context.tags,
-        summary: context.summary.trim(),
-        selectedText: "",
-        markdown: context.markdownBody,
-        markdownTruncated: false,
-      };
+      tags: context.tags,
+      summary: context.summary.trim(),
+      selectedText: "",
+      markdown: context.markdownBody,
+      markdownTruncated: false,
+      tagTaxonomyContext: buildTagTaxonomyPromptContext({
+        title: context.title,
+        notePath: context.filePath,
+        summary: context.summary,
+        content: context.markdownBody,
+        existingTags: context.tags,
+      }).text,
+    };
       void submitPolishFullNoteCommand(chatContext, commandText, commandArgument);
       return;
     }

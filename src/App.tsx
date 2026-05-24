@@ -1,5 +1,5 @@
 ﻿import { listen } from "@tauri-apps/api/event";
-import { forwardRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
@@ -29,6 +29,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
+import { findTagSuggestionsByQuery, normalizeTagPath, type TagSuggestion } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -1110,18 +1111,56 @@ function normalizeTagValue(tag: string): string {
   return tag.trim().replace(/\s+/g, " ");
 }
 
+function getTagIdentityKey(tag: string): string {
+  const normalized = normalizeTagPath(tag);
+  if (normalized?.entryId) {
+    return `entry:${normalized.entryId}`;
+  }
+  if (normalized?.fullPath) {
+    return `path:${normalized.fullPath.toLocaleLowerCase()}`;
+  }
+  return `text:${normalizeTagValue(tag).toLocaleLowerCase()}`;
+}
+
 function mergeTagsStable(existingTags: string[], suggestedTags: string[]): string[] {
   const merged: string[] = [];
   const seen = new Set<string>();
 
   for (const tag of [...existingTags, ...suggestedTags]) {
     const normalized = normalizeTagValue(tag);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
+    const identityKey = getTagIdentityKey(normalized);
+    if (!normalized || seen.has(identityKey)) continue;
+    seen.add(identityKey);
     merged.push(normalized);
   }
 
   return merged;
+}
+
+function formatTagSuggestionPath(pathText: string): string {
+  return pathText.split("/").join(" / ");
+}
+
+function getDisplayAliases(suggestion: TagSuggestion, query: string): string[] {
+  const normalizedQuery = normalizeTagValue(query).toLocaleLowerCase();
+  const aliases = suggestion.aliases
+    .map(normalizeTagValue)
+    .filter(Boolean)
+    .filter((alias) => alias !== suggestion.name && alias !== suggestion.pathText);
+  const matched = aliases.filter((alias) => normalizedQuery && alias.toLocaleLowerCase().includes(normalizedQuery));
+  return (matched.length > 0 ? matched : aliases).slice(0, 3);
+}
+
+function replaceTagWithCanonicalSuggestion(tags: string[], replaceIndex: number, suggestion: TagSuggestion): string[] {
+  const candidate = normalizeTagValue(suggestion.pathText);
+  const candidateKey = getTagIdentityKey(candidate);
+  const retained = tags.filter((tag, index) => index !== replaceIndex && getTagIdentityKey(tag) !== candidateKey);
+  const insertIndex = replaceIndex >= 0 ? Math.min(replaceIndex, retained.length) : retained.length;
+  return mergeTagsStable([], [
+    ...retained.slice(0, insertIndex),
+    candidate,
+    ...retained.slice(insertIndex),
+  ]);
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -2085,6 +2124,7 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
       variables: [
         { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "在模板中写入该变量，执行时会替换为 notes 内的相对路径。" },
         { name: "{{content}}", meaning: "当前笔记完整 Markdown 内容。", usage: "用于让 AI 根据正文生成标题、标签和摘要。" },
+        { name: "{{tag_context}}", meaning: "根据当前标题、正文和已有 tags 本地筛选出的预设标签规则与少量候选。", usage: "用于约束 AI 优先输出 taxonomy canonical path，避免乱造标签。" },
       ],
       editable: true,
     };
@@ -2513,6 +2553,8 @@ export default function App() {
   const [newNoteLocationOption, setNewNoteLocationOption] = useState<NoteLocationOptionId>("current");
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
+  const [isTagSuggestionOpen, setIsTagSuggestionOpen] = useState(false);
+  const [activeTagSuggestionIndex, setActiveTagSuggestionIndex] = useState(0);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
   const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
   const [activeTreeDirectoryPath, setActiveTreeDirectoryPath] = useState<string | null>(null);
@@ -5035,7 +5077,55 @@ export default function App() {
       .split(",")
       .map(normalizeTagValue)
       .filter(Boolean);
-    updateFrontmatter({ tags });
+    updateFrontmatter({ tags: mergeTagsStable([], tags) });
+    setIsTagSuggestionOpen(true);
+  };
+
+  const activeTagQuery = frontmatter.fields.tags[frontmatter.fields.tags.length - 1] ?? "";
+  const tagSuggestions = useMemo(() => {
+    const query = normalizeTagValue(activeTagQuery);
+    if (!query || !frontmatter.canMerge || !frontmatter.canEditTags) {
+      return [];
+    }
+    return findTagSuggestionsByQuery(query, { limit: 8 });
+  }, [activeTagQuery, frontmatter.canEditTags, frontmatter.canMerge]);
+
+  useEffect(() => {
+    setActiveTagSuggestionIndex(0);
+  }, [activeTagQuery]);
+
+  const applyTagSuggestion = (suggestion: TagSuggestion) => {
+    if (!frontmatter.canMerge || !frontmatter.canEditTags) return;
+    const replaceIndex = frontmatter.fields.tags.length > 0 ? frontmatter.fields.tags.length - 1 : -1;
+    const nextTags = replaceTagWithCanonicalSuggestion(frontmatter.fields.tags, replaceIndex, suggestion);
+    updateFrontmatter({ tags: nextTags });
+    setIsTagSuggestionOpen(false);
+  };
+
+  const handleTagsInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setIsTagSuggestionOpen(false);
+      return;
+    }
+
+    if (event.key === "ArrowDown" && isTagSuggestionOpen && tagSuggestions.length > 0) {
+      event.preventDefault();
+      setActiveTagSuggestionIndex((index) => (index + 1) % tagSuggestions.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp" && isTagSuggestionOpen && tagSuggestions.length > 0) {
+      event.preventDefault();
+      setActiveTagSuggestionIndex((index) => (index - 1 + tagSuggestions.length) % tagSuggestions.length);
+      return;
+    }
+
+    if (event.key !== "Enter" || !isTagSuggestionOpen || tagSuggestions.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    applyTagSuggestion(tagSuggestions[Math.min(activeTagSuggestionIndex, tagSuggestions.length - 1)]);
   };
 
   const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
@@ -8659,13 +8749,53 @@ export default function App() {
                           </div>
                           <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-tags">标签</Label>
-                            <Input
-                              id="frontmatter-tags"
-                              value={frontmatter.fields.tags.join(", ")}
-                              disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
-                              placeholder="用逗号分隔标签"
-                              onChange={(e) => updateTagsFromInput(e.target.value)}
-                            />
+                            <div className="relative">
+                              <Input
+                                id="frontmatter-tags"
+                                value={frontmatter.fields.tags.join(", ")}
+                                disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
+                                placeholder="用逗号分隔标签"
+                                autoComplete="off"
+                                onBlur={() => {
+                                  window.setTimeout(() => setIsTagSuggestionOpen(false), 120);
+                                }}
+                                onChange={(e) => updateTagsFromInput(e.target.value)}
+                                onFocus={() => setIsTagSuggestionOpen(true)}
+                                onKeyDown={handleTagsInputKeyDown}
+                              />
+                              {isTagSuggestionOpen && activeTagQuery.trim() && tagSuggestions.length > 0 && (
+                                <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden border border-border/80 bg-background text-sm shadow-sm">
+                                  {tagSuggestions.map((suggestion, index) => {
+                                    const aliases = getDisplayAliases(suggestion, activeTagQuery);
+                                    const active = index === activeTagSuggestionIndex;
+                                    return (
+                                      <button
+                                        key={suggestion.id}
+                                        type="button"
+                                        className={cn(
+                                          "block w-full px-3 py-2 text-left transition-colors",
+                                          active ? "bg-sky-50 text-[#146BB7]" : "text-foreground hover:bg-sky-50 hover:text-[#146BB7]",
+                                        )}
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          applyTagSuggestion(suggestion);
+                                        }}
+                                        onMouseEnter={() => setActiveTagSuggestionIndex(index)}
+                                      >
+                                        <span className="block text-[13px] font-medium leading-5">
+                                          {formatTagSuggestionPath(suggestion.pathText)}
+                                        </span>
+                                        {aliases.length > 0 && (
+                                          <span className="block truncate text-[11px] leading-4 text-muted-foreground">
+                                            别名：{aliases.join("、")}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                           <div className="app-frontmatter-field grid gap-1.5">
                             <Label htmlFor="frontmatter-difficulty">难度</Label>

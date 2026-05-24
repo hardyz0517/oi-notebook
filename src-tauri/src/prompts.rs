@@ -86,6 +86,10 @@ Rules:
 - If the comment has no clear reusable value, return should_import=false.
 - body must be Markdown.
 - tags must contain 2-5 concise items when should_import=true.
+- tags describe knowledge points, training use, source, stage, project, and related dimensions.
+- Prefer canonical taxonomy paths when they fit, and use path-style tags when confident.
+- Normalize common aliases to canonical paths, for example 拓展 KMP / exKMP -> 算法/字符串/Z 函数, and 李超树 -> 算法/数据结构/李超线段树.
+- If no canonical tag is clearly supported by the comment, use fewer conservative tags instead of inventing many labels.
 - draft should default to true unless the comment clearly says it is publish-ready.
 
 Problem ID: {{problem_id}}
@@ -110,13 +114,20 @@ Required JSON schema:
 
 Rules:
 - Generate metadata only from the current note content.
-- tags must contain 3-5 concise OI or algorithm oriented labels.
+- category describes the note kind, such as 题解, 技巧, 学习, 杂谈, or 项目日志.
+- tags describe knowledge points, training use, source, stage, project, and related dimensions.
+- Prefer canonical taxonomy paths from the local tag context when they fit.
+- Normalize aliases to canonical paths, for example 拓展 KMP / exKMP -> 算法/字符串/Z 函数, and 李超树 -> 算法/数据结构/李超线段树.
+- tags should contain only confident labels. Do not invent many labels just to fill the list.
 - summary must be one concise sentence.
 - title may be improved, but keep it factual and not exaggerated.
 - Do not rewrite or polish the note body.
 - Do not return Markdown, only JSON.
 
 Note relative path: {{note_path}}
+
+Local tag taxonomy context:
+{{tag_context}}
 
 Current markdown content:
 {{content}}
