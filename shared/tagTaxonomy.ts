@@ -664,11 +664,23 @@ export function resolveTagTaxonomy(userConfig: UserTagTaxonomyConfig = {}) {
 }
 
 const resolvedTagTaxonomy = resolveTagTaxonomy();
+const userResolvedTagTaxonomyCache = new WeakMap<UserTagTaxonomyConfig, ResolvedTagTaxonomy>();
 
 export const TAG_ALIAS_MAP = resolvedTagTaxonomy.aliasMap;
 
 function getResolvedTagTaxonomy(userConfig?: UserTagTaxonomyConfig | null): ResolvedTagTaxonomy {
-  return userConfig ? resolveTagTaxonomy(userConfig) : resolvedTagTaxonomy;
+  if (!userConfig) {
+    return resolvedTagTaxonomy;
+  }
+
+  const cached = userResolvedTagTaxonomyCache.get(userConfig);
+  if (cached) {
+    return cached;
+  }
+
+  const resolved = resolveTagTaxonomy(userConfig);
+  userResolvedTagTaxonomyCache.set(userConfig, resolved);
+  return resolved;
 }
 
 export function normalizeTagToTaxonomyPath(tag: string, userConfig?: UserTagTaxonomyConfig | null) {

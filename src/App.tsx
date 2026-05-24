@@ -30,7 +30,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -481,6 +481,12 @@ type SettingsView = "main" | "prompt-editor";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
+
+type TagNormalizationScanResult = {
+  path: string;
+  title: string;
+  suggestions: TagNormalizationSuggestion[];
+};
 
 interface PolishReviewTab {
   id: string;
@@ -2528,6 +2534,10 @@ export default function App() {
   const [tagTaxonomyEntryAliasesInput, setTagTaxonomyEntryAliasesInput] = useState("");
   const [tagTaxonomyAliasNameInput, setTagTaxonomyAliasNameInput] = useState("");
   const [tagTaxonomyAliasTargetInput, setTagTaxonomyAliasTargetInput] = useState("");
+  const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
+  const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
+  const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
+  const [tagNormalizationScanIssueCount, setTagNormalizationScanIssueCount] = useState(0);
   const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3070,6 +3080,10 @@ export default function App() {
       { label: "合并规则", value: tagTaxonomyStats.mergesCount },
     ],
     [tagTaxonomyStats],
+  );
+  const tagNormalizationScanSuggestionCount = useMemo(
+    () => tagNormalizationScanResults?.reduce((total, result) => total + result.suggestions.length, 0) ?? 0,
+    [tagNormalizationScanResults],
   );
   const tagTaxonomyUserEntries = useMemo(
     () => [...(tagTaxonomyConfig?.entries ?? [])].sort((left, right) => left.path.join("/").localeCompare(right.path.join("/"), "zh-Hans-CN")),
@@ -5380,6 +5394,53 @@ export default function App() {
     updateFrontmatter({ tags: nextTags });
     setIsTagNormalizationDetailsOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatter.fields.tags, tagNormalizationSuggestions, tagTaxonomyUserConfig, updateFrontmatter]);
+  const handleScanLegacyTags = useCallback(async () => {
+    if (isScanningTagNormalization) return;
+
+    setIsScanningTagNormalization(true);
+    setTagNormalizationScanError(null);
+    setTagNormalizationScanIssueCount(0);
+
+    const results: TagNormalizationScanResult[] = [];
+    let issueCount = 0;
+
+    try {
+      for (const file of noteFiles) {
+        try {
+          const content = await readNote(file.path);
+          const parsed = parseFrontmatterFields(content);
+
+          if (parsed.warning && !parsed.canEditTags) {
+            issueCount += 1;
+          }
+
+          if (parsed.fields.tags.length === 0) continue;
+
+          const suggestions = getTagNormalizationSuggestions(parsed.fields.tags, {
+            userConfig: tagTaxonomyUserConfig,
+          });
+
+          if (suggestions.length > 0) {
+            results.push({
+              path: file.path,
+              title: parsed.fields.title.trim() || file.displayTitle?.trim() || file.name.replace(/\.md$/i, ""),
+              suggestions,
+            });
+          }
+        } catch {
+          issueCount += 1;
+        }
+      }
+
+      setTagNormalizationScanResults(results);
+      setTagNormalizationScanIssueCount(issueCount);
+    } catch (error) {
+      setTagNormalizationScanError(getErrorMessage(error));
+      setTagNormalizationScanResults(null);
+    } finally {
+      setIsScanningTagNormalization(false);
+    }
+  }, [isScanningTagNormalization, noteFiles, tagTaxonomyUserConfig]);
   const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
     if (!currentFilePath || currentFilePath !== notePath) {
       throw new Error("当前打开的笔记已变化，请切回原笔记后再应用");
@@ -8397,6 +8458,74 @@ export default function App() {
                         <span className="text-sm text-muted-foreground">
                           可用标签候选：{tagTaxonomyStats.availableCandidateCount}
                         </span>
+                      </SettingRow>
+                      <SettingRow
+                        title="旧标签扫描"
+                        description="只读扫描当前笔记库中的 frontmatter tags；本轮仅预览，不会修改任何笔记。"
+                        align="start"
+                      >
+                        <div className="grid min-w-0 gap-3">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleScanLegacyTags()}
+                              disabled={isScanningTagNormalization}
+                            >
+                              {isScanningTagNormalization ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                              {isScanningTagNormalization ? "正在扫描..." : "扫描旧标签"}
+                            </Button>
+                            <span className="text-xs text-muted-foreground">只读取笔记 frontmatter，不会写入 notes/**。</span>
+                          </div>
+
+                          {tagNormalizationScanError && (
+                            <span className="text-sm text-destructive">扫描失败：{tagNormalizationScanError}</span>
+                          )}
+
+                          {tagNormalizationScanResults && (
+                            <div className="grid min-w-0 gap-2">
+                              {tagNormalizationScanResults.length === 0 ? (
+                                <span className="text-sm text-muted-foreground">
+                                  未发现需要规范化的标签。
+                                  {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="text-sm text-muted-foreground">
+                                    发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanSuggestionCount} 个标签建议。
+                                    {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
+                                  </span>
+                                  <div className="max-h-72 overflow-y-auto rounded-sm border border-border/70 bg-muted/10">
+                                    {tagNormalizationScanResults.map((result) => (
+                                      <details key={result.path} className="border-b border-border/60 last:border-b-0">
+                                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm text-foreground hover:bg-muted/20">
+                                          <span className="min-w-0">
+                                            <span className="block truncate">{result.title}</span>
+                                            <span className="block truncate font-mono text-[11px] text-muted-foreground">{result.path}</span>
+                                          </span>
+                                          <span className="shrink-0 text-xs text-muted-foreground">{result.suggestions.length} 个建议</span>
+                                        </summary>
+                                        <div className="grid gap-1 px-3 pb-3 text-xs text-muted-foreground">
+                                          {result.suggestions.slice(0, 5).map((suggestion) => (
+                                            <div key={`${result.path}:${suggestion.original}:${suggestion.normalized}`} className="min-w-0 break-words">
+                                              <span className="text-foreground">{suggestion.original}</span>
+                                              <span className="mx-1.5">→</span>
+                                              <span>{suggestion.pathText}</span>
+                                            </div>
+                                          ))}
+                                          {result.suggestions.length > 5 && (
+                                            <div>另有 {result.suggestions.length - 5} 条。</div>
+                                          )}
+                                        </div>
+                                      </details>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </SettingRow>
                       <SettingRow
                         title="后续计划"
