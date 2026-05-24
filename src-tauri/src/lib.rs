@@ -7,6 +7,7 @@ mod luogu;
 mod notes;
 mod paths;
 mod prompts;
+mod tag_taxonomy;
 mod web_cache;
 mod web_extract;
 
@@ -262,6 +263,9 @@ pub fn run() {
             prompts::list_ai_prompts,
             prompts::read_ai_prompt,
             prompts::save_ai_prompt,
+            tag_taxonomy::get_tag_taxonomy_config,
+            tag_taxonomy::save_tag_taxonomy_config,
+            tag_taxonomy::reset_tag_taxonomy_config,
             open_blog,
             restart_blog_server,
             open_notes_folder,

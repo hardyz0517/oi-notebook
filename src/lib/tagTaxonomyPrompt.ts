@@ -2,6 +2,7 @@ import {
   findTagSuggestionsByQuery,
   suggestTagsFromArticleText,
   type TagSuggestion,
+  type UserTagTaxonomyConfig,
 } from "@/lib/tagTaxonomy";
 
 export const TAG_TAXONOMY_PROMPT_SUGGESTION_LIMIT = 20;
@@ -16,6 +17,7 @@ export interface TagTaxonomyPromptInput {
   content?: string | null;
   existingTags?: string[];
   limit?: number;
+  userConfig?: UserTagTaxonomyConfig | null;
 }
 
 export interface TagTaxonomyPromptContext {
@@ -87,7 +89,7 @@ export function buildTagTaxonomyPromptContext(input: TagTaxonomyPromptInput): Ta
       content: truncatePromptContent(input.content),
       existingTags: input.existingTags ?? [],
     },
-    { includeExistingTags: true, limit },
+    { includeExistingTags: true, limit, userConfig: input.userConfig },
   )) {
     addSuggestion(item.tag);
   }
@@ -96,7 +98,7 @@ export function buildTagTaxonomyPromptContext(input: TagTaxonomyPromptInput): Ta
     if (suggestions.size >= limit) {
       break;
     }
-    for (const suggestion of findTagSuggestionsByQuery(seed, { limit: 3 })) {
+    for (const suggestion of findTagSuggestionsByQuery(seed, { limit: 3, userConfig: input.userConfig })) {
       addSuggestion(suggestion);
     }
   }

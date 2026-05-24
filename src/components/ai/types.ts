@@ -1,5 +1,6 @@
 import type { AiConfig } from "@/lib/api";
 import type { SolutionFormatChange } from "@/lib/solutionFormatter";
+import type { UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
 export interface AiSidebarNoteContext {
   filePath: string | null;
@@ -67,6 +68,7 @@ export interface AiSidebarProps {
   aiConfig: AiConfig | null;
   onAiConfigChange: (config: AiConfig) => void;
   onOpenAiSettings: () => void;
+  tagTaxonomyConfig?: UserTagTaxonomyConfig | null;
   onApplySuggestedTags: (notePath: string, suggestedTags: string[]) => Promise<void>;
   onApplyPolishedSelection: (input: ApplyPolishedSelectionInput) => Promise<void>;
   onApplyPolishedFullNote: (input: ApplyPolishedFullNoteInput) => Promise<void>;

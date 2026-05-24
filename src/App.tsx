@@ -1,5 +1,5 @@
-﻿import { listen } from "@tauri-apps/api/event";
-import { forwardRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { forwardRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
@@ -23,13 +24,13 @@ import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from 
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig } from "@/lib/api";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { findTagSuggestionsByQuery, normalizeTagPath, type TagSuggestion } from "@/lib/tagTaxonomy";
+import { getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -465,6 +466,7 @@ type SettingsSection =
   | "luogu-rules"
   | "luogu-import-center"
   | "blog-preview"
+  | "blog-tag-taxonomy"
   | "data-storage"
   | "about-version"
   | "about-markdown"
@@ -681,7 +683,14 @@ const SETTINGS_TREE: Array<{
       { id: "luogu-import-center", label: "导入中心" },
     ],
   },
-  { id: "blog", label: "博客", children: [{ id: "blog-preview", label: "本地预览" }] },
+  {
+    id: "blog",
+    label: "博客",
+    children: [
+      { id: "blog-preview", label: "本地预览" },
+      { id: "blog-tag-taxonomy", label: "标签体系" },
+    ],
+  },
   { id: "data", label: "数据与存储", children: [{ id: "data-storage", label: "目录与缓存" }] },
   {
     id: "about",
@@ -893,6 +902,20 @@ function applyLuoguPreparedRules(
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
+const LUOGU_DIFFICULTY_OPTIONS = [
+  { value: "", label: "无", className: "text-[#9ca3af]" },
+  { value: "入门", label: "入门", className: "text-[#f08a9b]" },
+  { value: "普及-", label: "普及-", className: "text-[#f0a35c]" },
+  { value: "普及/提高-", label: "普及/提高-", className: "text-[#e0b85a]" },
+  { value: "普及+/提高", label: "普及+/提高", className: "text-[#76c893]" },
+  { value: "提高+/省选-", label: "提高+/省选-", className: "text-[#74a9d8]" },
+  { value: "省选/NOI-", label: "省选/NOI-", className: "text-[#b79adf]" },
+  { value: "NOI/NOI+/CTSC", label: "NOI/NOI+/CTSC", className: "text-[#c7c9d1]" },
+] as const;
+
+function getDifficultyOptionClassName(value: string): string {
+  return LUOGU_DIFFICULTY_OPTIONS.find((option) => option.value === value)?.className ?? "text-foreground";
+}
 
 function cloneAiConfig(config: AiConfig): AiConfig {
   return {
@@ -1111,8 +1134,89 @@ function normalizeTagValue(tag: string): string {
   return tag.trim().replace(/\s+/g, " ");
 }
 
-function getTagIdentityKey(tag: string): string {
-  const normalized = normalizeTagPath(tag);
+function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | null): UserTagTaxonomyConfig {
+  return {
+    version: config?.version ?? 1,
+    entries: [...(config?.entries ?? [])],
+    aliases: { ...(config?.aliases ?? {}) },
+    hiddenIds: [...(config?.hiddenIds ?? [])],
+    orderOverrides: { ...(config?.orderOverrides ?? {}) },
+    merges: { ...(config?.merges ?? {}) },
+  };
+}
+
+function parseTagPathInput(value: string): string[] {
+  return value
+    .split("/")
+    .map((segment) => normalizeTagValue(segment))
+    .filter(Boolean);
+}
+
+function parseAliasListInput(value: string): string[] {
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  for (const rawAlias of value.split(/[,，]/)) {
+    const alias = normalizeTagValue(rawAlias);
+    const key = alias.toLocaleLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    aliases.push(alias);
+  }
+  return aliases;
+}
+
+function getStableTagPathHash(pathText: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < pathText.length; index += 1) {
+    hash ^= pathText.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function slugifyUserTagIdSegment(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function createUserTagEntryId(path: string[], existingEntries: TagTaxonomyEntry[]): string {
+  const pathText = path.join("/");
+  const pathSlug = path.map(slugifyUserTagIdSegment).filter(Boolean).join(".");
+  const baseId = `user.${pathSlug || "tag"}.${getStableTagPathHash(pathText)}`;
+  const existingIds = new Set(existingEntries.map((entry) => entry.id));
+  if (!existingIds.has(baseId)) return baseId;
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}.${index}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+
+  return `${baseId}.${existingIds.size + 1}`;
+}
+
+function resolveTagTaxonomyAliasTarget(targetInput: string, userConfig?: UserTagTaxonomyConfig | null): string | null {
+  const target = normalizeTagValue(targetInput);
+  if (!target) return null;
+
+  const normalizedTargetPath = target.split("/").map(normalizeTagValue).filter(Boolean).join("/");
+  const normalizedReadablePath = target.split("/").map(normalizeTagValue).filter(Boolean).join(" / ");
+  const suggestion = getTagSuggestionList(userConfig).find((candidate) => (
+    candidate.id === target ||
+    candidate.pathText === normalizedTargetPath ||
+    formatTagSuggestionPath(candidate.pathText) === normalizedReadablePath ||
+    candidate.path.join("/") === normalizedTargetPath
+  ));
+  if (suggestion) return suggestion.id;
+
+  if (/^[a-z0-9._:-]+$/i.test(target)) return target;
+  return null;
+}
+
+function getTagIdentityKey(tag: string, userConfig?: UserTagTaxonomyConfig | null): string {
+  const normalized = normalizeTagPath(tag, userConfig);
   if (normalized?.entryId) {
     return `entry:${normalized.entryId}`;
   }
@@ -1122,13 +1226,17 @@ function getTagIdentityKey(tag: string): string {
   return `text:${normalizeTagValue(tag).toLocaleLowerCase()}`;
 }
 
-function mergeTagsStable(existingTags: string[], suggestedTags: string[]): string[] {
+function mergeTagsStable(
+  existingTags: string[],
+  suggestedTags: string[],
+  userConfig?: UserTagTaxonomyConfig | null,
+): string[] {
   const merged: string[] = [];
   const seen = new Set<string>();
 
   for (const tag of [...existingTags, ...suggestedTags]) {
     const normalized = normalizeTagValue(tag);
-    const identityKey = getTagIdentityKey(normalized);
+    const identityKey = getTagIdentityKey(normalized, userConfig);
     if (!normalized || seen.has(identityKey)) continue;
     seen.add(identityKey);
     merged.push(normalized);
@@ -1139,28 +1247,6 @@ function mergeTagsStable(existingTags: string[], suggestedTags: string[]): strin
 
 function formatTagSuggestionPath(pathText: string): string {
   return pathText.split("/").join(" / ");
-}
-
-function getDisplayAliases(suggestion: TagSuggestion, query: string): string[] {
-  const normalizedQuery = normalizeTagValue(query).toLocaleLowerCase();
-  const aliases = suggestion.aliases
-    .map(normalizeTagValue)
-    .filter(Boolean)
-    .filter((alias) => alias !== suggestion.name && alias !== suggestion.pathText);
-  const matched = aliases.filter((alias) => normalizedQuery && alias.toLocaleLowerCase().includes(normalizedQuery));
-  return (matched.length > 0 ? matched : aliases).slice(0, 3);
-}
-
-function replaceTagWithCanonicalSuggestion(tags: string[], replaceIndex: number, suggestion: TagSuggestion): string[] {
-  const candidate = normalizeTagValue(suggestion.pathText);
-  const candidateKey = getTagIdentityKey(candidate);
-  const retained = tags.filter((tag, index) => index !== replaceIndex && getTagIdentityKey(tag) !== candidateKey);
-  const insertIndex = replaceIndex >= 0 ? Math.min(replaceIndex, retained.length) : retained.length;
-  return mergeTagsStable([], [
-    ...retained.slice(0, insertIndex),
-    candidate,
-    ...retained.slice(insertIndex),
-  ]);
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -2433,6 +2519,16 @@ export default function App() {
       SETTINGS_FONT_SIZE_MAX,
     ),
   );
+  const [tagTaxonomyConfig, setTagTaxonomyConfig] = useState<UserTagTaxonomyConfig | null>(null);
+  const [tagTaxonomyConfigError, setTagTaxonomyConfigError] = useState<string | null>(null);
+  const [isLoadingTagTaxonomyConfig, setIsLoadingTagTaxonomyConfig] = useState(false);
+  const [isSavingTagTaxonomyConfig, setIsSavingTagTaxonomyConfig] = useState(false);
+  const [tagTaxonomySaveError, setTagTaxonomySaveError] = useState<string | null>(null);
+  const [tagTaxonomyEntryPathInput, setTagTaxonomyEntryPathInput] = useState("");
+  const [tagTaxonomyEntryAliasesInput, setTagTaxonomyEntryAliasesInput] = useState("");
+  const [tagTaxonomyAliasNameInput, setTagTaxonomyAliasNameInput] = useState("");
+  const [tagTaxonomyAliasTargetInput, setTagTaxonomyAliasTargetInput] = useState("");
+  const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
   const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
@@ -2468,6 +2564,26 @@ export default function App() {
       });
     });
   }, []);
+
+  const loadTagTaxonomyConfig = useCallback(async () => {
+    setIsLoadingTagTaxonomyConfig(true);
+    try {
+      const config = await getTagTaxonomyConfig();
+      setTagTaxonomyConfig(config);
+      setTagTaxonomyConfigError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("Failed to load tag taxonomy config; using builtin taxonomy.", message);
+      setTagTaxonomyConfig(null);
+      setTagTaxonomyConfigError(message);
+    } finally {
+      setIsLoadingTagTaxonomyConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTagTaxonomyConfig();
+  }, [loadTagTaxonomyConfig]);
 
   useEffect(() => {
     setEditorSelectedText("");
@@ -2553,8 +2669,9 @@ export default function App() {
   const [newNoteLocationOption, setNewNoteLocationOption] = useState<NoteLocationOptionId>("current");
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
-  const [isTagSuggestionOpen, setIsTagSuggestionOpen] = useState(false);
-  const [activeTagSuggestionIndex, setActiveTagSuggestionIndex] = useState(0);
+  const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
+  const [isDifficultyMenuOpen, setIsDifficultyMenuOpen] = useState(false);
+  const difficultyDropdownRef = useRef<HTMLDivElement | null>(null);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
   const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
   const [activeTreeDirectoryPath, setActiveTreeDirectoryPath] = useState<string | null>(null);
@@ -2696,6 +2813,27 @@ export default function App() {
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
+  useEffect(() => {
+    if (!isDifficultyMenuOpen) return;
+
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && difficultyDropdownRef.current?.contains(target)) return;
+      setIsDifficultyMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsDifficultyMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDifficultyMenuOpen]);
   const luoguSubmissionCandidateStates = useMemo(() => {
     const submissions = luoguPreviewResult?.submissions ?? [];
     return Object.fromEntries(
@@ -2884,6 +3022,142 @@ export default function App() {
   const blogStatusLabel = isRestartingBlog ? "重启中" : "打开 / 重启";
   const aiStatusLabel =
     !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
+  const tagTaxonomyStats = useMemo(() => {
+    const entriesCount = tagTaxonomyConfig?.entries?.length ?? 0;
+    const aliasesCount = Object.keys(tagTaxonomyConfig?.aliases ?? {}).length;
+    const hiddenIdsCount = tagTaxonomyConfig?.hiddenIds?.length ?? 0;
+    const orderOverridesCount = Object.keys(tagTaxonomyConfig?.orderOverrides ?? {}).length;
+    const mergesCount = Object.keys(tagTaxonomyConfig?.merges ?? {}).length;
+    const userConfigItemCount = entriesCount + aliasesCount + hiddenIdsCount + orderOverridesCount + mergesCount;
+    const availableCandidateCount = getTagSuggestionList(tagTaxonomyUserConfig)
+      .filter((suggestion) => !suggestion.hidden && !suggestion.deprecated)
+      .length;
+    const statusLabel = isLoadingTagTaxonomyConfig
+      ? "正在读取"
+      : tagTaxonomyConfigError
+        ? "加载失败，已回退内置默认配置"
+        : userConfigItemCount > 0
+          ? "已加载用户配置"
+          : "使用内置默认配置";
+
+    return {
+      statusLabel,
+      entriesCount,
+      aliasesCount,
+      hiddenIdsCount,
+      orderOverridesCount,
+      mergesCount,
+      availableCandidateCount,
+      userConfigItemCount,
+    };
+  }, [isLoadingTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyConfigError, tagTaxonomyUserConfig]);
+  const tagTaxonomyStatItems = useMemo(
+    () => [
+      { label: "自定义标签", value: tagTaxonomyStats.entriesCount },
+      { label: "自定义别名", value: tagTaxonomyStats.aliasesCount },
+      { label: "隐藏默认标签", value: tagTaxonomyStats.hiddenIdsCount },
+      { label: "排序覆盖", value: tagTaxonomyStats.orderOverridesCount },
+      { label: "合并规则", value: tagTaxonomyStats.mergesCount },
+    ],
+    [tagTaxonomyStats],
+  );
+  const tagTaxonomyUserEntries = useMemo(
+    () => [...(tagTaxonomyConfig?.entries ?? [])].sort((left, right) => left.path.join("/").localeCompare(right.path.join("/"), "zh-Hans-CN")),
+    [tagTaxonomyConfig],
+  );
+  const tagTaxonomyUserAliases = useMemo(
+    () => Object.entries(tagTaxonomyConfig?.aliases ?? {}).sort(([left], [right]) => left.localeCompare(right, "zh-Hans-CN")),
+    [tagTaxonomyConfig],
+  );
+  const saveUserTagTaxonomyConfig = useCallback(async (nextConfig: UserTagTaxonomyConfig): Promise<boolean> => {
+    const normalizedConfig = normalizeUserTagTaxonomyConfig(nextConfig);
+    setIsSavingTagTaxonomyConfig(true);
+    setTagTaxonomySaveError(null);
+    try {
+      await saveTagTaxonomyConfig(normalizedConfig);
+      setTagTaxonomyConfig(normalizedConfig);
+      setTagTaxonomyConfigError(null);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTagTaxonomySaveError(message);
+      return false;
+    } finally {
+      setIsSavingTagTaxonomyConfig(false);
+    }
+  }, []);
+  const handleAddTagTaxonomyEntry = useCallback(async () => {
+    const path = parseTagPathInput(tagTaxonomyEntryPathInput);
+    if (path.length === 0) {
+      setTagTaxonomySaveError("标签路径不能为空。");
+      return;
+    }
+
+    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    const pathText = path.join("/");
+    const existingSuggestion = getTagSuggestionList(currentConfig).find((suggestion) => suggestion.pathText === pathText);
+    if (existingSuggestion) {
+      setTagTaxonomySaveError("这个标签路径已经存在。");
+      return;
+    }
+
+    const nextEntry: TagTaxonomyEntry = {
+      id: createUserTagEntryId(path, currentConfig.entries ?? []),
+      path,
+      aliases: parseAliasListInput(tagTaxonomyEntryAliasesInput),
+      source: "user",
+    };
+    const saved = await saveUserTagTaxonomyConfig({
+      ...currentConfig,
+      entries: [...(currentConfig.entries ?? []), nextEntry],
+    });
+    if (!saved) return;
+
+    setTagTaxonomyEntryPathInput("");
+    setTagTaxonomyEntryAliasesInput("");
+  }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyEntryAliasesInput, tagTaxonomyEntryPathInput]);
+  const handleDeleteTagTaxonomyEntry = useCallback(async (entryId: string) => {
+    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    await saveUserTagTaxonomyConfig({
+      ...currentConfig,
+      entries: (currentConfig.entries ?? []).filter((entry) => entry.id !== entryId),
+    });
+  }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
+  const handleAddTagTaxonomyAlias = useCallback(async () => {
+    const aliasName = normalizeTagValue(tagTaxonomyAliasNameInput);
+    if (!aliasName) {
+      setTagTaxonomySaveError("别名不能为空。");
+      return;
+    }
+
+    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    const target = resolveTagTaxonomyAliasTarget(tagTaxonomyAliasTargetInput, currentConfig);
+    if (!target) {
+      setTagTaxonomySaveError("目标标签不能为空；请填写 canonical id，或填写已存在的标签路径。");
+      return;
+    }
+
+    const saved = await saveUserTagTaxonomyConfig({
+      ...currentConfig,
+      aliases: {
+        ...(currentConfig.aliases ?? {}),
+        [aliasName]: target,
+      },
+    });
+    if (!saved) return;
+
+    setTagTaxonomyAliasNameInput("");
+    setTagTaxonomyAliasTargetInput("");
+  }, [saveUserTagTaxonomyConfig, tagTaxonomyAliasNameInput, tagTaxonomyAliasTargetInput, tagTaxonomyConfig]);
+  const handleDeleteTagTaxonomyAlias = useCallback(async (aliasName: string) => {
+    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    const nextAliases = { ...(currentConfig.aliases ?? {}) };
+    delete nextAliases[aliasName];
+    await saveUserTagTaxonomyConfig({
+      ...currentConfig,
+      aliases: nextAliases,
+    });
+  }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const luoguStatusLabel =
     !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
       ? "读取中"
@@ -5072,62 +5346,18 @@ export default function App() {
     setIsDirty(nextDirty);
   };
 
-  const updateTagsFromInput = (value: string) => {
-    const tags = value
-      .split(",")
-      .map(normalizeTagValue)
-      .filter(Boolean);
-    updateFrontmatter({ tags: mergeTagsStable([], tags) });
-    setIsTagSuggestionOpen(true);
-  };
-
-  const activeTagQuery = frontmatter.fields.tags[frontmatter.fields.tags.length - 1] ?? "";
-  const tagSuggestions = useMemo(() => {
-    const query = normalizeTagValue(activeTagQuery);
-    if (!query || !frontmatter.canMerge || !frontmatter.canEditTags) {
-      return [];
-    }
-    return findTagSuggestionsByQuery(query, { limit: 8 });
-  }, [activeTagQuery, frontmatter.canEditTags, frontmatter.canMerge]);
-
-  useEffect(() => {
-    setActiveTagSuggestionIndex(0);
-  }, [activeTagQuery]);
-
-  const applyTagSuggestion = (suggestion: TagSuggestion) => {
+  const openTagPicker = useCallback(() => {
     if (!frontmatter.canMerge || !frontmatter.canEditTags) return;
-    const replaceIndex = frontmatter.fields.tags.length > 0 ? frontmatter.fields.tags.length - 1 : -1;
-    const nextTags = replaceTagWithCanonicalSuggestion(frontmatter.fields.tags, replaceIndex, suggestion);
-    updateFrontmatter({ tags: nextTags });
-    setIsTagSuggestionOpen(false);
-  };
-
-  const handleTagsInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      setIsTagSuggestionOpen(false);
-      return;
-    }
-
-    if (event.key === "ArrowDown" && isTagSuggestionOpen && tagSuggestions.length > 0) {
-      event.preventDefault();
-      setActiveTagSuggestionIndex((index) => (index + 1) % tagSuggestions.length);
-      return;
-    }
-
-    if (event.key === "ArrowUp" && isTagSuggestionOpen && tagSuggestions.length > 0) {
-      event.preventDefault();
-      setActiveTagSuggestionIndex((index) => (index - 1 + tagSuggestions.length) % tagSuggestions.length);
-      return;
-    }
-
-    if (event.key !== "Enter" || !isTagSuggestionOpen || tagSuggestions.length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-    applyTagSuggestion(tagSuggestions[Math.min(activeTagSuggestionIndex, tagSuggestions.length - 1)]);
-  };
-
+    setIsTagPickerOpen(true);
+  }, [frontmatter.canEditTags, frontmatter.canMerge]);
+  const closeTagPicker = useCallback(() => {
+    setIsTagPickerOpen(false);
+  }, []);
+  const confirmTagPicker = useCallback((tags: string[]) => {
+    if (!frontmatter.canMerge || !frontmatter.canEditTags) return;
+    updateFrontmatter({ tags });
+    setIsTagPickerOpen(false);
+  }, [frontmatter.canEditTags, frontmatter.canMerge, updateFrontmatter]);
   const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
     if (!currentFilePath || currentFilePath !== notePath) {
       throw new Error("当前打开的笔记已变化，请切回原笔记后再应用");
@@ -5139,7 +5369,7 @@ export default function App() {
       throw new Error(frontmatter.warning ?? "当前标签暂不能通过表单改写");
     }
 
-    const nextTags = mergeTagsStable(frontmatter.fields.tags, suggestedTags);
+    const nextTags = mergeTagsStable(frontmatter.fields.tags, suggestedTags, tagTaxonomyUserConfig);
     if (nextTags.length === frontmatter.fields.tags.length) return;
     updateFrontmatter({ tags: nextTags });
   };
@@ -6444,7 +6674,15 @@ export default function App() {
         </div>
       </DialogContent>
     </Dialog>
-    <Dialog open={dialogMode === "create" || dialogMode === "rename"} onOpenChange={(open) => !open && closeDialog()}>
+    <TagPickerDialog
+      open={isTagPickerOpen}
+      selectedTags={frontmatter.fields.tags}
+      userConfig={tagTaxonomyUserConfig}
+      onOpenChange={(open) => {
+        if (!open) closeTagPicker();
+      }}
+      onConfirm={confirmTagPicker}
+    />    <Dialog open={dialogMode === "create" || dialogMode === "rename"} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent className="flex max-h-[min(86vh,760px)] w-[min(720px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>
@@ -6734,7 +6972,7 @@ export default function App() {
                 ) : (
                   luoguConnectionResult.submissions.map((submission) => (
                     <div key={submission.submissionId} className="font-mono">
-                      #{submission.submissionId} {submission.problemId} {submission.problemTitle} · {submission.status} · {submission.submitTime}
+                      #{submission.submissionId} {submission.problemId} {submission.problemTitle} 路 {submission.status} 路 {submission.submitTime}
                     </div>
                   ))
                 )}
@@ -6819,11 +7057,11 @@ export default function App() {
                   <h2 className="text-lg font-semibold tracking-tight">洛谷导入中心</h2>
                   <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     <span>扫描提交、选择候选、生成预览、确认写入</span>
-                    <span>·</span>
+                    <span>路</span>
                     <span>洛谷账号：<span className={luoguConfigured ? "text-emerald-300" : "text-amber-300"}>{luoguImportCenterAccountLabel}</span></span>
-                    <span>·</span>
+                    <span>路</span>
                     <span>AI：<span className={luoguConfigAiConfigured ? "text-emerald-300" : "text-amber-300"}>{luoguImportCenterAiLabel}</span></span>
-                    <span>·</span>
+                    <span>路</span>
                     <button
                       type="button"
                       className="text-foreground underline-offset-4 hover:underline disabled:pointer-events-none disabled:opacity-50"
@@ -7031,9 +7269,9 @@ export default function App() {
                         {luoguPreviewResult && displayedLuoguPreviewSubmissions.length > 0 && luoguPrepareProgress && (
                           <div className="border-t border-border/70 px-3 py-1 text-xs text-muted-foreground">
                             {isStoppingLuoguPrepare ? "正在停止生成" : "正在生成预览"} {luoguPrepareProgress.current} / {luoguPrepareProgress.total}
-                            <span className="ml-2">成功 {luoguPrepareProgress.succeeded} · 失败 {luoguPrepareProgress.failed} · 跳过 {luoguPrepareProgress.skipped}</span>
+                            <span className="ml-2">成功 {luoguPrepareProgress.succeeded} 路 失败 {luoguPrepareProgress.failed} 路 跳过 {luoguPrepareProgress.skipped}</span>
                             {currentlyPreparingLuoguSubmission && (
-                              <span className="ml-2 font-mono">{currentlyPreparingLuoguSubmission.problemId || "未知题号"} · {currentlyPreparingLuoguSubmission.submissionId}</span>
+                              <span className="ml-2 font-mono">{currentlyPreparingLuoguSubmission.problemId || "未知题号"} 路 {currentlyPreparingLuoguSubmission.submissionId}</span>
                             )}
                           </div>
                         )}
@@ -7119,7 +7357,7 @@ export default function App() {
                                 });
                                 const submitTime = formatLuoguSubmissionTime(submission.submitTime);
                                 const canOpenPreview = Boolean(prepared && !prepared.skipped && prepared.markdown.trim());
-                                const suggestionTitle = [displayState.detail, displayState.output !== "—" ? displayState.output : ""].filter(Boolean).join(" · ");
+                                const suggestionTitle = [displayState.detail, displayState.output !== "—" ? displayState.output : ""].filter(Boolean).join(" 路 ");
                                 return (
                                   <div
                                     key={submission.submissionId}
@@ -7168,7 +7406,7 @@ export default function App() {
 
                                     <div className="min-w-0 truncate text-xs leading-5 text-muted-foreground" title={submitTime.absolute}>
                                       <span className="text-foreground">{submitTime.compact}</span>
-                                      {submitTime.relative && <span className="ml-1">· {submitTime.relative}</span>}
+                                      {submitTime.relative && <span className="ml-1">路 {submitTime.relative}</span>}
                                     </div>
 
                                     <div className="min-w-0" title={suggestionTitle}>
@@ -7193,10 +7431,10 @@ export default function App() {
                             <div className="shrink-0 text-base font-medium text-foreground">审阅预览</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
                             {luoguPrepareProgress
-                              ? `生成中 ${luoguPrepareProgress.current}/${luoguPrepareProgress.total} · 成功 ${luoguPrepareProgress.succeeded} · 失败 ${luoguPrepareProgress.failed}`
+                              ? `生成中 ${luoguPrepareProgress.current}/${luoguPrepareProgress.total} 路 成功 ${luoguPrepareProgress.succeeded} 路 失败 ${luoguPrepareProgress.failed}`
                               : luoguWriteProgress
                                 ? `写入中 ${luoguWriteProgress.current}/${luoguWriteProgress.total}`
-                                : `已生成 ${preparedLuoguNotes.length} 个 · 已选 ${writableLuoguPreparedNotes.length} 个`}
+                                : `已生成 ${preparedLuoguNotes.length} 个 路 已选 ${writableLuoguPreparedNotes.length} 个`}
                             </div>
                           </div>
                         </div>
@@ -7282,7 +7520,7 @@ export default function App() {
                                     >
                                       <div className="min-w-0 text-sm font-medium leading-5 text-foreground line-clamp-2">
                                         <span className="font-mono">{submission.problemId || "未知题号"}</span>
-                                        <span> · {submission.problemTitle || "未读取到标题"}</span>
+                                        <span> 路 {submission.problemTitle || "未读取到标题"}</span>
                                       </div>
                                       <div className="mt-1 flex min-w-0 items-center gap-2 text-xs">
                                         <span className={cn("shrink-0 rounded-sm border px-1.5 py-0.5", getLuoguPreviewStatusBadgeClass(statusLabel))}>
@@ -7302,9 +7540,9 @@ export default function App() {
                               <div className="shrink-0 border-b border-border bg-muted/20 px-3 py-2">
                                 <div className="flex min-w-0 items-center justify-between gap-3">
                                   <div className="min-w-0 flex-1">
-                                    <div className="min-w-0 truncate text-base font-medium text-foreground" title={`${activeLuoguPreparedPreview.problemId} · ${activeLuoguPreparedPreview.problemTitle} · ${activeLuoguPreparedPreview.suggestedRelativePath}`}>
+                                    <div className="min-w-0 truncate text-base font-medium text-foreground" title={`${activeLuoguPreparedPreview.problemId} 路 ${activeLuoguPreparedPreview.problemTitle} 路 ${activeLuoguPreparedPreview.suggestedRelativePath}`}>
                                       <span className="font-mono">{activeLuoguPreparedPreview.problemId || "未知题号"}</span>
-                                      <span> · {activeLuoguPreparedPreview.problemTitle || "未读取到标题"}</span>
+                                      <span> 路 {activeLuoguPreparedPreview.problemTitle || "未读取到标题"}</span>
                                     </div>
                                   </div>
                                   <div className="flex shrink-0 items-center gap-2">
@@ -7565,7 +7803,7 @@ export default function App() {
                     <span className="text-xs text-muted-foreground">{promptContent.length.toLocaleString()} 字符</span>
                   </div>
                   <div className="truncate text-xs leading-4 text-muted-foreground">
-                    {selectedPromptUsage.title} · {promptPolishMessage ?? selectedPromptUsage.scope}
+                    {selectedPromptUsage.title} 路 {promptPolishMessage ?? selectedPromptUsage.scope}
                   </div>
                 </>
               ) : (
@@ -7935,6 +8173,216 @@ export default function App() {
                     </section>
                   )}
 
+                  {shouldRenderSettingsPage("blog-tag-taxonomy") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1">
+                        <div className="text-base font-semibold text-foreground">标签体系</div>
+                        <div className="text-xs leading-5 text-muted-foreground">用于组织博客文章、桌面端标签建议和 AI 元数据补全；当前仍保留自由输入标签。</div>
+                      </div>
+                      <SettingRow
+                        title="当前状态"
+                        description="读取 .oinb/tag-taxonomy.json；失败时自动回退内置默认标签体系。"
+                        align="start"
+                      >
+                        <div className="grid min-w-0 gap-2 text-sm">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className={cn(
+                              "inline-flex rounded-sm border px-2 py-0.5 text-xs",
+                              tagTaxonomyConfigError
+                                ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                                : tagTaxonomyStats.userConfigItemCount > 0
+                                  ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                                  : "border-border/70 bg-muted/20 text-muted-foreground",
+                            )}>
+                              {tagTaxonomyStats.statusLabel}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void loadTagTaxonomyConfig()}
+                              disabled={isLoadingTagTaxonomyConfig}
+                            >
+                              <RefreshCw className={cn("h-3.5 w-3.5", isLoadingTagTaxonomyConfig && "animate-spin")} />
+                              重新加载
+                            </Button>
+                          </div>
+                          {tagTaxonomyConfigError && (
+                            <div className="text-xs leading-5 text-muted-foreground">
+                              读取失败：{tagTaxonomyConfigError}
+                            </div>
+                          )}
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="配置文件" description="用户自定义博客标签体系配置文件；当前只编辑自定义标签和别名。">
+                        <span className="inline-flex rounded-sm border border-border/70 bg-muted/20 px-2 py-1 font-mono text-xs text-foreground">
+                          .oinb/tag-taxonomy.json
+                        </span>
+                      </SettingRow>
+                      <SettingRow title="用户配置统计" description="统计当前用户配置里的扩展项；为空时使用内置默认体系。" align="start">
+                        <div className="flex min-w-0 flex-wrap gap-2">
+                          {tagTaxonomyStatItems.map((item) => (
+                            <span key={item.label} className="inline-flex items-center gap-1 rounded-sm border border-border/70 bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
+                              <span>{item.label}</span>
+                              <span className="font-medium text-foreground">{item.value}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="新增自定义标签" description="路径用 / 分隔；别名可选，用逗号分隔。保存后立即用于标签建议和 AI 元数据补全。" align="start">
+                        <div className="grid min-w-0 gap-3">
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                            <div className="grid gap-1.5">
+                              <Label htmlFor="tag-taxonomy-entry-path" className="text-xs text-muted-foreground">标签路径</Label>
+                              <Input
+                                id="tag-taxonomy-entry-path"
+                                value={tagTaxonomyEntryPathInput}
+                                placeholder="算法/字符串/自定义字符串技巧"
+                                onChange={(event) => setTagTaxonomyEntryPathInput(event.target.value)}
+                                disabled={isSavingTagTaxonomyConfig}
+                              />
+                            </div>
+                            <div className="grid gap-1.5">
+                              <Label htmlFor="tag-taxonomy-entry-aliases" className="text-xs text-muted-foreground">别名</Label>
+                              <Input
+                                id="tag-taxonomy-entry-aliases"
+                                value={tagTaxonomyEntryAliasesInput}
+                                placeholder="exFoo, Foo 技巧, 旧标签名"
+                                onChange={(event) => setTagTaxonomyEntryAliasesInput(event.target.value)}
+                                disabled={isSavingTagTaxonomyConfig}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleAddTagTaxonomyEntry()}
+                              disabled={isSavingTagTaxonomyConfig}
+                            >
+                              {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                              添加标签
+                            </Button>
+                            <span className="text-xs text-muted-foreground">保存为 user.* canonical id，不会修改已有笔记。</span>
+                          </div>
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="自定义标签" description="这里只显示 .oinb/tag-taxonomy.json 中的用户 entries，不展示内置标签。" align="start">
+                        {tagTaxonomyUserEntries.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">暂无自定义标签。</span>
+                        ) : (
+                          <div className="grid min-w-0 gap-2">
+                            {tagTaxonomyUserEntries.map((entry) => (
+                              <div key={entry.id} className="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-border/60 py-2 last:border-b-0">
+                                <div className="grid min-w-0 gap-1">
+                                  <span className="break-words text-sm text-foreground">{entry.path.join(" / ")}</span>
+                                  <span className="font-mono text-[11px] text-muted-foreground">{entry.id}</span>
+                                  {entry.aliases && entry.aliases.length > 0 && (
+                                    <span className="text-xs text-muted-foreground">别名：{entry.aliases.join("、")}</span>
+                                  )}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-muted-foreground hover:text-destructive"
+                                  onClick={() => void handleDeleteTagTaxonomyEntry(entry.id)}
+                                  disabled={isSavingTagTaxonomyConfig}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  删除
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </SettingRow>
+                      <SettingRow title="新增别名" description="目标可填写 canonical id，也可填写已存在的标签路径；例如 algorithm.string.z-function。" align="start">
+                        <div className="grid min-w-0 gap-3">
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
+                            <div className="grid gap-1.5">
+                              <Label htmlFor="tag-taxonomy-alias-name" className="text-xs text-muted-foreground">别名</Label>
+                              <Input
+                                id="tag-taxonomy-alias-name"
+                                value={tagTaxonomyAliasNameInput}
+                                placeholder="拓展KMP"
+                                onChange={(event) => setTagTaxonomyAliasNameInput(event.target.value)}
+                                disabled={isSavingTagTaxonomyConfig}
+                              />
+                            </div>
+                            <div className="grid gap-1.5">
+                              <Label htmlFor="tag-taxonomy-alias-target" className="text-xs text-muted-foreground">目标 canonical id / 标签路径</Label>
+                              <Input
+                                id="tag-taxonomy-alias-target"
+                                value={tagTaxonomyAliasTargetInput}
+                                placeholder="algorithm.string.z-function"
+                                onChange={(event) => setTagTaxonomyAliasTargetInput(event.target.value)}
+                                disabled={isSavingTagTaxonomyConfig}
+                              />
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-fit"
+                            onClick={() => void handleAddTagTaxonomyAlias()}
+                            disabled={isSavingTagTaxonomyConfig}
+                          >
+                            {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                            添加别名
+                          </Button>
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="自定义别名" description="只显示用户自定义 aliases；内置 alias 仍由默认体系提供。" align="start">
+                        {tagTaxonomyUserAliases.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">暂无自定义别名。</span>
+                        ) : (
+                          <div className="grid min-w-0 gap-2">
+                            {tagTaxonomyUserAliases.map(([aliasName, target]) => (
+                              <div key={aliasName} className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 py-2 last:border-b-0">
+                                <span className="min-w-0 break-words text-sm text-foreground">
+                                  {aliasName}
+                                  <span className="mx-2 text-muted-foreground">→</span>
+                                  <span className="font-mono text-xs text-muted-foreground">{target}</span>
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-muted-foreground hover:text-destructive"
+                                  onClick={() => void handleDeleteTagTaxonomyAlias(aliasName)}
+                                  disabled={isSavingTagTaxonomyConfig}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  删除
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </SettingRow>
+                      {tagTaxonomySaveError && (
+                        <SettingRow title="保存状态" description="保存失败不会影响当前内置标签体系 fallback。">
+                          <span className="text-sm text-destructive">保存失败：{tagTaxonomySaveError}</span>
+                        </SettingRow>
+                      )}
+                      <SettingRow
+                        title="候选库"
+                        description="候选库用于博客标签归类、标签建议和 AI prompt 上下文；不会限制用户手动输入自定义标签。"
+                      >
+                        <span className="text-sm text-muted-foreground">
+                          可用标签候选：{tagTaxonomyStats.availableCandidateCount}
+                        </span>
+                      </SettingRow>
+                      <SettingRow
+                        title="后续计划"
+                        description="后续会继续支持隐藏项、排序、合并规则和更完整的标签体系管理。"
+                      />
+                    </section>
+                  )}
+
                   {shouldRenderSettingsPage("ai-web-search") && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
@@ -7972,7 +8420,7 @@ export default function App() {
                       ) : (
                         <>
                           {promptTemplateRows.map((prompt) => {
-                            return <SettingRow key={prompt.fileName} title={prompt.usage.title || prompt.displayName} description={<><span className="font-mono">{prompt.fileName}</span><span> · {prompt.usage.purpose}</span></>}><Button type="button" variant="outline" size="sm" onClick={() => handleEditPrompt(prompt.fileName)} disabled={isLoadingPrompt || isSavingPrompt}>编辑</Button></SettingRow>;
+                            return <SettingRow key={prompt.fileName} title={prompt.usage.title || prompt.displayName} description={<><span className="font-mono">{prompt.fileName}</span><span> 路 {prompt.usage.purpose}</span></>}><Button type="button" variant="outline" size="sm" onClick={() => handleEditPrompt(prompt.fileName)} disabled={isLoadingPrompt || isSavingPrompt}>编辑</Button></SettingRow>;
                           })}
                           <SettingRow title={PROMPT_STYLE_PLACEHOLDER.title} description={PROMPT_STYLE_PLACEHOLDER.purpose}><span className="text-xs text-muted-foreground">后续接入</span></SettingRow>
                         </>
@@ -8067,7 +8515,7 @@ export default function App() {
                       </div>
                       <SettingRow
                         title="当前状态"
-                        description={`洛谷账号：${luoguImportCenterAccountLabel} · AI：${luoguImportCenterAiLabel}`}
+                        description={`洛谷账号：${luoguImportCenterAccountLabel} 路 AI：${luoguImportCenterAiLabel}`}
                       >
                         <Button
                           size="sm"
@@ -8719,7 +9167,7 @@ export default function App() {
                       onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
                       className="app-frontmatter-panel shrink-0 border-b border-border bg-background/95"
                     >
-                      <summary className="flex h-8 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
+                      <summary className="flex h-7 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
                         <span className="inline-flex items-center gap-1.5">
                           <ChevronRight
                             className={cn(
@@ -8736,60 +9184,113 @@ export default function App() {
                           </span>
                         )}
                       </summary>
-                      <div className="app-frontmatter-body grid gap-3 px-4 py-3">
-                        <div className="app-frontmatter-grid grid grid-cols-1 gap-3 lg:grid-cols-2">
-                          <div className="app-frontmatter-field grid gap-1.5">
+                      <div className="app-frontmatter-body grid gap-2 px-4 py-2">
+                        <div className="app-frontmatter-grid grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+                          <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-title">标题</Label>
                             <Input
                               id="frontmatter-title"
                               value={frontmatter.fields.title}
                               disabled={!frontmatter.canMerge}
+                              className="h-9 px-2.5 text-xs"
+                              autoComplete="off"
                               onChange={(e) => updateFrontmatter({ title: e.target.value })}
                             />
                           </div>
-                          <div className="app-frontmatter-field grid gap-1.5">
+                          <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-tags">标签</Label>
-                            <div className="relative">
-                              <Input
-                                id="frontmatter-tags"
-                                value={frontmatter.fields.tags.join(", ")}
-                                disabled={!frontmatter.canMerge || !frontmatter.canEditTags}
-                                placeholder="用逗号分隔标签"
-                                autoComplete="off"
-                                onBlur={() => {
-                                  window.setTimeout(() => setIsTagSuggestionOpen(false), 120);
+                            <div
+                              id="frontmatter-tags"
+                              role="button"
+                              tabIndex={!frontmatter.canMerge || !frontmatter.canEditTags ? -1 : 0}
+                              className={cn(
+                                "h-9 w-full cursor-pointer rounded-sm border border-border/80 bg-muted/20 px-2.5 text-left text-xs outline-none transition-colors hover:border-border hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50",
+                                (!frontmatter.canMerge || !frontmatter.canEditTags) && "cursor-not-allowed bg-input/50 opacity-50 dark:bg-input/80",
+                              )}
+                              onClick={openTagPicker}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  openTagPicker();
+                                }
+                              }}
+                            >
+                              <span className="flex h-full min-w-0 items-center justify-between gap-3 overflow-hidden">
+                                <span className="truncate text-muted-foreground">选择标签</span>
+                                <span className="shrink-0 text-[11px] text-muted-foreground">
+                                  已选 {frontmatter.fields.tags.length} 个
+                                </span>
+                              </span>
+                            </div>
+                          </div>
+                          <div className="app-frontmatter-field grid gap-1">
+                            <Label htmlFor="frontmatter-difficulty">难度</Label>
+                            <div ref={difficultyDropdownRef} className="relative">
+                              <button
+                                id="frontmatter-difficulty"
+                                type="button"
+                                disabled={!frontmatter.canMerge}
+                                className={cn(
+                                  "flex h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 text-left text-xs outline-none transition-colors hover:border-border focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80",
+                                  isDifficultyMenuOpen && "border-white/25 ring-1 ring-white/10",
+                                  getDifficultyOptionClassName(frontmatter.fields.difficulty),
+                                )}
+                                aria-haspopup="listbox"
+                                aria-expanded={isDifficultyMenuOpen}
+                                onClick={() => {
+                                  if (!frontmatter.canMerge) return;
+                                  setIsDifficultyMenuOpen((open) => !open);
                                 }}
-                                onChange={(e) => updateTagsFromInput(e.target.value)}
-                                onFocus={() => setIsTagSuggestionOpen(true)}
-                                onKeyDown={handleTagsInputKeyDown}
-                              />
-                              {isTagSuggestionOpen && activeTagQuery.trim() && tagSuggestions.length > 0 && (
-                                <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden border border-border/80 bg-background text-sm shadow-sm">
-                                  {tagSuggestions.map((suggestion, index) => {
-                                    const aliases = getDisplayAliases(suggestion, activeTagQuery);
-                                    const active = index === activeTagSuggestionIndex;
+                              >
+                                <span className="min-w-0 truncate">
+                                  {frontmatter.fields.difficulty.trim() || "无"}
+                                </span>
+                                <ChevronDown
+                                  className={cn(
+                                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                                    isDifficultyMenuOpen && "rotate-180",
+                                  )}
+                                  aria-hidden="true"
+                                />
+                              </button>
+                              {isDifficultyMenuOpen && frontmatter.canMerge && (
+                                <div
+                                  role="listbox"
+                                  aria-labelledby="frontmatter-difficulty"
+                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-white/10 bg-[#222222] py-1 text-xs shadow-md shadow-black/20 dark:bg-[#222222]"
+                                >
+                                  {!LUOGU_DIFFICULTY_OPTIONS.some((option) => option.value === frontmatter.fields.difficulty) && frontmatter.fields.difficulty.trim() && (
+                                    <button
+                                      type="button"
+                                      role="option"
+                                      aria-selected
+                                      className="flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left text-foreground transition-colors hover:bg-white/[0.06]"
+                                      onClick={() => setIsDifficultyMenuOpen(false)}
+                                    >
+                                      <span className="min-w-0 truncate">当前：{frontmatter.fields.difficulty}</span>
+                                      <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                                    </button>
+                                  )}
+                                  {LUOGU_DIFFICULTY_OPTIONS.map((option) => {
+                                    const selected = frontmatter.fields.difficulty === option.value;
                                     return (
                                       <button
-                                        key={suggestion.id}
+                                        key={option.value || "none"}
                                         type="button"
+                                        role="option"
+                                        aria-selected={selected}
                                         className={cn(
-                                          "block w-full px-3 py-2 text-left transition-colors",
-                                          active ? "bg-sky-50 text-[#146BB7]" : "text-foreground hover:bg-sky-50 hover:text-[#146BB7]",
+                                          "flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-white/[0.06]",
+                                          selected && "bg-white/[0.08]",
+                                          option.className,
                                         )}
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          applyTagSuggestion(suggestion);
+                                        onClick={() => {
+                                          updateFrontmatter({ difficulty: option.value });
+                                          setIsDifficultyMenuOpen(false);
                                         }}
-                                        onMouseEnter={() => setActiveTagSuggestionIndex(index)}
                                       >
-                                        <span className="block text-[13px] font-medium leading-5">
-                                          {formatTagSuggestionPath(suggestion.pathText)}
-                                        </span>
-                                        {aliases.length > 0 && (
-                                          <span className="block truncate text-[11px] leading-4 text-muted-foreground">
-                                            别名：{aliases.join("、")}
-                                          </span>
-                                        )}
+                                        <span>{option.label}</span>
+                                        {selected && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                                       </button>
                                     );
                                   })}
@@ -8797,42 +9298,36 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                          <div className="app-frontmatter-field grid gap-1.5">
-                            <Label htmlFor="frontmatter-difficulty">难度</Label>
-                            <Input
-                              id="frontmatter-difficulty"
-                              value={frontmatter.fields.difficulty}
-                              disabled={!frontmatter.canMerge}
-                              onChange={(e) => updateFrontmatter({ difficulty: e.target.value })}
-                            />
-                          </div>
-                          <div className="app-frontmatter-field grid gap-1.5">
+                          <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-source">来源</Label>
                             <Input
                               id="frontmatter-source"
                               value={frontmatter.fields.source}
                               disabled={!frontmatter.canMerge}
+                              className="h-9 px-2.5 text-xs"
+                              autoComplete="off"
                               onChange={(e) => updateFrontmatter({ source: e.target.value })}
                             />
                           </div>
                         </div>
-                        <div className="app-frontmatter-field app-frontmatter-summary grid gap-1.5">
+                        <div className="app-frontmatter-field app-frontmatter-summary grid gap-1">
                           <Label htmlFor="frontmatter-summary">摘要</Label>
                           <textarea
                             id="frontmatter-summary"
                             value={frontmatter.fields.summary}
                             disabled={!frontmatter.canMerge}
                             rows={2}
-                            className="min-h-14 w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                            className="min-h-[76px] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-1.5 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                            autoComplete="off"
                             onChange={(e) => updateFrontmatter({ summary: e.target.value })}
                           />
                         </div>
-                        <label className="app-frontmatter-draft flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                        <label className="app-frontmatter-draft flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={frontmatter.fields.draft}
                             disabled={!frontmatter.canMerge}
-                            className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-3.5 w-3.5 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
                             onChange={(e) => updateFrontmatter({ draft: e.target.checked })}
                           />
                           草稿
@@ -8927,6 +9422,7 @@ export default function App() {
           aiConfig={aiConfig}
           onAiConfigChange={handleAiConfigChangeFromSidebar}
           onOpenAiSettings={() => void openAiSettings()}
+          tagTaxonomyConfig={tagTaxonomyUserConfig}
           onApplySuggestedTags={handleApplyAiSuggestedTags}
           onApplyPolishedSelection={handleApplyPolishedSelection}
           onApplyPolishedFullNote={handleApplyPolishedFullNote}
@@ -9006,4 +9502,3 @@ export default function App() {
     </>
   );
 }
-

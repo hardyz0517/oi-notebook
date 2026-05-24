@@ -56,6 +56,10 @@ pub(crate) fn oinb_dir() -> Result<PathBuf, String> {
     Ok(data_root()?.join(".oinb"))
 }
 
+pub(crate) fn tag_taxonomy_config_path() -> Result<PathBuf, String> {
+    Ok(oinb_dir()?.join("tag-taxonomy.json"))
+}
+
 pub(crate) fn site_dir() -> Result<Option<PathBuf>, String> {
     if cfg!(debug_assertions) {
         Ok(Some(repo_root()?.join("site")))

@@ -3592,6 +3592,7 @@ export default function AiSidebar({
   aiConfig,
   onAiConfigChange,
   onOpenAiSettings,
+  tagTaxonomyConfig,
   onApplySuggestedTags,
   onApplyPolishedSelection,
   onApplyPolishedFullNote,
@@ -4906,6 +4907,7 @@ export default function AiSidebar({
       summary: context.summary,
       content: context.markdownBody,
       existingTags: context.tags,
+      userConfig: tagTaxonomyConfig,
     }).text;
 
     return {
@@ -5657,6 +5659,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         summary: context.summary,
         content: context.markdownBody,
         existingTags: context.tags,
+        userConfig: tagTaxonomyConfig,
       }).text,
     };
       void submitPolishFullNoteCommand(chatContext, commandText, commandArgument);

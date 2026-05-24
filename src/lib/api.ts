@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
+import type { UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
@@ -708,6 +709,30 @@ export async function writeLuoguPreparedNote(
 export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
   try {
     return await invoke<SyncLuoguInsightsResult>("sync_luogu_insights");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
+  try {
+    return await invoke<UserTagTaxonomyConfig>("get_tag_taxonomy_config");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function saveTagTaxonomyConfig(config: UserTagTaxonomyConfig): Promise<void> {
+  try {
+    await invoke<void>("save_tag_taxonomy_config", { config });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function resetTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
+  try {
+    return await invoke<UserTagTaxonomyConfig>("reset_tag_taxonomy_config");
   } catch (e) {
     throw toError(e);
   }
