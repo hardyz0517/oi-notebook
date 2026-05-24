@@ -1,6 +1,17 @@
-﻿import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { extractMarkdownHeadings, MarkdownRenderer, type MarkdownHeading } from "./MarkdownRenderer";
+import {
+  buildTagTree,
+  findTagTreeNode,
+  flattenTagTree,
+  getArticleTagSearchTerms,
+  getTagSuggestionList,
+  getTagPathSegments,
+  matchArticleByTagPath,
+  tagPathSeparator,
+  type TagTreeNode,
+} from "./tagTaxonomy";
 
 type NoteSummary = {
   title: string;
@@ -78,6 +89,16 @@ type CountItem = {
   count: number;
 };
 
+type TagChipItem = {
+  label: string;
+  fullPath: string;
+  count: number;
+};
+
+const tagSuggestionSearchByPath = new Map(
+  getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
+);
+
 const categoryLabels: Record<string, string> = {
   tricks: "\u6280\u5de7",
   problems: "\u9898\u89e3",
@@ -135,6 +156,7 @@ function getRouteFromHash(): Route {
   const hashPath = getHashPath(hash);
   const page = parseRoutePage(hash);
   const notePrefix = "#/note/";
+  const tagsPrefix = "#/tags/";
   const tagPrefix = "#/tag/";
   const categoryPrefix = "#/category/";
   const searchPrefix = "#/search";
@@ -166,6 +188,14 @@ function getRouteFromHash(): Route {
 
   if (hashPath === "#/tags") {
     return { name: "tags", page };
+  }
+
+  if (hashPath.startsWith(tagsPrefix)) {
+    try {
+      return { name: "tag", tag: decodeURIComponent(hashPath.slice(tagsPrefix.length)), page };
+    } catch {
+      return { name: "tags", page: 1 };
+    }
   }
 
   if (hashPath.startsWith(tagPrefix)) {
@@ -223,7 +253,7 @@ function getArticlesHref(page = 1, year?: string | null) {
 }
 
 function getTagHref(tag: string, page = 1) {
-  return withPageParam(`#/tag/${encodeURIComponent(tag)}`, page);
+  return withPageParam(`#/tags/${encodeURIComponent(tag)}`, page);
 }
 
 function getCategoryHref(category: string, page = 1) {
@@ -256,6 +286,7 @@ function isSafeReturnPath(path: string) {
     hashPath === "#/" ||
     hashPath === "#/articles" ||
     hashPath === "#/tags" ||
+    hashPath.startsWith("#/tags/") ||
     hashPath.startsWith("#/tag/") ||
     hashPath === "#/categories" ||
     hashPath.startsWith("#/category/") ||
@@ -266,7 +297,7 @@ function isSafeReturnPath(path: string) {
 function getReturnLabel(path: string) {
   const hashPath = getHashPath(`#${path}`);
   if (hashPath === "#/") return "\u8fd4\u56de\u9996\u9875";
-  if (hashPath === "#/tags" || hashPath.startsWith("#/tag/")) return "\u8fd4\u56de\u6807\u7b7e";
+  if (hashPath === "#/tags" || hashPath.startsWith("#/tags/") || hashPath.startsWith("#/tag/")) return "\u8fd4\u56de\u6807\u7b7e";
   if (hashPath === "#/categories" || hashPath.startsWith("#/category/")) return "\u8fd4\u56de\u5206\u7c7b";
   if (hashPath === "#/search") return "\u8fd4\u56de\u641c\u7d22";
   return "\u8fd4\u56de\u6587\u7ae0\u5217\u8868";
@@ -734,20 +765,7 @@ function normalizeSearchText(value: string) {
 }
 
 function getTagCounts(notes: NoteSummary[]) {
-  const counts = new Map<string, number>();
-
-  for (const note of notes) {
-    for (const tag of note.tags) {
-      const trimmed = tag.trim();
-      if (trimmed) {
-        counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
-      }
-    }
-  }
-
-  return Array.from(counts, ([name, count]) => ({ name, count })).sort(
-    (a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"),
-  );
+  return flattenTagTree(buildTagTree(notes));
 }
 
 function getCategoryCounts(notes: NoteSummary[]) {
@@ -776,7 +794,7 @@ function searchNotes(notes: NoteSummary[], query: string) {
       note.excerpt ?? "",
       note.articleClass ?? "",
       note.relativePath,
-      ...note.tags,
+      ...getArticleTagSearchTerms(note),
     ];
 
     return fields.some((field) => normalizeSearchText(field).includes(normalizedQuery));
@@ -844,7 +862,7 @@ export default function App() {
       }
 
       console.error("Failed to load local blog notes", err);
-      setNotesError("鏃犳硶璇诲彇鏈湴绗旇");
+      setNotesError("无法读取本地笔记");
       setNotes([]);
     } finally {
       if (!signal?.aborted) {
@@ -867,7 +885,7 @@ export default function App() {
     return () => controller.abort();
   }, []);
 
-  const tagCounts = useMemo(() => getTagCounts(notes), [notes]);
+  const tagTree = useMemo(() => buildTagTree(notes), [notes]);
   const categoryCounts = useMemo(() => getCategoryCounts(notes), [notes]);
 
   return (
@@ -888,7 +906,7 @@ export default function App() {
           <IndexView
             route={route}
             notes={notes}
-            tagCounts={tagCounts}
+            tagTree={tagTree}
             categoryCounts={categoryCounts}
             isLoading={isLoadingNotes}
             error={notesError}
@@ -902,7 +920,7 @@ export default function App() {
 function IndexView({
   route,
   notes,
-  tagCounts,
+  tagTree,
   categoryCounts,
   isLoading,
   error,
@@ -910,7 +928,7 @@ function IndexView({
 }: {
   route: Exclude<Route, { name: "note"; encodedPath: string; relativePath: string }>;
   notes: NoteSummary[];
-  tagCounts: CountItem[];
+  tagTree: TagTreeNode[];
   categoryCounts: CountItem[];
   isLoading: boolean;
   error: string | null;
@@ -931,41 +949,50 @@ function IndexView({
   }
 
   if (route.name === "tags") {
-    const paged = paginateNotes(notes, route.page, resultPageSize);
-
     return (
       <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6807\u7b7e"}>
-        <TagCloud tags={tagCounts} />
-        <PostResults
-          notes={paged.items}
+        <TagMap
+          tagTree={tagTree}
           isLoading={isLoading}
           error={error}
           onRetry={onRetry}
-          sourceHref={getRouteReturnHref(route)}
-          variant="list"
-          emptyTitle={"\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u6807\u7b7e"}
-          emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6c47\u603b\u6807\u7b7e\u5165\u53e3\u3002"}
         />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => withPageParam("#/tags", page)} />
       </ListingPage>
     );
   }
 
   if (route.name === "tag") {
-    const filteredNotes = notes.filter((note) => note.tags.includes(route.tag));
+    const tagNode = findTagTreeNode(tagTree, route.tag);
+    const includeDescendants = Boolean(tagNode?.children.length);
+    const filteredNotes = notes.filter((note) => matchArticleByTagPath(note, route.tag, includeDescendants));
     const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
+    const relatedTags = tagNode ? collectRelatedTagChips(tagNode) : [];
 
     return (
-      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6807\u7b7e \u2192 " + route.tag}>
-        <PostResults
-          notes={paged.items}
-          isLoading={isLoading}
-          error={error}
-          onRetry={onRetry}
-          sourceHref={getRouteReturnHref(route)}
-          variant="list"
-        />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getTagHref(route.tag, page)} />
+      <ListingPage
+        breadcrumb={
+          <>
+            <a href="#/">{"\u9996\u9875"}</a>
+            <span>{" \u2192 "}</span>
+            <a href="#/tags">{"\u6807\u7b7e"}</a>
+          </>
+        }
+      >
+        <TagDetailHeader tag={route.tag} count={filteredNotes.length} />
+        <RelatedTagList tags={relatedTags} />
+        <section className="tag-detail-results">
+          <PostResults
+            notes={paged.items}
+            isLoading={isLoading}
+            error={error}
+            onRetry={onRetry}
+            sourceHref={getRouteReturnHref(route)}
+            variant="list"
+            emptyTitle={"\u8fd9\u4e2a\u6807\u7b7e\u4e0b\u8fd8\u6ca1\u6709\u6587\u7ae0"}
+            emptyDescription={"\u540e\u7eed\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u8fd9\u4e2a\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
+          />
+          <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getTagHref(route.tag, page)} />
+        </section>
       </ListingPage>
     );
   }
@@ -1076,7 +1103,7 @@ function SiteNav({ route }: { route: Route }) {
   );
 }
 
-function ListingPage({ breadcrumb, children }: { breadcrumb: string; children: ReactNode }) {
+function ListingPage({ breadcrumb, children }: { breadcrumb: ReactNode; children: ReactNode }) {
   return (
     <>
       <nav className="breadcrumb" aria-label={"\u9762\u5305\u5c51"}>
@@ -1084,6 +1111,241 @@ function ListingPage({ breadcrumb, children }: { breadcrumb: string; children: R
       </nav>
       <section className="listing-content">{children}</section>
     </>
+  );
+}
+
+function TagDetailHeader({ tag, count }: { tag: string; count: number }) {
+  const segments = getTagPathSegments(tag);
+
+  return (
+    <header className="tag-detail-header">
+      <h1>
+        {segments.map((segment, index) => (
+          <span key={segments.slice(0, index + 1).join(tagPathSeparator)}>
+            {index > 0 ? <em>{tagPathSeparator}</em> : null}
+            <a href={getTagHref(segments.slice(0, index + 1).join(tagPathSeparator))}>{segment}</a>
+          </span>
+        ))}
+      </h1>
+      <p className="tag-detail-count">{"\u5171 " + count + " \u7bc7\u6587\u7ae0"}</p>
+    </header>
+  );
+}
+
+function getTagChipLabel(node: TagTreeNode) {
+  if (node.depth <= 3) {
+    return node.name;
+  }
+
+  const segments = getTagPathSegments(node.fullPath);
+  return segments.slice(2).join(` ${tagPathSeparator} `);
+}
+
+function collectTagChips(node: TagTreeNode): TagChipItem[] {
+  return [
+    {
+      label: getTagChipLabel(node),
+      fullPath: node.fullPath,
+      count: node.count,
+    },
+    ...node.children.flatMap(collectTagChips),
+  ];
+}
+
+function collectRelatedTagChips(node: TagTreeNode): TagChipItem[] {
+  return node.children.flatMap((child) => {
+    if (child.children.length === 0) {
+      const segments = getTagPathSegments(child.fullPath);
+      const parentDepth = node.depth;
+
+      return [{
+        label: segments.slice(parentDepth).join(` ${tagPathSeparator} `),
+        fullPath: child.fullPath,
+        count: child.count,
+      }];
+    }
+
+    return collectRelatedTagChips(child);
+  });
+}
+
+function normalizeTagSearchText(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
+}
+
+function normalizeCompactTagSearchText(value: string) {
+  return normalizeTagSearchText(value).replace(/\s+/g, "");
+}
+
+function getTagChipSearchText(item: TagChipItem) {
+  return [
+    item.label,
+    item.fullPath,
+    tagSuggestionSearchByPath.get(item.fullPath) ?? "",
+  ].join(" ");
+}
+
+function matchesTagChipSearch(item: TagChipItem, query: string) {
+  const normalizedQuery = normalizeTagSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const searchText = getTagChipSearchText(item);
+  return (
+    normalizeTagSearchText(searchText).includes(normalizedQuery) ||
+    normalizeCompactTagSearchText(searchText).includes(normalizeCompactTagSearchText(query))
+  );
+}
+
+function TagChip({ item }: { item: TagChipItem }) {
+  return (
+    <a className="tag-map-chip" href={getTagHref(item.fullPath)}>
+      <span>{item.label}</span>
+      <small>{item.count}</small>
+    </a>
+  );
+}
+
+function RelatedTagList({ tags }: { tags: TagChipItem[] }) {
+  if (tags.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="tag-detail-related" aria-label={"\u76f8\u5173\u5b50\u6807\u7b7e"}>
+      <h2>{"\u76f8\u5173\u6807\u7b7e"}</h2>
+      <div className="tag-map-chip-row">
+        {tags.map((item) => (
+          <TagChip item={item} key={item.fullPath} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TagMap({
+  tagTree,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  tagTree: TagTreeNode[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const [tagQuery, setTagQuery] = useState("");
+
+  if (isLoading) {
+    return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6807\u7b7e"} description={"\u6b63\u5728\u6c47\u603b\u672c\u5730\u7b14\u8bb0\u7684\u6807\u7b7e\u4f53\u7cfb\u3002"} />;
+  }
+
+  if (error) {
+    return <ErrorState title={"\u65e0\u6cd5\u8bfb\u53d6\u6807\u7b7e"} description={"\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u6c47\u603b\u6807\u7b7e\u4f53\u7cfb\u3002"} onRetry={onRetry} />;
+  }
+
+  if (tagTree.length === 0) {
+    return (
+      <EmptyState
+        title={"\u8fd8\u6ca1\u6709\u6807\u7b7e"}
+        description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u751f\u6210\u4e00\u5f20\u8f7b\u91cf\u7684\u77e5\u8bc6\u5730\u56fe\u3002"}
+      />
+    );
+  }
+
+  const trimmedTagQuery = tagQuery.trim();
+  const visibleGroups = tagTree
+    .map((group) => {
+      const directChips = group.children
+        .filter((child) => child.children.length === 0)
+        .map((child) => ({
+          label: child.name,
+          fullPath: child.fullPath,
+          count: child.count,
+        }))
+        .filter((item) => matchesTagChipSearch(item, trimmedTagQuery));
+      const branches = group.children
+        .filter((child) => child.children.length > 0)
+        .map((child) => ({
+          node: child,
+          chips: child.children
+            .flatMap(collectTagChips)
+            .filter((item) => matchesTagChipSearch(item, trimmedTagQuery)),
+        }))
+        .filter((branch) => branch.chips.length > 0);
+
+      return { group, directChips, branches };
+    })
+    .filter((group) => group.directChips.length > 0 || group.branches.length > 0);
+
+  return (
+    <section className="tag-map" aria-label={"\u6807\u7b7e\u4f53\u7cfb"}>
+      <div className="tag-map-heading">
+        <h1>{"\u6807\u7b7e"}</h1>
+        <div className="tag-map-search">
+          <span className="tag-map-search-icon" aria-hidden="true" />
+          <input
+            aria-label={"\u641c\u7d22\u6807\u7b7e\u6216\u522b\u540d"}
+            placeholder={"\u641c\u7d22\u6807\u7b7e\u6216\u522b\u540d"}
+            type="search"
+            value={tagQuery}
+            onChange={(event) => setTagQuery(event.target.value)}
+          />
+          {tagQuery ? (
+            <button type="button" onClick={() => setTagQuery("")}>
+              {"\u6e05\u9664"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {visibleGroups.length > 0 ? (
+        <div className="tag-map-groups">
+          {visibleGroups.map(({ group, directChips, branches }) => (
+              <section className="tag-map-group" key={group.fullPath}>
+                <a className="tag-map-group-title" href={getTagHref(group.fullPath)}>
+                  <span>{group.name}</span>
+                  <small>{group.count}</small>
+                </a>
+                {directChips.length > 0 ? (
+                  <div className="tag-map-chip-row">
+                    {directChips.map((item) => (
+                      <TagChip item={item} key={item.fullPath} />
+                    ))}
+                  </div>
+                ) : null}
+                {branches.length > 0 ? (
+                  <div className="tag-map-branches">
+                    {branches.map(({ node, chips }) => (
+                      <TagMapBranch chips={chips} node={node} key={node.fullPath} />
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ))}
+        </div>
+      ) : (
+        <p className="tag-map-empty">{"\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u6807\u7b7e\u3002"}</p>
+      )}
+    </section>
+  );
+}
+
+function TagMapBranch({ node, chips = node.children.flatMap(collectTagChips) }: { node: TagTreeNode; chips?: TagChipItem[] }) {
+  return (
+    <section className="tag-map-branch">
+      <a className="tag-map-branch-title" href={getTagHref(node.fullPath)}>
+        <span>{node.name}</span>
+        <small>{node.count}</small>
+      </a>
+      {chips.length > 0 ? (
+        <div className="tag-map-chip-row">
+          {chips.map((item) => (
+            <TagChip item={item} key={item.fullPath} />
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1409,6 +1671,7 @@ function ArticleResultList({ notes, sourceHref }: { notes: NoteSummary[]; source
               </div>
               <h2>{note.title}</h2>
               <p>{getNoteExcerpt(note)}</p>
+              <span className="result-read-more">{"\u9605\u8bfb\u66f4\u591a"}</span>
             </a>
           </article>
         );
