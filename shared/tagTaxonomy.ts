@@ -101,6 +101,14 @@ export type TagTaxonomySelfCheckResult = {
   }>;
 };
 
+export type TagNormalizationSuggestion = {
+  original: string;
+  normalized: string;
+  displayName: string;
+  pathText: string;
+  reason: "alias" | "legacy-path" | "canonical-equivalent";
+};
+
 type MutableTagTreeNode = {
   name: string;
   fullPath: string;
@@ -711,6 +719,45 @@ export function normalizeTagPath(tag: string, userConfig?: UserTagTaxonomyConfig
   };
 }
 
+export function getTagNormalizationSuggestions(
+  tags: string[],
+  options: { userConfig?: UserTagTaxonomyConfig | null } = {},
+): TagNormalizationSuggestion[] {
+  const suggestions: TagNormalizationSuggestion[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of tags) {
+    const original = tag.trim();
+    if (!original) {
+      continue;
+    }
+
+    const originalSegments = splitTagSegments(original);
+    const originalPath = getTagPathText(originalSegments);
+    const normalized = normalizeTagPath(original, options.userConfig);
+
+    if (!normalized?.entryId || normalized.fullPath === originalPath) {
+      continue;
+    }
+
+    const key = `${normalizeTagAliasKey(original)}=>${normalizeTagAliasKey(normalized.fullPath)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    suggestions.push({
+      original,
+      normalized: normalized.fullPath,
+      displayName: normalized.name,
+      pathText: normalized.fullPath,
+      reason: originalSegments.length > 1 ? "legacy-path" : "alias",
+    });
+  }
+
+  return suggestions;
+}
+
 export function getTagPathPrefixes(segments: string[]) {
   return segments.map((_, index) => getTagPathText(segments.slice(0, index + 1)));
 }
@@ -1224,6 +1271,31 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
   addSelfCheck(checks, "old path 李超线段树 normalizes to Luogu path", normalizedPath("算法/数据结构/李超线段树"), "算法/树形数据结构/李超线段树");
   addSelfCheck(checks, "old path CRT normalizes to Luogu path", normalizedPath("算法/数学/CRT"), "算法/数论/中国剩余定理 CRT");
   addSelfCheck(checks, "unknown flat tag falls into custom tags", normalizedPath("自己乱写的标签"), "自定义标签/自己乱写的标签");
+
+  const normalizationSuggestions = (tags: string[]) => getTagNormalizationSuggestions(tags).map((item) => item.normalized).join("|");
+  addSelfCheck(checks, "normalization suggests 李超树 canonical path", normalizationSuggestions(["李超树"]), "算法/树形数据结构/李超线段树");
+  addSelfCheck(checks, "normalization suggests exKMP canonical path", normalizationSuggestions(["exKMP"]), zFunctionPath);
+  addSelfCheck(
+    checks,
+    "normalization suggests old 李超线段树 path canonical path",
+    normalizationSuggestions(["算法/数据结构/李超线段树"]),
+    "算法/树形数据结构/李超线段树",
+  );
+  addSelfCheck(
+    checks,
+    "normalization suggests old CRT path canonical path",
+    normalizationSuggestions(["算法/数学/CRT"]),
+    "算法/数论/中国剩余定理 CRT",
+  );
+  addSelfCheck(checks, "normalization ignores canonical Z 函数 path", getTagNormalizationSuggestions([zFunctionPath]).length, 0);
+  addSelfCheck(checks, "normalization ignores unknown custom tag", getTagNormalizationSuggestions(["完全自定义标签"]).length, 0);
+  addSelfCheck(
+    checks,
+    "normalization replacement deduplicates canonical duplicate",
+    new Set(getTagNormalizationSuggestions(["李超树", "算法/树形数据结构/李超线段树"]).map((item) => item.normalized)).size,
+    1,
+  );
+
   addSelfCheck(checks, "query exKMP returns Z 函数", firstQueryPath("exKMP"), zFunctionPath);
   addSelfCheck(checks, "query 拓展 KMP returns Z 函数", firstQueryPath("拓展 KMP"), zFunctionPath);
   addSelfCheck(checks, "query 主席树 returns 可持久化线段树", firstQueryPath("主席树"), "算法/树形数据结构/可持久化线段树");

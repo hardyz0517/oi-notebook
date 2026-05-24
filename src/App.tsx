@@ -30,7 +30,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -2670,6 +2670,7 @@ export default function App() {
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
+  const [isTagNormalizationDetailsOpen, setIsTagNormalizationDetailsOpen] = useState(false);
   const [isDifficultyMenuOpen, setIsDifficultyMenuOpen] = useState(false);
   const difficultyDropdownRef = useRef<HTMLDivElement | null>(null);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
@@ -2813,6 +2814,15 @@ export default function App() {
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
+  const tagNormalizationSuggestions = useMemo(
+    () => getTagNormalizationSuggestions(frontmatter.fields.tags, { userConfig: tagTaxonomyUserConfig }),
+    [frontmatter.fields.tags, tagTaxonomyUserConfig],
+  );
+  useEffect(() => {
+    if (tagNormalizationSuggestions.length === 0) {
+      setIsTagNormalizationDetailsOpen(false);
+    }
+  }, [tagNormalizationSuggestions.length]);
   useEffect(() => {
     if (!isDifficultyMenuOpen) return;
 
@@ -5358,6 +5368,18 @@ export default function App() {
     updateFrontmatter({ tags });
     setIsTagPickerOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, updateFrontmatter]);
+  const applyTagNormalizationSuggestions = useCallback(() => {
+    if (!frontmatter.canMerge || !frontmatter.canEditTags || tagNormalizationSuggestions.length === 0) return;
+
+    const replacements = new Map(tagNormalizationSuggestions.map((suggestion) => [suggestion.original, suggestion.normalized]));
+    const nextTags = mergeTagsStable(
+      [],
+      frontmatter.fields.tags.map((tag) => replacements.get(tag.trim()) ?? tag),
+      tagTaxonomyUserConfig,
+    );
+    updateFrontmatter({ tags: nextTags });
+    setIsTagNormalizationDetailsOpen(false);
+  }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatter.fields.tags, tagNormalizationSuggestions, tagTaxonomyUserConfig, updateFrontmatter]);
   const handleApplyAiSuggestedTags = async (notePath: string, suggestedTags: string[]) => {
     if (!currentFilePath || currentFilePath !== notePath) {
       throw new Error("当前打开的笔记已变化，请切回原笔记后再应用");
@@ -9222,6 +9244,40 @@ export default function App() {
                                 </span>
                               </span>
                             </div>
+                            {tagNormalizationSuggestions.length > 0 && (
+                              <div className="rounded-sm border border-amber-400/20 bg-amber-400/[0.06] px-2.5 py-1.5 text-[11px] text-amber-100/90">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span>有 {tagNormalizationSuggestions.length} 个标签可规范化为当前标签体系。</span>
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      className="text-amber-100 underline-offset-2 hover:underline"
+                                      onClick={() => setIsTagNormalizationDetailsOpen((open) => !open)}
+                                    >
+                                      {isTagNormalizationDetailsOpen ? "收起" : "查看"}
+                                    </button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-[11px] text-amber-50 hover:bg-amber-400/10 hover:text-amber-50"
+                                      onClick={applyTagNormalizationSuggestions}
+                                    >
+                                      一键应用
+                                    </Button>
+                                  </span>
+                                </div>
+                                {isTagNormalizationDetailsOpen && (
+                                  <div className="mt-1.5 grid gap-1 text-amber-50/80">
+                                    {tagNormalizationSuggestions.map((suggestion) => (
+                                      <div key={`${suggestion.original}->${suggestion.normalized}`} className="min-w-0 truncate" title={`${suggestion.original} -> ${suggestion.pathText}`}>
+                                        {suggestion.original} <span className="text-amber-100/50">-&gt;</span> {suggestion.pathText}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-difficulty">难度</Label>
