@@ -30,7 +30,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -467,6 +467,7 @@ type SettingsSection =
   | "luogu-import-center"
   | "blog-preview"
   | "blog-tag-taxonomy"
+  | "blog-tag-manager"
   | "data-storage"
   | "about-version"
   | "about-markdown"
@@ -497,6 +498,14 @@ type TagNormalizationApplyResult = {
   successCount: number;
   normalizedTagCount: number;
   failures: TagNormalizationApplyFailure[];
+};
+
+type TagManagerRootGroup = {
+  root: string;
+  groups: Array<{
+    name: string;
+    candidates: TagSuggestion[];
+  }>;
 };
 
 interface PolishReviewTab {
@@ -706,6 +715,7 @@ const SETTINGS_TREE: Array<{
     children: [
       { id: "blog-preview", label: "本地预览" },
       { id: "blog-tag-taxonomy", label: "标签体系" },
+      { id: "blog-tag-manager", label: "标签管理器" },
     ],
   },
   { id: "data", label: "数据与存储", children: [{ id: "data-storage", label: "目录与缓存" }] },
@@ -2549,6 +2559,8 @@ export default function App() {
   const [isTagTaxonomyAliasListExpanded, setIsTagTaxonomyAliasListExpanded] = useState(false);
   const [tagTaxonomyEntryListQuery, setTagTaxonomyEntryListQuery] = useState("");
   const [tagTaxonomyAliasListQuery, setTagTaxonomyAliasListQuery] = useState("");
+  const [tagManagerSearchQuery, setTagManagerSearchQuery] = useState("");
+  const [selectedTagManagerSuggestionId, setSelectedTagManagerSuggestionId] = useState<string | null>(null);
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
@@ -3162,6 +3174,52 @@ export default function App() {
     }
     return filteredTagTaxonomyUserAliases.slice(0, 5);
   }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
+  const tagManagerSuggestions = useMemo(
+    () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden),
+    [tagTaxonomyUserConfig],
+  );
+  const tagManagerRootGroups = useMemo<TagManagerRootGroup[]>(() => {
+    const rootMap = new Map<string, Map<string, TagSuggestion[]>>();
+    for (const suggestion of tagManagerSuggestions) {
+      const root = suggestion.path[0] ?? "未分组";
+      const group = suggestion.path[1] ?? "未分组";
+      if (!rootMap.has(root)) {
+        rootMap.set(root, new Map());
+      }
+      const groupMap = rootMap.get(root)!;
+      if (!groupMap.has(group)) {
+        groupMap.set(group, []);
+      }
+      groupMap.get(group)!.push(suggestion);
+    }
+
+    return Array.from(rootMap.entries()).map(([root, groupMap]) => ({
+      root,
+      groups: Array.from(groupMap.entries()).map(([name, candidates]) => ({
+        name,
+        candidates,
+      })),
+    }));
+  }, [tagManagerSuggestions]);
+  const tagManagerSearchResults = useMemo(() => {
+    const query = tagManagerSearchQuery.trim().toLowerCase();
+    if (!query) return [];
+    return tagManagerSuggestions
+      .filter((suggestion) =>
+        [
+          suggestion.id,
+          suggestion.name,
+          suggestion.pathText,
+          suggestion.searchText,
+          ...suggestion.aliases,
+        ].join("\n").toLowerCase().includes(query),
+      )
+      .slice(0, 100);
+  }, [tagManagerSearchQuery, tagManagerSuggestions]);
+  const selectedTagManagerSuggestion = useMemo(
+    () => tagManagerSuggestions.find((suggestion) => suggestion.id === selectedTagManagerSuggestionId) ?? null,
+    [selectedTagManagerSuggestionId, tagManagerSuggestions],
+  );
   const saveUserTagTaxonomyConfig = useCallback(async (nextConfig: UserTagTaxonomyConfig): Promise<boolean> => {
     const normalizedConfig = normalizeUserTagTaxonomyConfig(nextConfig);
     setIsSavingTagTaxonomyConfig(true);
@@ -8842,11 +8900,164 @@ export default function App() {
                               后续会在这里支持树形浏览标签体系、搜索内置标签、隐藏内置标签、调整顺序、设置合并规则和集中管理别名。当前页面只提供快速新增和扫描工具。
                             </div>
                             <div>
-                              <Button type="button" variant="outline" size="sm" disabled>
-                                打开标签管理器（后续）
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openSettingsSection("blog-tag-manager")}
+                              >
+                                打开标签管理器（只读）
                               </Button>
                             </div>
                           </div>
+                        </section>
+                      </div>
+                    </section>
+                  )}
+
+                  {shouldRenderSettingsPage("blog-tag-manager") && (
+                    <section className={settingsPageSectionClass}>
+                      <div className="mb-3 grid gap-1">
+                        <div className="text-base font-semibold text-foreground">标签管理器</div>
+                        <div className="text-xs leading-5 text-muted-foreground">
+                          用于浏览当前合并后的标签体系。当前版本只读；后续会支持隐藏、排序、合并规则和集中别名管理。
+                        </div>
+                      </div>
+                      <div className="grid min-h-[520px] gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                        <section className="grid min-h-0 gap-3 rounded-sm border border-border/70 bg-muted/10 p-3">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="tag-manager-search" className="text-xs text-muted-foreground">搜索</Label>
+                            <Input
+                              id="tag-manager-search"
+                              value={tagManagerSearchQuery}
+                              placeholder="搜索标签、路径或别名"
+                              onChange={(event) => setTagManagerSearchQuery(event.target.value)}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                          <div className="min-h-0 overflow-y-auto pr-1">
+                            {tagManagerSearchQuery.trim() ? (
+                              tagManagerSearchResults.length === 0 ? (
+                                <div className="py-6 text-sm text-muted-foreground">没有找到匹配的标签。</div>
+                              ) : (
+                                <div className="grid gap-1">
+                                  {tagManagerSearchResults.map((suggestion) => (
+                                    <button
+                                      key={suggestion.id}
+                                      type="button"
+                                      className={cn(
+                                        "grid min-w-0 gap-0.5 rounded-sm border px-2.5 py-2 text-left transition-colors",
+                                        selectedTagManagerSuggestion?.id === suggestion.id
+                                          ? "border-primary/60 bg-primary/10"
+                                          : "border-transparent hover:border-border/70 hover:bg-muted/20",
+                                      )}
+                                      onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
+                                    >
+                                      <span className="truncate text-sm text-foreground">{suggestion.name}</span>
+                                      <span className="truncate text-[11px] text-muted-foreground">{suggestion.pathText}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )
+                            ) : (
+                              <div className="grid gap-3">
+                                {tagManagerRootGroups.map((rootGroup) => (
+                                  <details key={rootGroup.root} open={rootGroup.root === "算法"} className="group rounded-sm border border-border/60 bg-background/20">
+                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-sm font-medium text-foreground hover:bg-muted/20">
+                                      <span>{rootGroup.root}</span>
+                                      <span className="text-[11px] font-normal text-muted-foreground">
+                                        {rootGroup.groups.reduce((total, group) => total + group.candidates.length, 0)} 个
+                                      </span>
+                                    </summary>
+                                    <div className="grid gap-2 border-t border-border/60 px-2.5 py-2">
+                                      {rootGroup.groups.map((group) => (
+                                        <div key={`${rootGroup.root}:${group.name}`} className="grid gap-1">
+                                          <div className="text-xs font-medium text-muted-foreground">{group.name}</div>
+                                          <div className="grid gap-1">
+                                            {group.candidates.map((suggestion) => (
+                                              <button
+                                                key={suggestion.id}
+                                                type="button"
+                                                className={cn(
+                                                  "flex min-w-0 items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
+                                                  selectedTagManagerSuggestion?.id === suggestion.id
+                                                    ? "bg-primary/10 text-foreground"
+                                                    : "text-muted-foreground hover:bg-muted/20 hover:text-foreground",
+                                                )}
+                                                onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
+                                              >
+                                                <span className="min-w-0 truncate">{suggestion.name}</span>
+                                                {suggestion.source === "user" && (
+                                                  <span className="shrink-0 rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">user</span>
+                                                )}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </section>
+
+                        <section className="min-w-0 rounded-sm border border-border/70 bg-muted/10 p-4">
+                          {selectedTagManagerSuggestion ? (
+                            <div className="grid gap-4">
+                              <div className="grid gap-1">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                  <span className="text-base font-semibold text-foreground">{selectedTagManagerSuggestion.name}</span>
+                                  <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                    {selectedTagManagerSuggestion.source === "user" ? "用户自定义标签" : "内置标签"}
+                                  </span>
+                                  {selectedTagManagerSuggestion.deprecated && (
+                                    <span className="rounded-sm border border-amber-300/50 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-200">deprecated</span>
+                                  )}
+                                  {selectedTagManagerSuggestion.hidden && (
+                                    <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] text-muted-foreground">hidden</span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">当前为只读视图。编辑、隐藏、排序和合并规则将在后续支持。</div>
+                              </div>
+
+                              <div className="grid gap-3 text-sm">
+                                <div className="grid gap-1">
+                                  <div className="text-xs text-muted-foreground">完整路径</div>
+                                  <div className="break-words text-foreground">{selectedTagManagerSuggestion.pathText}</div>
+                                </div>
+                                <div className="grid gap-1">
+                                  <div className="text-xs text-muted-foreground">canonical id</div>
+                                  <div className="break-all rounded-sm border border-border/70 bg-background/30 px-2 py-1 font-mono text-xs text-foreground">
+                                    {selectedTagManagerSuggestion.id}
+                                  </div>
+                                </div>
+                                <div className="grid gap-1">
+                                  <div className="text-xs text-muted-foreground">来源</div>
+                                  <div className="text-foreground">{selectedTagManagerSuggestion.source}</div>
+                                </div>
+                                <div className="grid gap-2">
+                                  <div className="text-xs text-muted-foreground">aliases</div>
+                                  {selectedTagManagerSuggestion.aliases.length === 0 ? (
+                                    <div className="text-sm text-muted-foreground">暂无别名。</div>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      {selectedTagManagerSuggestion.aliases.map((alias) => (
+                                        <span key={alias} className="rounded-sm border border-border/70 bg-background/30 px-2 py-1 text-xs text-foreground">
+                                          {alias}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex h-full min-h-[320px] items-center justify-center rounded-sm border border-dashed border-border/70 text-sm text-muted-foreground">
+                              请选择左侧标签。
+                            </div>
+                          )}
                         </section>
                       </div>
                     </section>
