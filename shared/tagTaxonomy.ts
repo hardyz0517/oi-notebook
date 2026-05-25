@@ -125,12 +125,60 @@ export type TagTaxonomySelfCheckResult = {
   }>;
 };
 
+export type TagNormalizationReason =
+  | "already_canonical"
+  | "alias_to_canonical"
+  | "merge_to_target"
+  | "alias_to_merged_source"
+  | "unknown_freeform"
+  | "hidden_no_change"
+  | "duplicate_after_normalize";
+
+export type TagNormalizationAnalysis = {
+  original: string;
+  originalIndex: number;
+  originalPathText: string;
+  isCanonical: boolean;
+  isUnknownFreeform: boolean;
+  isAliasMatch: boolean;
+  isMergeSource: boolean;
+  isAliasToMergedSource: boolean;
+  hidden: boolean;
+  deprecated: boolean;
+  targetCanonicalPath: string | null;
+  targetEntryId: string | null;
+  targetDisplayName: string | null;
+  reason: TagNormalizationReason;
+  shouldRewrite: boolean;
+  safeToAutoApply: boolean;
+  duplicateOfIndex?: number;
+};
+
 export type TagNormalizationSuggestion = {
   original: string;
   normalized: string;
   displayName: string;
   pathText: string;
-  reason: "alias" | "legacy-path" | "canonical-equivalent";
+  reason: TagNormalizationReason;
+  targetEntryId: string | null;
+  safeToAutoApply: boolean;
+};
+
+export type TagNormalizationPlan = {
+  analyses: TagNormalizationAnalysis[];
+  suggestions: TagNormalizationSuggestion[];
+  nextTags: string[];
+  changed: boolean;
+  stats: {
+    total: number;
+    rewriteCount: number;
+    aliasCount: number;
+    mergeCount: number;
+    aliasToMergedSourceCount: number;
+    duplicateCount: number;
+    unknownCount: number;
+    hiddenSkippedCount: number;
+  };
 };
 
 type MutableTagTreeNode = {
@@ -845,43 +893,227 @@ export function normalizeTagPath(tag: string, userConfig?: UserTagTaxonomyConfig
   };
 }
 
+function findDirectTaxonomyEntryByReference(reference: string, taxonomy: ResolvedTagTaxonomy): TagTaxonomyEntry | null {
+  const text = reference.trim();
+  if (!text) {
+    return null;
+  }
+
+  const key = normalizeTagAliasKey(text);
+  const byId = taxonomy.idMap.get(text) ?? taxonomy.entries.find((entry) => normalizeTagAliasKey(entry.id) === key);
+  if (byId) {
+    return byId;
+  }
+
+  const byPath = taxonomy.entries.find((entry) => normalizeTagAliasKey(getTagPathText(entry.path)) === key);
+  if (byPath) {
+    return byPath;
+  }
+
+  const byName = taxonomy.entries.find((entry) => normalizeTagAliasKey(entry.path[entry.path.length - 1] ?? getTagPathText(entry.path)) === key);
+  if (byName) {
+    return byName;
+  }
+
+  return taxonomy.entries.find((entry) => (entry.aliases ?? []).some((alias) => normalizeTagAliasKey(alias) === key)) ?? null;
+}
+
+function findUserAliasSourceEntry(
+  tag: string,
+  userConfig: UserTagTaxonomyConfig | null | undefined,
+  taxonomy: ResolvedTagTaxonomy,
+): TagTaxonomyEntry | null {
+  const key = normalizeTagAliasKey(tag);
+
+  for (const [alias, targetReference] of Object.entries(userConfig?.aliases ?? {})) {
+    if (normalizeTagAliasKey(alias) !== key) {
+      continue;
+    }
+
+    return findDirectTaxonomyEntryByReference(targetReference, taxonomy);
+  }
+
+  return null;
+}
+
+function getTagNormalizationIdentity(analysis: TagNormalizationAnalysis) {
+  if (analysis.targetEntryId) {
+    return `entry:${analysis.targetEntryId}`;
+  }
+  return `text:${normalizeTagAliasKey(analysis.original)}`;
+}
+
+function createTagNormalizationSuggestion(analysis: TagNormalizationAnalysis): TagNormalizationSuggestion {
+  const normalized = analysis.targetCanonicalPath ?? analysis.original;
+  return {
+    original: analysis.original,
+    normalized,
+    displayName: analysis.targetDisplayName ?? normalized,
+    pathText: normalized,
+    reason: analysis.reason,
+    targetEntryId: analysis.targetEntryId,
+    safeToAutoApply: analysis.safeToAutoApply,
+  };
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+export function analyzeSingleTagNormalization(
+  tag: string,
+  options: { userConfig?: UserTagTaxonomyConfig | null; index?: number } = {},
+): TagNormalizationAnalysis {
+  const original = tag.trim();
+  const originalSegments = splitTagSegments(original);
+  const originalPathText = getTagPathText(originalSegments);
+  const taxonomy = getResolvedTagTaxonomy(options.userConfig);
+  const userAliasSourceEntry = findUserAliasSourceEntry(original, options.userConfig, taxonomy);
+  const sourceEntry = userAliasSourceEntry ?? findDirectTaxonomyEntryByReference(original, taxonomy);
+  const normalized = normalizeTagPath(original, options.userConfig);
+  const targetEntry = normalized?.entryId ? taxonomy.idMap.get(normalized.entryId) ?? null : null;
+  const targetCanonicalPath = targetEntry ? getTagPathText(targetEntry.path) : null;
+  const targetDisplayName = targetEntry ? targetEntry.path[targetEntry.path.length - 1] ?? targetCanonicalPath : null;
+  const sourcePathText = sourceEntry ? getTagPathText(sourceEntry.path) : null;
+  const sourceName = sourceEntry ? sourceEntry.path[sourceEntry.path.length - 1] ?? sourcePathText : null;
+  const originalKey = normalizeTagAliasKey(original);
+  const isDirectCanonicalPath = Boolean(sourcePathText && normalizeTagAliasKey(sourcePathText) === normalizeTagAliasKey(originalPathText));
+  const isDirectId = Boolean(sourceEntry && normalizeTagAliasKey(sourceEntry.id) === originalKey);
+  const isDirectName = Boolean(sourceName && normalizeTagAliasKey(sourceName) === originalKey);
+  const isEntryAlias = Boolean(sourceEntry?.aliases?.some((alias) => normalizeTagAliasKey(alias) === originalKey));
+  const isAliasMatch = Boolean(userAliasSourceEntry || isEntryAlias || (!isDirectCanonicalPath && !isDirectId && !isDirectName && targetEntry));
+  const isMergeSource = Boolean(sourceEntry?.mergeTo && targetEntry && sourceEntry.id !== targetEntry.id);
+  const isAliasToMergedSource = Boolean(userAliasSourceEntry?.mergeTo && targetEntry && userAliasSourceEntry.id !== targetEntry.id);
+  const isCanonical = Boolean(targetEntry && targetCanonicalPath === originalPathText && !isMergeSource);
+  const hidden = Boolean(sourceEntry?.hidden ?? targetEntry?.hidden);
+  const deprecated = Boolean(sourceEntry?.deprecated || sourceEntry?.mergeTo);
+  const shouldRewrite = Boolean(targetEntry && targetCanonicalPath && targetCanonicalPath !== originalPathText);
+
+  let reason: TagNormalizationReason = "unknown_freeform";
+  if (!targetEntry) {
+    reason = "unknown_freeform";
+  } else if (isAliasToMergedSource) {
+    reason = "alias_to_merged_source";
+  } else if (isMergeSource) {
+    reason = "merge_to_target";
+  } else if (shouldRewrite || isAliasMatch) {
+    reason = "alias_to_canonical";
+  } else if (hidden) {
+    reason = "hidden_no_change";
+  } else {
+    reason = "already_canonical";
+  }
+
+  return {
+    original,
+    originalIndex: options.index ?? 0,
+    originalPathText,
+    isCanonical,
+    isUnknownFreeform: !targetEntry,
+    isAliasMatch,
+    isMergeSource,
+    isAliasToMergedSource,
+    hidden,
+    deprecated,
+    targetCanonicalPath,
+    targetEntryId: targetEntry?.id ?? null,
+    targetDisplayName,
+    reason,
+    shouldRewrite,
+    safeToAutoApply: shouldRewrite,
+  };
+}
+
+export function analyzeTagListNormalization(
+  tags: string[],
+  options: { userConfig?: UserTagTaxonomyConfig | null } = {},
+): TagNormalizationPlan {
+  const analyses = tags
+    .map((tag, index) => analyzeSingleTagNormalization(tag, { userConfig: options.userConfig, index }))
+    .filter((analysis) => analysis.original.length > 0);
+  const nextTags: string[] = [];
+  const seen = new Map<string, number>();
+  const finalAnalyses = analyses.map((analysis) => ({ ...analysis }));
+
+  for (const analysis of finalAnalyses) {
+    const identity = getTagNormalizationIdentity(analysis);
+    const duplicateOfIndex = analysis.targetEntryId ? seen.get(identity) : undefined;
+
+    if (duplicateOfIndex !== undefined) {
+      analysis.reason = "duplicate_after_normalize";
+      analysis.shouldRewrite = true;
+      analysis.safeToAutoApply = true;
+      analysis.duplicateOfIndex = duplicateOfIndex;
+      continue;
+    }
+
+    seen.set(identity, analysis.originalIndex);
+    nextTags.push(analysis.shouldRewrite && analysis.targetCanonicalPath ? analysis.targetCanonicalPath : analysis.original);
+  }
+
+  const suggestions = finalAnalyses
+    .filter((analysis) => analysis.safeToAutoApply && analysis.shouldRewrite)
+    .map(createTagNormalizationSuggestion);
+  const stats = finalAnalyses.reduce<TagNormalizationPlan["stats"]>((current, analysis) => {
+    if (analysis.reason === "alias_to_canonical" && analysis.shouldRewrite) {
+      current.aliasCount += 1;
+    }
+    if (analysis.reason === "merge_to_target") {
+      current.mergeCount += 1;
+    }
+    if (analysis.reason === "alias_to_merged_source") {
+      current.aliasToMergedSourceCount += 1;
+    }
+    if (analysis.reason === "duplicate_after_normalize") {
+      current.duplicateCount += 1;
+    }
+    if (analysis.reason === "unknown_freeform") {
+      current.unknownCount += 1;
+    }
+    if (analysis.reason === "hidden_no_change") {
+      current.hiddenSkippedCount += 1;
+    }
+    if (analysis.shouldRewrite && analysis.reason !== "duplicate_after_normalize") {
+      current.rewriteCount += 1;
+    }
+    return current;
+  }, {
+    total: finalAnalyses.length,
+    rewriteCount: 0,
+    aliasCount: 0,
+    mergeCount: 0,
+    aliasToMergedSourceCount: 0,
+    duplicateCount: 0,
+    unknownCount: 0,
+    hiddenSkippedCount: 0,
+  });
+
+  return {
+    analyses: finalAnalyses,
+    suggestions,
+    nextTags,
+    changed: !areStringArraysEqual(tags.map((tag) => tag.trim()).filter(Boolean), nextTags),
+    stats,
+  };
+}
+
+export function buildTagNormalizationPreview(
+  tags: string[],
+  options: { userConfig?: UserTagTaxonomyConfig | null } = {},
+): TagNormalizationPlan {
+  return analyzeTagListNormalization(tags, options);
+}
+
+export function applyTagNormalizationPlan(tags: string[], plan: TagNormalizationPlan): string[] {
+  const currentTags = tags.map((tag) => tag.trim()).filter(Boolean);
+  return plan.changed ? plan.nextTags : currentTags;
+}
+
 export function getTagNormalizationSuggestions(
   tags: string[],
   options: { userConfig?: UserTagTaxonomyConfig | null } = {},
 ): TagNormalizationSuggestion[] {
-  const suggestions: TagNormalizationSuggestion[] = [];
-  const seen = new Set<string>();
-
-  for (const tag of tags) {
-    const original = tag.trim();
-    if (!original) {
-      continue;
-    }
-
-    const originalSegments = splitTagSegments(original);
-    const originalPath = getTagPathText(originalSegments);
-    const normalized = normalizeTagPath(original, options.userConfig);
-
-    if (!normalized?.entryId || normalized.fullPath === originalPath) {
-      continue;
-    }
-
-    const key = `${normalizeTagAliasKey(original)}=>${normalizeTagAliasKey(normalized.fullPath)}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-
-    suggestions.push({
-      original,
-      normalized: normalized.fullPath,
-      displayName: normalized.name,
-      pathText: normalized.fullPath,
-      reason: originalSegments.length > 1 ? "legacy-path" : "alias",
-    });
-  }
-
-  return suggestions;
+  return analyzeTagListNormalization(tags, options).suggestions;
 }
 
 export function getTagPathPrefixes(segments: string[]) {
@@ -1659,6 +1891,46 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
       },
     }, { includeHidden: true, includeDeprecated: true }).some((suggestion) => suggestion.id === "algorithm.string.kmp" && suggestion.hidden && suggestion.deprecated),
     true,
+  );
+
+  const aliasNormalizationPlan = analyzeTagListNormalization(["拓展 KMP"]);
+  const mergeNormalizationPlan = analyzeTagListNormalization(["KMP"], { userConfig: mergeConfig });
+  const aliasToMergeNormalizationPlan = analyzeTagListNormalization(["旧 KMP 入口"], { userConfig: userAliasToMergeSourceConfig });
+  const duplicateNormalizationPlan = analyzeTagListNormalization(["拓展 KMP", zFunctionPath]);
+  const unknownNormalizationPlan = analyzeTagListNormalization(["完全自定义标签"]);
+  const hiddenOnlyNormalizationPlan = analyzeTagListNormalization([zFunctionPath], {
+    userConfig: {
+      hiddenIds: ["algorithm.string.z-function"],
+    },
+  });
+  const userEntryNormalizationPlan = analyzeTagListNormalization(["自定义标签/字符串/自定义模式匹配"], { userConfig: userEntryConfig });
+  const orderOverrideNormalizationPlan = analyzeTagListNormalization(["拓展 KMP"], {
+    userConfig: {
+      orderOverrides: {
+        "algorithm.string.z-function": -10,
+      },
+    },
+  });
+
+  addSelfCheck(checks, "normalization analysis marks alias to canonical", aliasNormalizationPlan.suggestions[0]?.reason ?? null, "alias_to_canonical");
+  addSelfCheck(checks, "normalization analysis rewrites alias to canonical", aliasNormalizationPlan.nextTags.join("|"), zFunctionPath);
+  addSelfCheck(checks, "normalization analysis marks merge source", mergeNormalizationPlan.suggestions[0]?.reason ?? null, "merge_to_target");
+  addSelfCheck(checks, "normalization analysis rewrites merge source to target", mergeNormalizationPlan.nextTags.join("|"), zFunctionPath);
+  addSelfCheck(checks, "normalization analysis marks alias to merge source", aliasToMergeNormalizationPlan.suggestions[0]?.reason ?? null, "alias_to_merged_source");
+  addSelfCheck(checks, "normalization analysis rewrites alias to merge source to target", aliasToMergeNormalizationPlan.nextTags.join("|"), zFunctionPath);
+  addSelfCheck(checks, "normalization analysis marks duplicate after normalize", duplicateNormalizationPlan.suggestions.some((item) => item.reason === "duplicate_after_normalize"), true);
+  addSelfCheck(checks, "apply normalization plan deduplicates target", applyTagNormalizationPlan(["拓展 KMP", zFunctionPath], duplicateNormalizationPlan).join("|"), zFunctionPath);
+  addSelfCheck(checks, "unknown freeform normalization stays unchanged", applyTagNormalizationPlan(["完全自定义标签"], unknownNormalizationPlan).join("|"), "完全自定义标签");
+  addSelfCheck(checks, "unknown freeform normalization has no rewrite suggestion", unknownNormalizationPlan.suggestions.length, 0);
+  addSelfCheck(checks, "hidden only tag is skipped without rewrite", hiddenOnlyNormalizationPlan.analyses[0]?.reason ?? null, "hidden_no_change");
+  addSelfCheck(checks, "hidden only tag has no rewrite suggestion", hiddenOnlyNormalizationPlan.suggestions.length, 0);
+  addSelfCheck(checks, "user custom canonical is not reported as old tag", userEntryNormalizationPlan.suggestions.length, 0);
+  addSelfCheck(checks, "orderOverrides do not change normalization plan target", orderOverrideNormalizationPlan.nextTags.join("|"), zFunctionPath);
+  addSelfCheck(
+    checks,
+    "apply normalization plan keeps stable order",
+    applyTagNormalizationPlan(["自定义自由标签", "拓展 KMP", "来源/平台/洛谷"], analyzeTagListNormalization(["自定义自由标签", "拓展 KMP", "来源/平台/洛谷"])).join("|"),
+    `自定义自由标签|${zFunctionPath}|来源/平台/洛谷`,
   );
 
   const userEditOriginalConfig: UserTagTaxonomyConfig = {

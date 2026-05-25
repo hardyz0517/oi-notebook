@@ -33,7 +33,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -521,6 +521,7 @@ function recordTagManagerDebugEvent(event: string, payload?: unknown): void {
 type TagNormalizationScanResult = {
   path: string;
   title: string;
+  plan: TagNormalizationPlan;
   suggestions: TagNormalizationSuggestion[];
 };
 
@@ -532,8 +533,70 @@ type TagNormalizationApplyFailure = {
 type TagNormalizationApplyResult = {
   successCount: number;
   normalizedTagCount: number;
+  duplicateTagCount: number;
+  skippedCount: number;
   failures: TagNormalizationApplyFailure[];
 };
+
+type TagNormalizationScanStats = {
+  noteCount: number;
+  suggestionCount: number;
+  rewriteCount: number;
+  aliasCount: number;
+  mergeCount: number;
+  aliasToMergedSourceCount: number;
+  duplicateCount: number;
+  unknownCount: number;
+  hiddenSkippedCount: number;
+};
+
+function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
+  return {
+    noteCount: 0,
+    suggestionCount: 0,
+    rewriteCount: 0,
+    aliasCount: 0,
+    mergeCount: 0,
+    aliasToMergedSourceCount: 0,
+    duplicateCount: 0,
+    unknownCount: 0,
+    hiddenSkippedCount: 0,
+  };
+}
+
+function addTagNormalizationPlanStats(stats: TagNormalizationScanStats, plan: TagNormalizationPlan): TagNormalizationScanStats {
+  return {
+    noteCount: stats.noteCount + 1,
+    suggestionCount: stats.suggestionCount + plan.suggestions.length,
+    rewriteCount: stats.rewriteCount + plan.stats.rewriteCount,
+    aliasCount: stats.aliasCount + plan.stats.aliasCount,
+    mergeCount: stats.mergeCount + plan.stats.mergeCount,
+    aliasToMergedSourceCount: stats.aliasToMergedSourceCount + plan.stats.aliasToMergedSourceCount,
+    duplicateCount: stats.duplicateCount + plan.stats.duplicateCount,
+    unknownCount: stats.unknownCount + plan.stats.unknownCount,
+    hiddenSkippedCount: stats.hiddenSkippedCount + plan.stats.hiddenSkippedCount,
+  };
+}
+
+function formatTagNormalizationReason(reason: TagNormalizationReason) {
+  switch (reason) {
+    case "alias_to_canonical":
+      return "别名";
+    case "merge_to_target":
+      return "已合并";
+    case "alias_to_merged_source":
+      return "别名指向已合并标签";
+    case "duplicate_after_normalize":
+      return "去重";
+    case "hidden_no_change":
+      return "隐藏，跳过";
+    case "unknown_freeform":
+      return "自由标签，跳过";
+    case "already_canonical":
+    default:
+      return "已规范";
+  }
+}
 
 interface PolishReviewTab {
   id: string;
@@ -2594,6 +2657,7 @@ export default function App() {
   const [tagManagerSession, setTagManagerSession] = useState<{ initialConfig: UserTagTaxonomyConfig; returnTarget: SettingsTarget; initialFilterMode?: TagManagerFilterMode } | null>(null);
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
+  const [tagNormalizationScanAllStats, setTagNormalizationScanAllStats] = useState<TagNormalizationScanStats | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
   const [tagNormalizationScanIssueCount, setTagNormalizationScanIssueCount] = useState(0);
   const [selectedTagNormalizationScanPaths, setSelectedTagNormalizationScanPaths] = useState<Set<string>>(() => new Set());
@@ -2904,10 +2968,11 @@ export default function App() {
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(fullMarkdown), [fullMarkdown]);
-  const tagNormalizationSuggestions = useMemo(
-    () => getTagNormalizationSuggestions(frontmatter.fields.tags, { userConfig: tagTaxonomyUserConfig }),
+  const tagNormalizationPlan = useMemo(
+    () => analyzeTagListNormalization(frontmatter.fields.tags, { userConfig: tagTaxonomyUserConfig }),
     [frontmatter.fields.tags, tagTaxonomyUserConfig],
   );
+  const tagNormalizationSuggestions = tagNormalizationPlan.suggestions;
   useEffect(() => {
     if (tagNormalizationSuggestions.length === 0) {
       setIsTagNormalizationDetailsOpen(false);
@@ -3161,13 +3226,16 @@ export default function App() {
     ],
     [tagTaxonomyStats],
   );
-  const tagNormalizationScanSuggestionCount = useMemo(
-    () => tagNormalizationScanResults?.reduce((total, result) => total + result.suggestions.length, 0) ?? 0,
-    [tagNormalizationScanResults],
+  const tagNormalizationScanStats = useMemo(
+    () => tagNormalizationScanAllStats ?? tagNormalizationScanResults?.reduce(
+      (stats, result) => addTagNormalizationPlanStats(stats, result.plan),
+      createEmptyTagNormalizationScanStats(),
+    ) ?? createEmptyTagNormalizationScanStats(),
+    [tagNormalizationScanAllStats, tagNormalizationScanResults],
   );
   const selectedTagNormalizationScanStats = useMemo(() => {
     if (!tagNormalizationScanResults) {
-      return { noteCount: 0, suggestionCount: 0 };
+      return createEmptyTagNormalizationScanStats();
     }
 
     return tagNormalizationScanResults.reduce(
@@ -3176,12 +3244,9 @@ export default function App() {
           return stats;
         }
 
-        return {
-          noteCount: stats.noteCount + 1,
-          suggestionCount: stats.suggestionCount + result.suggestions.length,
-        };
+        return addTagNormalizationPlanStats(stats, result.plan);
       },
-      { noteCount: 0, suggestionCount: 0 },
+      createEmptyTagNormalizationScanStats(),
     );
   }, [selectedTagNormalizationScanPaths, tagNormalizationScanResults]);
   const tagTaxonomyUserEntries = useMemo(
@@ -5667,24 +5732,21 @@ export default function App() {
   const applyTagNormalizationSuggestions = useCallback(() => {
     if (!frontmatter.canMerge || !frontmatter.canEditTags || tagNormalizationSuggestions.length === 0) return;
 
-    const replacements = new Map(tagNormalizationSuggestions.map((suggestion) => [suggestion.original, suggestion.normalized]));
-    const nextTags = mergeTagsStable(
-      [],
-      frontmatter.fields.tags.map((tag) => replacements.get(tag.trim()) ?? tag),
-      tagTaxonomyUserConfig,
-    );
+    const nextTags = applyTagNormalizationPlan(frontmatter.fields.tags, tagNormalizationPlan);
     updateFrontmatter({ tags: nextTags });
     setIsTagNormalizationDetailsOpen(false);
-  }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatter.fields.tags, tagNormalizationSuggestions, tagTaxonomyUserConfig, updateFrontmatter]);
+  }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatter.fields.tags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
   const handleScanLegacyTags = useCallback(async () => {
     if (isScanningTagNormalization) return;
 
     setIsScanningTagNormalization(true);
     setTagNormalizationScanError(null);
     setTagNormalizationScanIssueCount(0);
+    setTagNormalizationScanAllStats(null);
     setSelectedTagNormalizationScanPaths(new Set());
 
     const results: TagNormalizationScanResult[] = [];
+    let scanStats = createEmptyTagNormalizationScanStats();
     let issueCount = 0;
 
     try {
@@ -5699,15 +5761,17 @@ export default function App() {
 
           if (parsed.fields.tags.length === 0) continue;
 
-          const suggestions = getTagNormalizationSuggestions(parsed.fields.tags, {
+          const plan = analyzeTagListNormalization(parsed.fields.tags, {
             userConfig: tagTaxonomyUserConfig,
           });
+          scanStats = addTagNormalizationPlanStats(scanStats, plan);
 
-          if (suggestions.length > 0) {
+          if (plan.suggestions.length > 0) {
             results.push({
               path: file.path,
               title: parsed.fields.title.trim() || file.displayTitle?.trim() || file.name.replace(/\.md$/i, ""),
-              suggestions,
+              plan,
+              suggestions: plan.suggestions,
             });
           }
         } catch {
@@ -5716,10 +5780,12 @@ export default function App() {
       }
 
       setTagNormalizationScanResults(results);
+      setTagNormalizationScanAllStats(scanStats);
       setTagNormalizationScanIssueCount(issueCount);
     } catch (error) {
       setTagNormalizationScanError(getErrorMessage(error));
       setTagNormalizationScanResults(null);
+      setTagNormalizationScanAllStats(null);
     } finally {
       setIsScanningTagNormalization(false);
     }
@@ -5747,7 +5813,9 @@ export default function App() {
     const selectedPaths = new Set(selectedTagNormalizationScanPaths);
     const confirmMessage = [
       `将修改 ${selectedTagNormalizationScanStats.noteCount} 篇笔记。`,
-      `将规范化 ${selectedTagNormalizationScanStats.suggestionCount} 个标签。`,
+      `将改写 ${selectedTagNormalizationScanStats.rewriteCount} 个标签。`,
+      `将合并 ${selectedTagNormalizationScanStats.duplicateCount} 个重复标签。`,
+      `unknown/free-form 标签不会被改写。`,
       "只修改 frontmatter.tags，不会改正文。",
       "建议在批量应用前确认 Git 工作区状态，便于回滚。",
       "",
@@ -5760,13 +5828,16 @@ export default function App() {
     const failures: TagNormalizationApplyFailure[] = [];
     let successCount = 0;
     let normalizedTagCount = 0;
+    let duplicateTagCount = 0;
+    let skippedCount = 0;
 
     for (const result of tagNormalizationScanResults) {
       if (!selectedPaths.has(result.path)) continue;
 
       try {
         if (result.path === currentFilePath && isDirty) {
-          throw new Error("当前打开的笔记有未保存改动，已跳过");
+          skippedCount += 1;
+          continue;
         }
 
         const content = await readNote(result.path);
@@ -5776,27 +5847,29 @@ export default function App() {
           throw new Error(parsed.warning ?? "当前 frontmatter 暂不能安全改写 tags");
         }
 
-        const suggestions = getTagNormalizationSuggestions(parsed.fields.tags, {
+        const plan = analyzeTagListNormalization(parsed.fields.tags, {
           userConfig: tagTaxonomyUserConfig,
         });
-        if (suggestions.length === 0) continue;
+        if (plan.suggestions.length === 0) {
+          skippedCount += 1;
+          continue;
+        }
 
-        const replacements = new Map(suggestions.map((suggestion) => [suggestion.original, suggestion.normalized]));
-        const nextTags = mergeTagsStable(
-          [],
-          parsed.fields.tags.map((tag) => replacements.get(tag.trim()) ?? tag),
-          tagTaxonomyUserConfig,
-        );
+        const nextTags = applyTagNormalizationPlan(parsed.fields.tags, plan);
         const nextMarkdown = mergeFrontmatterFields(content, {
           ...parsed.fields,
           tags: nextTags,
         });
 
-        if (nextMarkdown === content) continue;
+        if (nextMarkdown === content) {
+          skippedCount += 1;
+          continue;
+        }
 
         await writeNote(result.path, nextMarkdown);
         successCount += 1;
-        normalizedTagCount += suggestions.length;
+        normalizedTagCount += plan.stats.rewriteCount;
+        duplicateTagCount += plan.stats.duplicateCount;
 
         if (result.path === currentFilePath) {
           applyLoadedMarkdown(nextMarkdown, currentFilePath);
@@ -5812,6 +5885,8 @@ export default function App() {
     setTagNormalizationApplyResult({
       successCount,
       normalizedTagCount,
+      duplicateTagCount,
+      skippedCount,
       failures,
     });
     setSelectedTagNormalizationScanPaths(new Set());
@@ -5825,6 +5900,8 @@ export default function App() {
     isDirty,
     selectedTagNormalizationScanPaths,
     selectedTagNormalizationScanStats.noteCount,
+    selectedTagNormalizationScanStats.duplicateCount,
+    selectedTagNormalizationScanStats.rewriteCount,
     selectedTagNormalizationScanStats.suggestionCount,
     tagNormalizationScanResults,
     tagTaxonomyUserConfig,
@@ -9129,7 +9206,8 @@ export default function App() {
                           {tagNormalizationApplyResult && (
                             <div className="grid gap-1 rounded-sm border border-border/70 bg-muted/10 px-3 py-2 text-sm text-muted-foreground">
                               <span>
-                                成功修改 {tagNormalizationApplyResult.successCount} 篇笔记，规范化 {tagNormalizationApplyResult.normalizedTagCount} 个标签。
+                                成功修改 {tagNormalizationApplyResult.successCount} 篇笔记，改写 {tagNormalizationApplyResult.normalizedTagCount} 个标签，合并 {tagNormalizationApplyResult.duplicateTagCount} 个重复标签。
+                                {tagNormalizationApplyResult.skippedCount > 0 ? ` 跳过 ${tagNormalizationApplyResult.skippedCount} 篇无需改写的笔记。` : ""}
                               </span>
                               {tagNormalizationApplyResult.failures.length > 0 && (
                                 <div className="grid gap-1 text-xs">
@@ -9150,16 +9228,26 @@ export default function App() {
                           {tagNormalizationScanResults && (
                             <div className="grid min-w-0 gap-3">
                               {tagNormalizationScanResults.length === 0 ? (
-                                <span className="text-sm text-muted-foreground">
-                                  未发现需要规范化的标签。
-                                  {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
-                                </span>
+                                <div className="grid gap-1 text-sm text-muted-foreground">
+                                  <span>
+                                    未发现需要规范化的标签。
+                                    {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
+                                  </span>
+                                  {(tagNormalizationScanStats.unknownCount > 0 || tagNormalizationScanStats.hiddenSkippedCount > 0) && (
+                                    <span className="text-xs">
+                                      自由标签跳过 {tagNormalizationScanStats.unknownCount}，隐藏跳过 {tagNormalizationScanStats.hiddenSkippedCount}。
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <>
                                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
                                     <span className="text-sm text-muted-foreground">
-                                      发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanSuggestionCount} 个标签建议。
+                                      发现 {tagNormalizationScanResults.length} 篇笔记有可规范化标签，共 {tagNormalizationScanStats.suggestionCount} 个标签建议。
                                       {tagNormalizationScanIssueCount > 0 ? ` ${tagNormalizationScanIssueCount} 篇笔记读取或解析失败。` : ""}
+                                    </span>
+                                    <span className="basis-full text-xs text-muted-foreground">
+                                      别名 {tagNormalizationScanStats.aliasCount}，合并 {tagNormalizationScanStats.mergeCount}，别名指向已合并 {tagNormalizationScanStats.aliasToMergedSourceCount}，去重 {tagNormalizationScanStats.duplicateCount}，自由标签跳过 {tagNormalizationScanStats.unknownCount}，隐藏跳过 {tagNormalizationScanStats.hiddenSkippedCount}。
                                     </span>
                                     <div className="flex flex-wrap items-center gap-2">
                                       <Button
@@ -9181,7 +9269,7 @@ export default function App() {
                                         全不选
                                       </Button>
                                       <span className="text-xs text-muted-foreground">
-                                        已选 {selectedTagNormalizationScanStats.noteCount} 篇，{selectedTagNormalizationScanStats.suggestionCount} 个标签建议
+                                        已选 {selectedTagNormalizationScanStats.noteCount} 篇，{selectedTagNormalizationScanStats.rewriteCount} 个改写，{selectedTagNormalizationScanStats.duplicateCount} 个去重
                                       </span>
                                       <Button
                                         type="button"
@@ -9220,6 +9308,7 @@ export default function App() {
                                         <div className="grid gap-1 px-10 pb-3 text-xs text-muted-foreground">
                                           {result.suggestions.slice(0, 5).map((suggestion) => (
                                             <div key={`${result.path}:${suggestion.original}:${suggestion.normalized}`} className="min-w-0 break-words">
+                                              <span className="mr-1.5 rounded-sm border border-border/60 px-1 py-0.5 text-[10px] text-muted-foreground">{formatTagNormalizationReason(suggestion.reason)}</span>
                                               <span className="text-foreground">{suggestion.original}</span>
                                               <span className="mx-1.5">→</span>
                                               <span>{suggestion.pathText}</span>
@@ -10025,6 +10114,8 @@ export default function App() {
                                   <div className="mt-1.5 grid gap-1 text-amber-50/80">
                                     {tagNormalizationSuggestions.map((suggestion) => (
                                       <div key={`${suggestion.original}->${suggestion.normalized}`} className="min-w-0 truncate" title={`${suggestion.original} -> ${suggestion.pathText}`}>
+                                        <span className="text-amber-100/60">{formatTagNormalizationReason(suggestion.reason)}</span>
+                                        <span className="mx-1">·</span>
                                         {suggestion.original} <span className="text-amber-100/50">-&gt;</span> {suggestion.pathText}
                                       </div>
                                     ))}
