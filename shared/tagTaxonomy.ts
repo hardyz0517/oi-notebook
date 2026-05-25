@@ -1542,6 +1542,75 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
   );
   addSelfCheck(checks, "builtin alias works with user aliases", normalizeTagPath("exKMP", userAliasConfig)?.fullPath ?? null, zFunctionPath);
 
+  const mergeConfig: UserTagTaxonomyConfig = {
+    merges: {
+      "algorithm.string.kmp": "algorithm.string.z-function",
+    },
+  };
+  const mergeSuggestions = getTagSuggestionList(mergeConfig, { includeHidden: true, includeDeprecated: true });
+  const visibleMergeSuggestions = getTagSuggestionList(mergeConfig);
+  const mergedKmpSuggestion = mergeSuggestions.find((suggestion) => suggestion.id === "algorithm.string.kmp") ?? null;
+  addSelfCheck(checks, "merge source normalizes to target path", normalizeTagPath("KMP", mergeConfig)?.fullPath ?? null, zFunctionPath);
+  addSelfCheck(checks, "merge source id normalizes to target id", normalizeTagPath("algorithm.string.kmp", mergeConfig)?.entryId ?? null, "algorithm.string.z-function");
+  addSelfCheck(checks, "merge source suggestion is deprecated when included", mergedKmpSuggestion?.deprecated ?? null, true);
+  addSelfCheck(checks, "merge source hidden from default suggestions", visibleMergeSuggestions.some((suggestion) => suggestion.id === "algorithm.string.kmp"), false);
+  addSelfCheck(checks, "merge keeps builtin alias normalization", normalizeTagPath("exKMP", mergeConfig)?.fullPath ?? null, zFunctionPath);
+  addSelfCheck(
+    checks,
+    "hidden merge source can be previewed when included",
+    getTagSuggestionList({
+      hiddenIds: ["algorithm.string.kmp"],
+      merges: {
+        "algorithm.string.kmp": "algorithm.string.z-function",
+      },
+    }, { includeHidden: true, includeDeprecated: true }).some((suggestion) => suggestion.id === "algorithm.string.kmp" && suggestion.hidden && suggestion.deprecated),
+    true,
+  );
+
+  const userEditOriginalConfig: UserTagTaxonomyConfig = {
+    entries: [{
+      id: "user.selfcheck.editable",
+      path: ["自定义标签", "编辑测试", "旧标签"],
+      aliases: ["旧别名"],
+      source: "user",
+    }],
+  };
+  const userEditConfig: UserTagTaxonomyConfig = {
+    entries: [{
+      id: "user.selfcheck.editable",
+      path: ["自定义标签", "编辑测试", "新标签"],
+      aliases: ["新别名"],
+      source: "user",
+    }],
+  };
+  const editedUserSuggestion = getTagSuggestionList(userEditConfig).find((suggestion) => suggestion.id === "user.selfcheck.editable") ?? null;
+  const builtinSuggestionForEditCheck = getTagSuggestionList().find((suggestion) => suggestion.id === "algorithm.string.z-function") ?? null;
+  const conflictingUserEditPath = "算法/字符串/Z 函数";
+  const hasBuiltinPathConflict = getTagSuggestionList(userEditConfig, { includeHidden: true, includeDeprecated: true })
+    .some((suggestion) => suggestion.pathText === conflictingUserEditPath && suggestion.id !== "user.selfcheck.editable");
+
+  addSelfCheck(checks, "edited user entry label appears in suggestions", editedUserSuggestion?.pathText ?? null, "自定义标签/编辑测试/新标签");
+  addSelfCheck(
+    checks,
+    "edited user entry new alias is searchable",
+    findTagSuggestionsByQuery("新别名", { limit: 1, userConfig: userEditConfig })[0]?.id ?? null,
+    "user.selfcheck.editable",
+  );
+  addSelfCheck(
+    checks,
+    "removed user entry alias stops matching",
+    findTagSuggestionsByQuery("旧别名", { limit: 1, userConfig: userEditConfig }).length,
+    0,
+  );
+  addSelfCheck(
+    checks,
+    "original user entry alias matched before edit",
+    findTagSuggestionsByQuery("旧别名", { limit: 1, userConfig: userEditOriginalConfig })[0]?.id ?? null,
+    "user.selfcheck.editable",
+  );
+  addSelfCheck(checks, "builtin entry remains builtin source", builtinSuggestionForEditCheck?.source ?? null, "builtin");
+  addSelfCheck(checks, "user entry edit path conflict can be detected", hasBuiltinPathConflict, true);
+
   addSelfCheck(checks, "article text 拓展 KMP suggests Z 函数", suggestedPath({ title: "拓展 KMP 模板题" }), zFunctionPath);
   addSelfCheck(
     checks,

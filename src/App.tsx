@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { forwardRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
+import type { TagManagerFilterMode } from "@/components/tag-manager/types";
+import { parseUserTagTaxonomyConfigJson, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
@@ -2580,11 +2582,16 @@ export default function App() {
   const [tagTaxonomyEntryAliasesInput, setTagTaxonomyEntryAliasesInput] = useState("");
   const [tagTaxonomyAliasNameInput, setTagTaxonomyAliasNameInput] = useState("");
   const [tagTaxonomyAliasTargetInput, setTagTaxonomyAliasTargetInput] = useState("");
+  const [tagTaxonomyImportJsonInput, setTagTaxonomyImportJsonInput] = useState("");
+  const [tagTaxonomyImportPreview, setTagTaxonomyImportPreview] = useState<TagTaxonomyConfigImportResult | null>(null);
+  const [tagTaxonomyImportError, setTagTaxonomyImportError] = useState<string | null>(null);
+  const [tagTaxonomyImportMessage, setTagTaxonomyImportMessage] = useState<string | null>(null);
+  const tagTaxonomyImportFileInputRef = useRef<HTMLInputElement | null>(null);
   const [isTagTaxonomyEntryListExpanded, setIsTagTaxonomyEntryListExpanded] = useState(false);
   const [isTagTaxonomyAliasListExpanded, setIsTagTaxonomyAliasListExpanded] = useState(false);
   const [tagTaxonomyEntryListQuery, setTagTaxonomyEntryListQuery] = useState("");
   const [tagTaxonomyAliasListQuery, setTagTaxonomyAliasListQuery] = useState("");
-  const [tagManagerSession, setTagManagerSession] = useState<{ initialConfig: UserTagTaxonomyConfig; returnTarget: SettingsTarget } | null>(null);
+  const [tagManagerSession, setTagManagerSession] = useState<{ initialConfig: UserTagTaxonomyConfig; returnTarget: SettingsTarget; initialFilterMode?: TagManagerFilterMode } | null>(null);
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
@@ -3221,10 +3228,11 @@ export default function App() {
     () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden).length,
     [tagTaxonomyUserConfig],
   );
-  const openTagManagerWorkspace = useCallback(() => {
+  const openTagManagerWorkspace = useCallback((initialFilterMode: TagManagerFilterMode = "all") => {
     const returnTarget: SettingsTarget = { type: "page", page: "blog-tag-manager" };
     debugTagManager("app.openTagManager.request", {
       returnTarget,
+      initialFilterMode,
       hasConfig: Boolean(tagTaxonomyConfig),
       settingsOpen: isAdvancedActionsOpen,
       activeSettingsTarget,
@@ -3233,6 +3241,7 @@ export default function App() {
     setTagManagerSession({
       initialConfig: normalizeUserTagTaxonomyConfig(tagTaxonomyConfig),
       returnTarget,
+      initialFilterMode,
     });
     debugTagManager("app.tagManagerSession.set", {
       returnTarget,
@@ -3285,6 +3294,104 @@ export default function App() {
       setIsSavingTagTaxonomyConfig(false);
     }
   }, []);
+  const handleExportTagTaxonomyConfig = useCallback(async () => {
+    const exportConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
+    const json = `${JSON.stringify(exportConfig, null, 2)}\n`;
+    setTagTaxonomyImportError(null);
+
+    try {
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `oi-notebook-tag-taxonomy-${new Date().toISOString().slice(0, 10)}.json`;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setTagTaxonomyImportMessage("已导出标签配置 JSON");
+    } catch {
+      try {
+        await navigator.clipboard.writeText(json);
+        setTagTaxonomyImportMessage("已复制标签配置 JSON");
+      } catch (clipboardError) {
+        setTagTaxonomyImportMessage(null);
+        setTagTaxonomyImportError(`导出失败：${getErrorMessage(clipboardError)}`);
+      }
+    }
+  }, [tagTaxonomyConfig]);
+  const previewTagTaxonomyImport = useCallback((jsonText: string) => {
+    const text = jsonText.trim();
+    if (!text) {
+      setTagTaxonomyImportPreview(null);
+      setTagTaxonomyImportError("请先粘贴标签配置 JSON。");
+      return null;
+    }
+
+    try {
+      const result = parseUserTagTaxonomyConfigJson(text);
+      setTagTaxonomyImportPreview(result);
+      setTagTaxonomyImportError(null);
+      setTagTaxonomyImportMessage(null);
+      return result;
+    } catch (error) {
+      setTagTaxonomyImportPreview(null);
+      setTagTaxonomyImportError(getErrorMessage(error));
+      return null;
+    }
+  }, []);
+  const handleTagTaxonomyImportInputChange = useCallback((value: string) => {
+    setTagTaxonomyImportJsonInput(value);
+    setTagTaxonomyImportPreview(null);
+    setTagTaxonomyImportError(null);
+    setTagTaxonomyImportMessage(null);
+  }, []);
+  const handleSelectTagTaxonomyImportFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      setTagTaxonomyImportJsonInput(text);
+      const result = previewTagTaxonomyImport(text);
+      if (result) {
+        setTagTaxonomyImportMessage(`已读取 JSON 文件：${file.name}`);
+      }
+    } catch (error) {
+      setTagTaxonomyImportPreview(null);
+      setTagTaxonomyImportError(`读取文件失败：${getErrorMessage(error)}`);
+    }
+  }, [previewTagTaxonomyImport]);
+  const handleConfirmTagTaxonomyImport = useCallback(async () => {
+    const result = previewTagTaxonomyImport(tagTaxonomyImportJsonInput);
+    if (!result) return;
+
+    const ok = window.confirm(
+      [
+        "确定导入这份标签配置吗？",
+        `自定义标签：${result.preview.entriesCount}`,
+        `自定义别名：${result.preview.aliasesCount}`,
+        `隐藏标签：${result.preview.hiddenIdsCount}`,
+        `排序覆盖：${result.preview.orderOverridesCount}`,
+        `合并规则：${result.preview.mergesCount}`,
+        "导入会覆盖当前用户标签配置，但不会修改 notes/**。",
+      ].join("\n"),
+    );
+    if (!ok) return;
+
+    const saved = await saveUserTagTaxonomyConfig(result.config);
+    if (!saved) {
+      setTagTaxonomyImportError("导入保存失败，请查看保存失败提示。");
+      return;
+    }
+
+    setTagTaxonomyImportJsonInput("");
+    setTagTaxonomyImportPreview(null);
+    setTagTaxonomyImportError(null);
+    setTagTaxonomyImportMessage("已导入标签配置");
+  }, [previewTagTaxonomyImport, saveUserTagTaxonomyConfig, tagTaxonomyImportJsonInput]);
   const handleAddTagTaxonomyEntry = useCallback(async () => {
     const path = parseTagPathInput(tagTaxonomyEntryPathInput);
     if (path.length === 0) {
@@ -8018,6 +8125,10 @@ export default function App() {
                                 <textarea
                                   readOnly
                                   value={activeLuoguPreparedPreview.sourceCode}
+                                  autoComplete="off"
+                                  autoCorrect="off"
+                                  autoCapitalize="none"
+                                  spellCheck={false}
                                   className="min-h-0 w-full flex-1 resize-none border-0 bg-background/70 p-4 font-mono text-xs leading-5 text-foreground outline-none"
                                   placeholder="这条预览没有返回提交原文。"
                                 />
@@ -8083,6 +8194,10 @@ export default function App() {
                         id="luogu-source-code"
                         value={luoguSourceCode}
                         disabled={isImportingLuogu}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         className="min-h-0 w-full flex-1 resize-none rounded-md border border-input bg-background/70 px-3 py-3 font-mono text-xs leading-5 outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
                         placeholder={`int main() {\n  return 0;\n}\n\n/*\n启示：\n这题的关键观察是 ...\n\n坑点：\n边界需要额外处理 ...\n*/`}
                         onChange={(e) => setLuoguSourceCode(e.target.value)}
@@ -8644,6 +8759,140 @@ export default function App() {
                         </section>
 
                         <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="grid gap-1">
+                            <div className="text-sm font-semibold text-foreground">配置备份</div>
+                            <div className="text-xs leading-5 text-muted-foreground">只导出或导入用户标签配置，不包含内置 taxonomy，也不会读取或修改 notes/**。</div>
+                          </div>
+                          <div className="grid min-w-0 max-w-full gap-2 overflow-hidden">
+                            <input
+                              ref={tagTaxonomyImportFileInputRef}
+                              type="file"
+                              accept="application/json,.json"
+                              className="hidden"
+                              onChange={(event) => void handleSelectTagTaxonomyImportFile(event)}
+                              disabled={isSavingTagTaxonomyConfig}
+                            />
+                            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-hidden">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void handleExportTagTaxonomyConfig()}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                导出标签配置
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => tagTaxonomyImportFileInputRef.current?.click()}
+                                disabled={isSavingTagTaxonomyConfig}
+                              >
+                                <Upload className="h-3.5 w-3.5" />
+                                选择 JSON 文件
+                              </Button>
+                            </div>
+                            <div className="h-5 min-w-0 max-w-full overflow-hidden text-xs text-muted-foreground">
+                              <span className="block truncate">{tagTaxonomyImportMessage ?? "可选择 JSON 文件，或在下方粘贴配置内容。"}</span>
+                            </div>
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="tag-taxonomy-import-json" className="text-xs text-muted-foreground">导入 JSON</Label>
+                            <textarea
+                              id="tag-taxonomy-import-json"
+                              value={tagTaxonomyImportJsonInput}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              placeholder='粘贴 {"version":1,"entries":[],"aliases":{},"hiddenIds":[],"orderOverrides":{},"merges":{}}'
+                              onChange={(event) => handleTagTaxonomyImportInputChange(event.target.value)}
+                              disabled={isSavingTagTaxonomyConfig}
+                              className="min-h-28 w-full resize-y rounded-sm border border-border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/60"
+                            />
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => previewTagTaxonomyImport(tagTaxonomyImportJsonInput)}
+                              disabled={isSavingTagTaxonomyConfig}
+                            >
+                              检查导入内容
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => void handleConfirmTagTaxonomyImport()}
+                              disabled={isSavingTagTaxonomyConfig || !tagTaxonomyImportPreview}
+                            >
+                              {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                              确认导入
+                            </Button>
+                          </div>
+                          <div className="min-h-[2.5rem] min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                            {tagTaxonomyImportPreview ? (
+                              <div className="flex min-w-0 flex-wrap gap-2">
+                                <span className="text-xs text-muted-foreground">预览统计</span>
+                                <span className="text-xs text-muted-foreground">自定义标签 {tagTaxonomyImportPreview.preview.entriesCount}</span>
+                                <span className="text-xs text-muted-foreground">自定义别名 {tagTaxonomyImportPreview.preview.aliasesCount}</span>
+                                <span className="text-xs text-muted-foreground">隐藏标签 {tagTaxonomyImportPreview.preview.hiddenIdsCount}</span>
+                                <span className="text-xs text-muted-foreground">排序覆盖 {tagTaxonomyImportPreview.preview.orderOverridesCount}</span>
+                                <span className="text-xs text-muted-foreground">合并规则 {tagTaxonomyImportPreview.preview.mergesCount}</span>
+                              </div>
+                            ) : (
+                              <span className="block truncate text-xs text-muted-foreground">检查或选择 JSON 后显示预览统计。</span>
+                            )}
+                          </div>
+                          <div className="h-5 min-w-0 max-w-full overflow-hidden text-sm text-destructive">
+                            <span className="block truncate">{tagTaxonomyImportError ?? ""}</span>
+                          </div>
+                        </section>
+
+                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                          <div className="grid gap-1">
+                            <div className="text-sm font-semibold text-foreground">日常管理</div>
+                            <div className="text-xs leading-5 text-muted-foreground">自定义标签、别名、隐藏、合并和排序都集中在标签管理器中处理，设置页只保留摘要和备份入口。</div>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">自定义标签</div>
+                              <div className="text-lg font-semibold text-foreground">共 {tagTaxonomyStats.entriesCount} 个</div>
+                            </div>
+                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">自定义别名</div>
+                              <div className="text-lg font-semibold text-foreground">共 {tagTaxonomyStats.aliasesCount} 个</div>
+                            </div>
+                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">隐藏标签</div>
+                              <div className="text-lg font-semibold text-foreground">共 {tagTaxonomyStats.hiddenIdsCount} 个</div>
+                            </div>
+                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">排序覆盖</div>
+                              <div className="text-lg font-semibold text-foreground">共 {tagTaxonomyStats.orderOverridesCount} 个</div>
+                            </div>
+                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">合并规则</div>
+                              <div className="text-lg font-semibold text-foreground">共 {tagTaxonomyStats.mergesCount} 个</div>
+                            </div>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => openTagManagerWorkspace()}>
+                              打开标签管理器
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" onClick={() => openTagManagerWorkspace("user")}>
+                              查看自定义标签
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => openTagManagerWorkspace()}>
+                              管理自定义别名
+                            </Button>
+                            <span className="text-xs text-muted-foreground">别名在标签管理器右侧详情中按单个标签管理。</span>
+                          </div>
+                        </section>
+
+                        <section hidden className="grid gap-3 border-t border-border/70 pt-4">
                           <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                             <div className="grid gap-1">
                               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -8749,7 +8998,7 @@ export default function App() {
                           )}
                         </section>
 
-                        <section className="grid gap-3 border-t border-border/70 pt-4">
+                        <section hidden className="grid gap-3 border-t border-border/70 pt-4">
                           <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                             <div className="grid gap-1">
                               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -8993,14 +9242,14 @@ export default function App() {
                           <div className="grid gap-2">
                             <div className="text-sm font-semibold text-foreground">标签管理器</div>
                             <div className="text-xs leading-5 text-muted-foreground">
-                              标签管理器已可用于浏览和隐藏/恢复；排序、合并、集中别名管理后续支持。
+                              标签管理器可用于浏览、隐藏/恢复、排序、合并和集中别名管理。
                             </div>
                             <div>
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={openTagManagerWorkspace}
+                                onClick={() => openTagManagerWorkspace()}
                               >
                                 打开标签管理器
                               </Button>
@@ -9036,7 +9285,7 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex flex-wrap items-center gap-3">
-                            <Button type="button" onClick={openTagManagerWorkspace}>
+                            <Button type="button" onClick={() => openTagManagerWorkspace()}>
                               打开标签管理器
                             </Button>
                             <span className="text-xs leading-5 text-muted-foreground">
@@ -9167,6 +9416,7 @@ export default function App() {
     {tagManagerSession && (
       <TagManagerWorkspace
         initialConfig={tagManagerSession.initialConfig}
+        initialFilterMode={tagManagerSession.initialFilterMode}
         onRequestClose={requestCloseTagManager}
       />
     )}
@@ -9879,6 +10129,9 @@ export default function App() {
                             rows={2}
                             className="min-h-[76px] w-full resize-none rounded-none border border-input bg-transparent px-2.5 py-1.5 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
                             autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
                             onChange={(e) => updateFrontmatter({ summary: e.target.value })}
                           />
                         </div>
