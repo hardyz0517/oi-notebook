@@ -305,7 +305,7 @@ function collectOtherAliasOwners(suggestions: TagSuggestion[], config: UserTagTa
 export function getUserAliasesForSuggestion(config: UserTagTaxonomyConfig, suggestion: TagSuggestion | null): string[] {
   if (!suggestion) return [];
   return Object.entries(config.aliases ?? {})
-    .filter(([, targetId]) => targetId === suggestion.id)
+    .filter(([alias]) => normalizeTagPath(alias, config)?.entryId === suggestion.id)
     .map(([alias]) => alias.trim())
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -786,6 +786,17 @@ export function runTagManagerMergeRuleSelfCheck() {
   };
   const hiddenMergedSource = getTagSuggestionList(hiddenMergeConfig, { includeHidden: true, includeDeprecated: true })
     .find((suggestion) => suggestion.id === "algorithm.string.kmp") ?? null;
+  const userAliasToMergedSourceConfig: UserTagTaxonomyConfig = {
+    aliases: {
+      "旧 KMP 入口": "algorithm.string.kmp",
+    },
+    merges: {
+      "algorithm.string.kmp": "algorithm.string.z-function",
+    },
+  };
+  const userAliasMergedSuggestions = getTagSuggestionList(userAliasToMergedSourceConfig, { includeHidden: true, includeDeprecated: true });
+  const userAliasMergedSource = userAliasMergedSuggestions.find((suggestion) => suggestion.id === "algorithm.string.kmp") ?? null;
+  const userAliasMergedTarget = userAliasMergedSuggestions.find((suggestion) => suggestion.id === "algorithm.string.z-function") ?? null;
 
   return {
     addedMergePreviewShowsTarget: preview?.targetSuggestion?.id === "algorithm.string.z-function",
@@ -802,6 +813,9 @@ export function runTagManagerMergeRuleSelfCheck() {
     builtinAliasStillWorks: added.ok
       ? normalizeTagPath("exKMP", added.config)?.entryId === "algorithm.string.z-function"
       : false,
+    userAliasToMergedSourceBelongsToTarget:
+      getUserAliasesForSuggestion(userAliasToMergedSourceConfig, userAliasMergedTarget).includes("旧 KMP 入口")
+      && !getUserAliasesForSuggestion(userAliasToMergedSourceConfig, userAliasMergedSource).includes("旧 KMP 入口"),
     hiddenMergedSourceDoesNotCrash: hiddenMergedSource?.hidden === true && hiddenMergedSource.deprecated === true,
     visibleTargetCandidateSearch: getMergeTargetCandidates(baseSuggestions, source, baseConfig, "Z 函数")[0]?.id === "algorithm.string.z-function",
   };

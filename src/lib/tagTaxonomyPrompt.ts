@@ -164,6 +164,33 @@ export function runTagTaxonomyPromptSelfCheck(): TagTaxonomyPromptSelfCheckResul
   const kmpContext = buildTagTaxonomyPromptContext({ title: "拓展 KMP 模板" });
   const liChaoContext = buildTagTaxonomyPromptContext({ content: "李超树维护直线最值" });
   const emptyContext = buildTagTaxonomyPromptContext({});
+  const userContext = buildTagTaxonomyPromptContext({
+    title: "自定义后缀自动机",
+    userConfig: {
+      entries: [{
+        id: "user.prompt.selfcheck",
+        path: ["自定义标签", "字符串", "自定义后缀自动机"],
+        source: "user",
+      }],
+    },
+  });
+  const filteredContext = buildTagTaxonomyPromptContext({
+    title: "KMP Z 函数",
+    userConfig: {
+      hiddenIds: ["algorithm.string.z-function"],
+      merges: {
+        "algorithm.string.kmp": "algorithm.string.z-function",
+      },
+    },
+  });
+  const mergedContext = buildTagTaxonomyPromptContext({
+    title: "KMP",
+    userConfig: {
+      merges: {
+        "algorithm.string.kmp": "algorithm.string.z-function",
+      },
+    },
+  });
 
   addSelfCheck(checks, "title 拓展 KMP includes Z 函数 candidate", hasSuggestion(kmpContext, zFunctionPath), true);
   addSelfCheck(checks, "content 李超树 includes 李超线段树 candidate", hasSuggestion(liChaoContext, liChaoPath), true);
@@ -171,6 +198,10 @@ export function runTagTaxonomyPromptSelfCheck(): TagTaxonomyPromptSelfCheckResul
   addSelfCheck(checks, "displayed aliases do not exceed limit", getDisplayedAliasCount(kmpContext.text, zFunctionPath) <= TAG_ALIAS_DISPLAY_LIMIT, true);
   addSelfCheck(checks, "empty input has no candidates", emptyContext.suggestions.length, 0);
   addSelfCheck(checks, "empty input still returns rules", emptyContext.text.includes("标签体系规则"), true);
+  addSelfCheck(checks, "user custom candidate can appear in prompt context", hasSuggestion(userContext, "自定义标签/字符串/自定义后缀自动机"), true);
+  addSelfCheck(checks, "hidden target stays out of prompt context", hasSuggestion(filteredContext, zFunctionPath), false);
+  addSelfCheck(checks, "merged source leads prompt context to target", hasSuggestion(mergedContext, zFunctionPath), true);
+  addSelfCheck(checks, "deprecated merge source stays out of prompt context", hasSuggestion(mergedContext, "算法/字符串/KMP"), false);
   addSelfCheck(
     checks,
     "prompt text has no unsafe placeholder artifacts",

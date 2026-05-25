@@ -3,7 +3,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { saveTagTaxonomyConfig } from "@/lib/api";
-import { getTagSuggestionList, getTagSuggestionRootGroups, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
@@ -400,6 +400,11 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       setAliasError("该名称已是当前标签，无需添加");
       return;
     }
+    const builtinAliasOwnerId = normalizeTagPath(alias)?.entryId;
+    if (builtinAliasOwnerId && builtinAliasOwnerId !== selectedSuggestion.id) {
+      setAliasError("该别名已被内置标签使用");
+      return;
+    }
 
     const currentConfig = normalizeConfig(workingConfig);
     const existingUserAlias = Object.keys(currentConfig.aliases ?? {}).some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
@@ -433,7 +438,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const nextAliases = { ...(currentConfig.aliases ?? {}) };
     const targetId = nextAliases[alias];
 
-    if (targetId !== selectedSuggestion.id) {
+    if (targetId !== selectedSuggestion.id && normalizeTagPath(alias, currentConfig)?.entryId !== selectedSuggestion.id) {
       setAliasError("只能删除当前标签的自定义别名");
       return;
     }

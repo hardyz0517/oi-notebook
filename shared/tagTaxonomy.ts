@@ -664,11 +664,19 @@ export function createResolvedTagTaxonomy(
   const idMap = new Map<string, TagTaxonomyEntry>();
 
   const resolveMergeTarget = (entry: TagTaxonomyEntry): TagTaxonomyEntry => {
-    if (!entry.mergeTo) {
-      return entry;
+    const visitedIds = new Set([entry.id]);
+    let target = entry;
+
+    while (target.mergeTo) {
+      const nextTarget = baseIndexes.idMap.get(target.mergeTo);
+      if (!nextTarget || visitedIds.has(nextTarget.id)) {
+        return entry;
+      }
+      visitedIds.add(nextTarget.id);
+      target = nextTarget;
     }
 
-    return baseIndexes.idMap.get(entry.mergeTo) ?? entry;
+    return target;
   };
 
   for (const entry of resolvedEntries) {
@@ -685,10 +693,31 @@ export function createResolvedTagTaxonomy(
     }
   }
 
+  const protectedBuiltinAliasKeys = new Set<string>();
+  for (const entry of resolvedEntries.filter((item) => item.source === "builtin")) {
+    const target = resolveMergeTarget(entry);
+    const pathText = getTagPathText(entry.path);
+    const builtinKeys = [
+      pathText,
+      entry.id,
+      entry.path[entry.path.length - 1] ?? pathText,
+      ...(entry.aliases ?? []),
+    ].map(normalizeTagAliasKey);
+    for (const key of builtinKeys) {
+      protectedBuiltinAliasKeys.add(key);
+      aliasMap.set(key, target);
+    }
+    pathMap.set(normalizeTagAliasKey(pathText), target);
+  }
+
   for (const [alias, targetReference] of Object.entries(userConfig.aliases ?? {})) {
-    const target = resolveEntryReference(targetReference, { aliasMap, pathMap, idMap });
-    if (target) {
-      aliasMap.set(normalizeTagAliasKey(alias), target);
+    const aliasKey = normalizeTagAliasKey(alias);
+    if (protectedBuiltinAliasKeys.has(aliasKey)) {
+      continue;
+    }
+    const referencedEntry = resolveEntryReference(targetReference, { aliasMap, pathMap, idMap });
+    if (referencedEntry) {
+      aliasMap.set(aliasKey, resolveMergeTarget(referencedEntry));
     }
   }
 
@@ -1074,6 +1103,7 @@ export function getTagSuggestionList(
     const aliases = uniqueStrings([
       ...(entry.aliases ?? []),
       ...getUserAliasesForEntry(entry, userConfig, taxonomy),
+      ...getMergeSourceAliasesForEntry(entry, taxonomy),
     ]);
 
     return [{
@@ -1104,11 +1134,36 @@ function getUserAliasesForEntry(
       continue;
     }
 
-    const target = resolveEntryReference(targetReference, taxonomy);
+    const target = taxonomy.aliasMap.get(normalizeTagAliasKey(targetReference)) ?? resolveEntryReference(targetReference, taxonomy);
+    const effectiveTarget = taxonomy.aliasMap.get(normalizeTagAliasKey(trimmedAlias));
 
-    if (target?.id === entry.id) {
+    if (target?.id === entry.id && effectiveTarget?.id === entry.id) {
       aliases.push(trimmedAlias);
     }
+  }
+
+  return uniqueStrings(aliases);
+}
+
+function getMergeSourceAliasesForEntry(
+  entry: TagTaxonomyEntry,
+  taxonomy: ResolvedTagTaxonomy,
+): string[] {
+  const aliases: string[] = [];
+
+  for (const source of taxonomy.entries) {
+    if (!source.mergeTo || source.id === entry.id) {
+      continue;
+    }
+    const effectiveTarget = taxonomy.aliasMap.get(normalizeTagAliasKey(source.id));
+    if (effectiveTarget?.id !== entry.id) {
+      continue;
+    }
+    aliases.push(
+      source.path[source.path.length - 1] ?? "",
+      getTagPathText(source.path),
+      ...(source.aliases ?? []),
+    );
   }
 
   return uniqueStrings(aliases);
@@ -1542,6 +1597,27 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
   );
   addSelfCheck(checks, "builtin alias works with user aliases", normalizeTagPath("exKMP", userAliasConfig)?.fullPath ?? null, zFunctionPath);
 
+  const userEntryConfig: UserTagTaxonomyConfig = {
+    entries: [{
+      id: "user.selfcheck.custom",
+      path: ["自定义标签", "字符串", "自定义模式匹配"],
+      aliases: ["自定义匹配入口"],
+      source: "user",
+    }],
+  };
+  addSelfCheck(
+    checks,
+    "user entry appears in suggestions",
+    getTagSuggestionList(userEntryConfig).some((suggestion) => suggestion.id === "user.selfcheck.custom"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "user entry alias normalizes to user canonical path",
+    normalizeTagPath("自定义匹配入口", userEntryConfig)?.fullPath ?? null,
+    "自定义标签/字符串/自定义模式匹配",
+  );
+
   const mergeConfig: UserTagTaxonomyConfig = {
     merges: {
       "algorithm.string.kmp": "algorithm.string.z-function",
@@ -1554,7 +1630,25 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
   addSelfCheck(checks, "merge source id normalizes to target id", normalizeTagPath("algorithm.string.kmp", mergeConfig)?.entryId ?? null, "algorithm.string.z-function");
   addSelfCheck(checks, "merge source suggestion is deprecated when included", mergedKmpSuggestion?.deprecated ?? null, true);
   addSelfCheck(checks, "merge source hidden from default suggestions", visibleMergeSuggestions.some((suggestion) => suggestion.id === "algorithm.string.kmp"), false);
+  addSelfCheck(checks, "merge source query returns visible target", findTagSuggestionsByQuery("KMP", { limit: 1, userConfig: mergeConfig })[0]?.pathText ?? null, zFunctionPath);
+  addSelfCheck(checks, "normalization suggests merge source target", getTagNormalizationSuggestions(["KMP"], { userConfig: mergeConfig })[0]?.normalized ?? null, zFunctionPath);
   addSelfCheck(checks, "merge keeps builtin alias normalization", normalizeTagPath("exKMP", mergeConfig)?.fullPath ?? null, zFunctionPath);
+  const userAliasToMergeSourceConfig: UserTagTaxonomyConfig = {
+    aliases: {
+      "旧 KMP 入口": "algorithm.string.kmp",
+    },
+    merges: {
+      "algorithm.string.kmp": "algorithm.string.z-function",
+    },
+  };
+  addSelfCheck(checks, "user alias pointing at merge source normalizes to target", normalizeTagPath("旧 KMP 入口", userAliasToMergeSourceConfig)?.fullPath ?? null, zFunctionPath);
+  addSelfCheck(checks, "user alias pointing at merge source searches target", findTagSuggestionsByQuery("旧 KMP 入口", { limit: 1, userConfig: userAliasToMergeSourceConfig })[0]?.pathText ?? null, zFunctionPath);
+  addSelfCheck(
+    checks,
+    "user alias cannot override builtin alias",
+    normalizeTagPath("exKMP", { aliases: { exKMP: "algorithm.string.kmp" } })?.fullPath ?? null,
+    zFunctionPath,
+  );
   addSelfCheck(
     checks,
     "hidden merge source can be previewed when included",
