@@ -56,6 +56,25 @@ export type TagCompletionContext = {
   aliases: Record<string, string>;
 };
 
+export type TagSuggestionGroupNode = {
+  name: string;
+  path: string[];
+  pathText: string;
+  id?: string;
+  entryId?: string;
+  orderKey: string;
+  candidates: TagSuggestion[];
+};
+
+export type TagSuggestionRootGroup = {
+  root: string;
+  name: string;
+  path: string[];
+  pathText: string;
+  orderKey: string;
+  groups: TagSuggestionGroupNode[];
+};
+
 export type FindTagSuggestionsOptions = {
   limit?: number;
   includeHidden?: boolean;
@@ -139,6 +158,26 @@ export type ResolvedTagTaxonomy = {
 export const tagRootGroups = ["算法", "题型", "训练", "来源", "阶段", "项目", "杂项"] as const;
 export const customTagRoot = "自定义标签";
 export const tagPathSeparator = "/";
+
+export function getTagNodeOrderKey(path: string[]): string {
+  return `path:${path.map((segment) => segment.trim()).filter(Boolean).join(tagPathSeparator)}`;
+}
+
+export function createDenseOrderOverrides(
+  currentOverrides: Record<string, number> | undefined,
+  nextIds: string[],
+): Record<string, number> {
+  const next = { ...(currentOverrides ?? {}) };
+  nextIds.forEach((id, index) => {
+    next[id] = index;
+  });
+  return next;
+}
+
+function getTagGroupOrderKey(path: string[], taxonomy: ResolvedTagTaxonomy): string {
+  const pathEntry = taxonomy.pathMap.get(normalizeTagAliasKey(getTagPathText(path)));
+  return pathEntry?.id ?? getTagNodeOrderKey(path);
+}
 
 const algorithmTagGroups = [
   "语言入门",
@@ -656,7 +695,48 @@ export function createResolvedTagTaxonomy(
   const visibleEntries = resolvedEntries
     .filter((entry) => !entry.hidden && !entry.deprecated)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || getTagPathText(a.path).localeCompare(getTagPathText(b.path), "zh-CN"));
-  const displayOrder = new Map(visibleEntries.map((entry, index) => [entry.id, entry.order ?? index]));
+  const allDisplayEntries = [...resolvedEntries]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || getTagPathText(a.path).localeCompare(getTagPathText(b.path), "zh-CN"));
+  const displayOrder = new Map<string, number>();
+  allDisplayEntries.forEach((entry, index) => {
+    displayOrder.set(entry.id, entry.order ?? index);
+  });
+
+  const rootFallbackOrder = new Map<string, number>();
+  tagRootGroups.forEach((root, index) => rootFallbackOrder.set(root, index));
+  rootFallbackOrder.set(customTagRoot, tagRootGroups.length);
+
+  allDisplayEntries.forEach((entry, index) => {
+    const root = entry.path[0];
+    if (root) {
+      const rootKey = getTagNodeOrderKey([root]);
+      if (!displayOrder.has(rootKey)) {
+        displayOrder.set(rootKey, userConfig.orderOverrides?.[rootKey] ?? rootFallbackOrder.get(root) ?? entry.order ?? index);
+      }
+    }
+
+    const group = entry.path[1];
+    if (root && group) {
+      const groupPath = [root, group];
+      const groupPathKey = getTagNodeOrderKey(groupPath);
+      const groupEntry = baseIndexes.pathMap.get(normalizeTagAliasKey(getTagPathText(groupPath)));
+      const groupOrderKey = groupEntry?.id ?? groupPathKey;
+      const groupEntryOrder = groupEntry ? displayOrder.get(groupEntry.id) : undefined;
+      const groupOrder =
+        userConfig.orderOverrides?.[groupOrderKey]
+        ?? userConfig.orderOverrides?.[groupPathKey]
+        ?? groupEntryOrder
+        ?? entry.order
+        ?? index;
+
+      if (!displayOrder.has(groupPathKey)) {
+        displayOrder.set(groupPathKey, groupOrder);
+      }
+      if (groupEntry) {
+        displayOrder.set(groupEntry.id, groupOrder);
+      }
+    }
+  });
 
   return { entries: resolvedEntries, visibleEntries, aliasMap, pathMap, idMap, displayOrder };
 }
@@ -991,7 +1071,10 @@ export function getTagSuggestionList(
 
     const pathText = getTagPathText(entry.path);
     const name = entry.path[entry.path.length - 1] ?? pathText;
-    const aliases = entry.aliases ?? [];
+    const aliases = uniqueStrings([
+      ...(entry.aliases ?? []),
+      ...getUserAliasesForEntry(entry, userConfig, taxonomy),
+    ]);
 
     return [{
       id: entry.id,
@@ -1007,7 +1090,111 @@ export function getTagSuggestionList(
   }).sort((a, b) => compareTagSuggestions(a, b, taxonomy));
 }
 
+function getUserAliasesForEntry(
+  entry: TagTaxonomyEntry,
+  userConfig: UserTagTaxonomyConfig | null | undefined,
+  taxonomy: Pick<ResolvedTagTaxonomy, "aliasMap" | "pathMap" | "idMap">,
+): string[] {
+  const aliases: string[] = [];
+
+  for (const [alias, targetReference] of Object.entries(userConfig?.aliases ?? {})) {
+    const trimmedAlias = alias.trim();
+
+    if (!trimmedAlias) {
+      continue;
+    }
+
+    const target = resolveEntryReference(targetReference, taxonomy);
+
+    if (target?.id === entry.id) {
+      aliases.push(trimmedAlias);
+    }
+  }
+
+  return uniqueStrings(aliases);
+}
+
+export function getTagSuggestionRootGroups(
+  userConfig?: UserTagTaxonomyConfig | null,
+  options: GetTagSuggestionListOptions = {},
+): TagSuggestionRootGroup[] {
+  const taxonomy = getResolvedTagTaxonomy(userConfig);
+  const suggestions = getTagSuggestionList(userConfig, options);
+  const rootMap = new Map<string, TagSuggestionRootGroup>();
+
+  for (const suggestion of suggestions) {
+    const root = suggestion.path[0] ?? customTagRoot;
+    const rootPath = [root];
+    const rootPathText = getTagPathText(rootPath);
+    const rootOrderKey = getTagNodeOrderKey(rootPath);
+    let rootGroup = rootMap.get(rootPathText);
+    if (!rootGroup) {
+      rootGroup = {
+        root,
+        name: root,
+        path: rootPath,
+        pathText: rootPathText,
+        orderKey: rootOrderKey,
+        groups: [],
+      };
+      rootMap.set(rootPathText, rootGroup);
+    }
+
+    const groupName = suggestion.path[1] ?? suggestion.name;
+    const groupPath = suggestion.path.slice(0, Math.min(2, suggestion.path.length));
+    const groupPathText = getTagPathText(groupPath);
+    let group = rootGroup.groups.find((item) => item.pathText === groupPathText);
+    if (!group) {
+      const groupEntry = taxonomy.pathMap.get(normalizeTagAliasKey(groupPathText));
+      const orderKey = getTagGroupOrderKey(groupPath, taxonomy);
+      group = {
+        name: groupName,
+        path: groupPath,
+        pathText: groupPathText,
+        id: groupEntry?.id,
+        entryId: groupEntry?.id,
+        orderKey,
+        candidates: [],
+      };
+      rootGroup.groups.push(group);
+    }
+
+    group.candidates.push(suggestion);
+  }
+
+  return Array.from(rootMap.values())
+    .map((rootGroup) => ({
+      ...rootGroup,
+      groups: rootGroup.groups
+        .map((group) => ({
+          ...group,
+          candidates: group.candidates.sort((a, b) => compareTagSuggestions(a, b, taxonomy)),
+        }))
+        .sort((a, b) => getPathOrder(a.path, taxonomy) - getPathOrder(b.path, taxonomy) || a.pathText.localeCompare(b.pathText, "zh-CN")),
+    }))
+    .sort((a, b) => getPathOrder(a.path, taxonomy) - getPathOrder(b.path, taxonomy) || a.pathText.localeCompare(b.pathText, "zh-CN"));
+}
+
+function getPathOrder(path: string[], taxonomy: ResolvedTagTaxonomy): number {
+  if (path.length === 0) return Number.MAX_SAFE_INTEGER;
+  const pathText = getTagPathText(path);
+  const pathEntry = taxonomy.pathMap.get(normalizeTagAliasKey(pathText));
+  if (pathEntry) {
+    const entryOrder = taxonomy.displayOrder.get(pathEntry.id);
+    if (entryOrder !== undefined) return entryOrder;
+  }
+  return taxonomy.displayOrder.get(getTagNodeOrderKey(path)) ?? Number.MAX_SAFE_INTEGER;
+}
+
 function compareTagSuggestions(a: TagSuggestion, b: TagSuggestion, taxonomy = resolvedTagTaxonomy) {
+  const rootOrderA = getPathOrder(a.path.slice(0, 1), taxonomy);
+  const rootOrderB = getPathOrder(b.path.slice(0, 1), taxonomy);
+  if (rootOrderA !== rootOrderB) return rootOrderA - rootOrderB;
+
+  const groupOrderA = getPathOrder(a.path.slice(0, 2), taxonomy);
+  const groupOrderB = getPathOrder(b.path.slice(0, 2), taxonomy);
+  if (groupOrderA !== groupOrderB) return groupOrderA - groupOrderB;
+
   const orderA = taxonomy.displayOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
   const orderB = taxonomy.displayOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
   return orderA - orderB || a.pathText.localeCompare(b.pathText, "zh-CN");
@@ -1327,6 +1514,34 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
   addSelfCheck(checks, "query 拓展 KMP returns Z 函数", firstQueryPath("拓展 KMP"), zFunctionPath);
   addSelfCheck(checks, "query 主席树 returns 可持久化线段树", firstQueryPath("主席树"), "算法/树形数据结构/可持久化线段树");
   addSelfCheck(checks, "query STB returns segment tree beats", firstQueryPath("STB"), "算法/树形数据结构/吉司机线段树 segment tree beats");
+
+  const userAlias = "user-z-alias-selfcheck";
+  const userAliasConfig: UserTagTaxonomyConfig = {
+    aliases: {
+      [userAlias]: "algorithm.string.z-function",
+    },
+  };
+  addSelfCheck(checks, "user alias normalizes to Z 函数", normalizeTagPath(userAlias, userAliasConfig)?.fullPath ?? null, zFunctionPath);
+  addSelfCheck(
+    checks,
+    "query user alias returns Z 函数",
+    findTagSuggestionsByQuery(userAlias, { limit: 1, userConfig: userAliasConfig })[0]?.pathText ?? null,
+    zFunctionPath,
+  );
+  addSelfCheck(
+    checks,
+    "suggestions include user alias",
+    getTagSuggestionList(userAliasConfig).find((suggestion) => suggestion.id === "algorithm.string.z-function")?.aliases.includes(userAlias) ?? false,
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "removed user alias stops matching suggestions",
+    findTagSuggestionsByQuery(userAlias, { limit: 1, userConfig: { aliases: {} } }).length,
+    0,
+  );
+  addSelfCheck(checks, "builtin alias works with user aliases", normalizeTagPath("exKMP", userAliasConfig)?.fullPath ?? null, zFunctionPath);
+
   addSelfCheck(checks, "article text 拓展 KMP suggests Z 函数", suggestedPath({ title: "拓展 KMP 模板题" }), zFunctionPath);
   addSelfCheck(
     checks,
@@ -1339,6 +1554,179 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
     "query results do not contain duplicate candidates",
     new Set(findTagSuggestionsByQuery("tree", { limit: 20 }).map((item) => item.id)).size,
     findTagSuggestionsByQuery("tree", { limit: 20 }).length,
+  );
+
+  const defaultDpOrder = getTagSuggestionList()
+    .filter((item) => item.pathText.startsWith("算法/动态规划 DP/"))
+    .map((item) => item.id);
+  const overriddenDpOrder = getTagSuggestionList({
+    orderOverrides: {
+      "algorithm.dp.knapsack": -10,
+    },
+  })
+    .filter((item) => item.pathText.startsWith("算法/动态规划 DP/"))
+    .map((item) => item.id);
+  const hiddenZSuggestions = getTagSuggestionList({
+    hiddenIds: ["algorithm.string.z-function"],
+    orderOverrides: {
+      "algorithm.string.z-function": -10,
+    },
+  });
+  const hiddenZIncludedSuggestions = getTagSuggestionList(
+    {
+      hiddenIds: ["algorithm.string.z-function"],
+      orderOverrides: {
+        "algorithm.string.z-function": -10,
+      },
+    },
+    { includeHidden: true },
+  );
+  const rootOverrideOrder = uniqueStrings(getTagSuggestionList({
+    orderOverrides: {
+      [getTagNodeOrderKey(["训练"])]: -10,
+    },
+  }).map((item) => item.path[0] ?? ""));
+  const algorithmGroupOverrideOrder = uniqueStrings(getTagSuggestionList({
+    orderOverrides: {
+      "algorithm.group.string": -10,
+    },
+  })
+    .filter((item) => item.path[0] === "算法")
+    .map((item) => item.path[1] ?? ""));
+  const algorithmBrowserGroups = getTagSuggestionRootGroups({
+    orderOverrides: {
+      "algorithm.group.string": -10,
+    },
+  }).find((group) => group.root === "算法")?.groups.map((group) => group.name) ?? [];
+  const dirtyMiddleGroupNextIds = [
+    "algorithm.group.string",
+    "algorithm.group.language",
+    "algorithm.group.dp",
+  ];
+  const dirtyMiddleGroupOverrides = createDenseOrderOverrides(
+    {
+      "algorithm.group.string": 0,
+      "algorithm.group.language": 0,
+      "algorithm.group.dp": 0,
+      "algorithm.string.z-function": 42,
+    },
+    dirtyMiddleGroupNextIds,
+  );
+  const dirtyMiddleGroupOrder = getTagSuggestionRootGroups({
+    orderOverrides: dirtyMiddleGroupOverrides,
+  }).find((group) => group.root === "算法")?.groups.map((group) => group.name) ?? [];
+  const stringTagOverrideOrder = getTagSuggestionList({
+    orderOverrides: {
+      "algorithm.string.z-function": -10,
+    },
+  })
+    .filter((item) => item.pathText.startsWith("算法/字符串/"))
+    .map((item) => item.id);
+  const hiddenStringOverrideOrder = getTagSuggestionList(
+    {
+      hiddenIds: ["algorithm.string.z-function"],
+      orderOverrides: {
+        "algorithm.string.z-function": -10,
+      },
+    },
+    { includeHidden: true },
+  )
+    .filter((item) => item.pathText.startsWith("算法/字符串/"))
+    .map((item) => item.id);
+
+  addSelfCheck(
+    checks,
+    "default order keeps DP before knapsack",
+    defaultDpOrder.indexOf("algorithm.dp.dp") < defaultDpOrder.indexOf("algorithm.dp.knapsack"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides can reorder sibling tags",
+    overriddenDpOrder.indexOf("algorithm.dp.knapsack") < overriddenDpOrder.indexOf("algorithm.dp.dp"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides can reorder root categories",
+    rootOverrideOrder.indexOf("训练") < rootOverrideOrder.indexOf("算法"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides can reorder middle groups",
+    algorithmGroupOverrideOrder.indexOf("字符串") < algorithmGroupOverrideOrder.indexOf("语言入门"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "tag manager group list reorders middle groups",
+    algorithmBrowserGroups.indexOf("字符串") < algorithmBrowserGroups.indexOf("语言入门"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "dirty middle group overrides rewrite dense values",
+    dirtyMiddleGroupNextIds.map((id) => dirtyMiddleGroupOverrides[id]).join(","),
+    "0,1,2",
+  );
+  addSelfCheck(
+    checks,
+    "dirty middle group overrides keep rewritten browser order",
+    dirtyMiddleGroupOrder.indexOf("字符串") < dirtyMiddleGroupOrder.indexOf("语言入门"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "dirty middle group rewrite preserves other scope overrides",
+    dirtyMiddleGroupOverrides["algorithm.string.z-function"],
+    42,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides can reorder leaf tags in string group",
+    stringTagOverrideOrder.indexOf("algorithm.string.z-function") < stringTagOverrideOrder.indexOf("algorithm.string.kmp"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides keep unspecified sibling tags",
+    overriddenDpOrder.includes("algorithm.dp.digit"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides keep unspecified middle groups",
+    algorithmGroupOverrideOrder.includes("图论"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "hiddenIds with orderOverrides exclude hidden tags by default",
+    hiddenZSuggestions.some((item) => item.id === "algorithm.string.z-function"),
+    false,
+  );
+  addSelfCheck(
+    checks,
+    "includeHidden returns hidden ordered tags",
+    hiddenZIncludedSuggestions.some((item) => item.id === "algorithm.string.z-function" && item.hidden),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "includeHidden keeps hidden tags in overridden order",
+    hiddenStringOverrideOrder.indexOf("algorithm.string.z-function") < hiddenStringOverrideOrder.indexOf("algorithm.string.kmp"),
+    true,
+  );
+  addSelfCheck(
+    checks,
+    "orderOverrides do not affect alias normalization",
+    normalizeTagPath("exKMP", {
+      orderOverrides: {
+        "algorithm.string.z-function": -10,
+      },
+    })?.fullPath ?? null,
+    zFunctionPath,
   );
 
   const tree = buildTagTree([

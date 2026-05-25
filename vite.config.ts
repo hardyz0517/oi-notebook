@@ -41,8 +41,8 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**", "**/notes/**"],
+      // 3. tell Vite to ignore backend, notes, and local runtime config writes
+      ignored: ["**/src-tauri/**", "**/notes/**", ".oinb/**", "**/.oinb/**"],
     },
   },
 }));

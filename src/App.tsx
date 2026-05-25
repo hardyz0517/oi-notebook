@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
@@ -30,7 +31,7 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagNormalizationSuggestions, getTagSuggestionList, normalizeTagPath, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -483,6 +484,38 @@ type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings"
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
 
+const TAG_MANAGER_DEBUG_STORAGE_KEY = "oi-notebook.debugTagManager";
+const TAG_MANAGER_DEBUG_LOG_STORAGE_KEY = "oi-notebook.debugTagManagerLog";
+const TAG_MANAGER_DEBUG_LOG_LIMIT = 300;
+
+function isTagManagerDebugEnabled(): boolean {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(TAG_MANAGER_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function debugTagManager(message: string, detail?: unknown): void {
+  recordTagManagerDebugEvent(message, detail);
+}
+
+function recordTagManagerDebugEvent(event: string, payload?: unknown): void {
+  if (!isTagManagerDebugEnabled()) return;
+  try {
+    const raw = window.localStorage.getItem(TAG_MANAGER_DEBUG_LOG_STORAGE_KEY) ?? "";
+    const entries = raw.split("\n").filter(Boolean);
+    entries.push(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      event,
+      payload,
+    }));
+    window.localStorage.setItem(TAG_MANAGER_DEBUG_LOG_STORAGE_KEY, entries.slice(-TAG_MANAGER_DEBUG_LOG_LIMIT).join("\n"));
+  } catch {
+    // Debug logging must never affect app behavior.
+  }
+}
+
 type TagNormalizationScanResult = {
   path: string;
   title: string;
@@ -498,14 +531,6 @@ type TagNormalizationApplyResult = {
   successCount: number;
   normalizedTagCount: number;
   failures: TagNormalizationApplyFailure[];
-};
-
-type TagManagerRootGroup = {
-  root: string;
-  groups: Array<{
-    name: string;
-    candidates: TagSuggestion[];
-  }>;
 };
 
 interface PolishReviewTab {
@@ -2559,9 +2584,7 @@ export default function App() {
   const [isTagTaxonomyAliasListExpanded, setIsTagTaxonomyAliasListExpanded] = useState(false);
   const [tagTaxonomyEntryListQuery, setTagTaxonomyEntryListQuery] = useState("");
   const [tagTaxonomyAliasListQuery, setTagTaxonomyAliasListQuery] = useState("");
-  const [tagManagerSearchQuery, setTagManagerSearchQuery] = useState("");
-  const [showHiddenTagsInManager, setShowHiddenTagsInManager] = useState(false);
-  const [selectedTagManagerSuggestionId, setSelectedTagManagerSuggestionId] = useState<string | null>(null);
+  const [tagManagerSession, setTagManagerSession] = useState<{ initialConfig: UserTagTaxonomyConfig; returnTarget: SettingsTarget } | null>(null);
   const [isScanningTagNormalization, setIsScanningTagNormalization] = useState(false);
   const [tagNormalizationScanResults, setTagNormalizationScanResults] = useState<TagNormalizationScanResult[] | null>(null);
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
@@ -2570,6 +2593,8 @@ export default function App() {
   const [isApplyingTagNormalizationScan, setIsApplyingTagNormalizationScan] = useState(false);
   const [tagNormalizationApplyResult, setTagNormalizationApplyResult] = useState<TagNormalizationApplyResult | null>(null);
   const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
+  const tagManagerSessionRef = useRef(tagManagerSession);
+  const currentFilePathRef = useRef(currentFilePath);
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
   const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
@@ -2577,6 +2602,15 @@ export default function App() {
   const scrollSyncRafRef = useRef<number | null>(null);
   const scrollSyncSuppressRafRef = useRef<number | null>(null);
   const suppressedScrollPaneRef = useRef<"editor" | "preview" | null>(null);
+
+  useEffect(() => {
+    tagManagerSessionRef.current = tagManagerSession;
+  }, [tagManagerSession]);
+
+  useEffect(() => {
+    currentFilePathRef.current = currentFilePath;
+  }, [currentFilePath]);
+
   const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
     if (suppressedScrollPaneRef.current === source) return;
 
@@ -2839,6 +2873,14 @@ export default function App() {
     frontmatterPrefix: "",
     markdown: INITIAL_MARKDOWN,
   });
+  useEffect(() => {
+    debugTagManager("app.activeSettingsTarget.changed", {
+      activeSettingsTarget,
+      hasTagManagerSession: Boolean(tagManagerSession),
+      settingsOpen: isAdvancedActionsOpen,
+      currentFilePath,
+    });
+  }, [activeSettingsTarget, currentFilePath, isAdvancedActionsOpen, tagManagerSession]);
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -3175,52 +3217,57 @@ export default function App() {
     }
     return filteredTagTaxonomyUserAliases.slice(0, 5);
   }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
-  const tagManagerSuggestions = useMemo(
-    () => getTagSuggestionList(tagTaxonomyUserConfig, { includeHidden: showHiddenTagsInManager }),
-    [showHiddenTagsInManager, tagTaxonomyUserConfig],
+  const tagManagerAvailableCandidateCount = useMemo(
+    () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden).length,
+    [tagTaxonomyUserConfig],
   );
-  const tagManagerRootGroups = useMemo<TagManagerRootGroup[]>(() => {
-    const rootMap = new Map<string, Map<string, TagSuggestion[]>>();
-    for (const suggestion of tagManagerSuggestions) {
-      const root = suggestion.path[0] ?? "未分组";
-      const group = suggestion.path[1] ?? "未分组";
-      if (!rootMap.has(root)) {
-        rootMap.set(root, new Map());
-      }
-      const groupMap = rootMap.get(root)!;
-      if (!groupMap.has(group)) {
-        groupMap.set(group, []);
-      }
-      groupMap.get(group)!.push(suggestion);
-    }
+  const openTagManagerWorkspace = useCallback(() => {
+    const returnTarget: SettingsTarget = { type: "page", page: "blog-tag-manager" };
+    debugTagManager("app.openTagManager.request", {
+      returnTarget,
+      hasConfig: Boolean(tagTaxonomyConfig),
+      settingsOpen: isAdvancedActionsOpen,
+      activeSettingsTarget,
+      currentFilePath,
+    });
+    setTagManagerSession({
+      initialConfig: normalizeUserTagTaxonomyConfig(tagTaxonomyConfig),
+      returnTarget,
+    });
+    debugTagManager("app.tagManagerSession.set", {
+      returnTarget,
+      settingsOpen: isAdvancedActionsOpen,
+      activeSettingsTarget,
+      currentFilePath,
+    });
+    setActiveSettingsTarget(returnTarget);
+    setSettingsView("main");
+    setIsAdvancedActionsOpen(true);
+  }, [activeSettingsTarget, currentFilePath, isAdvancedActionsOpen, tagTaxonomyConfig]);
+  const requestCloseTagManager = useCallback((reason: TagManagerCloseReason, finalConfig?: UserTagTaxonomyConfig) => {
+    debugTagManager("app.requestCloseTagManager", {
+      reason,
+      hasSession: Boolean(tagManagerSession),
+      settingsOpen: isAdvancedActionsOpen,
+      activeSettingsTarget,
+      currentFilePath,
+    });
+    const session = tagManagerSession;
+    if (!session) return;
 
-    return Array.from(rootMap.entries()).map(([root, groupMap]) => ({
-      root,
-      groups: Array.from(groupMap.entries()).map(([name, candidates]) => ({
-        name,
-        candidates,
-      })),
-    }));
-  }, [tagManagerSuggestions]);
-  const tagManagerSearchResults = useMemo(() => {
-    const query = tagManagerSearchQuery.trim().toLowerCase();
-    if (!query) return [];
-    return tagManagerSuggestions
-      .filter((suggestion) =>
-        [
-          suggestion.id,
-          suggestion.name,
-          suggestion.pathText,
-          suggestion.searchText,
-          ...suggestion.aliases,
-        ].join("\n").toLowerCase().includes(query),
-      )
-      .slice(0, 100);
-  }, [tagManagerSearchQuery, tagManagerSuggestions]);
-  const selectedTagManagerSuggestion = useMemo(
-    () => tagManagerSuggestions.find((suggestion) => suggestion.id === selectedTagManagerSuggestionId) ?? null,
-    [selectedTagManagerSuggestionId, tagManagerSuggestions],
-  );
+    const returnTarget = session.returnTarget ?? { type: "page", page: "blog-tag-manager" };
+    debugTagManager("app.tagManagerSession.clear", {
+      returnTarget,
+      settingsOpen: isAdvancedActionsOpen,
+      currentFilePath,
+    });
+    setTagTaxonomyConfig(normalizeUserTagTaxonomyConfig(finalConfig ?? session.initialConfig));
+    setTagTaxonomyConfigError(null);
+    setTagManagerSession(null);
+    setIsAdvancedActionsOpen(true);
+    setSettingsView("main");
+    setActiveSettingsTarget(returnTarget);
+  }, [activeSettingsTarget, currentFilePath, isAdvancedActionsOpen, tagManagerSession]);
   const saveUserTagTaxonomyConfig = useCallback(async (nextConfig: UserTagTaxonomyConfig): Promise<boolean> => {
     const normalizedConfig = normalizeUserTagTaxonomyConfig(nextConfig);
     setIsSavingTagTaxonomyConfig(true);
@@ -3308,19 +3355,6 @@ export default function App() {
     await saveUserTagTaxonomyConfig({
       ...currentConfig,
       aliases: nextAliases,
-    });
-  }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
-  const handleSetTagManagerSuggestionHidden = useCallback(async (suggestion: TagSuggestion, hidden: boolean) => {
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
-    if (hidden) {
-      hiddenIds.add(suggestion.id);
-    } else {
-      hiddenIds.delete(suggestion.id);
-    }
-    await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      hiddenIds: Array.from(hiddenIds),
     });
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const luoguStatusLabel =
@@ -6401,6 +6435,16 @@ export default function App() {
   };
 
   const closeSettingsCenter = () => {
+    debugTagManager("settings.close", {
+      hasTagManagerSession: Boolean(tagManagerSession),
+      activeSettingsTarget,
+      settingsView,
+      currentFilePath,
+    });
+    if (tagManagerSession) {
+      debugTagManager("settings.close.ignoredForTagManager");
+      return;
+    }
     if (hasAiConfigDraftChanges && !window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
       return;
     }
@@ -6427,6 +6471,16 @@ export default function App() {
   };
 
   const handleSettingsCenterCloseRequest = () => {
+    debugTagManager("settings.closeRequest", {
+      hasTagManagerSession: Boolean(tagManagerSession),
+      activeSettingsTarget,
+      settingsView,
+      currentFilePath,
+    });
+    if (tagManagerSession) {
+      debugTagManager("settings.closeRequest.ignoredForTagManager");
+      return;
+    }
     if (settingsView === "prompt-editor") {
       closePromptEditorToSettings();
       return;
@@ -6754,6 +6808,11 @@ export default function App() {
     let cancelled = false;
 
     listen("notes-changed", () => {
+      debugTagManager("notes.changed", {
+        hasTagManagerSession: Boolean(tagManagerSessionRef.current),
+        currentFilePath: currentFilePathRef.current,
+        refreshList: true,
+      });
       listNotes()
         .then((updated) => {
           if (!cancelled) {
@@ -6900,6 +6959,22 @@ export default function App() {
     Boolean(dialogValue.trim()) &&
     !folderNameValidationMessage &&
     !folderParentValidationMessage;
+
+  void SettingsInlineSelect;
+  void PROMPT_STYLE_PLACEHOLDER;
+  void expandedLuoguRuleId;
+  void setExpandedLuoguRuleId;
+  void isTestingWebSearchConnection;
+  void webSearchConnectionMessage;
+  void webCacheMessage;
+  void luoguSettingsStatusTone;
+  void luoguSettingsStatusDescription;
+  void isLuoguRuleControlDisabled;
+  void luoguRuleSettingRows;
+  void promptTemplateRows;
+  void handleTestWebSearchConnection;
+  void loadPromptTemplates;
+  void handleEditPrompt;
 
   return (
     <>
@@ -8077,9 +8152,16 @@ export default function App() {
         </section>
       </div>
     )}
+    {isAdvancedActionsOpen && tagManagerSession === null && (
     <Dialog
-      open={isAdvancedActionsOpen}
+      open
       onOpenChange={(open) => {
+        debugTagManager("settings.onOpenChange", {
+          open,
+          nextOpen: open,
+          activeSettingsTarget,
+          currentFilePath,
+        });
         if (open) {
           setSettingsCenterRect((current) => getSafeOpenedSettingsCenterRect(current));
           setExpandedSettingsGroups({});
@@ -8909,18 +8991,18 @@ export default function App() {
 
                         <section className="border-t border-border/70 pt-4">
                           <div className="grid gap-2">
-                            <div className="text-sm font-semibold text-foreground">可视化标签管理器（后续）</div>
+                            <div className="text-sm font-semibold text-foreground">标签管理器</div>
                             <div className="text-xs leading-5 text-muted-foreground">
-                              后续会在这里支持树形浏览标签体系、搜索内置标签、隐藏内置标签、调整顺序、设置合并规则和集中管理别名。当前页面只提供快速新增和扫描工具。
+                              标签管理器已可用于浏览和隐藏/恢复；排序、合并、集中别名管理后续支持。
                             </div>
                             <div>
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => openSettingsSection("blog-tag-manager")}
+                                onClick={openTagManagerWorkspace}
                               >
-                                打开标签管理器（只读）
+                                打开标签管理器
                               </Button>
                             </div>
                           </div>
@@ -8931,336 +9013,38 @@ export default function App() {
 
                   {shouldRenderSettingsPage("blog-tag-manager") && (
                     <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">标签管理器</div>
-                        <div className="text-xs leading-5 text-muted-foreground">
-                          用于浏览当前合并后的标签体系。当前版本只读；后续会支持隐藏、排序、合并规则和集中别名管理。
-                        </div>
-                      </div>
-                      <div className="grid min-h-[520px] gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-                        <section className="grid min-h-0 gap-3 rounded-sm border border-border/70 bg-muted/10 p-3">
-                          <div className="grid gap-1.5">
-                            <Label htmlFor="tag-manager-search" className="text-xs text-muted-foreground">搜索</Label>
-                            <Input
-                              id="tag-manager-search"
-                              value={tagManagerSearchQuery}
-                              placeholder="搜索标签、路径或别名"
-                              onChange={(event) => setTagManagerSearchQuery(event.target.value)}
-                              className="h-8 text-sm"
-                            />
+                      <div className="grid gap-5">
+                        <div className="grid gap-1">
+                          <div className="text-base font-semibold text-foreground">标签管理器</div>
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            浏览当前合并后的标签体系，并管理标签可见性。
                           </div>
-                          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              className="h-3.5 w-3.5 accent-primary"
-                              checked={showHiddenTagsInManager}
-                              onChange={(event) => setShowHiddenTagsInManager(event.target.checked)}
-                            />
-                            显示隐藏标签
-                          </label>
-                          <div className="min-h-0 overflow-y-auto pr-1">
-                            {tagManagerSearchQuery.trim() ? (
-                              tagManagerSearchResults.length === 0 ? (
-                                <div className="py-6 text-sm text-muted-foreground">没有找到匹配的标签。</div>
-                              ) : (
-                                <div className="grid gap-1">
-                                  {tagManagerSearchResults.map((suggestion) => (
-                                    <button
-                                      key={suggestion.id}
-                                      type="button"
-                                      className={cn(
-                                        "grid min-w-0 gap-0.5 rounded-sm border px-2.5 py-2 text-left transition-colors",
-                                        selectedTagManagerSuggestion?.id === suggestion.id
-                                          ? "border-primary/60 bg-primary/10"
-                                          : "border-transparent hover:border-border/70 hover:bg-muted/20",
-                                      )}
-                                      onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
-                                    >
-                                      <span className="truncate text-sm text-foreground">{suggestion.name}</span>
-                                      <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-                                        <span className="min-w-0 truncate">{suggestion.pathText}</span>
-                                        {suggestion.hidden && <span className="shrink-0">已隐藏</span>}
-                                      </span>
-                                    </button>
-                                  ))}
-                                </div>
-                              )
-                            ) : (
-                              <div className="grid gap-3">
-                                {tagManagerRootGroups.map((rootGroup) => (
-                                  <details key={rootGroup.root} open={rootGroup.root === "算法"} className="group rounded-sm border border-border/60 bg-background/20">
-                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-sm font-medium text-foreground hover:bg-muted/20">
-                                      <span>{rootGroup.root}</span>
-                                      <span className="text-[11px] font-normal text-muted-foreground">
-                                        {rootGroup.groups.reduce((total, group) => total + group.candidates.length, 0)} 个
-                                      </span>
-                                    </summary>
-                                    <div className="grid gap-2 border-t border-border/60 px-2.5 py-2">
-                                      {rootGroup.groups.map((group) => (
-                                        <div key={`${rootGroup.root}:${group.name}`} className="grid gap-1">
-                                          <div className="text-xs font-medium text-muted-foreground">{group.name}</div>
-                                          <div className="grid gap-1">
-                                            {group.candidates.map((suggestion) => (
-                                              <button
-                                                key={suggestion.id}
-                                                type="button"
-                                                className={cn(
-                                                  "flex min-w-0 items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
-                                                  selectedTagManagerSuggestion?.id === suggestion.id
-                                                    ? "bg-primary/10 text-foreground"
-                                                    : "text-muted-foreground hover:bg-muted/20 hover:text-foreground",
-                                                )}
-                                                onClick={() => setSelectedTagManagerSuggestionId(suggestion.id)}
-                                              >
-                                                <span className="min-w-0 truncate">{suggestion.name}</span>
-                                                <span className="flex shrink-0 items-center gap-1">
-                                                  {suggestion.hidden && (
-                                                    <span className="rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">已隐藏</span>
-                                                  )}
-                                                  {suggestion.source === "user" && (
-                                                    <span className="rounded-sm border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">user</span>
-                                                  )}
-                                                </span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </details>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </section>
-
-                        <section className="min-w-0 rounded-sm border border-border/70 bg-muted/10 p-4">
-                          {selectedTagManagerSuggestion ? (
-                            <div className="grid gap-4">
-                              <div className="grid gap-1">
-                                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                  <span className="text-base font-semibold text-foreground">{selectedTagManagerSuggestion.name}</span>
-                                  <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                                    {selectedTagManagerSuggestion.source === "user" ? "用户自定义标签" : "内置标签"}
-                                  </span>
-                                  {selectedTagManagerSuggestion.deprecated && (
-                                    <span className="rounded-sm border border-amber-300/50 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-200">deprecated</span>
-                                  )}
-                                  {selectedTagManagerSuggestion.hidden && (
-                                    <span className="rounded-sm border border-border/70 bg-muted/20 px-1.5 py-0.5 text-[11px] text-muted-foreground">hidden</span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-muted-foreground">当前仅支持隐藏 / 恢复显示；编辑、排序和合并规则将在后续支持。</div>
-                              </div>
-
-                              <div className="grid gap-3 text-sm">
-                                <div className="grid gap-1">
-                                  <div className="text-xs text-muted-foreground">完整路径</div>
-                                  <div className="break-words text-foreground">{selectedTagManagerSuggestion.pathText}</div>
-                                </div>
-                                <div className="grid gap-1">
-                                  <div className="text-xs text-muted-foreground">canonical id</div>
-                                  <div className="break-all rounded-sm border border-border/70 bg-background/30 px-2 py-1 font-mono text-xs text-foreground">
-                                    {selectedTagManagerSuggestion.id}
-                                  </div>
-                                </div>
-                                <div className="grid gap-1">
-                                  <div className="text-xs text-muted-foreground">来源</div>
-                                  <div className="text-foreground">{selectedTagManagerSuggestion.source}</div>
-                                </div>
-                                <div className="grid gap-2">
-                                  <div className="text-xs text-muted-foreground">aliases</div>
-                                  {selectedTagManagerSuggestion.aliases.length === 0 ? (
-                                    <div className="text-sm text-muted-foreground">暂无别名。</div>
-                                  ) : (
-                                    <div className="flex flex-wrap gap-2">
-                                      {selectedTagManagerSuggestion.aliases.map((alias) => (
-                                        <span key={alias} className="rounded-sm border border-border/70 bg-background/30 px-2 py-1 text-xs text-foreground">
-                                          {alias}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="grid gap-2 border-t border-border/70 pt-3">
-                                  <div className="text-xs text-muted-foreground">可见性</div>
-                                  <div className="flex min-w-0 flex-wrap items-center gap-3">
-                                    <span className="text-sm text-foreground">
-                                      状态：{selectedTagManagerSuggestion.hidden ? "已隐藏" : "显示中"}
-                                    </span>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => void handleSetTagManagerSuggestionHidden(selectedTagManagerSuggestion, !selectedTagManagerSuggestion.hidden)}
-                                      disabled={isSavingTagTaxonomyConfig}
-                                    >
-                                      {isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                                      {selectedTagManagerSuggestion.hidden ? "恢复显示" : "隐藏此标签"}
-                                    </Button>
-                                  </div>
-                                  <div className="text-xs leading-5 text-muted-foreground">
-                                    该操作只写入用户配置 hiddenIds，不会修改内置 taxonomy 或任何笔记。
-                                  </div>
-                                  {tagTaxonomySaveError && (
-                                    <div className="text-xs text-destructive">保存失败：{tagTaxonomySaveError}</div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex h-full min-h-[320px] items-center justify-center rounded-sm border border-dashed border-border/70 text-sm text-muted-foreground">
-                              请选择左侧标签。
-                            </div>
-                          )}
-                        </section>
-                      </div>
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("ai-web-search") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">联网搜索</div>
-                        <div className="text-xs leading-5 text-muted-foreground">Bing 公开搜索无需 Key；Bocha 推荐用于稳定中文搜索；Brave 适合已有配置。</div>
-                      </div>
-                      <SettingRow title="启用联网搜索 Provider" description="关闭后不会请求公开搜索 Provider。">
-                        <button type="button" className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", aiConfigDraft?.web_search.enabled ? "border-primary/70 bg-primary" : "border-border bg-muted/40")} onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), enabled: !normalizeWebSearchConfig(config.web_search).enabled } }))} disabled={!aiConfigDraft || isSavingAiConfig} role="switch" aria-checked={aiConfigDraft?.web_search.enabled === true} aria-label="启用联网搜索 Provider"><span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", aiConfigDraft?.web_search.enabled && "translate-x-5")} /></button>
-                      </SettingRow>
-                      <SettingRow title="Provider" description="Bing 无需 Key，Bocha 推荐 / 稳定，Brave 备用。">
-                        <div className="flex flex-wrap gap-2">
-                          {([{ value: "bing", label: "Bing 公开搜索", badge: "无需 Key" }, { value: "bocha", label: "博查 Bocha", badge: "推荐 / 稳定" }, { value: "brave", label: "Brave Search", badge: "备用" }] as const).map((option) => (
-                            <Button key={option.value} type="button" variant={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === option.value ? "default" : "outline"} size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), provider: option.value } }))} disabled={!aiConfigDraft || isSavingAiConfig}>{option.label}<span className="ml-1 text-[10px] opacity-75">{option.badge}</span></Button>
-                          ))}
                         </div>
-                      </SettingRow>
-                      <SettingRow title="Bing 公开搜索" description="无需 API Key，适合开箱即用。稳定性不如正式 API；如果遇到限流或验证页，可以稍后重试或改用 Bocha / Brave。">
-                        <span className="text-xs text-muted-foreground">无需 Key，但可能被限流或返回验证页。</span>
-                      </SettingRow>
-                      <SettingRow title="Bocha API Key" description="推荐，适合中文搜索。"><Input type="password" value={aiConfigDraft?.web_search.bochaApiKey ?? ""} placeholder="sk-..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), bochaApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="Bocha Endpoint" description="留空使用默认地址。"><Input value={aiConfigDraft?.web_search.bochaEndpoint ?? ""} placeholder="https://api.bochaai.com/v1/web-search" onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), bochaEndpoint: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="Brave API Key" description="备用，适合已有配置。"><Input type="password" value={aiConfigDraft?.web_search.braveApiKey ?? ""} placeholder="BSA..." onChange={(event) => updateAiConfigDraft((config) => ({ ...config, web_search: { ...normalizeWebSearchConfig(config.web_search), braveApiKey: event.target.value } }))} disabled={!aiConfigDraft || isSavingAiConfig} /></SettingRow>
-                      <SettingRow title="测试连接" description={normalizeWebSearchConfig(aiConfigDraft?.web_search).provider === "bing" ? "手动发送一个很小的 Bing 公开搜索测试 query。" : !normalizeWebSearchConfig(aiConfigDraft?.web_search).bochaApiKey && !normalizeWebSearchConfig(aiConfigDraft?.web_search).braveApiKey ? "Bing 可无需 Key 使用；Bocha / Brave 需要配置 Key。" : "发送一个小查询测试当前 Provider。"}>
-                        <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleTestWebSearchConnection()} disabled={!aiConfigDraft || isSavingAiConfig || isTestingWebSearchConnection}>{isTestingWebSearchConnection ? "测试中..." : "测试连接"}</Button>{webSearchConnectionMessage && <span className="text-xs text-muted-foreground">{webSearchConnectionMessage}</span>}</div>
-                      </SettingRow>
-                      <SettingRow title="清理联网缓存" description="清理搜索结果和网页摘录缓存。"><div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => void handleClearWebCache()} disabled={isClearingWebCache}>{isClearingWebCache ? "清理中..." : "清理联网缓存"}</Button>{webCacheMessage && <span className="text-xs text-muted-foreground">{webCacheMessage}</span>}</div></SettingRow>
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("ai-prompts") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">提示词模板</div><div className="text-xs leading-5 text-muted-foreground">这里只列入口；编辑会打开单独视图。</div></div>
-                      {promptTemplates.length === 0 ? (
-                        <SettingRow title="本机模板" description="读取当前可编辑模板列表。"><Button variant="outline" onClick={() => void loadPromptTemplates()} disabled={isLoadingPrompt || isSavingPrompt}><FileText className="h-3.5 w-3.5" />读取提示词模板</Button></SettingRow>
-                      ) : (
-                        <>
-                          {promptTemplateRows.map((prompt) => {
-                            return <SettingRow key={prompt.fileName} title={prompt.usage.title || prompt.displayName} description={<><span className="font-mono">{prompt.fileName}</span><span> 路 {prompt.usage.purpose}</span></>}><Button type="button" variant="outline" size="sm" onClick={() => handleEditPrompt(prompt.fileName)} disabled={isLoadingPrompt || isSavingPrompt}>编辑</Button></SettingRow>;
-                          })}
-                          <SettingRow title={PROMPT_STYLE_PLACEHOLDER.title} description={PROMPT_STYLE_PLACEHOLDER.purpose}><span className="text-xs text-muted-foreground">后续接入</span></SettingRow>
-                        </>
-                      )}
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("luogu-account") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">账号配置</div>
-                        <div className="text-xs leading-5 text-muted-foreground">用于扫描洛谷提交记录。配置 Cookie 后可以手动测试连接。</div>
-                      </div>
-                      <SettingRow
-                        title="洛谷账号状态"
-                        description={
-                          <span className="inline-flex flex-wrap items-center gap-2">
-                            <span className={cn("inline-flex rounded-sm border px-2 py-0.5 text-xs", luoguSettingsStatusTone)}>
-                              状态：{luoguStatusLabel}
+                        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/10 p-4">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span className="rounded-sm border border-border/70 bg-background/30 px-2 py-1">
+                              可用标签候选 {tagManagerAvailableCandidateCount}
                             </span>
-                            <span>{luoguSettingsStatusDescription}</span>
-                          </span>
-                        }
-                      >
-                        <div className="flex flex-wrap gap-2">
-                          <Button size="sm" onClick={() => { setIsAdvancedActionsOpen(false); void openLuoguSettings(); }} disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}>
-                            <Settings className="h-3.5 w-3.5" />配置账号
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={handleTestLuoguConnection} disabled={isTestingLuoguConnection || isSyncingLuogu}>
-                            <PlugZap className="h-3.5 w-3.5" />{isTestingLuoguConnection ? "测试中..." : "测试连接"}
-                          </Button>
+                            <span className="rounded-sm border border-border/70 bg-background/30 px-2 py-1">
+                              自定义标签 {tagTaxonomyStats.entriesCount}
+                            </span>
+                            <span className="rounded-sm border border-border/70 bg-background/30 px-2 py-1">
+                              自定义别名 {tagTaxonomyStats.aliasesCount}
+                            </span>
+                            <span className="rounded-sm border border-border/70 bg-background/30 px-2 py-1">
+                              隐藏标签 {tagTaxonomyStats.hiddenIdsCount}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <Button type="button" onClick={openTagManagerWorkspace}>
+                              打开标签管理器
+                            </Button>
+                            <span className="text-xs leading-5 text-muted-foreground">
+                              打开独立管理面板后可浏览、搜索并调整标签可见性。
+                            </span>
+                          </div>
                         </div>
-                      </SettingRow>
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("luogu-rules") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">导入规则</div>
                       </div>
-                      <div className="grid min-w-0 gap-0 border-t border-border/70">
-                        {luoguRuleSettingRows.map((row) => (
-                          <SettingRow key={row.id} title={row.title} description={row.description}>
-                            <div className="grid min-w-0 justify-start gap-2">
-                              <SettingsInlineSelect
-                                id={row.id}
-                                value={row.value}
-                                disabled={isLuoguRuleControlDisabled}
-                                options={row.options}
-                                ariaLabel={row.title}
-                                expandedRuleId={expandedLuoguRuleId}
-                                onExpandedRuleChange={setExpandedLuoguRuleId}
-                                onChange={row.onChange}
-                              />
-                              {row.id === "defaultSaveLocation" && luoguImportRules.defaultSaveLocation === "custom" && (
-                                <Input
-                                  value={luoguImportRules.customSaveDirectory}
-                                  disabled={isLuoguRuleControlDisabled}
-                                  placeholder="例如 review/ 或 tricks/"
-                                  className="h-9 w-full max-w-[300px] border-border/75 bg-muted/20 text-sm shadow-sm hover:border-muted-foreground/55 focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
-                                  onChange={(event) => {
-                                    setLuoguImportRules((current) => normalizeLuoguImportRules({ ...current, customSaveDirectory: event.target.value }));
-                                  }}
-                                  onBlur={(event) => {
-                                    const value = event.target.value;
-                                    const error = validateLuoguSaveDirectoryInput(value);
-                                    if (error) {
-                                      toast.error(`自定义目录无效：${error}`);
-                                      return;
-                                    }
-                                    updateLuoguImportRules({ customSaveDirectory: value });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key !== "Enter") return;
-                                    event.currentTarget.blur();
-                                  }}
-                                />
-                              )}
-                            </div>
-                          </SettingRow>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {shouldRenderSettingsPage("luogu-import-center") && (
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">导入中心</div>
-                        <div className="text-xs leading-5 text-muted-foreground">从洛谷提交记录扫描并生成本地笔记。扫描、预览和写入都在导入中心完成。</div>
-                      </div>
-                      <SettingRow
-                        title="当前状态"
-                        description={`洛谷账号：${luoguImportCenterAccountLabel} 路 AI：${luoguImportCenterAiLabel}`}
-                      >
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => { setIsAdvancedActionsOpen(false); void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-import-center" } }); }}
-                          disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
-                        >
-                          <Download className="h-3.5 w-3.5" />打开导入中心
-                        </Button>
-                      </SettingRow>
                     </section>
                   )}
 
@@ -9379,6 +9163,13 @@ export default function App() {
         />
       </DialogContent>
     </Dialog>
+    )}
+    {tagManagerSession && (
+      <TagManagerWorkspace
+        initialConfig={tagManagerSession.initialConfig}
+        onRequestClose={requestCloseTagManager}
+      />
+    )}
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
       <header className="app-top-toolbar flex min-h-8 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-0.5">
