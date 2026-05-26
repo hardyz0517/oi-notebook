@@ -1,0 +1,381 @@
+.notex-workbench {
+  --notex-surface: color-mix(in oklch, var(--background) 94%, var(--muted) 6%);
+  --notex-panel: color-mix(in oklch, var(--background) 88%, var(--muted) 12%);
+  --notex-panel-strong: color-mix(in oklch, var(--background) 78%, var(--muted) 22%);
+  --notex-border: color-mix(in oklch, var(--border) 74%, transparent);
+  --notex-border-subtle: color-mix(in oklch, var(--border) 42%, transparent);
+  --notex-hover: color-mix(in oklch, var(--accent) 34%, transparent);
+  --notex-selected: color-mix(in oklch, var(--accent) 44%, transparent);
+  --notex-muted: color-mix(in oklch, var(--muted-foreground) 82%, transparent);
+  background: var(--notex-surface);
+}
+
+.notex-workbench:is(.dark *) {
+  --notex-surface: #202124;
+  --notex-panel: #26282a;
+  --notex-panel-strong: #2b2d2f;
+  --notex-border: rgb(255 255 255 / 0.11);
+  --notex-border-subtle: rgb(255 255 255 / 0.07);
+  --notex-hover: rgb(255 255 255 / 0.055);
+  --notex-selected: rgb(255 255 255 / 0.075);
+  --notex-muted: rgb(229 231 235 / 0.62);
+}
+
+.notex-header {
+  height: 36px !important;
+  min-height: 36px;
+  padding-inline: 10px !important;
+  border-bottom-color: var(--notex-border-subtle) !important;
+  background: var(--notex-panel);
+}
+
+.notex-brand {
+  gap: 0;
+}
+
+.notex-title {
+  font-size: 13px !important;
+  font-weight: 600;
+  line-height: 16px !important;
+}
+
+.notex-model-status {
+  font-size: 10.5px !important;
+  line-height: 12px !important;
+  color: var(--notex-muted);
+}
+
+.notex-provider-button {
+  height: 26px !important;
+  max-width: 116px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--notex-muted) !important;
+}
+
+.notex-provider-button:hover,
+.notex-provider-button[aria-expanded="true"] {
+  background: var(--notex-hover) !important;
+  color: var(--foreground) !important;
+}
+
+.notex-icon-button {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 5px !important;
+  color: var(--notex-muted) !important;
+}
+
+.notex-icon-button:hover,
+.notex-icon-button[aria-pressed="true"] {
+  background: var(--notex-hover) !important;
+  color: var(--foreground) !important;
+}
+
+.notex-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.notex-modebar {
+  height: 28px !important;
+  min-height: 28px;
+  padding-inline: 8px !important;
+  border-bottom-color: var(--notex-border-subtle) !important;
+  background: var(--notex-surface);
+}
+
+.notex-mode-title {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 16px !important;
+}
+
+.notex-mode-actions {
+  gap: 0;
+}
+
+.notex-messages {
+  padding: 8px 10px 10px !important;
+  background: var(--notex-surface);
+}
+
+.notex-message-list {
+  gap: 10px !important;
+}
+
+.notex-message {
+  border-radius: 6px;
+}
+
+.notex-message-assistant {
+  max-width: 100% !important;
+}
+
+.notex-message-user {
+  max-width: 88% !important;
+  border-color: var(--notex-border-subtle) !important;
+  background: var(--notex-panel-strong) !important;
+  color: var(--foreground) !important;
+  box-shadow: none !important;
+}
+
+.notex-message-system {
+  border-color: var(--notex-border-subtle) !important;
+  background: var(--notex-panel) !important;
+  box-shadow: none !important;
+}
+
+.notex-composer-wrap {
+  padding: 7px 10px 9px !important;
+  border-top: 1px solid var(--notex-border-subtle);
+  background: var(--notex-panel);
+}
+
+.notex-composer {
+  border-radius: 6px !important;
+  border-color: var(--notex-border) !important;
+  background: var(--notex-surface) !important;
+  box-shadow: none !important;
+}
+
+.notex-composer:focus-within {
+  border-color: color-mix(in oklch, var(--ring) 38%, var(--notex-border)) !important;
+  background: var(--background) !important;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ring) 18%, transparent) !important;
+}
+
+.notex-composer-input {
+  min-height: 30px !important;
+  padding: 3px 5px 2px !important;
+  font-size: 13px !important;
+  line-height: 20px !important;
+}
+
+.notex-composer-toolbar {
+  padding-top: 5px !important;
+  border-top: 1px solid var(--notex-border-subtle);
+}
+
+.notex-composer-control {
+  height: 24px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--notex-muted) !important;
+  font-size: 11px !important;
+}
+
+.notex-composer-control:hover,
+.notex-composer-control[aria-expanded="true"],
+.notex-composer-control[aria-checked="true"] {
+  background: var(--notex-hover) !important;
+  color: var(--foreground) !important;
+}
+
+.notex-switch-track {
+  background: color-mix(in oklch, var(--muted-foreground) 22%, transparent) !important;
+}
+
+.notex-composer-control[aria-checked="true"] .notex-switch-track {
+  background: color-mix(in oklch, var(--primary) 58%, transparent) !important;
+}
+
+.notex-switch-thumb {
+  box-shadow: none !important;
+}
+
+.notex-composer-send {
+  width: 30px !important;
+  height: 28px !important;
+  border-radius: 5px !important;
+  box-shadow: none !important;
+}
+
+.notex-composer-send:not(:disabled) {
+  background: var(--foreground) !important;
+  color: var(--background) !important;
+}
+
+.notex-composer-send:disabled {
+  background: var(--notex-panel-strong) !important;
+}
+
+.notex-command-panel {
+  bottom: calc(100% + 6px) !important;
+  border-radius: 6px !important;
+  border-color: var(--notex-border) !important;
+  background: var(--notex-panel) !important;
+  box-shadow: 0 8px 18px rgb(15 23 42 / 0.08) !important;
+}
+
+.notex-command-panel:is(.dark *) {
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.24) !important;
+}
+
+.notex-command-header {
+  min-height: 24px;
+  padding: 3px 8px !important;
+  border-bottom-color: var(--notex-border-subtle) !important;
+}
+
+.notex-command-list {
+  padding: 4px !important;
+}
+
+.notex-command-item {
+  height: 32px !important;
+  min-height: 32px;
+  gap: 7px !important;
+  border-radius: 4px !important;
+  padding: 3px 7px !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.notex-command-item:hover {
+  background: var(--notex-hover) !important;
+}
+
+.notex-command-item[data-active="true"] {
+  background: var(--notex-selected) !important;
+  color: var(--foreground) !important;
+}
+
+.notex-command-icon {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.notex-command-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.notex-command-name {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 15px !important;
+}
+
+.notex-command-description {
+  font-size: 12px !important;
+  line-height: 14px !important;
+  color: var(--notex-muted) !important;
+}
+
+.notex-tag-output {
+  gap: 9px !important;
+  border-radius: 6px !important;
+  border-color: var(--notex-border-subtle) !important;
+  background: transparent !important;
+  padding: 10px 0 0 !important;
+  box-shadow: none !important;
+}
+
+.notex-tag-output-header,
+.notex-tag-output-section,
+.notex-tag-output-reason,
+.notex-tag-actions {
+  padding-inline: 10px;
+}
+
+.notex-tag-output-title {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+.notex-tag-output-path,
+.notex-tag-output-label {
+  color: var(--notex-muted) !important;
+}
+
+.notex-tag-output-status,
+.notex-tag-chip {
+  border-radius: 4px !important;
+  background: var(--notex-panel) !important;
+}
+
+.notex-tag-chip-list {
+  gap: 4px !important;
+}
+
+.notex-tag-chip {
+  padding: 1px 6px !important;
+  border-color: var(--notex-border-subtle) !important;
+  font-size: 11px !important;
+  line-height: 18px !important;
+}
+
+.notex-tag-candidate-list {
+  gap: 2px !important;
+}
+
+.notex-tag-candidate {
+  border-radius: 4px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 5px 6px !important;
+}
+
+.notex-tag-candidate:hover {
+  background: var(--notex-hover) !important;
+}
+
+.notex-tag-checkbox {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--primary);
+}
+
+.notex-tag-candidate-body {
+  gap: 0 !important;
+}
+
+.notex-tag-candidate-name {
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  line-height: 18px !important;
+}
+
+.notex-tag-confidence,
+.notex-tag-candidate-reason {
+  color: var(--notex-muted) !important;
+}
+
+.notex-tag-candidate-reason {
+  font-size: 11px !important;
+  line-height: 17px !important;
+}
+
+.notex-tag-output-reason {
+  border-top: 1px solid var(--notex-border-subtle);
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding-block: 7px !important;
+}
+
+.notex-tag-actions {
+  border-top: 1px solid var(--notex-border-subtle);
+  padding-block: 7px 8px;
+}
+
+.notex-tag-action-secondary,
+.notex-tag-action-primary {
+  height: 26px !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+}
+
+.notex-tag-action-secondary {
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+.notex-tag-action-secondary:hover {
+  background: var(--notex-hover) !important;
+}
+
+.notex-tag-action-primary {
+  background: var(--foreground) !important;
+  color: var(--background) !important;
+}

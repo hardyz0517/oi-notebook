@@ -59,6 +59,7 @@ import {
   type NoteChatStreamDoneEvent,
   type NoteChatStreamErrorEvent,
 } from "@/lib/api";
+import "./notexWorkbench.css";
 
 type AiChatMessage = {
   id: string;
@@ -3267,11 +3268,11 @@ function TagSuggestionCard({
 
   const renderTags = (tags: string[], emptyText: string) => (
     tags.length > 0 ? (
-      <div className="flex flex-wrap gap-1.5">
+      <div className="notex-tag-chip-list flex flex-wrap gap-1.5">
         {tags.map((tag) => (
           <span
             key={tag}
-            className="rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[11px] leading-5 text-foreground dark:bg-white/[0.04]"
+            className="notex-tag-chip rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[11px] leading-5 text-foreground dark:bg-white/[0.04]"
           >
             {tag}
           </span>
@@ -3283,17 +3284,17 @@ function TagSuggestionCard({
   );
 
   return (
-    <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-      <div className="flex min-w-0 items-start justify-between gap-3">
+    <div className="notex-tag-output grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="notex-tag-output-header flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-medium leading-5 text-foreground">建议标签预览</div>
-          <div className="truncate text-[11px] leading-4 text-muted-foreground" title={suggestion.notePath}>
+          <div className="notex-tag-output-title text-sm font-medium leading-5 text-foreground">建议标签预览</div>
+          <div className="notex-tag-output-path truncate text-[11px] leading-4 text-muted-foreground" title={suggestion.notePath}>
             {getCompactPath(suggestion.notePath)}
           </div>
         </div>
         {statusText && (
           <span className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-5",
+            "notex-tag-output-status shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-5",
             suggestion.error
               ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
               : "bg-muted text-muted-foreground dark:bg-white/[0.08]",
@@ -3303,18 +3304,18 @@ function TagSuggestionCard({
         )}
       </div>
 
-      <div className="grid gap-1.5">
-        <div className="text-[11px] font-medium leading-4 text-muted-foreground">当前已有 tags</div>
+      <div className="notex-tag-output-section grid gap-1.5">
+        <div className="notex-tag-output-label text-[11px] font-medium leading-4 text-muted-foreground">当前已有 tags</div>
         {renderTags(suggestion.existingTags, "当前没有已有标签")}
       </div>
 
-      <div className="grid gap-1.5">
+      <div className="notex-tag-output-section grid gap-1.5">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-medium leading-4 text-muted-foreground">建议新增 tags</div>
+          <div className="notex-tag-output-label text-[11px] font-medium leading-4 text-muted-foreground">建议新增 tags</div>
           {hasSuggestions && !suggestion.applied && !suggestion.ignored && (
             <button
               type="button"
-              className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-55"
+              className="notex-tag-link text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-55"
               onClick={onSelectAll}
               disabled={isApplying}
             >
@@ -3323,25 +3324,25 @@ function TagSuggestionCard({
           )}
         </div>
         {hasSuggestions ? (
-          <div className="grid gap-1.5">
+          <div className="notex-tag-candidate-list grid gap-1.5">
             {detailedSuggestions.map((item) => (
-              <label key={item.tag} className="flex min-w-0 items-start gap-2 rounded-md border border-border/50 bg-background/55 px-2.5 py-2 dark:bg-black/10">
+              <label key={item.tag} className="notex-tag-candidate flex min-w-0 items-start gap-2 rounded-md border border-border/50 bg-background/55 px-2.5 py-2 dark:bg-black/10">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="notex-tag-checkbox mt-1"
                   checked={selectedSet.has(item.tag)}
                   disabled={isApplying || suggestion.applied || suggestion.ignored}
                   onChange={() => onToggleTag(item.tag)}
                 />
-                <span className="grid min-w-0 gap-1">
-                  <span className="font-medium leading-5 text-foreground">
+                <span className="notex-tag-candidate-body grid min-w-0 gap-1">
+                  <span className="notex-tag-candidate-name font-medium leading-5 text-foreground">
                     {item.tag}
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                    <span className="notex-tag-confidence ml-2 text-[11px] font-normal text-muted-foreground">
                       {Math.round(item.confidence * 100)}%
                     </span>
                   </span>
                   {(item.reason || item.evidence || item.normalizedFrom) && (
-                    <span className="text-[11px] leading-5 text-muted-foreground">
+                    <span className="notex-tag-candidate-reason text-[11px] leading-5 text-muted-foreground">
                       {item.reason || "匹配当前笔记内容和候选标签。"}
                       {item.evidence ? `；${item.evidence}` : ""}
                       {item.normalizedFrom ? `；已规范化自 ${item.normalizedFrom}` : ""}
@@ -3362,16 +3363,16 @@ function TagSuggestionCard({
       </div>
 
       {suggestion.reason && (
-        <div className="rounded-md bg-background/65 px-2.5 py-2 text-xs leading-5 text-muted-foreground dark:bg-black/10">
+        <div className="notex-tag-output-reason rounded-md bg-background/65 px-2.5 py-2 text-xs leading-5 text-muted-foreground dark:bg-black/10">
           {suggestion.reason}
         </div>
       )}
 
       {!suggestion.applied && !suggestion.ignored && (
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="notex-tag-actions flex flex-wrap justify-end gap-2">
           <button
             type="button"
-            className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-55"
+            className="notex-tag-action-secondary inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-55"
             onClick={onIgnore}
             disabled={isApplying}
           >
@@ -3379,7 +3380,7 @@ function TagSuggestionCard({
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
+            className="notex-tag-action-primary inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
             onClick={onApply}
             disabled={!hasSuggestions || !hasSelectedSuggestions || isApplying}
           >
@@ -6591,25 +6592,26 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
   return (
     <aside
       className={cn(
-        "relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
+        "notex-workbench ai-sidebar-shell relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
         isOpen ? "flex" : "hidden",
         isMaximized && "absolute inset-0 z-40 border-l border-border/80 shadow-2xl",
       )}
       style={isMaximized ? undefined : sidebarStyle}
       aria-hidden={!isOpen}
     >
-      <div className="relative shrink-0">
-        <div className="flex h-11 items-center justify-between px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex min-w-0 items-center border-b border-primary/70 pb-1 text-sm font-semibold tracking-[0.08em] text-foreground">
-            <div className="truncate">NoteX</div>
+      <div className="notex-top relative shrink-0">
+        <div className="notex-header flex h-11 items-center justify-between gap-1.5 border-b border-border/40 px-3">
+        <div className="notex-brand grid min-w-0 flex-1 gap-px">
+          <div className="notex-title truncate text-[16px] font-semibold leading-5 text-foreground">NoteX</div>
+          <div className="notex-model-status truncate text-[11px] leading-3 text-muted-foreground/75">
+            {isAiConfigured ? selectedProviderLabel : "请先配置 AI 模型"}
           </div>
         </div>
         <button
           type="button"
           className={cn(
-            "mx-2 inline-flex h-7 min-w-0 max-w-[12rem] flex-1 items-center justify-between gap-1 rounded-sm px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            isProviderPickerOpen && "bg-accent text-accent-foreground",
+            "notex-provider-button inline-flex h-7 min-w-0 max-w-[7.5rem] items-center justify-between gap-1 rounded-md border border-border/45 bg-background/25 px-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            isProviderPickerOpen && "bg-accent/35 text-foreground",
           )}
             onClick={() => {
               setIsProviderPickerOpen((open) => !open);
@@ -6621,13 +6623,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           aria-label="选择 AI 模型"
           aria-expanded={isProviderPickerOpen}
         >
-          <span className="truncate">配置组：{selectedProviderLabel}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{selectedProviderLabel}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </button>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="notex-header-actions flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="notex-icon-button inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => onMaximizedChange?.(!isMaximized)}
             title={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
             aria-label={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
@@ -6637,7 +6639,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </button>
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="notex-icon-button inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={onClose}
             title="Hide NoteX"
             aria-label="Hide NoteX"
@@ -6648,10 +6650,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
         </div>
 
-        <div className="flex min-w-0 items-center justify-between gap-2 px-3 py-1">
+        <div className="notex-modebar flex h-10 min-w-0 items-center justify-between gap-2 border-b border-border/30 px-3">
           {viewMode === "conversations" ? (
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="min-w-0 truncate text-sm font-medium text-foreground" title="会话">
+              <span className="notex-mode-title min-w-0 truncate text-[15px] font-medium leading-5 text-foreground" title="会话">
                 会话
               </span>
             </div>
@@ -6659,7 +6661,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <button
                 type="button"
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={() => {
                   setViewMode("conversations");
                   setIsAllConversationsOpen(false);
@@ -6674,18 +6676,19 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 <ArrowLeft className="h-4 w-4" />
               </button>
               <span
-                className="min-w-0 truncate text-sm font-medium text-foreground"
+                className="notex-mode-title min-w-0 truncate text-[15px] font-medium leading-5 text-foreground"
                 title={activeConversationTitle}
               >
                 {activeConversationTitle}
               </span>
             </div>
           )}
+          <div className="notex-mode-actions flex shrink-0 items-center gap-1">
           <button
             type="button"
             className={cn(
-              "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              isHistoryOpen && "bg-accent text-accent-foreground",
+              "notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              isHistoryOpen && "bg-accent/35 text-foreground",
             )}
             onClick={() => {
               setIsHistoryOpen((open) => !open);
@@ -6701,7 +6704,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </button>
           <button
             type="button"
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={createNewConversation}
             title="新聊天"
             aria-label="新聊天"
@@ -6710,7 +6713,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </button>
           <button
             type="button"
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => {
               setIsHistoryOpen(false);
               setIsAllConversationsOpen(false);
@@ -6723,6 +6726,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           >
             <Settings className="h-4 w-4" />
           </button>
+          </div>
         </div>
 
         {isProviderPickerOpen && (
@@ -6950,7 +6954,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       <div className="relative min-h-0 flex-1">
         <div
           ref={messagesScrollRef}
-          className="h-full overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
+          className="notex-messages h-full overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
           onScroll={handleMessagesScroll}
         >
           {viewMode === "conversations" ? (
@@ -6997,7 +7001,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             </div>
           ) : (
-            <div className={cn(contentColumnClass, "grid gap-3")}>
+            <div className={cn("notex-message-list", contentColumnClass, "grid gap-3")}>
             {messages.map((message) => {
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
@@ -7019,7 +7023,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   ? highlightedLocalCitationId.slice(message.id.length + 1)
                   : null;
                 return (
-                  <div key={message.id} className="mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
+                  <div key={message.id} className="notex-message notex-message-assistant mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
                     {timingLabel && (
                       <div className={cn(
                         "text-[11px] leading-4 text-muted-foreground/75",
@@ -7159,7 +7163,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
               if (message.role === "user") {
                 return (
-                  <div key={message.id} className="ai-chat-user-bubble ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
+                  <div key={message.id} className="notex-message notex-message-user ai-chat-user-bubble ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
                     <div className="whitespace-pre-wrap break-words">{message.text}</div>
                   </div>
                 );
@@ -7168,7 +7172,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               return (
                 <div
                   key={message.id}
-                  className="mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-sm leading-6 text-muted-foreground shadow-sm"
+                  className="notex-message notex-message-system mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-sm leading-6 text-muted-foreground shadow-sm"
                 >
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                   <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
@@ -7253,19 +7257,19 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         )}
       </div>
 
-      <div className="relative z-30 shrink-0 px-3 pb-3 pt-2">
+      <div className="notex-composer-wrap relative z-30 shrink-0 px-3 pb-3 pt-2">
         <div className={cn(contentColumnClass, "relative")}>
         {isCommandPanelOpen && (
-          <div className="ai-command-panel absolute bottom-[calc(100%-0.45rem)] left-5 right-5 z-20 overflow-hidden rounded-xl border border-[#dcdfe6] bg-white text-popover-foreground shadow-[0_18px_48px_rgb(15_23_42/0.16)] dark:border-white/10 dark:bg-[#2f3134] dark:shadow-[0_18px_52px_rgb(0_0_0/0.42)]">
-            <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground">
-              <div className="font-medium">选择命令</div>
-              <div>上下键 - 回车</div>
+          <div className="notex-command-panel ai-command-panel absolute bottom-[calc(100%+0.4rem)] left-0 right-0 z-20 overflow-hidden rounded-[10px] border border-border/50 bg-popover/95 text-popover-foreground shadow-[0_6px_18px_rgb(15_23_42/0.07)] backdrop-blur dark:border-white/10 dark:bg-[#2b2d2f]/96 dark:shadow-[0_8px_22px_rgb(0_0_0/0.22)]">
+            <div className="notex-command-header flex items-center justify-between border-b border-border/30 px-2.5 py-1 text-[11px] text-muted-foreground">
+              <div className="font-medium text-muted-foreground">选择命令</div>
+              <div className="text-[10px] text-muted-foreground/55">↑↓ 选择 · Enter</div>
             </div>
             {visibleCommands.length > 0 ? (
-              <div className="ai-command-list max-h-72 overflow-y-auto overflow-x-hidden px-1.5 pb-1.5 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--muted-foreground)_30%,transparent)_transparent]">
+              <div className="notex-command-list ai-command-list max-h-72 overflow-y-auto overflow-x-hidden px-1 py-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--muted-foreground)_18%,transparent)_transparent]">
                 {groupedVisibleCommands.map(({ category, commands }) => (
                   <div key={category} className="py-0.5">
-                    <div className="px-1.5 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/75">
+                    <div className="px-2 pb-0.5 pt-0.5 text-[11px] font-medium leading-4 text-muted-foreground/60">
                       {category}
                     </div>
                     <div className="grid gap-0.5">
@@ -7284,14 +7288,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             }}
                             type="button"
                             className={cn(
-                              "ai-command-item flex h-10 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left transition-[background-color,color,box-shadow,opacity]",
+                              "notex-command-item ai-command-item flex h-10 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1 text-left transition-[background-color,color,opacity]",
                               isDisabled
                                 ? "cursor-not-allowed opacity-50"
-                                : "text-foreground hover:bg-[#f5f7fa] dark:hover:bg-white/[0.07]",
+                                : "text-foreground hover:bg-accent/18 hover:text-foreground dark:hover:bg-white/[0.04]",
                               isActive && !isDisabled
-                                ? "bg-[#eef3f8] text-foreground shadow-[inset_0_0_0_1px_rgb(15_23_42/0.03)] dark:bg-white/10"
+                                ? "bg-accent/28 text-foreground dark:bg-white/[0.06]"
                                 : isActive
-                                  ? "bg-[#f3f4f6] text-foreground dark:bg-white/[0.05]"
+                                  ? "bg-accent/16 text-foreground dark:bg-white/[0.04]"
                                   : undefined,
                             )}
                             onMouseEnter={() => setActiveCommandIndex(itemIndex)}
@@ -7300,13 +7304,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             disabled={isDisabled}
                             aria-disabled={isDisabled}
                           >
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
-                              <Icon className="h-3.5 w-3.5" />
+                            <span className="notex-command-icon flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-sm text-muted-foreground">
+                              <Icon className="h-4 w-4" />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
-                                <span className="max-w-[7.5rem] shrink truncate text-sm font-medium text-foreground">{command.label}</span>
-                                <span className="truncate text-xs text-muted-foreground">
+                              <span className="grid min-w-0 gap-0.5 overflow-hidden">
+                                <span className="notex-command-name truncate text-[13.5px] font-medium leading-4 text-foreground">{command.label}</span>
+                                <span className="notex-command-description truncate text-[12px] leading-[14px] text-muted-foreground">
                                   {getCommandDescriptionText(command, disabledReason)}
                                 </span>
                               </span>
@@ -7336,7 +7340,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           />
         )}
 
-        <div className="ai-composer relative rounded-2xl border border-[#dcdfe6] bg-[#fafafa] p-2 shadow-[0_10px_26px_rgb(15_23_42/0.06)] transition-[border-color,box-shadow,background-color] focus-within:border-[#b8c0cc] focus-within:shadow-[0_12px_32px_rgb(15_23_42/0.10)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_12px_34px_rgb(0_0_0/0.24)] dark:focus-within:border-white/20 dark:focus-within:shadow-[0_14px_38px_rgb(0_0_0/0.34)]">
+        <div className="notex-composer ai-composer relative rounded-[10px] border border-border/55 bg-background/70 p-1.5 shadow-[0_1px_6px_rgb(15_23_42/0.04)] transition-[border-color,box-shadow,background-color] focus-within:border-border/75 focus-within:bg-background/85 focus-within:shadow-[0_0_0_1px_rgb(15_23_42/0.025)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_6px_18px_rgb(0_0_0/0.16)] dark:focus-within:border-white/16 dark:focus-within:shadow-[0_0_0_1px_rgb(255_255_255/0.05)]">
           <textarea
             ref={inputRef}
             value={inputValue}
@@ -7354,17 +7358,17 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               event.currentTarget.focus();
             }}
             onKeyDown={handleInputKeyDown}
-            rows={2}
+            rows={1}
             placeholder="Ask a question, or type /"
-            className="max-h-[180px] min-h-14 w-full resize-none border-0 !bg-transparent px-2 py-1 text-sm leading-5 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/75 focus:!shadow-none"
+            className="notex-composer-input max-h-[152px] min-h-8 w-full resize-none border-0 !bg-transparent px-1.5 py-0.5 text-sm leading-5 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/65 focus:!shadow-none"
           />
-          <div className="flex min-w-0 items-center gap-1 overflow-hidden px-1.5 pt-1.5 text-[11px] text-muted-foreground">
+          <div className="notex-composer-toolbar flex min-w-0 items-center gap-1 overflow-hidden px-0.5 pt-1 text-[12px] text-muted-foreground">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <button
                 type="button"
                 className={cn(
-                  "inline-flex h-7 min-w-[3.75rem] max-w-[10rem] flex-[1_1_7rem] items-center gap-1 overflow-hidden rounded-full border border-border/70 bg-background/70 px-1.5 text-left text-[11px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:px-2 dark:bg-white/[0.04]",
-                  isModelPickerOpen && "bg-accent text-accent-foreground",
+                  "notex-composer-control inline-flex h-[26px] min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden rounded-md border border-border/50 bg-background/35 px-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:px-1.5 dark:bg-white/[0.035]",
+                  isModelPickerOpen && "bg-accent/35 text-foreground",
                 )}
                 onClick={() => {
                   setIsModelPickerOpen((open) => !open);
@@ -7376,15 +7380,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 aria-expanded={isModelPickerOpen}
               >
                 <span className="min-w-0 truncate">{selectedModelLabel}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               </button>
               <button
                 type="button"
                 role="switch"
                 aria-checked={includeCurrentNoteContext}
                 className={cn(
-                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/70 px-1 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1.5 min-[420px]:px-2 dark:bg-white/[0.04]",
-                  includeCurrentNoteContext && "border-primary/45 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_rgb(59_130_246/0.08)]",
+                  "notex-composer-control notex-composer-switch inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border border-border/50 bg-background/35 px-1 text-[12px] transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1 min-[420px]:px-1.5 dark:bg-white/[0.035]",
+                  includeCurrentNoteContext && "border-primary/30 bg-primary/8 text-foreground",
                 )}
                 onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
                 title={includeCurrentNoteContext ? "包含当前笔记信息" : "不包含当前笔记信息"}
@@ -7392,14 +7396,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               >
                 <span
                   className={cn(
-                    "relative h-3.5 w-6 shrink-0 rounded-full bg-muted-foreground/25 transition-colors",
-                    includeCurrentNoteContext && "bg-primary/70",
+                    "notex-switch-track relative h-3 w-5 shrink-0 rounded-full bg-muted-foreground/20 transition-colors",
+                    includeCurrentNoteContext && "bg-primary/62",
                   )}
                 >
                   <span
                     className={cn(
-                      "absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-background shadow-sm transition-transform",
-                      includeCurrentNoteContext && "translate-x-2.5",
+                      "notex-switch-thumb absolute left-0.5 top-0.5 h-2 w-2 rounded-full bg-background shadow-sm transition-transform",
+                      includeCurrentNoteContext && "translate-x-2",
                     )}
                   />
                 </span>
@@ -7410,8 +7414,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={webSearchEnabled}
                 className={cn(
-                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/70 px-1.5 text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1.5 min-[420px]:px-2 dark:bg-white/[0.04]",
-                  webSearchEnabled && "border-primary/45 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_rgb(59_130_246/0.08)]",
+                  "notex-composer-control notex-composer-switch inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border border-border/50 bg-background/35 px-1.5 text-[12px] transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1 min-[420px]:px-1.5 dark:bg-white/[0.035]",
+                  webSearchEnabled && "border-primary/30 bg-primary/8 text-foreground",
                 )}
                 onClick={handleWebSearchToggle}
                 title={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
@@ -7493,7 +7497,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             <button
               type="button"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#202124] text-white shadow-sm transition-[background-color,color,opacity,transform,box-shadow] hover:bg-[#111827] hover:shadow disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-55 dark:bg-[#f3f4f6] dark:text-[#202124] dark:hover:bg-white dark:disabled:bg-white/12 dark:disabled:text-muted-foreground"
+              className="notex-composer-send ai-composer-send inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#202124] text-white shadow-sm transition-[background-color,color,opacity,box-shadow] hover:bg-[#111827] disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-55 dark:bg-[#f3f4f6] dark:text-[#202124] dark:hover:bg-white dark:disabled:bg-white/12 dark:disabled:text-muted-foreground"
               onClick={submitInput}
               disabled={inputValue.trim().length === 0 || isResponding}
               title={isResponding ? "Thinking" : "Send"}
