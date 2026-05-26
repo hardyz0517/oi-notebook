@@ -276,8 +276,8 @@ const AI_CONVERSATION_LIMIT = 20;
 const AI_CONVERSATION_MESSAGE_LIMIT = 100;
 const AI_QUERY_PLANNER_TIMEOUT_MS = 5000;
 const LOCAL_NOTE_SEARCH_TIMEOUT_MS = 5000;
-const COMPOSER_TEXTAREA_MIN_HEIGHT = 56;
-const COMPOSER_TEXTAREA_MAX_HEIGHT = 180;
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 104;
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 220;
 
 const waitForNextFrame = (): Promise<void> =>
   new Promise((resolve) => {
@@ -1924,7 +1924,7 @@ function AiMarkdownMessage({
   }, [onCitationClick, renderedHtml]);
 
   if (!renderedHtml) {
-    return <div className="whitespace-pre-wrap break-words">{markdown}</div>;
+    return <div className="notex-assistant-markdown whitespace-pre-wrap break-words">{markdown}</div>;
   }
 
   return (
@@ -1932,12 +1932,12 @@ function AiMarkdownMessage({
       ref={containerRef}
       data-ai-markdown-message="true"
       className={cn(
-        "ai-message-preview min-w-0 max-w-full overflow-hidden break-words text-sm leading-6 text-foreground",
+        "notex-assistant-markdown ai-message-preview min-w-0 max-w-full overflow-hidden break-words text-foreground",
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        "[&_h1]:mb-2 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:leading-snug",
-        "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:leading-snug",
-        "[&_h3]:mb-1.5 [&_h3]:mt-2.5 [&_h3]:text-sm [&_h3]:font-semibold",
-        "[&_p]:mb-2 [&_p]:leading-6",
+        "[&_h1]:mb-2 [&_h1]:mt-3 [&_h1]:font-semibold",
+        "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:font-semibold",
+        "[&_h3]:mb-1.5 [&_h3]:mt-2.5 [&_h3]:font-semibold",
+        "[&_p]:mb-2",
         "[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5",
         "[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5",
         "[&_li]:mb-1",
@@ -6592,7 +6592,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
   return (
     <aside
       className={cn(
-        "notex-workbench ai-sidebar-shell relative z-20 shrink-0 flex-col overflow-hidden border-l border-border/80 bg-background/95 text-foreground",
+        "notex-workbench ai-sidebar-shell relative shrink-0 flex-col overflow-hidden border-l border-border/80 text-foreground",
         isOpen ? "flex" : "hidden",
         isMaximized && "absolute inset-0 z-40 border-l border-border/80 shadow-2xl",
       )}
@@ -6951,10 +6951,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="notex-messages-region relative flex min-h-0 flex-1 overflow-hidden">
         <div
           ref={messagesScrollRef}
-          className="notex-messages h-full overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
+          className="notex-messages min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
           onScroll={handleMessagesScroll}
         >
           {viewMode === "conversations" ? (
@@ -7023,10 +7023,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   ? highlightedLocalCitationId.slice(message.id.length + 1)
                   : null;
                 return (
-                  <div key={message.id} className="notex-message notex-message-assistant mr-auto grid w-full max-w-[94%] gap-1.5 py-1 text-sm leading-6 text-foreground">
+                  <div key={message.id} className="notex-message notex-message-assistant mr-auto grid w-full max-w-[94%] gap-2 py-1.5 text-foreground">
                     {timingLabel && (
                       <div className={cn(
-                        "text-[11px] leading-4 text-muted-foreground/75",
+                        "notex-message-meta text-muted-foreground/75",
                         message.state === "error" && "text-amber-600/80 dark:text-amber-300/80",
                       )}>
                         {timingLabel}
@@ -7128,7 +7128,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         </>
                       )}
                       {!isAssistantBusy && (canCopyAssistantMessage || canRetryMessage) && (
-                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <div className="notex-message-actions mt-2 flex items-center gap-1.5 text-muted-foreground">
                           {canCopyAssistantMessage && (
                             <button
                               type="button"
@@ -7163,7 +7163,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
               if (message.role === "user") {
                 return (
-                  <div key={message.id} className="notex-message notex-message-user ai-chat-user-bubble ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
+                  <div key={message.id} className="notex-message notex-message-user notex-user-message ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-primary-foreground">
                     <div className="whitespace-pre-wrap break-words">{message.text}</div>
                   </div>
                 );
@@ -7172,7 +7172,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               return (
                 <div
                   key={message.id}
-                  className="notex-message notex-message-system mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-sm leading-6 text-muted-foreground shadow-sm"
+                  className="notex-message notex-message-system mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-muted-foreground"
                 >
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                   <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
@@ -7257,10 +7257,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         )}
       </div>
 
-      <div className="notex-composer-wrap relative z-30 shrink-0 px-3 pb-3 pt-2">
-        <div className={cn(contentColumnClass, "relative")}>
+      <div className={cn("notex-composer-wrap shrink-0", contentColumnClass)}>
         {isCommandPanelOpen && (
-          <div className="notex-command-panel ai-command-panel absolute bottom-[calc(100%+0.4rem)] left-0 right-0 z-20 overflow-hidden rounded-[10px] border border-border/50 bg-popover/95 text-popover-foreground shadow-[0_6px_18px_rgb(15_23_42/0.07)] backdrop-blur dark:border-white/10 dark:bg-[#2b2d2f]/96 dark:shadow-[0_8px_22px_rgb(0_0_0/0.22)]">
+          <div className="notex-command-panel ai-command-panel absolute bottom-[calc(100%+0.4rem)] left-0 right-0 z-20 overflow-hidden rounded-[10px] border border-border/50 bg-popover/95 text-popover-foreground dark:border-white/10 dark:bg-[#2b2d2f]/96">
             <div className="notex-command-header flex items-center justify-between border-b border-border/30 px-2.5 py-1 text-[11px] text-muted-foreground">
               <div className="font-medium text-muted-foreground">选择命令</div>
               <div className="text-[10px] text-muted-foreground/55">↑↓ 选择 · Enter</div>
@@ -7340,7 +7339,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           />
         )}
 
-        <div className="notex-composer ai-composer relative rounded-[10px] border border-border/55 bg-background/70 p-1.5 shadow-[0_1px_6px_rgb(15_23_42/0.04)] transition-[border-color,box-shadow,background-color] focus-within:border-border/75 focus-within:bg-background/85 focus-within:shadow-[0_0_0_1px_rgb(15_23_42/0.025)] dark:border-white/10 dark:bg-[#2b2d2f] dark:shadow-[0_6px_18px_rgb(0_0_0/0.16)] dark:focus-within:border-white/16 dark:focus-within:shadow-[0_0_0_1px_rgb(255_255_255/0.05)]">
+        <div className="notex-composer-card">
           <textarea
             ref={inputRef}
             value={inputValue}
@@ -7360,15 +7359,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             onKeyDown={handleInputKeyDown}
             rows={1}
             placeholder="Ask a question, or type /"
-            className="notex-composer-input max-h-[152px] min-h-8 w-full resize-none border-0 !bg-transparent px-1.5 py-0.5 text-sm leading-5 text-foreground !shadow-none outline-none placeholder:text-muted-foreground/65 focus:!shadow-none"
+            className="notex-composer-input w-full resize-none outline-none"
           />
-          <div className="notex-composer-toolbar flex min-w-0 items-center gap-1 overflow-hidden px-0.5 pt-1 text-[12px] text-muted-foreground">
+          <div className="notex-composer-toolbar flex min-w-0 items-center gap-1 overflow-hidden">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <button
                 type="button"
                 className={cn(
-                  "notex-composer-control inline-flex h-[26px] min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden rounded-md border border-border/50 bg-background/35 px-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:px-1.5 dark:bg-white/[0.035]",
-                  isModelPickerOpen && "bg-accent/35 text-foreground",
+                  "notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  isModelPickerOpen && "notex-composer-control-active",
                 )}
                 onClick={() => {
                   setIsModelPickerOpen((open) => !open);
@@ -7387,8 +7386,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={includeCurrentNoteContext}
                 className={cn(
-                  "notex-composer-control notex-composer-switch inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border border-border/50 bg-background/35 px-1 text-[12px] transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1 min-[420px]:px-1.5 dark:bg-white/[0.035]",
-                  includeCurrentNoteContext && "border-primary/30 bg-primary/8 text-foreground",
+                  "notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  includeCurrentNoteContext && "notex-composer-control-active",
                 )}
                 onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
                 title={includeCurrentNoteContext ? "包含当前笔记信息" : "不包含当前笔记信息"}
@@ -7402,7 +7401,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 >
                   <span
                     className={cn(
-                      "notex-switch-thumb absolute left-0.5 top-0.5 h-2 w-2 rounded-full bg-background shadow-sm transition-transform",
+                      "notex-switch-thumb absolute left-0.5 top-0.5 h-2 w-2 rounded-full transition-transform",
                       includeCurrentNoteContext && "translate-x-2",
                     )}
                   />
@@ -7414,8 +7413,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={webSearchEnabled}
                 className={cn(
-                  "notex-composer-control notex-composer-switch inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border border-border/50 bg-background/35 px-1.5 text-[12px] transition-colors hover:bg-accent/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1 min-[420px]:px-1.5 dark:bg-white/[0.035]",
-                  webSearchEnabled && "border-primary/30 bg-primary/8 text-foreground",
+                  "notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  webSearchEnabled && "notex-composer-control-active",
                 )}
                 onClick={handleWebSearchToggle}
                 title={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
@@ -7426,7 +7425,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               </button>
 
               {false && isModelPickerOpen && (
-                <div className="absolute bottom-9 left-0 z-50 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+                <div className="absolute bottom-9 left-0 z-50 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground">
                   <div className="grid gap-2 border-b border-border/70 p-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-xs font-medium text-foreground">
@@ -7449,7 +7448,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         value={modelSearch}
                         onChange={(event) => setModelSearch(event.target.value)}
                         placeholder="搜索模型"
-                        className="h-7 rounded-md border border-input bg-background/80 px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-7 rounded-md border border-input bg-[#2e2e2e] px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       />
                     )}
                   </div>
@@ -7497,7 +7496,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             <button
               type="button"
-              className="notex-composer-send ai-composer-send inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#202124] text-white shadow-sm transition-[background-color,color,opacity,box-shadow] hover:bg-[#111827] disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-55 dark:bg-[#f3f4f6] dark:text-[#202124] dark:hover:bg-white dark:disabled:bg-white/12 dark:disabled:text-muted-foreground"
+              className="notex-composer-send ai-composer-send inline-flex shrink-0 items-center justify-center transition-[background-color,color,opacity]"
               onClick={submitInput}
               disabled={inputValue.trim().length === 0 || isResponding}
               title={isResponding ? "Thinking" : "Send"}
@@ -7507,7 +7506,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </button>
           </div>
           {isModelPickerOpen && (
-            <div className="absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+            <div className="absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground">
               <div className="grid gap-2 border-b border-border/70 p-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-medium text-foreground">
@@ -7530,7 +7529,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     value={modelSearch}
                     onChange={(event) => setModelSearch(event.target.value)}
                     placeholder="搜索模型"
-                    className="h-7 rounded-md border border-input bg-background/80 px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="h-7 rounded-md border border-input bg-[#2e2e2e] px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   />
                 )}
               </div>
@@ -7575,7 +7574,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               </div>
             </div>
           )}
-        </div>
         </div>
       </div>
       <Dialog

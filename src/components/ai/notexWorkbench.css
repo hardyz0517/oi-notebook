@@ -1,56 +1,76 @@
 .notex-workbench {
-  --notex-surface: color-mix(in oklch, var(--background) 94%, var(--muted) 6%);
-  --notex-panel: color-mix(in oklch, var(--background) 88%, var(--muted) 12%);
-  --notex-panel-strong: color-mix(in oklch, var(--background) 78%, var(--muted) 22%);
-  --notex-border: color-mix(in oklch, var(--border) 74%, transparent);
-  --notex-border-subtle: color-mix(in oklch, var(--border) 42%, transparent);
-  --notex-hover: color-mix(in oklch, var(--accent) 34%, transparent);
-  --notex-selected: color-mix(in oklch, var(--accent) 44%, transparent);
-  --notex-muted: color-mix(in oklch, var(--muted-foreground) 82%, transparent);
-  background: var(--notex-surface);
+  --notex-surface: #181818;
+  --notex-panel: #1d1d1d;
+  --notex-panel-soft: #242424;
+  --notex-panel-strong: #2a2a2a;
+  --notex-composer-bg: #2e2e2e;
+  --notex-border: rgb(255 255 255 / 0.08);
+  --notex-border-subtle: rgb(255 255 255 / 0.045);
+  --notex-hover: rgb(255 255 255 / 0.065);
+  --notex-selected: rgb(255 255 255 / 0.11);
+  --notex-muted: rgb(232 232 232 / 0.72);
+  --notex-radius-sm: 7px;
+  --notex-radius-md: 10px;
+  --notex-radius-lg: 18px;
+  --notex-pad-x: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--notex-surface) !important;
+  color: var(--foreground);
+  font-size: 15px;
 }
 
 .notex-workbench:is(.dark *) {
-  --notex-surface: #202124;
-  --notex-panel: #26282a;
-  --notex-panel-strong: #2b2d2f;
-  --notex-border: rgb(255 255 255 / 0.11);
-  --notex-border-subtle: rgb(255 255 255 / 0.07);
-  --notex-hover: rgb(255 255 255 / 0.055);
-  --notex-selected: rgb(255 255 255 / 0.075);
-  --notex-muted: rgb(229 231 235 / 0.62);
+  --notex-surface: #181818;
+  --notex-panel: #1d1d1d;
+  --notex-panel-soft: #242424;
+  --notex-panel-strong: #2a2a2a;
+  --notex-composer-bg: #2e2e2e;
+  --notex-border: rgb(255 255 255 / 0.08);
+  --notex-border-subtle: rgb(255 255 255 / 0.045);
+  --notex-hover: rgb(255 255 255 / 0.065);
+  --notex-selected: rgb(255 255 255 / 0.11);
+  --notex-muted: rgb(232 232 232 / 0.72);
+}
+
+.notex-workbench * {
+  letter-spacing: 0;
 }
 
 .notex-header {
-  height: 36px !important;
-  min-height: 36px;
-  padding-inline: 10px !important;
-  border-bottom-color: var(--notex-border-subtle) !important;
-  background: var(--notex-panel);
+  height: 40px !important;
+  min-height: 40px;
+  padding-inline: var(--notex-pad-x) 10px !important;
+  border-bottom-color: color-mix(in oklch, var(--notex-border-subtle) 28%, transparent) !important;
+  background: #181818 !important;
 }
 
 .notex-brand {
-  gap: 0;
+  gap: 1px;
 }
 
 .notex-title {
-  font-size: 13px !important;
+  font-size: 16px !important;
   font-weight: 600;
-  line-height: 16px !important;
+  line-height: 18px !important;
+  color: color-mix(in oklch, var(--foreground) 96%, var(--notex-muted)) !important;
 }
 
 .notex-model-status {
-  font-size: 10.5px !important;
-  line-height: 12px !important;
-  color: var(--notex-muted);
+  font-size: 13px !important;
+  line-height: 15px !important;
+  color: color-mix(in oklch, var(--foreground) 76%, var(--notex-muted));
 }
 
 .notex-provider-button {
-  height: 26px !important;
-  max-width: 116px !important;
+  height: 27px !important;
+  max-width: 124px !important;
+  border-radius: var(--notex-radius-sm) !important;
   border-color: transparent !important;
   background: transparent !important;
-  color: var(--notex-muted) !important;
+  color: color-mix(in oklch, var(--foreground) 68%, var(--notex-muted)) !important;
+  font-size: 13px !important;
 }
 
 .notex-provider-button:hover,
@@ -62,8 +82,8 @@
 .notex-icon-button {
   width: 28px !important;
   height: 28px !important;
-  border-radius: 5px !important;
-  color: var(--notex-muted) !important;
+  border-radius: var(--notex-radius-sm) !important;
+  color: color-mix(in oklch, var(--foreground) 56%, var(--notex-muted)) !important;
 }
 
 .notex-icon-button:hover,
@@ -73,188 +93,324 @@
 }
 
 .notex-icon-button svg {
-  width: 16px;
-  height: 16px;
+  width: 15.5px;
+  height: 15.5px;
 }
 
 .notex-modebar {
-  height: 28px !important;
-  min-height: 28px;
-  padding-inline: 8px !important;
-  border-bottom-color: var(--notex-border-subtle) !important;
-  background: var(--notex-surface);
+  height: 30px !important;
+  min-height: 30px;
+  padding-inline: 10px var(--notex-pad-x) !important;
+  border-bottom-color: color-mix(in oklch, var(--notex-border-subtle) 26%, transparent) !important;
+  background: transparent !important;
 }
 
 .notex-mode-title {
-  font-size: 12px !important;
+  font-size: 15.5px !important;
   font-weight: 500 !important;
-  line-height: 16px !important;
+  line-height: 18px !important;
+  color: color-mix(in oklch, var(--foreground) 88%, var(--notex-muted));
 }
 
 .notex-mode-actions {
   gap: 0;
 }
 
+.notex-messages-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #181818 !important;
+}
+
 .notex-messages {
-  padding: 8px 10px 10px !important;
-  background: var(--notex-surface);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 0 !important;
+  background: #181818 !important;
+}
+
+.notex-messages::before,
+.notex-messages::after,
+.notex-messages-region::before,
+.notex-messages-region::after,
+.notex-composer-wrap::before,
+.notex-composer-wrap::after {
+  display: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  mask-image: none !important;
+  pointer-events: none !important;
+  content: none !important;
 }
 
 .notex-command-list,
-.notex-composer textarea,
+.notex-composer-card textarea,
 .notex-workbench [class*="overflow-y-auto"] {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted-foreground) 20%, transparent) transparent;
 }
 
 .notex-command-list::-webkit-scrollbar,
-.notex-composer textarea::-webkit-scrollbar,
+.notex-composer-card textarea::-webkit-scrollbar,
 .notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .notex-command-list::-webkit-scrollbar-thumb,
-.notex-composer textarea::-webkit-scrollbar-thumb,
+.notex-composer-card textarea::-webkit-scrollbar-thumb,
 .notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: color-mix(in oklch, var(--muted-foreground) 18%, transparent);
 }
 
 .notex-command-list::-webkit-scrollbar-track,
-.notex-composer textarea::-webkit-scrollbar-track,
+.notex-composer-card textarea::-webkit-scrollbar-track,
 .notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .notex-message-list {
-  gap: 10px !important;
+  gap: 18px !important;
 }
 
 .notex-message {
-  border-radius: 6px;
+  border-radius: var(--notex-radius-md);
+  font-size: 20px !important;
+  line-height: 1.6 !important;
 }
 
 .notex-message-assistant {
   max-width: 100% !important;
 }
 
-.notex-message-user {
-  max-width: 88% !important;
-  border-color: var(--notex-border-subtle) !important;
-  background: var(--notex-panel-strong) !important;
-  color: var(--foreground) !important;
-  box-shadow: none !important;
+.notex-assistant-markdown,
+.notex-message-assistant [data-ai-markdown-message] {
+  color: color-mix(in oklch, var(--foreground) 90%, var(--notex-muted));
+  font-size: 20px !important;
+  line-height: 1.6 !important;
 }
 
-.notex-message-system {
-  border-color: var(--notex-border-subtle) !important;
-  background: var(--notex-panel) !important;
-  box-shadow: none !important;
+.notex-assistant-markdown :where(p, li, ol, ul),
+.notex-message-assistant [data-ai-markdown-message] :where(p, li, ol, ul) {
+  font-size: 20px !important;
+  line-height: 1.6 !important;
 }
 
-.notex-composer-wrap {
-  padding: 7px 10px 9px !important;
-  border-top: 1px solid var(--notex-border-subtle);
-  background: var(--notex-panel);
+.notex-assistant-markdown :where(span, strong),
+.notex-message-assistant [data-ai-markdown-message] :where(span, strong) {
+  font-size: inherit !important;
+  line-height: inherit !important;
 }
 
-.notex-composer {
-  border-radius: 6px !important;
-  border-color: var(--notex-border) !important;
-  background: var(--notex-surface) !important;
-  box-shadow: none !important;
+.notex-assistant-markdown :where(p),
+.notex-message-assistant [data-ai-markdown-message] :where(p) {
+  margin-block: 0 12px !important;
 }
 
-.notex-composer:focus-within {
-  border-color: color-mix(in oklch, var(--ring) 38%, var(--notex-border)) !important;
-  background: var(--background) !important;
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ring) 18%, transparent) !important;
+.notex-assistant-markdown :where(li),
+.notex-message-assistant [data-ai-markdown-message] :where(li) {
+  margin-block: 0 8px !important;
 }
 
-.notex-composer-input {
-  min-height: 30px !important;
-  padding: 3px 5px 2px !important;
-  font-size: 13px !important;
+.notex-assistant-markdown :where(ol, ul),
+.notex-message-assistant [data-ai-markdown-message] :where(ol, ul) {
+  margin-block: 0 12px !important;
+  padding-left: 32px !important;
+}
+
+.notex-message-assistant :where(button) {
+  color: color-mix(in oklch, var(--foreground) 58%, var(--notex-muted));
+  font-size: 14px;
+}
+
+.notex-message-meta,
+.notex-message-actions,
+.notex-message-actions :where(button) {
+  font-size: 14px !important;
   line-height: 20px !important;
 }
 
+.notex-user-message,
+.notex-message-user {
+  max-width: 88% !important;
+  border-color: rgb(255 255 255 / 0.055) !important;
+  background: rgb(255 255 255 / 0.055) !important;
+  color: color-mix(in oklch, var(--foreground) 90%, var(--notex-muted)) !important;
+  box-shadow: none !important;
+  font-size: 20px !important;
+  line-height: 1.6 !important;
+  padding: 10px 14px !important;
+}
+
+.notex-message-system {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 18px !important;
+  line-height: 1.6 !important;
+}
+
+.notex-composer-wrap {
+  flex: 0 0 auto;
+  position: relative !important;
+  z-index: auto !important;
+  bottom: auto !important;
+  inset: auto !important;
+  margin: 0 !important;
+  padding: 0 12px 12px !important;
+  overflow: visible !important;
+  pointer-events: auto !important;
+  border: 0 !important;
+  border-top: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  mask-image: none !important;
+  transform: none !important;
+}
+
+.notex-composer-card {
+  position: relative;
+  border-radius: 18px !important;
+  border: 1px solid rgb(255 255 255 / 0.12) !important;
+  background: #2e2e2e !important;
+  box-shadow:
+    0 18px 32px -18px rgb(0 0 0 / 0.55),
+    0 2px 8px -2px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.06) !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.notex-composer-card:focus-within {
+  border-color: rgb(255 255 255 / 0.16) !important;
+  background: #2e2e2e !important;
+  box-shadow:
+    0 18px 32px -18px rgb(0 0 0 / 0.55),
+    0 2px 8px -2px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.06) !important;
+}
+
+.notex-composer-input {
+  max-height: 220px;
+  min-height: 104px !important;
+  padding: 18px 18px 12px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: color-mix(in oklch, var(--foreground) 94%, var(--notex-muted)) !important;
+  font-size: 20px !important;
+  line-height: 1.45 !important;
+  box-shadow: none !important;
+  resize: none;
+}
+
+.notex-composer-input::placeholder {
+  color: rgb(232 232 232 / 0.68) !important;
+  font-size: 20px !important;
+}
+
+.notex-composer-card textarea,
+.notex-composer-input textarea {
+  font-size: 20px !important;
+  line-height: 1.45 !important;
+}
+
 .notex-composer-toolbar {
-  padding-top: 5px !important;
-  border-top: 1px solid var(--notex-border-subtle);
+  min-height: 42px;
+  padding: 4px 14px 14px !important;
+  border-top: 0 !important;
+  background: transparent !important;
+  color: color-mix(in oklch, var(--foreground) 78%, var(--notex-muted)) !important;
+  font-size: 14.5px !important;
 }
 
 .notex-composer-control {
-  height: 24px !important;
+  height: 34px !important;
+  border-radius: var(--notex-radius-sm) !important;
   border-color: transparent !important;
   background: transparent !important;
-  color: var(--notex-muted) !important;
-  font-size: 11px !important;
+  color: color-mix(in oklch, var(--foreground) 82%, var(--notex-muted)) !important;
+  font-size: 14.5px !important;
+  padding-inline: 9px !important;
 }
 
 .notex-composer-control:hover,
 .notex-composer-control[aria-expanded="true"],
-.notex-composer-control[aria-checked="true"] {
+.notex-composer-control[aria-checked="true"],
+.notex-composer-control-active {
   background: var(--notex-hover) !important;
   color: var(--foreground) !important;
 }
 
 .notex-switch-track {
-  background: color-mix(in oklch, var(--muted-foreground) 22%, transparent) !important;
+  background: color-mix(in oklch, var(--foreground) 18%, transparent) !important;
 }
 
 .notex-composer-control[aria-checked="true"] .notex-switch-track {
-  background: color-mix(in oklch, var(--primary) 58%, transparent) !important;
+  background: color-mix(in oklch, var(--foreground) 34%, transparent) !important;
 }
 
 .notex-switch-thumb {
   box-shadow: none !important;
+  background: rgb(232 232 232 / 0.86) !important;
 }
 
 .notex-composer-send {
-  width: 30px !important;
-  height: 28px !important;
-  border-radius: 5px !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 999px !important;
+  border: 0 !important;
   box-shadow: none !important;
+  margin-right: 2px;
+  color: #181818 !important;
 }
 
 .notex-composer-send:not(:disabled) {
-  background: var(--foreground) !important;
-  color: var(--background) !important;
+  background: color-mix(in oklch, var(--foreground) 88%, transparent) !important;
+  color: var(--notex-surface) !important;
 }
 
 .notex-composer-send:disabled {
-  background: var(--notex-panel-strong) !important;
+  background: rgb(255 255 255 / 0.18) !important;
+  color: rgb(232 232 232 / 0.62) !important;
+  opacity: 1 !important;
 }
 
 .notex-command-panel {
-  bottom: calc(100% + 6px) !important;
-  border-radius: 6px !important;
-  border-color: var(--notex-border) !important;
-  background: var(--notex-panel) !important;
-  box-shadow: 0 8px 18px rgb(15 23 42 / 0.08) !important;
+  bottom: calc(100% + 8px) !important;
+  left: 2px !important;
+  right: 2px !important;
+  border-radius: 12px !important;
+  border-color: color-mix(in oklch, var(--notex-border) 70%, transparent) !important;
+  background: color-mix(in oklch, var(--notex-panel-strong) 72%, var(--notex-surface) 28%) !important;
+  box-shadow: none !important;
 }
 
 .notex-command-panel:is(.dark *) {
-  box-shadow: 0 10px 24px rgb(0 0 0 / 0.24) !important;
+  box-shadow: none !important;
 }
 
 .notex-command-header {
-  min-height: 24px;
-  padding: 3px 8px !important;
-  border-bottom-color: var(--notex-border-subtle) !important;
+  min-height: 26px;
+  padding: 4px 9px !important;
+  border-bottom-color: color-mix(in oklch, var(--notex-border-subtle) 68%, transparent) !important;
+  font-size: 14px !important;
 }
 
 .notex-command-list {
-  padding: 4px !important;
+  padding: 6px !important;
 }
 
 .notex-command-item {
-  height: 32px !important;
-  min-height: 32px;
-  gap: 7px !important;
-  border-radius: 4px !important;
-  padding: 3px 7px !important;
+  height: 44px !important;
+  min-height: 44px;
+  gap: 8px !important;
+  border-radius: var(--notex-radius-sm) !important;
+  padding: 5px 8px !important;
   border: 0 !important;
   box-shadow: none !important;
 }
@@ -264,13 +420,14 @@
 }
 
 .notex-command-item[data-active="true"] {
-  background: var(--notex-selected) !important;
+  background: color-mix(in oklch, var(--notex-selected) 92%, var(--notex-hover) 8%) !important;
   color: var(--foreground) !important;
 }
 
 .notex-command-icon {
   width: 16px !important;
   height: 16px !important;
+  color: color-mix(in oklch, var(--foreground) 70%, var(--notex-muted)) !important;
 }
 
 .notex-command-icon svg {
@@ -279,23 +436,24 @@
 }
 
 .notex-command-name {
-  font-size: 13px !important;
+  font-size: 16px !important;
   font-weight: 500 !important;
-  line-height: 15px !important;
+  line-height: 18px !important;
+  color: color-mix(in oklch, var(--foreground) 94%, var(--notex-muted)) !important;
 }
 
 .notex-command-description {
-  font-size: 12px !important;
-  line-height: 14px !important;
+  font-size: 14px !important;
+  line-height: 17px !important;
   color: var(--notex-muted) !important;
 }
 
 .notex-tag-output {
   gap: 9px !important;
-  border-radius: 6px !important;
-  border-color: var(--notex-border-subtle) !important;
-  background: transparent !important;
-  padding: 10px 0 0 !important;
+  border-radius: 12px !important;
+  border-color: color-mix(in oklch, var(--notex-border-subtle) 78%, transparent) !important;
+  background: rgb(255 255 255 / 0.04) !important;
+  padding: 14px 0 0 !important;
   box-shadow: none !important;
 }
 
@@ -303,12 +461,13 @@
 .notex-tag-output-section,
 .notex-tag-output-reason,
 .notex-tag-actions {
-  padding-inline: 10px;
+  padding-inline: 16px;
 }
 
 .notex-tag-output-title {
-  font-size: 13px !important;
-  font-weight: 500 !important;
+  font-size: 14px !important;
+  font-weight: 550 !important;
+  color: color-mix(in oklch, var(--foreground) 88%, var(--notex-muted)) !important;
 }
 
 .notex-tag-output-path,
@@ -318,8 +477,15 @@
 
 .notex-tag-output-status,
 .notex-tag-chip {
-  border-radius: 4px !important;
-  background: var(--notex-panel) !important;
+  border-radius: 6px !important;
+  background: color-mix(in oklch, var(--notex-panel-soft) 48%, transparent) !important;
+}
+
+.notex-tag-output-status {
+  padding: 1px 5px !important;
+  font-size: 11.5px !important;
+  line-height: 16px !important;
+  color: var(--notex-muted) !important;
 }
 
 .notex-tag-chip-list {
@@ -328,8 +494,8 @@
 
 .notex-tag-chip {
   padding: 1px 6px !important;
-  border-color: var(--notex-border-subtle) !important;
-  font-size: 11px !important;
+  border-color: color-mix(in oklch, var(--notex-border-subtle) 74%, transparent) !important;
+  font-size: 12px !important;
   line-height: 18px !important;
 }
 
@@ -338,19 +504,22 @@
 }
 
 .notex-tag-candidate {
-  border-radius: 4px !important;
+  min-height: 28px;
+  align-items: center !important;
+  border-radius: var(--notex-radius-sm) !important;
   border-color: transparent !important;
   background: transparent !important;
-  padding: 5px 6px !important;
+  padding: 4px 8px !important;
 }
 
 .notex-tag-candidate:hover {
-  background: var(--notex-hover) !important;
+  background: color-mix(in oklch, var(--notex-hover) 78%, transparent) !important;
 }
 
 .notex-tag-checkbox {
   width: 13px;
   height: 13px;
+  margin-top: 0 !important;
   accent-color: var(--primary);
 }
 
@@ -359,9 +528,10 @@
 }
 
 .notex-tag-candidate-name {
-  font-size: 12.5px !important;
+  font-size: 13.5px !important;
   font-weight: 500 !important;
   line-height: 18px !important;
+  color: color-mix(in oklch, var(--foreground) 92%, var(--notex-muted)) !important;
 }
 
 .notex-tag-confidence,
@@ -370,26 +540,27 @@
 }
 
 .notex-tag-candidate-reason {
-  font-size: 11px !important;
+  font-size: 12px !important;
   line-height: 17px !important;
 }
 
 .notex-tag-output-reason {
-  border-top: 1px solid var(--notex-border-subtle);
+  border-top: 1px solid color-mix(in oklch, var(--notex-border-subtle) 72%, transparent);
   border-radius: 0 !important;
   background: transparent !important;
-  padding-block: 7px !important;
+  padding-block: 7px 8px !important;
+  color: var(--notex-muted) !important;
 }
 
 .notex-tag-actions {
-  border-top: 1px solid var(--notex-border-subtle);
+  border-top: 1px solid color-mix(in oklch, var(--notex-border-subtle) 72%, transparent);
   padding-block: 7px 8px;
 }
 
 .notex-tag-action-secondary,
 .notex-tag-action-primary {
-  height: 26px !important;
-  border-radius: 4px !important;
+  height: 24px !important;
+  border-radius: var(--notex-radius-sm) !important;
   box-shadow: none !important;
 }
 
@@ -403,6 +574,7 @@
 }
 
 .notex-tag-action-primary {
-  background: var(--foreground) !important;
-  color: var(--background) !important;
+  border-color: color-mix(in oklch, var(--foreground) 14%, transparent) !important;
+  background: color-mix(in oklch, var(--foreground) 82%, transparent) !important;
+  color: var(--notex-surface) !important;
 }

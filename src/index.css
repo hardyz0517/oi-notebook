@@ -1026,7 +1026,8 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 .app-notes-sidebar-header {
   background: color-mix(in oklch, var(--surface-sidebar) 86%, var(--surface-toolbar));
   border-color: var(--separator-strong);
-  min-height: calc(28px * var(--chrome-zoom, 1));
+  min-height: calc(42px * var(--chrome-zoom, 1));
+  font-size: 20px;
 }
 
 .app-notes-sidebar-actions {
@@ -1040,27 +1041,29 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-notes-sidebar-action {
-  border-radius: 3px;
-  color: color-mix(in oklch, var(--text-muted) 72%, var(--text-secondary));
+  width: calc(32px * var(--app-zoom, 1));
+  height: calc(32px * var(--app-zoom, 1));
+  border-radius: 4px;
+  color: color-mix(in oklch, var(--text-muted) 66%, var(--text-secondary));
 }
 
 .app-notes-sidebar-action svg {
-  height: calc(16px * var(--app-zoom, 1)) !important;
-  width: calc(16px * var(--app-zoom, 1)) !important;
-  min-height: calc(16px * var(--app-zoom, 1));
-  min-width: calc(16px * var(--app-zoom, 1));
+  height: calc(20px * var(--app-zoom, 1)) !important;
+  width: calc(20px * var(--app-zoom, 1)) !important;
+  min-height: calc(20px * var(--app-zoom, 1));
+  min-width: calc(20px * var(--app-zoom, 1));
   stroke-width: 1.8;
 }
 
 .app-notes-sidebar-action:hover {
-  background: color-mix(in oklch, var(--hover-bg) 50%, transparent);
-  color: color-mix(in oklch, var(--foreground) 82%, var(--text-secondary));
+  background: color-mix(in oklch, var(--hover-bg) 58%, transparent);
+  color: color-mix(in oklch, var(--foreground) 88%, var(--text-secondary));
 }
 
 .app-file-tree {
   color: var(--foreground);
   min-height: 100%;
-  font-size: 13.5px;
+  font-size: 20px;
 }
 
 .app-file-tree-scroll {
@@ -1093,7 +1096,8 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-group-header {
-  min-height: calc(1.25rem * var(--app-ui-gap-scale));
+  min-height: 40px;
+  font-size: 20px;
 }
 
 .app-file-group-header-active {
@@ -1108,16 +1112,16 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-group-icon {
-  height: calc(13px * var(--app-zoom, 1)) !important;
-  width: calc(13px * var(--app-zoom, 1)) !important;
-  min-width: calc(15px * var(--app-zoom, 1));
+  height: calc(20px * var(--app-zoom, 1)) !important;
+  width: calc(20px * var(--app-zoom, 1)) !important;
+  min-width: calc(24px * var(--app-zoom, 1));
   color: color-mix(in oklch, var(--text-muted) 50%, var(--text-secondary));
   stroke-width: 2.18;
 }
 
 .app-file-group-chevron {
-  width: calc(13px * var(--app-zoom, 1));
-  min-width: calc(13px * var(--app-zoom, 1));
+  width: calc(24px * var(--app-zoom, 1));
+  min-width: calc(24px * var(--app-zoom, 1));
   color: color-mix(in oklch, var(--muted-foreground) 78%, transparent);
 }
 
@@ -1136,35 +1140,43 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-row {
-  min-height: 26px;
-  border-radius: 2px;
-  color: color-mix(in oklch, var(--foreground) 78%, var(--text-secondary));
+  min-height: 40px;
+  border-radius: 3px;
+  color: color-mix(in oklch, var(--foreground) 90%, var(--text-secondary));
   outline: none;
 }
 
 .app-file-row .app-file-name {
-  font-size: 13.5px;
-  line-height: 26px;
+  font-size: 20px;
+  line-height: 40px;
 }
 
 .app-file-folder-row .app-file-name,
 .app-file-root-row .app-file-name {
-  color: color-mix(in oklch, var(--foreground) 82%, var(--text-secondary));
+  color: color-mix(in oklch, var(--foreground) 90%, var(--text-secondary));
+}
+
+.app-file-root-row .app-file-name {
+  font-weight: 600;
+}
+
+.app-file-root-row > svg {
+  color: color-mix(in oklch, var(--foreground) 80%, var(--text-secondary)) !important;
 }
 
 .app-file-row:hover {
-  background: color-mix(in oklch, var(--hover-bg) 24%, transparent);
-  color: color-mix(in oklch, var(--foreground) 84%, var(--text-secondary));
+  background: #2a2d2e;
+  color: color-mix(in oklch, var(--foreground) 96%, var(--text-secondary));
 }
 
 .app-file-row[data-active="true"] {
-  background: color-mix(in oklch, var(--selected-bg) 22%, var(--surface-sidebar));
+  background: #04395e;
   box-shadow: none;
 }
 
-.app-notes-sidebar:hover .app-file-row[data-active="true"],
-.app-notes-sidebar:focus-within .app-file-row[data-active="true"] {
-  background: color-mix(in oklch, var(--selected-bg) 30%, var(--surface-sidebar));
+.app-file-row[data-active="true"]:hover,
+.app-file-row[data-active="true"]:focus-within {
+  background: #064875;
 }
 
 .app-file-row:focus-visible {
@@ -1172,7 +1184,8 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-row[data-active="true"] .app-file-name {
-  color: color-mix(in oklch, var(--foreground) 88%, var(--text-secondary));
+  color: color-mix(in oklch, var(--foreground) 99%, var(--text-secondary));
+  font-weight: 500;
 }
 
 .app-file-actions {
@@ -1187,14 +1200,14 @@ html[data-theme="light"] .app-notes-sidebar .bg-accent\/75 {
 }
 
 .app-file-action {
-  height: 20px;
-  width: 20px;
+  height: 32px;
+  width: 32px;
   border-radius: 2px;
 }
 
 .app-file-action svg {
-  height: clamp(13px, calc(14px * var(--chrome-zoom, 1)), 16px);
-  width: clamp(13px, calc(14px * var(--chrome-zoom, 1)), 16px);
+  height: clamp(18px, calc(19px * var(--chrome-zoom, 1)), 20px);
+  width: clamp(18px, calc(19px * var(--chrome-zoom, 1)), 20px);
   stroke-width: 1.95;
 }
 
@@ -1280,21 +1293,21 @@ html[data-theme="light"] .app-file-group-count {
 }
 
 html[data-theme="light"] .app-file-row {
-  color: color-mix(in oklch, var(--text-title) 78%, var(--text-secondary));
+  color: color-mix(in oklch, var(--text-title) 86%, var(--text-secondary));
 }
 
 html[data-theme="light"] .app-file-row:hover {
-  background: color-mix(in oklch, var(--hover-bg) 32%, var(--surface-sidebar));
+  background: color-mix(in oklch, var(--hover-bg) 64%, var(--surface-sidebar));
 }
 
 html[data-theme="light"] .app-file-row[data-active="true"] {
-  background: color-mix(in oklch, var(--selected-bg) 30%, var(--surface-sidebar));
+  background: color-mix(in oklch, #d7e6f6 68%, var(--surface-sidebar));
   box-shadow: none;
 }
 
-html[data-theme="light"] .app-notes-sidebar:hover .app-file-row[data-active="true"],
-html[data-theme="light"] .app-notes-sidebar:focus-within .app-file-row[data-active="true"] {
-  background: color-mix(in oklch, var(--selected-bg) 38%, var(--surface-sidebar));
+html[data-theme="light"] .app-file-row[data-active="true"]:hover,
+html[data-theme="light"] .app-file-row[data-active="true"]:focus-within {
+  background: color-mix(in oklch, #c7dcf3 76%, var(--surface-sidebar));
 }
 
 html[data-theme="light"] .app-file-group-header-active {
@@ -1307,12 +1320,15 @@ html[data-theme="light"] .app-file-actions {
 }
 
 .onb-tree {
-  --onb-tree-row-height: 24px;
-  --onb-tree-slot: 16px;
-  --onb-tree-actions-width: 42px;
+  --onb-tree-row-height: 40px;
+  --onb-tree-slot: 24px;
+  --onb-tree-actions-width: 66px;
+  --onb-tree-hover-bg: #2a2d2e;
+  --onb-tree-selected-bg: #04395e;
+  --onb-tree-selected-hover-bg: #064875;
   min-height: 100%;
-  color: color-mix(in oklch, var(--foreground) 78%, var(--text-secondary));
-  font-size: 13px;
+  color: color-mix(in oklch, var(--foreground) 90%, var(--text-secondary));
+  font-size: 20px;
   line-height: var(--onb-tree-row-height);
 }
 
@@ -1361,7 +1377,7 @@ html[data-theme="light"] .app-file-actions {
   min-width: 0;
   height: var(--onb-tree-row-height);
   align-items: center;
-  border-radius: 2px;
+  border-radius: 3px;
   color: inherit;
   outline: none;
   transition:
@@ -1370,23 +1386,23 @@ html[data-theme="light"] .app-file-actions {
 }
 
 .onb-tree-row:hover {
-  background-color: color-mix(in oklch, var(--hover-bg) 24%, transparent);
-  color: color-mix(in oklch, var(--foreground) 84%, var(--text-secondary));
+  background-color: #2a2d2e;
+  color: color-mix(in oklch, var(--foreground) 96%, var(--text-secondary));
 }
 
 .onb-tree-row[data-active="true"] {
-  background-color: color-mix(in oklch, var(--selected-bg) 24%, var(--surface-sidebar));
-  color: color-mix(in oklch, var(--foreground) 88%, var(--text-secondary));
+  background-color: #04395e;
+  color: color-mix(in oklch, var(--foreground) 99%, var(--text-secondary));
   box-shadow: none;
 }
 
-.app-notes-sidebar:hover .onb-tree-row[data-active="true"],
-.app-notes-sidebar:focus-within .onb-tree-row[data-active="true"] {
-  background-color: color-mix(in oklch, var(--selected-bg) 30%, var(--surface-sidebar));
+.onb-tree-row[data-active="true"]:hover,
+.onb-tree-row[data-active="true"]:focus-within {
+  background-color: #064875;
 }
 
 .onb-tree-row[data-descendant-active="true"]:not([data-active="true"]) .onb-tree-label-folder {
-  color: color-mix(in oklch, var(--foreground) 84%, var(--text-secondary));
+  color: color-mix(in oklch, var(--foreground) 90%, var(--text-secondary));
 }
 
 .onb-tree-row:focus-within {
@@ -1399,7 +1415,7 @@ html[data-theme="light"] .app-file-actions {
   height: 100%;
   flex: 1 1 auto;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1424,18 +1440,42 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
   flex: 0 0 var(--onb-tree-slot);
   align-items: center;
   justify-content: center;
-  color: color-mix(in oklch, var(--text-muted) 68%, var(--text-secondary));
+  color: color-mix(in oklch, var(--text-muted) 48%, var(--text-secondary));
 }
 
 .onb-tree-twistie svg,
 .onb-tree-icon svg {
-  width: 15px;
-  height: 15px;
+  width: 20px;
+  height: 20px;
 }
 
 .onb-tree-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
+}
+
+.onb-tree-icon {
+  color: color-mix(in oklch, var(--foreground) 72%, var(--text-secondary));
+}
+
+.onb-tree-row:has(.onb-tree-label-folder) .onb-tree-icon {
+  color: color-mix(in oklch, var(--foreground) 82%, var(--text-secondary));
+}
+
+.onb-tree-row:hover .onb-tree-icon {
+  color: color-mix(in oklch, var(--foreground) 94%, var(--text-secondary));
+}
+
+.onb-tree-row:hover .onb-tree-twistie {
+  color: color-mix(in oklch, var(--foreground) 80%, var(--text-secondary));
+}
+
+.onb-tree-row[data-active="true"] .onb-tree-icon {
+  color: color-mix(in oklch, var(--foreground) 99%, var(--text-secondary));
+}
+
+.onb-tree-row[data-active="true"] .onb-tree-twistie {
+  color: color-mix(in oklch, var(--foreground) 88%, var(--text-secondary));
 }
 
 .onb-tree-chevron {
@@ -1452,7 +1492,7 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
   flex: 0 1 auto;
   overflow: hidden;
   color: inherit;
-  font-size: 13px;
+  font-size: 20px;
   font-weight: 400;
   line-height: var(--onb-tree-row-height);
   text-overflow: ellipsis;
@@ -1460,6 +1500,15 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 }
 
 .onb-tree-label-folder {
+  font-weight: 500;
+  color: color-mix(in oklch, var(--foreground) 94%, var(--text-secondary));
+}
+
+.onb-tree-row[data-active="true"] .onb-tree-label {
+  font-weight: 500;
+}
+
+.onb-tree-row[data-active="true"] .onb-tree-label-folder {
   font-weight: 500;
 }
 
@@ -1491,28 +1540,28 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 
 .onb-tree-action {
   display: inline-flex;
-  width: 20px;
-  height: 20px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: 2px;
   background-color: transparent;
-  color: color-mix(in oklch, var(--text-muted) 78%, var(--text-secondary));
+  color: color-mix(in oklch, var(--text-muted) 58%, var(--text-secondary));
   outline: none;
   padding: 0;
 }
 
 .onb-tree-action svg {
-  width: 16px;
-  height: 16px;
+  width: 19px;
+  height: 19px;
   stroke-width: 1.9;
 }
 
 .app-notes-sidebar .onb-tree-action:hover,
 html[data-theme="light"] .app-notes-sidebar .onb-tree-action:hover {
-  background-color: color-mix(in oklch, var(--hover-bg) 52%, transparent);
-  color: color-mix(in oklch, var(--foreground) 84%, var(--text-secondary));
+  background-color: color-mix(in oklch, var(--hover-bg) 58%, transparent);
+  color: color-mix(in oklch, var(--foreground) 88%, var(--text-secondary));
 }
 
 .app-notes-sidebar .onb-tree-action-danger:hover,
@@ -1538,6 +1587,7 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-action-danger:hover {
   background: transparent;
   color: var(--foreground);
   font: inherit;
+  font-size: 20px;
   line-height: var(--onb-tree-row-height);
   outline: none;
   padding: 0;
@@ -1572,26 +1622,53 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-action-danger:hover {
 }
 
 html[data-theme="light"] .onb-tree {
-  color: color-mix(in oklch, var(--text-title) 78%, var(--text-secondary));
+  --onb-tree-hover-bg: color-mix(in oklch, var(--hover-bg) 64%, var(--surface-sidebar));
+  --onb-tree-selected-bg: color-mix(in oklch, #d7e6f6 68%, var(--surface-sidebar));
+  --onb-tree-selected-hover-bg: color-mix(in oklch, #c7dcf3 76%, var(--surface-sidebar));
+  color: color-mix(in oklch, var(--text-title) 90%, var(--text-secondary));
 }
 
 html[data-theme="light"] .onb-tree-row:hover {
-  background-color: color-mix(in oklch, var(--hover-bg) 30%, var(--surface-sidebar));
+  background-color: var(--onb-tree-hover-bg);
 }
 
 html[data-theme="light"] .onb-tree-row[data-active="true"] {
-  background-color: color-mix(in oklch, var(--selected-bg) 32%, var(--surface-sidebar));
-  color: color-mix(in oklch, var(--text-title) 88%, var(--text-secondary));
+  background-color: var(--onb-tree-selected-bg);
+  color: color-mix(in oklch, var(--text-title) 99%, var(--text-secondary));
 }
 
-html[data-theme="light"] .app-notes-sidebar:hover .onb-tree-row[data-active="true"],
-html[data-theme="light"] .app-notes-sidebar:focus-within .onb-tree-row[data-active="true"] {
-  background-color: color-mix(in oklch, var(--selected-bg) 38%, var(--surface-sidebar));
+html[data-theme="light"] .onb-tree-row[data-active="true"]:hover,
+html[data-theme="light"] .onb-tree-row[data-active="true"]:focus-within {
+  background-color: var(--onb-tree-selected-hover-bg);
 }
 
 html[data-theme="light"] .onb-tree-twistie,
 html[data-theme="light"] .onb-tree-icon {
-  color: color-mix(in oklch, var(--text-muted) 62%, var(--text-secondary));
+  color: color-mix(in oklch, var(--text-muted) 52%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-icon {
+  color: color-mix(in oklch, var(--text-title) 72%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-row:has(.onb-tree-label-folder) .onb-tree-icon {
+  color: color-mix(in oklch, var(--text-title) 82%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-row:hover .onb-tree-icon {
+  color: color-mix(in oklch, var(--text-title) 94%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-row:hover .onb-tree-twistie {
+  color: color-mix(in oklch, var(--text-title) 80%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-row[data-active="true"] .onb-tree-icon {
+  color: color-mix(in oklch, var(--text-title) 99%, var(--text-secondary));
+}
+
+html[data-theme="light"] .onb-tree-row[data-active="true"] .onb-tree-twistie {
+  color: color-mix(in oklch, var(--text-title) 88%, var(--text-secondary));
 }
 
 html[data-theme="light"] .onb-tree-inline-row {
