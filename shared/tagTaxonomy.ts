@@ -93,6 +93,56 @@ export type ArticleTagSuggestion = {
   reasons: string[];
 };
 
+export type AiTagRecommendationCandidate = {
+  id: string;
+  pathText: string;
+  name: string;
+  aliases: string[];
+  source: "builtin" | "user";
+  score: number;
+  reasons: string[];
+};
+
+export type AiTagRecommendationRawSuggestion = {
+  tag?: string | null;
+  confidence?: number | null;
+  reason?: string | null;
+  evidence?: string | null;
+};
+
+export type AiTagRecommendationSuggestion = {
+  tag: string;
+  confidence: number;
+  reason: string;
+  evidence: string;
+  normalizedFrom?: string;
+};
+
+export type AiTagRecommendationIgnored = {
+  tag?: string;
+  reason:
+    | "invalid_json"
+    | "missing_tag"
+    | "unknown_tag"
+    | "hidden"
+    | "deprecated"
+    | "duplicate_existing"
+    | "duplicate_suggestion"
+    | "not_in_candidates";
+  detail?: string;
+};
+
+export type AiTagRecommendationPostprocessResult = {
+  suggestions: AiTagRecommendationSuggestion[];
+  ignored: AiTagRecommendationIgnored[];
+};
+
+export type ParseAiTagRecommendationJsonResult = {
+  suggestions: AiTagRecommendationRawSuggestion[];
+  ignored: AiTagRecommendationIgnored[];
+  error?: string;
+};
+
 export type SuggestTagsFromArticleTextInput = {
   title?: string | null;
   summary?: string | null;
@@ -103,6 +153,17 @@ export type SuggestTagsFromArticleTextInput = {
 export type SuggestTagsFromArticleTextOptions = {
   limit?: number;
   includeExistingTags?: boolean;
+  userConfig?: UserTagTaxonomyConfig | null;
+};
+
+export type BuildAiTagRecommendationCandidatesInput = SuggestTagsFromArticleTextInput & {
+  notePath?: string | null;
+};
+
+export type BuildAiTagRecommendationCandidatesOptions = {
+  limit?: number;
+  aliasLimit?: number;
+  contentCharLimit?: number;
   userConfig?: UserTagTaxonomyConfig | null;
 };
 
@@ -1688,6 +1749,348 @@ export function suggestTagsFromArticleText(
     .slice(0, limit);
 }
 
+function normalizeAiRecommendationKey(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+const AI_TAG_RECOMMENDATION_REASON_LIMIT = 90;
+const AI_TAG_RECOMMENDATION_EVIDENCE_LIMIT = 120;
+
+function truncateAiRecommendationText(value: unknown, fallback: string, limit: number): string {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  const normalized = text || fallback;
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+function findFirstJsonObjectText(text: string): string | null {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{") continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === "\"") {
+        inString = true;
+      } else if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, index + 1);
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractAiTagRecommendationJsonObjectText(content: string): string | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("{")) {
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      // Fall through to code-fence and embedded-object extraction.
+    }
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch) {
+    const fenced = fencedMatch[1]?.trim() ?? "";
+    if (fenced.startsWith("{")) {
+      try {
+        JSON.parse(fenced);
+        return fenced;
+      } catch {
+        // Fall through to embedded-object extraction.
+      }
+    }
+  }
+
+  return findFirstJsonObjectText(trimmed);
+}
+
+export function parseAiTagRecommendationJson(content: string): ParseAiTagRecommendationJsonResult {
+  const jsonText = extractAiTagRecommendationJsonObjectText(content);
+  if (!jsonText) {
+    return {
+      suggestions: [],
+      ignored: [{ reason: "invalid_json", detail: "No JSON object found in model output." }],
+      error: "invalid_json",
+    };
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(jsonText);
+  } catch (error) {
+    return {
+      suggestions: [],
+      ignored: [{ reason: "invalid_json", detail: error instanceof Error ? error.message : String(error) }],
+      error: "invalid_json",
+    };
+  }
+
+  if (!value || typeof value !== "object" || !Array.isArray((value as { suggestions?: unknown }).suggestions)) {
+    return {
+      suggestions: [],
+      ignored: [{ reason: "invalid_json", detail: "suggestions must be an array." }],
+      error: "invalid_json",
+    };
+  }
+
+  const suggestions: AiTagRecommendationRawSuggestion[] = [];
+  const ignored: AiTagRecommendationIgnored[] = [];
+  for (const item of (value as { suggestions: unknown[] }).suggestions) {
+    if (!item || typeof item !== "object") {
+      ignored.push({ reason: "missing_tag" });
+      continue;
+    }
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.tag !== "string" || !candidate.tag.trim()) {
+      ignored.push({ reason: "missing_tag" });
+      continue;
+    }
+    suggestions.push({
+      tag: candidate.tag,
+      confidence: typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+        ? Math.max(0, Math.min(1, candidate.confidence))
+        : undefined,
+      reason: truncateAiRecommendationText(candidate.reason, "", AI_TAG_RECOMMENDATION_REASON_LIMIT),
+      evidence: truncateAiRecommendationText(candidate.evidence, "", AI_TAG_RECOMMENDATION_EVIDENCE_LIMIT),
+    });
+  }
+
+  return { suggestions, ignored };
+}
+
+function normalizeAiCandidate(candidate: TagSuggestion, score = 0, reasons: string[] = [], aliasLimit = 4): AiTagRecommendationCandidate {
+  return {
+    id: candidate.id,
+    pathText: candidate.pathText,
+    name: candidate.name,
+    aliases: uniqueStrings(candidate.aliases.map((alias) => alias.trim()).filter(Boolean)).slice(0, aliasLimit),
+    source: candidate.source,
+    score,
+    reasons,
+  };
+}
+
+function addAiCandidate(
+  candidates: Map<string, AiTagRecommendationCandidate>,
+  suggestion: TagSuggestion,
+  options: { score?: number; reasons?: string[]; aliasLimit: number; limit: number },
+) {
+  if (suggestion.hidden || suggestion.deprecated) {
+    return;
+  }
+  const existing = candidates.get(suggestion.id);
+  if (existing) {
+    candidates.set(suggestion.id, {
+      ...existing,
+      score: Math.max(existing.score, options.score ?? 0),
+      reasons: uniqueStrings([...existing.reasons, ...(options.reasons ?? [])]),
+    });
+    return;
+  }
+  if (candidates.size >= options.limit) {
+    return;
+  }
+  candidates.set(suggestion.id, normalizeAiCandidate(suggestion, options.score ?? 0, options.reasons ?? [], options.aliasLimit));
+}
+
+function getAiCandidateSeeds(input: BuildAiTagRecommendationCandidatesInput): string[] {
+  return uniqueStrings([
+    input.title ?? "",
+    input.notePath ?? "",
+    input.summary ?? "",
+    ...(input.existingTags ?? []),
+  ].map((item) => item.trim()).filter(Boolean));
+}
+
+export function buildAiTagRecommendationCandidates(
+  input: BuildAiTagRecommendationCandidatesInput,
+  options: BuildAiTagRecommendationCandidatesOptions = {},
+): AiTagRecommendationCandidate[] {
+  const limit = Math.max(1, Math.min(options.limit ?? 30, 40));
+  const aliasLimit = Math.max(0, Math.min(options.aliasLimit ?? 4, 8));
+  const contentCharLimit = Math.max(500, Math.min(options.contentCharLimit ?? 4000, 12000));
+  const candidates = new Map<string, AiTagRecommendationCandidate>();
+  const content = (input.content ?? "").trim();
+  const contentExcerpt = content.length > contentCharLimit ? content.slice(0, contentCharLimit) : content;
+
+  for (const item of suggestTagsFromArticleText(
+    {
+      title: input.title,
+      summary: input.summary,
+      content: contentExcerpt,
+      existingTags: input.existingTags ?? [],
+    },
+    {
+      includeExistingTags: true,
+      limit,
+      userConfig: options.userConfig,
+    },
+  )) {
+    addAiCandidate(candidates, item.tag, {
+      score: item.score,
+      reasons: item.reasons,
+      aliasLimit,
+      limit,
+    });
+  }
+
+  for (const seed of getAiCandidateSeeds(input)) {
+    if (candidates.size >= limit) {
+      break;
+    }
+    for (const suggestion of findTagSuggestionsByQuery(seed, {
+      limit: 4,
+      userConfig: options.userConfig,
+    })) {
+      addAiCandidate(candidates, suggestion, {
+        score: 1,
+        reasons: [`query matched ${seed}`],
+        aliasLimit,
+        limit,
+      });
+    }
+  }
+
+  return Array.from(candidates.values()).slice(0, limit);
+}
+
+function clampAiConfidence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0.6;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function getAiRecommendationIdentity(analysis: TagNormalizationAnalysis, fallback: string): string {
+  if (analysis.targetEntryId) {
+    return `entry:${analysis.targetEntryId}`;
+  }
+  if (analysis.targetCanonicalPath) {
+    return `path:${normalizeAiRecommendationKey(analysis.targetCanonicalPath)}`;
+  }
+  return `text:${normalizeAiRecommendationKey(fallback)}`;
+}
+
+export function postprocessAiTagRecommendations(
+  rawSuggestions: AiTagRecommendationRawSuggestion[],
+  options: {
+    candidates: AiTagRecommendationCandidate[];
+    existingTags?: string[];
+    userConfig?: UserTagTaxonomyConfig | null;
+    limit?: number;
+  },
+): AiTagRecommendationPostprocessResult {
+  const candidateById = new Map(options.candidates.map((candidate) => [candidate.id, candidate]));
+  const candidateByPath = new Map(options.candidates.map((candidate) => [normalizeAiRecommendationKey(candidate.pathText), candidate]));
+  const existing = new Set(
+    (options.existingTags ?? [])
+      .map((tag, index) => analyzeSingleTagNormalization(tag, { userConfig: options.userConfig, index }))
+      .filter((analysis) => !analysis.isUnknownFreeform)
+      .map((analysis) => getAiRecommendationIdentity(analysis, analysis.original)),
+  );
+  const seen = new Map<string, number>();
+  const suggestions: AiTagRecommendationSuggestion[] = [];
+  const ignored: AiTagRecommendationIgnored[] = [];
+  const limit = Math.max(1, Math.min(options.limit ?? 8, 20));
+
+  for (const raw of rawSuggestions) {
+    const original = typeof raw.tag === "string" ? raw.tag.trim() : "";
+    if (!original) {
+      ignored.push({ reason: "missing_tag" });
+      continue;
+    }
+
+    const analysis = analyzeSingleTagNormalization(original, { userConfig: options.userConfig });
+    const targetPath = analysis.targetCanonicalPath;
+    const targetCandidate = (
+      analysis.targetEntryId ? candidateById.get(analysis.targetEntryId) : undefined
+    ) ?? (
+      targetPath ? candidateByPath.get(normalizeAiRecommendationKey(targetPath)) : undefined
+    ) ?? null;
+
+    if (!targetPath || !analysis.targetEntryId) {
+      ignored.push({ tag: original, reason: "unknown_tag" });
+      continue;
+    }
+    if (!targetCandidate) {
+      ignored.push({
+        tag: original,
+        reason: analysis.hidden
+          ? "hidden"
+          : analysis.deprecated
+            ? "deprecated"
+            : "not_in_candidates",
+      });
+      continue;
+    }
+    if (targetCandidate.pathText !== targetPath || targetCandidate.id !== analysis.targetEntryId) {
+      ignored.push({ tag: original, reason: analysis.hidden ? "hidden" : "deprecated" });
+      continue;
+    }
+
+    const identity = getAiRecommendationIdentity(analysis, original);
+    if (existing.has(identity)) {
+      ignored.push({ tag: original, reason: "duplicate_existing" });
+      continue;
+    }
+    const nextSuggestion: AiTagRecommendationSuggestion = {
+      tag: targetPath,
+      confidence: clampAiConfidence(raw.confidence),
+      reason: truncateAiRecommendationText(raw.reason, "匹配当前文章内容与标签候选。", AI_TAG_RECOMMENDATION_REASON_LIMIT),
+      evidence: truncateAiRecommendationText(raw.evidence, "模型未提供具体证据。", AI_TAG_RECOMMENDATION_EVIDENCE_LIMIT),
+      normalizedFrom: normalizeAiRecommendationKey(original) === normalizeAiRecommendationKey(targetPath) ? undefined : original,
+    };
+
+    const existingSuggestionIndex = seen.get(identity);
+    if (existingSuggestionIndex !== undefined) {
+      const currentSuggestion = suggestions[existingSuggestionIndex];
+      if (nextSuggestion.confidence > currentSuggestion.confidence) {
+        suggestions[existingSuggestionIndex] = nextSuggestion;
+      }
+      ignored.push({ tag: original, reason: "duplicate_suggestion" });
+      continue;
+    }
+
+    seen.set(identity, suggestions.length);
+    suggestions.push(nextSuggestion);
+    if (suggestions.length >= limit) {
+      break;
+    }
+  }
+
+  return { suggestions, ignored };
+}
+
 function addSelfCheck(
   checks: TagTaxonomySelfCheckResult["checks"],
   name: string,
@@ -1932,6 +2335,111 @@ export function runTagTaxonomySelfCheck(): TagTaxonomySelfCheckResult {
     applyTagNormalizationPlan(["自定义自由标签", "拓展 KMP", "来源/平台/洛谷"], analyzeTagListNormalization(["自定义自由标签", "拓展 KMP", "来源/平台/洛谷"])).join("|"),
     `自定义自由标签|${zFunctionPath}|来源/平台/洛谷`,
   );
+
+  const aiBuiltinAliasCandidates = buildAiTagRecommendationCandidates({ title: "exKMP 与 Z 函数模板" });
+  const aiUserAliasCandidates = buildAiTagRecommendationCandidates(
+    { title: "自定义匹配入口复习" },
+    { userConfig: userEntryConfig },
+  );
+  const aiMergeCandidates = buildAiTagRecommendationCandidates(
+    { title: "KMP 自动机复习" },
+    { userConfig: mergeConfig },
+  );
+  const aiHiddenCandidates = buildAiTagRecommendationCandidates(
+    { title: "exKMP 与 Z 函数模板" },
+    { userConfig: { hiddenIds: ["algorithm.string.z-function"] } },
+  );
+  const aiHiddenIncluded = getTagSuggestionList(
+    { hiddenIds: ["algorithm.string.z-function"] },
+    { includeHidden: true },
+  );
+  const aiPostprocessAlias = postprocessAiTagRecommendations(
+    [{ tag: "exKMP", confidence: 0.8, reason: "alias", evidence: "exKMP" }],
+    { candidates: aiBuiltinAliasCandidates, existingTags: [] },
+  );
+  const aiPostprocessExisting = postprocessAiTagRecommendations(
+    [{ tag: "exKMP", confidence: 0.8, reason: "alias", evidence: "exKMP" }],
+    { candidates: aiBuiltinAliasCandidates, existingTags: [zFunctionPath] },
+  );
+  const aiPostprocessUnknown = postprocessAiTagRecommendations(
+    [{ tag: "完全不存在的 AI 自由标签", confidence: 0.8, reason: "unknown", evidence: "unknown" }],
+    { candidates: aiBuiltinAliasCandidates, existingTags: [] },
+  );
+  const aiPostprocessMerge = postprocessAiTagRecommendations(
+    [{ tag: "KMP", confidence: 0.7, reason: "merge", evidence: "KMP" }],
+    { candidates: aiMergeCandidates, existingTags: [], userConfig: mergeConfig },
+  );
+  const aiPostprocessAliasToMerge = postprocessAiTagRecommendations(
+    [{ tag: "旧 KMP 入口", confidence: 0.7, reason: "alias merge", evidence: "旧 KMP 入口" }],
+    { candidates: aiMergeCandidates, existingTags: [], userConfig: userAliasToMergeSourceConfig },
+  );
+  const aiPostprocessHidden = postprocessAiTagRecommendations(
+    [{ tag: zFunctionPath, confidence: 0.8, reason: "hidden", evidence: "hidden" }],
+    { candidates: aiHiddenCandidates, existingTags: [], userConfig: { hiddenIds: ["algorithm.string.z-function"] } },
+  );
+  const deprecatedUserConfig: UserTagTaxonomyConfig = {
+    entries: [{
+      id: "user.selfcheck.deprecated",
+      path: ["自定义标签", "废弃", "旧标签"],
+      deprecated: true,
+      source: "user",
+    }],
+  };
+  const aiPostprocessDeprecated = postprocessAiTagRecommendations(
+    [{ tag: "自定义标签/废弃/旧标签", confidence: 0.8, reason: "deprecated", evidence: "deprecated" }],
+    { candidates: buildAiTagRecommendationCandidates({ title: "旧标签" }, { userConfig: deprecatedUserConfig }), existingTags: [], userConfig: deprecatedUserConfig },
+  );
+  const aiPostprocessExistingAlias = postprocessAiTagRecommendations(
+    [{ tag: zFunctionPath, confidence: 0.8, reason: "canonical", evidence: "canonical" }],
+    { candidates: aiBuiltinAliasCandidates, existingTags: ["exKMP"] },
+  );
+  const aiPostprocessDuplicate = postprocessAiTagRecommendations(
+    [
+      { tag: "exKMP", confidence: 0.4, reason: "low", evidence: "low" },
+      { tag: zFunctionPath, confidence: 0.9, reason: "high", evidence: "high" },
+    ],
+    { candidates: aiBuiltinAliasCandidates, existingTags: [] },
+  );
+  const aiPostprocessUserCustom = postprocessAiTagRecommendations(
+    [{ tag: "自定义标签/字符串/自定义模式匹配", confidence: 0.8, reason: "user", evidence: "user" }],
+    { candidates: aiUserAliasCandidates, existingTags: [], userConfig: userEntryConfig },
+  );
+  const longReason = "很长".repeat(80);
+  const aiPostprocessClampAndTruncate = postprocessAiTagRecommendations(
+    [{ tag: "exKMP", confidence: 1.8, reason: longReason, evidence: longReason }],
+    { candidates: aiBuiltinAliasCandidates, existingTags: [] },
+  );
+  const parsedFenceJson = parseAiTagRecommendationJson("```json\n{\"suggestions\":[{\"tag\":\"exKMP\",\"confidence\":0.8}]}\n```");
+  const parsedEmbeddedJson = parseAiTagRecommendationJson("先解释一句 {\"suggestions\":[{\"tag\":\"exKMP\"}]} 后面还有文字");
+  const parsedInvalidJson = parseAiTagRecommendationJson("这不是 JSON");
+  const parsedMissingTagJson = parseAiTagRecommendationJson("{\"suggestions\":[{\"confidence\":0.8},{\"tag\":\"exKMP\"}]}");
+
+  addSelfCheck(checks, "AI candidates include builtin alias canonical", aiBuiltinAliasCandidates.some((candidate) => candidate.pathText === zFunctionPath), true);
+  addSelfCheck(checks, "AI candidates include user alias target", aiUserAliasCandidates.some((candidate) => candidate.pathText === "自定义标签/字符串/自定义模式匹配"), true);
+  addSelfCheck(checks, "AI candidates include merge target", aiMergeCandidates.some((candidate) => candidate.pathText === zFunctionPath), true);
+  addSelfCheck(checks, "AI candidates exclude merge source", aiMergeCandidates.some((candidate) => candidate.id === "algorithm.string.kmp"), false);
+  addSelfCheck(checks, "AI candidates exclude hidden by default", aiHiddenCandidates.some((candidate) => candidate.id === "algorithm.string.z-function"), false);
+  addSelfCheck(checks, "includeHidden can display hidden taxonomy suggestion", aiHiddenIncluded.some((candidate) => candidate.id === "algorithm.string.z-function" && candidate.hidden), true);
+  addSelfCheck(checks, "AI candidates exclude deprecated merge source by default", getTagSuggestionList(mergeConfig).some((candidate) => candidate.id === "algorithm.string.kmp"), false);
+  addSelfCheck(checks, "AI candidates include user custom tag", aiUserAliasCandidates.some((candidate) => candidate.id === "user.selfcheck.custom"), true);
+  addSelfCheck(checks, "AI postprocess normalizes alias output", aiPostprocessAlias.suggestions[0]?.tag ?? null, zFunctionPath);
+  addSelfCheck(checks, "AI postprocess normalizes merge source output", aiPostprocessMerge.suggestions[0]?.tag ?? null, zFunctionPath);
+  addSelfCheck(checks, "AI postprocess normalizes alias to merge source output", aiPostprocessAliasToMerge.suggestions[0]?.tag ?? null, zFunctionPath);
+  addSelfCheck(checks, "AI postprocess drops hidden output", aiPostprocessHidden.ignored[0]?.reason ?? null, "hidden");
+  addSelfCheck(checks, "AI postprocess drops deprecated output", aiPostprocessDeprecated.ignored[0]?.reason ?? null, "deprecated");
+  addSelfCheck(checks, "AI postprocess drops non taxonomy tag", aiPostprocessUnknown.ignored[0]?.reason ?? null, "unknown_tag");
+  addSelfCheck(checks, "AI postprocess deduplicates existing tags", aiPostprocessExisting.suggestions.length, 0);
+  addSelfCheck(checks, "AI postprocess deduplicates existing alias tags", aiPostprocessExistingAlias.ignored[0]?.reason ?? null, "duplicate_existing");
+  addSelfCheck(checks, "AI postprocess records duplicate suggestions", aiPostprocessDuplicate.ignored[0]?.reason ?? null, "duplicate_suggestion");
+  addSelfCheck(checks, "AI postprocess keeps higher confidence duplicate", aiPostprocessDuplicate.suggestions[0]?.confidence ?? null, 0.9);
+  addSelfCheck(checks, "AI postprocess allows user custom tag", aiPostprocessUserCustom.suggestions[0]?.tag ?? null, "自定义标签/字符串/自定义模式匹配");
+  addSelfCheck(checks, "AI postprocess clamps confidence", aiPostprocessClampAndTruncate.suggestions[0]?.confidence ?? null, 1);
+  addSelfCheck(checks, "AI postprocess truncates long reason", (aiPostprocessClampAndTruncate.suggestions[0]?.reason.length ?? 0) <= AI_TAG_RECOMMENDATION_REASON_LIMIT + 3, true);
+  addSelfCheck(checks, "AI postprocess truncates long evidence", (aiPostprocessClampAndTruncate.suggestions[0]?.evidence.length ?? 0) <= AI_TAG_RECOMMENDATION_EVIDENCE_LIMIT + 3, true);
+  addSelfCheck(checks, "AI JSON parser accepts code fence", parsedFenceJson.suggestions[0]?.tag ?? null, "exKMP");
+  addSelfCheck(checks, "AI JSON parser extracts embedded object", parsedEmbeddedJson.suggestions[0]?.tag ?? null, "exKMP");
+  addSelfCheck(checks, "AI JSON parser rejects non JSON", parsedInvalidJson.error ?? null, "invalid_json");
+  addSelfCheck(checks, "AI JSON parser records missing tag item", parsedMissingTagJson.ignored[0]?.reason ?? null, "missing_tag");
 
   const userEditOriginalConfig: UserTagTaxonomyConfig = {
     entries: [{

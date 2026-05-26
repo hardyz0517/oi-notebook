@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
-import type { UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
 export type CommitNoteStatus = "committed" | "noChanges";
@@ -212,6 +212,16 @@ export interface NoteChatAnswer {
 }
 
 export interface NoteTagSuggestion {
+  suggestions: Array<{
+    tag: string;
+    confidence: number;
+    reason: string;
+    evidence: string;
+  }>;
+  ignored?: Array<{
+    tag?: string;
+    reason: AiTagRecommendationIgnored["reason"];
+  }>;
   suggestedTags: string[];
   reason: string;
 }

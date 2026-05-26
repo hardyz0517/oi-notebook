@@ -60,7 +60,7 @@ const BING_NEWS_SEARCH_ENDPOINT: &str = "https://www.bing.com/news/search";
 const BING_PUBLIC_USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TestAiConnectionResult {
     pub model: String,
@@ -118,10 +118,28 @@ pub struct PolishedNoteBody {
     pub polished_body: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteTagSuggestion {
+    pub suggestions: Vec<NoteTagSuggestionItem>,
+    pub ignored: Vec<NoteTagSuggestionIgnoredItem>,
     pub suggested_tags: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteTagSuggestionItem {
+    pub tag: String,
+    pub confidence: f64,
+    pub reason: String,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteTagSuggestionIgnoredItem {
+    pub tag: Option<String>,
     pub reason: String,
 }
 
@@ -1573,20 +1591,69 @@ fn parse_ai_ok_response(content: &str) -> Result<bool, String> {
         .ok_or_else(|| "AI connection failed: response JSON did not contain boolean ok".to_string())
 }
 
+fn parse_first_json_object_from_text(text: &str) -> Option<JsonValue> {
+    for (start, start_ch) in text.char_indices() {
+        if start_ch != '{' {
+            continue;
+        }
+
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for (offset, ch) in text[start..].char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+            if ch == '{' {
+                depth = depth.saturating_add(1);
+                continue;
+            }
+            if ch == '}' {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = start + offset + ch.len_utf8();
+                    if let Ok(value) = serde_json::from_str::<JsonValue>(&text[start..end]) {
+                        if value.is_object() {
+                            return Some(value);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn parse_json_object_from_ai_content(content: &str, scope: &str) -> Result<JsonValue, String> {
     let trimmed = content.trim();
-    let json_text = if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
-        &trimmed[start..=end]
-    } else {
-        trimmed
-    };
+    if let Ok(value) = serde_json::from_str::<JsonValue>(trimmed) {
+        if value.is_object() {
+            return Ok(value);
+        }
+    }
+    if let Some(value) = parse_first_json_object_from_text(trimmed) {
+        return Ok(value);
+    }
 
-    serde_json::from_str(json_text).map_err(|e| {
-        format!(
-            "{scope}: response JSON parse failed: {e}; content_preview={}",
-            diagnostic_preview(content)
-        )
-    })
+    Err(format!(
+        "{scope}: response JSON parse failed; content_preview={}",
+        diagnostic_preview(content)
+    ))
 }
 
 fn clean_planner_text(value: &str, max_chars: usize) -> String {
@@ -3078,30 +3145,118 @@ fn normalize_suggested_tags(
     Ok(normalized)
 }
 
+fn clean_note_tag_suggestion_text(value: Option<&JsonValue>, fallback: &str, max_chars: usize) -> String {
+    let normalized = value
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or(fallback)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let truncated = take_chars(&normalized, max_chars);
+    if normalized.chars().count() > max_chars {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
 fn validate_note_tag_suggestion(
     value: JsonValue,
     existing_tags: &[String],
     scope: &str,
 ) -> Result<NoteTagSuggestion, String> {
-    let tags_value = value
-        .get("suggestedTags")
-        .and_then(JsonValue::as_array)
-        .ok_or_else(|| {
+    let mut detailed_suggestions = Vec::new();
+    let mut ignored = Vec::new();
+    let mut raw_tags = Vec::new();
+
+    if let Some(raw_suggestions_value) = value.get("suggestions") {
+        let suggestions_value = raw_suggestions_value.as_array().ok_or_else(|| {
             format!(
-                "{scope}: response JSON schema failed: suggestedTags must be an array; json_preview={}",
+                "{scope}: response JSON schema failed: suggestions must be an array; json_preview={}",
                 diagnostic_json_preview(&value)
             )
         })?;
-    let mut raw_tags = Vec::new();
-    for tag in tags_value {
-        let Some(tag_text) = tag.as_str() else {
-            return Err(format!(
-                "{scope}: response suggestedTags must only contain strings"
-            ));
-        };
-        raw_tags.push(tag_text.to_string());
+        for item in suggestions_value {
+            let Some(item_object) = item.as_object() else {
+                ignored.push(NoteTagSuggestionIgnoredItem {
+                    tag: None,
+                    reason: "missing_tag".to_string(),
+                });
+                continue;
+            };
+            let Some(tag) = item_object
+                .get("tag")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty()) else {
+                ignored.push(NoteTagSuggestionIgnoredItem {
+                    tag: None,
+                    reason: "missing_tag".to_string(),
+                });
+                continue;
+            };
+            let tag = tag.to_string();
+            let confidence = item
+                .get("confidence")
+                .and_then(JsonValue::as_f64)
+                .unwrap_or(0.6)
+                .clamp(0.0, 1.0);
+            let reason = clean_note_tag_suggestion_text(
+                item_object.get("reason"),
+                "匹配当前文章内容与标签候选。",
+                90,
+            );
+            let evidence = clean_note_tag_suggestion_text(
+                item_object.get("evidence"),
+                "模型未提供具体证据。",
+                120,
+            );
+
+            raw_tags.push(tag.clone());
+            detailed_suggestions.push(NoteTagSuggestionItem {
+                tag,
+                confidence,
+                reason,
+                evidence,
+            });
+        }
+    } else {
+        let tags_value = value
+            .get("suggestedTags")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                format!(
+                    "{scope}: response JSON schema failed: suggestions must be an array; json_preview={}",
+                    diagnostic_json_preview(&value)
+                )
+            })?;
+        for tag in tags_value {
+            let Some(tag_text) = tag.as_str() else {
+                return Err(format!(
+                    "{scope}: response suggestedTags must only contain strings"
+                ));
+            };
+            raw_tags.push(tag_text.to_string());
+        }
     }
+
     let suggested_tags = normalize_suggested_tags(existing_tags, raw_tags, scope)?;
+    if detailed_suggestions.is_empty() {
+        detailed_suggestions = suggested_tags
+            .iter()
+            .map(|tag| NoteTagSuggestionItem {
+                tag: tag.clone(),
+                confidence: 0.6,
+                reason: "匹配当前文章内容与标签候选。".to_string(),
+                evidence: "模型返回了旧版 suggestedTags。".to_string(),
+            })
+            .collect();
+    } else {
+        detailed_suggestions.retain(|item| suggested_tags.iter().any(|tag| tag == &item.tag));
+    }
+
     let reason = value
         .get("reason")
         .and_then(JsonValue::as_str)
@@ -3111,6 +3266,8 @@ fn validate_note_tag_suggestion(
         .to_string();
 
     Ok(NoteTagSuggestion {
+        suggestions: detailed_suggestions,
+        ignored,
         suggested_tags,
         reason,
     })
@@ -3493,7 +3650,7 @@ fn suggest_note_tags_blocking(
         format!("The user selected the following text. Use it as a hint, but do not tag only the selection:\n{selected_text}")
     };
     let markdown = context.markdown.trim();
-    let body_note = if markdown.is_empty() {
+    let body_note = if markdown.chars().count() < 80 {
         "Current body is empty or very short; rely mainly on title, path, and summary."
     } else if context.markdown_truncated {
         "Body is a truncated excerpt, not the full note."
@@ -3509,13 +3666,15 @@ fn suggest_note_tags_blocking(
 
     let user_prompt = format!(
         "Suggest frontmatter tags for an OI / algorithm / Markdown study note.\n\
-Use the title, path, existing tags, summary, Markdown body, and selected text.\n\
+Use the title, path, existing tags, summary, Markdown body excerpt, and selected text.\n\
 Do not repeat existing tags. Avoid generic tags unless truly necessary.\n\
-Use the local tag taxonomy context below. Prefer canonical taxonomy paths when they fit, and output canonical paths instead of aliases.\n\
-Do not force taxonomy labels when they are uncertain; keep only confident tags and avoid inventing many new labels.\n\
-Tags should be short, usually 2 to 8 items. Path-style tags such as 算法/字符串/Z 函数 are preferred when available.\n\
+Use the local tag taxonomy context below as a closed candidate set. The tag field must be one of the candidate canonical paths, or an alias/merge source that clearly normalizes to one candidate.\n\
+Do not output hidden tags, deprecated tags, merge sources, or unknown free-form tags.\n\
+If no reliable new candidate fits, return an empty suggestions array.\n\
+If the note is empty or very short, avoid guessing; return an empty array or only very low-confidence suggestions.\n\
 Output strict JSON only, without markdown fences or extra text.\n\
-The JSON shape must be: {{\"suggestedTags\":[\"算法/动态规划/DP\",\"训练/记录/复盘\"],\"reason\":\"These tags match the note content.\"}}\n\n\
+The JSON shape must be: {{\"suggestions\":[{{\"tag\":\"算法/字符串/Z 函数\",\"confidence\":0.82,\"reason\":\"文章讨论 Z 函数与 exKMP。\",\"evidence\":\"正文出现 Z 函数、exKMP 等关键词。\"}}]}}\n\
+confidence must be a number from 0 to 1. reason and evidence must be brief Chinese strings.\n\n\
 Local tag taxonomy context:\n{tag_taxonomy_context}\n\n\
 Title:\n{note_title}\n\n\
 Path:\n{note_path}\n\n\
@@ -3530,7 +3689,7 @@ Markdown body:\n{markdown}",
         {
             "role": "system",
             "content": format!(
-                "Return only strict JSON with suggestedTags and reason fields. Do not use markdown fences. Do not claim that files were modified.\n\n{}",
+                "Return only strict JSON with a suggestions array. Do not use markdown fences. Do not claim that files were modified. Never invent tags outside the provided local taxonomy candidates.\n\n{}",
                 build_model_identity_context(&resolved)
             )
         },

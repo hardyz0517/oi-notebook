@@ -1,14 +1,14 @@
 import {
-  findTagSuggestionsByQuery,
-  suggestTagsFromArticleText,
+  buildAiTagRecommendationCandidates,
+  type AiTagRecommendationCandidate,
   type TagSuggestion,
   type UserTagTaxonomyConfig,
 } from "@/lib/tagTaxonomy";
 
-export const TAG_TAXONOMY_PROMPT_SUGGESTION_LIMIT = 20;
+export const TAG_TAXONOMY_PROMPT_SUGGESTION_LIMIT = 30;
 
-const TAG_CONTEXT_CONTENT_CHAR_LIMIT = 12000;
-const TAG_ALIAS_DISPLAY_LIMIT = 5;
+const TAG_CONTEXT_CONTENT_CHAR_LIMIT = 4000;
+const TAG_ALIAS_DISPLAY_LIMIT = 4;
 
 export interface TagTaxonomyPromptInput {
   title?: string | null;
@@ -47,79 +47,63 @@ function truncatePromptContent(value: string | null | undefined) {
   return text.slice(0, TAG_CONTEXT_CONTENT_CHAR_LIMIT);
 }
 
-function formatTagSuggestion(suggestion: TagSuggestion) {
-  const aliases = suggestion.aliases
+function formatTagCandidate(candidate: AiTagRecommendationCandidate) {
+  const aliases = candidate.aliases
     .map(normalizePromptTag)
     .filter(Boolean)
-    .filter((alias) => alias !== suggestion.name && alias !== suggestion.pathText)
+    .filter((alias) => alias !== candidate.name && alias !== candidate.pathText)
     .slice(0, TAG_ALIAS_DISPLAY_LIMIT);
 
   if (aliases.length === 0) {
-    return `- ${suggestion.pathText}`;
+    return `- ${candidate.pathText}`;
   }
 
-  return `- ${suggestion.pathText}（别名：${aliases.join(", ")}）`;
-}
-
-function getQuerySeeds(input: TagTaxonomyPromptInput) {
-  return [
-    input.title ?? "",
-    input.notePath ?? "",
-    input.summary ?? "",
-    ...(input.existingTags ?? []),
-  ]
-    .map(normalizePromptTag)
-    .filter(Boolean);
+  return `- ${candidate.pathText}（别名：${aliases.join(", ")}）`;
 }
 
 export function buildTagTaxonomyPromptContext(input: TagTaxonomyPromptInput): TagTaxonomyPromptContext {
   const limit = Math.max(1, Math.min(input.limit ?? TAG_TAXONOMY_PROMPT_SUGGESTION_LIMIT, TAG_TAXONOMY_PROMPT_SUGGESTION_LIMIT));
-  const suggestions = new Map<string, TagSuggestion>();
-  const addSuggestion = (suggestion: TagSuggestion) => {
-    if (suggestions.size >= limit || suggestions.has(suggestion.id)) {
-      return;
-    }
-    suggestions.set(suggestion.id, suggestion);
-  };
-
-  for (const item of suggestTagsFromArticleText(
+  const candidates = buildAiTagRecommendationCandidates(
     {
       title: input.title,
+      notePath: input.notePath,
       summary: input.summary,
       content: truncatePromptContent(input.content),
       existingTags: input.existingTags ?? [],
     },
-    { includeExistingTags: true, limit, userConfig: input.userConfig },
-  )) {
-    addSuggestion(item.tag);
-  }
-
-  for (const seed of getQuerySeeds(input)) {
-    if (suggestions.size >= limit) {
-      break;
-    }
-    for (const suggestion of findTagSuggestionsByQuery(seed, { limit: 3, userConfig: input.userConfig })) {
-      addSuggestion(suggestion);
-    }
-  }
-
-  const selectedSuggestions = Array.from(suggestions.values()).slice(0, limit);
-  const candidateText = selectedSuggestions.length > 0
+    {
+      limit,
+      aliasLimit: TAG_ALIAS_DISPLAY_LIMIT,
+      contentCharLimit: TAG_CONTEXT_CONTENT_CHAR_LIMIT,
+      userConfig: input.userConfig,
+    },
+  );
+  const candidateText = candidates.length > 0
     ? [
-        "可选标签候选（输出 tags 时优先使用下面的 canonical path，不要输出别名）：",
-        ...selectedSuggestions.map(formatTagSuggestion),
+        "可选标签候选（输出 tags 时只能使用下面的 canonical path；别名只作为理解线索）：",
+        ...candidates.map(formatTagCandidate),
       ].join("\n")
-    : "当前笔记没有命中明确的预设标签候选；仍需遵守规则，少量输出确定的标签，不要为了凑数编造。";
+    : "当前笔记没有命中明确的可见标签候选；不要为了凑数编造自由标签。";
 
   return {
-    suggestions: selectedSuggestions,
+    suggestions: candidates.map((candidate) => ({
+      id: candidate.id,
+      path: candidate.pathText.split("/"),
+      pathText: candidate.pathText,
+      name: candidate.name,
+      aliases: candidate.aliases,
+      searchText: [candidate.id, candidate.pathText, candidate.name, ...candidate.aliases].join(" "),
+      source: candidate.source,
+      hidden: false,
+      deprecated: false,
+    })),
     text: [
       "标签体系规则：",
-      "- category 表示文章性质，例如：题解、技巧、学习、杂谈、项目日志。",
       "- tags 表示知识点、训练用途、来源、阶段、项目等维度。",
-      "- tags 优先使用预设标签体系中的 canonical path，尽量使用路径式标签。",
-      "- 同义词必须归到 canonical path，例如：拓展 KMP / exKMP -> 算法/字符串/Z 函数；李超树 -> 算法/树形数据结构/李超线段树。",
-      "- 如果没有合适标签，可以保留用户原 tag 或建议少量新 tag，但不要编造大量标签。",
+      "- tags 优先使用当前候选中的 taxonomy canonical path，尽量使用路径式标签。",
+      "- hidden 标签、deprecated 标签、merge source 不应直接输出。",
+      "- 如果理解到别名或 merge source，只输出对应 canonical target。",
+      "- 不要输出不存在于候选中的自由标签。",
       candidateText,
     ].join("\n"),
   };
@@ -149,7 +133,7 @@ function getDisplayedAliasCount(text: string, pathText: string) {
     return 0;
   }
 
-  const match = line.match(/（别名：(.+)）$/);
+  const match = line.match(/（别名：(.+)）/);
   if (!match) {
     return 0;
   }

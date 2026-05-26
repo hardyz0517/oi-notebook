@@ -35,7 +35,7 @@ import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPl
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { createSearchPreparationDiagnostics, encodeDebugValue, formatBingDiagnostics, formatDirectDiscoveryDiagnostics, formatNewsReadDiagnostics, formatSearchPreparationDiagnostics, formatSearchPreparationDiagnosticsForDisplay, getDebugReasonLabel, getSearchStageDebugLabel, mergeSearchDebug } from "@/lib/searchDiagnostics";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
-import { buildTagTaxonomyPromptContext } from "@/lib/tagTaxonomyPrompt";
+import { buildAiTagRecommendationInput, buildAiTagSuggestionMessagePayload, createAiTagRecommendationFailureMessage, normalizeAiTags, normalizeAiTagValue, type AiTagRecommendation, type AiTagRecommendationResult } from "@/lib/aiTagRecommendations";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import {
@@ -95,11 +95,7 @@ type AiChatMessage = {
   compressionResult?: CompressionResult;
 };
 
-type TagSuggestionResult = {
-  notePath: string;
-  existingTags: string[];
-  suggestedTags: string[];
-  reason?: string;
+type TagSuggestionResult = AiTagRecommendationResult & {
   applied?: boolean;
   ignored?: boolean;
   error?: string;
@@ -225,9 +221,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: "complete-tags",
-    trigger: "补全标签",
-    label: "补全标签",
-    description: "根据笔记正文建议标签。",
+    trigger: "推荐标签",
+    label: "推荐标签",
+    description: "基于当前笔记内容和标签体系推荐标签。",
     category: "文档",
     icon: Tag,
     requiresNote: true,
@@ -423,38 +419,6 @@ const getPolishPreviewDisplayStartLine = (preview: Pick<PolishPreviewResult, "sc
     : 1;
 };
 
-const normalizeTagValue = (tag: string): string => tag.trim().replace(/\s+/g, " ");
-
-const normalizeTags = (tags: string[]): string[] => {
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-
-  for (const tag of tags) {
-    const value = normalizeTagValue(tag);
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    normalized.push(value);
-  }
-
-  return normalized;
-};
-
-const filterNewTags = (existingTags: string[], suggestedTags: string[]): string[] => {
-  const existing = new Set(normalizeTags(existingTags));
-  return normalizeTags(suggestedTags).filter((tag) => !existing.has(tag));
-};
-
-const toTagSuggestionResult = (
-  suggestion: { suggestedTags: string[]; reason?: string },
-  notePath: string,
-  existingTags: string[],
-): TagSuggestionResult => ({
-  notePath,
-  existingTags: normalizeTags(existingTags),
-  suggestedTags: filterNewTags(existingTags, suggestion.suggestedTags),
-  reason: suggestion.reason?.trim() || undefined,
-});
-
 const getChatErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const detailStart = message.indexOf("; debug=");
@@ -554,34 +518,6 @@ const isNewsRoundupDecision = (decision: SearchDecision): boolean =>
   decision.newsIntent === true ||
   decision.vertical === "news" ||
   decision.aiPlanner?.freshness === "news";
-
-const getTagSuggestionErrorMessage = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const detailStart = message.indexOf("; debug=");
-  const scopedMessage = detailStart >= 0 ? message.slice(0, detailStart) : message;
-  const normalized = scopedMessage.replace(/^AI tag suggestion failed:\s*/i, "").trim();
-
-  if (
-    message.includes("base_url is missing") ||
-    message.includes("api_key is missing") ||
-    message.includes("model is missing")
-  ) {
-    return "AI 还没有配置完整，请先在设置里填写 base_url / api_key / model。";
-  }
-  if (message.includes("selected provider does not exist") || message.includes("selected provider is disabled")) {
-    return "当前配置组不可用，请重新选择模型。";
-  }
-  if (message.includes("selected model does not exist")) {
-    return "当前模型不可用，请重新选择模型。";
-  }
-  if (message.includes("request timed out")) return "标签建议请求超时，请重试。";
-  if (message.includes("network error")) return "无法连接 AI 服务，请检查配置和网络。";
-  if (normalized.includes("response JSON parse failed")) return "标签建议解析失败，请重试。";
-  if (normalized.includes("suggestedTags")) return "标签建议格式不正确，请重试。";
-  if (normalized.includes("HTTP ")) return "AI 服务返回错误响应，请检查配置后重试。";
-  if (normalized) return normalized;
-  return "标签建议生成失败，请重试。";
-};
 
 const getPolishSelectionErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
@@ -738,11 +674,42 @@ const sanitizeTagSuggestionForStorage = (value: unknown): TagSuggestionResult | 
   const item = value as Partial<TagSuggestionResult>;
   if (typeof item.notePath !== "string") return undefined;
   if (!Array.isArray(item.existingTags) || !Array.isArray(item.suggestedTags)) return undefined;
+  const suggestedTags = normalizeAiTags(item.suggestedTags.filter((tag): tag is string => typeof tag === "string"));
+  const suggestions = Array.isArray(item.suggestions)
+    ? item.suggestions.flatMap((suggestion) => {
+      if (!suggestion || typeof suggestion !== "object") return [];
+      const candidate = suggestion as Partial<AiTagRecommendation>;
+      if (typeof candidate.tag !== "string" || !candidate.tag.trim()) return [];
+      return [{
+        tag: normalizeAiTagValue(candidate.tag),
+        confidence: typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+          ? Math.max(0, Math.min(1, candidate.confidence))
+          : 0.6,
+        reason: typeof candidate.reason === "string" ? candidate.reason : "",
+        evidence: typeof candidate.evidence === "string" ? candidate.evidence : "",
+        normalizedFrom: typeof candidate.normalizedFrom === "string" ? candidate.normalizedFrom : undefined,
+      }];
+    })
+    : suggestedTags.map((tag) => ({
+      tag,
+      confidence: 0.6,
+      reason: "",
+      evidence: "",
+    }));
+  const selectedTags = Array.isArray(item.selectedTags)
+    ? normalizeAiTags(item.selectedTags.filter((tag): tag is string => typeof tag === "string"))
+      .filter((tag) => suggestedTags.includes(tag))
+    : suggestedTags;
 
   return {
     notePath: item.notePath,
-    existingTags: normalizeTags(item.existingTags.filter((tag): tag is string => typeof tag === "string")),
-    suggestedTags: normalizeTags(item.suggestedTags.filter((tag): tag is string => typeof tag === "string")),
+    existingTags: normalizeAiTags(item.existingTags.filter((tag): tag is string => typeof tag === "string")),
+    suggestedTags,
+    suggestions,
+    selectedTags,
+    ignoredCount: typeof item.ignoredCount === "number" && Number.isFinite(item.ignoredCount)
+      ? Math.max(0, Math.floor(item.ignoredCount))
+      : 0,
     reason: typeof item.reason === "string" ? item.reason : undefined,
     applied: item.applied === true,
     ignored: item.ignored === true,
@@ -3270,13 +3237,28 @@ function TagSuggestionCard({
   isApplying,
   onApply,
   onIgnore,
+  onToggleTag,
+  onSelectAll,
 }: {
   suggestion: TagSuggestionResult;
   isApplying: boolean;
   onApply: () => void;
   onIgnore: () => void;
+  onToggleTag: (tag: string) => void;
+  onSelectAll: () => void;
 }) {
   const hasSuggestions = suggestion.suggestedTags.length > 0;
+  const selectedTags = suggestion.selectedTags ?? suggestion.suggestedTags;
+  const selectedSet = new Set(selectedTags);
+  const hasSelectedSuggestions = selectedTags.length > 0;
+  const detailedSuggestions: AiTagRecommendation[] = (suggestion.suggestions?.length
+    ? suggestion.suggestions
+    : suggestion.suggestedTags.map((tag) => ({
+      tag,
+      confidence: 0.6,
+      reason: "",
+      evidence: "",
+    }))).filter((item) => suggestion.suggestedTags.includes(item.tag));
   const statusText = suggestion.applied
     ? "已应用"
     : suggestion.ignored
@@ -3327,8 +3309,54 @@ function TagSuggestionCard({
       </div>
 
       <div className="grid gap-1.5">
-        <div className="text-[11px] font-medium leading-4 text-muted-foreground">建议新增 tags</div>
-        {hasSuggestions ? renderTags(suggestion.suggestedTags, "") : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[11px] font-medium leading-4 text-muted-foreground">建议新增 tags</div>
+          {hasSuggestions && !suggestion.applied && !suggestion.ignored && (
+            <button
+              type="button"
+              className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-55"
+              onClick={onSelectAll}
+              disabled={isApplying}
+            >
+              全选
+            </button>
+          )}
+        </div>
+        {hasSuggestions ? (
+          <div className="grid gap-1.5">
+            {detailedSuggestions.map((item) => (
+              <label key={item.tag} className="flex min-w-0 items-start gap-2 rounded-md border border-border/50 bg-background/55 px-2.5 py-2 dark:bg-black/10">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={selectedSet.has(item.tag)}
+                  disabled={isApplying || suggestion.applied || suggestion.ignored}
+                  onChange={() => onToggleTag(item.tag)}
+                />
+                <span className="grid min-w-0 gap-1">
+                  <span className="font-medium leading-5 text-foreground">
+                    {item.tag}
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      {Math.round(item.confidence * 100)}%
+                    </span>
+                  </span>
+                  {(item.reason || item.evidence || item.normalizedFrom) && (
+                    <span className="text-[11px] leading-5 text-muted-foreground">
+                      {item.reason || "匹配当前笔记内容和候选标签。"}
+                      {item.evidence ? `；${item.evidence}` : ""}
+                      {item.normalizedFrom ? `；已规范化自 ${item.normalizedFrom}` : ""}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
+            {suggestion.ignoredCount ? (
+              <div className="text-[11px] leading-5 text-muted-foreground">
+                已忽略 {suggestion.ignoredCount} 个不合法或重复的模型输出。
+              </div>
+            ) : null}
+          </div>
+        ) : (
           <div className="text-xs leading-5 text-muted-foreground">没有发现需要新增的标签</div>
         )}
       </div>
@@ -3353,9 +3381,9 @@ function TagSuggestionCard({
             type="button"
             className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-55"
             onClick={onApply}
-            disabled={!hasSuggestions || isApplying}
+            disabled={!hasSuggestions || !hasSelectedSuggestions || isApplying}
           >
-            {isApplying ? "应用中..." : "应用标签"}
+            {isApplying ? "应用中..." : "应用所选"}
           </button>
         </div>
       )}
@@ -4901,14 +4929,14 @@ export default function AiSidebar({
     }
 
     const truncatedMarkdown = truncateText(context.markdownBody, NOTE_CHAT_MAX_MARKDOWN_CHARS);
-    const tagTaxonomyContext = buildTagTaxonomyPromptContext({
+    const tagRecommendationInput = buildAiTagRecommendationInput({
       title: context.title,
       notePath: context.filePath,
       summary: context.summary,
-      content: context.markdownBody,
+      body: context.markdownBody,
       existingTags: context.tags,
       userConfig: tagTaxonomyConfig,
-    }).text;
+    });
 
     return {
       noteTitle: context.filePath ? context.title : "",
@@ -4918,7 +4946,7 @@ export default function AiSidebar({
       selectedText: truncatedSelection.text,
       markdown: truncatedMarkdown.text,
       markdownTruncated: truncatedMarkdown.truncated,
-      tagTaxonomyContext,
+      tagTaxonomyContext: tagRecommendationInput.tagTaxonomyContext,
     };
   };
 
@@ -5199,7 +5227,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       appendMessages(
         conversationId,
         createMessage({ role: "user", text: displayText, state: "done" }),
-        createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
+        createMessage({ role: "system", text: "请先配置 AI 模型后再使用推荐标签。", state: "done" }),
       );
       setInputValue("");
       return;
@@ -5252,7 +5280,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         selectedProviderId,
         selectedModelId,
       );
-      const parsed = toTagSuggestionResult(suggestion, chatContext.notePath, chatContext.tags);
+      const parsed = buildAiTagSuggestionMessagePayload(suggestion, chatContext, tagTaxonomyConfig);
 
       replaceMessage(conversationId, assistantMessage.id, (message) => ({
         ...message,
@@ -5274,7 +5302,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       });
       replaceMessage(conversationId, assistantMessage.id, (message) => ({
         ...message,
-        text: getTagSuggestionErrorMessage(error),
+        text: createAiTagRecommendationFailureMessage(error),
         kind: "text",
         state: "error",
         ...finishAssistantTiming(message),
@@ -5645,23 +5673,24 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         return;
       }
 
-      const chatContext: NoteChatContextPayload = {
-        noteTitle: context.title,
-        notePath: context.filePath,
-      tags: context.tags,
-      summary: context.summary.trim(),
-      selectedText: "",
-      markdown: context.markdownBody,
-      markdownTruncated: false,
-      tagTaxonomyContext: buildTagTaxonomyPromptContext({
+      const tagRecommendationInput = buildAiTagRecommendationInput({
         title: context.title,
         notePath: context.filePath,
         summary: context.summary,
-        content: context.markdownBody,
+        body: context.markdownBody,
         existingTags: context.tags,
         userConfig: tagTaxonomyConfig,
-      }).text,
-    };
+      });
+      const chatContext: NoteChatContextPayload = {
+        noteTitle: context.title,
+        notePath: context.filePath,
+        tags: context.tags,
+        summary: context.summary.trim(),
+        selectedText: "",
+        markdown: context.markdownBody,
+        markdownTruncated: false,
+        tagTaxonomyContext: tagRecommendationInput.tagTaxonomyContext,
+      };
       void submitPolishFullNoteCommand(chatContext, commandText, commandArgument);
       return;
     }
@@ -6236,11 +6265,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const conversationId = activeConversation?.id;
     const suggestion = message.tagSuggestion;
     if (!conversationId || !suggestion || applyingTagMessageId) return;
+    const selectedTags = suggestion.selectedTags ?? suggestion.suggestedTags;
+    if (selectedTags.length === 0) return;
 
     setApplyingTagMessageId(message.id);
     updateTagSuggestionMessage(conversationId, message.id, (current) => ({ ...current, error: undefined }));
     try {
-      await onApplySuggestedTags(suggestion.notePath, suggestion.suggestedTags);
+      await onApplySuggestedTags(suggestion.notePath, selectedTags);
       updateTagSuggestionMessage(conversationId, message.id, (current) => ({
         ...current,
         applied: true,
@@ -6255,6 +6286,33 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     } finally {
       setApplyingTagMessageId(null);
     }
+  };
+
+  const toggleTagSuggestionSelection = (message: AiChatMessage, tag: string) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !message.tagSuggestion || message.tagSuggestion.applied || message.tagSuggestion.ignored) return;
+    updateTagSuggestionMessage(conversationId, message.id, (current) => {
+      const currentSelected = current.selectedTags ?? current.suggestedTags;
+      const selected = new Set(currentSelected);
+      if (selected.has(tag)) {
+        selected.delete(tag);
+      } else {
+        selected.add(tag);
+      }
+      return {
+        ...current,
+        selectedTags: current.suggestedTags.filter((suggestedTag) => selected.has(suggestedTag)),
+      };
+    });
+  };
+
+  const selectAllTagSuggestions = (message: AiChatMessage) => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !message.tagSuggestion || message.tagSuggestion.applied || message.tagSuggestion.ignored) return;
+    updateTagSuggestionMessage(conversationId, message.id, (current) => ({
+      ...current,
+      selectedTags: current.suggestedTags,
+    }));
   };
 
   const ignoreTagSuggestion = (message: AiChatMessage) => {
@@ -7011,6 +7069,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           isApplying={applyingTagMessageId === message.id}
                           onApply={() => void applyTagSuggestion(message)}
                           onIgnore={() => ignoreTagSuggestion(message)}
+                          onToggleTag={(tag) => toggleTagSuggestionSelection(message, tag)}
+                          onSelectAll={() => selectAllTagSuggestions(message)}
                         />
                       ) : message.kind === "polish-preview" && message.polishPreview ? (
                         <PolishPreviewCard
