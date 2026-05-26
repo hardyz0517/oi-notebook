@@ -28,9 +28,9 @@ interface TreeNode {
 
 const COLLAPSED_FOLDERS_STORAGE_KEY = "oi-notebook.collapsedFolders";
 const STANDARD_DIRECTORY_ORDER = ["tricks", "problems", "luogu", "inbox"];
-const TREE_DEPTH_INDENT = 11;
-const FOLDER_ROW_LEFT = 1;
-const FILE_ROW_LEFT = 18;
+const TREE_DEPTH_INDENT = 9;
+const TREE_ROW_LEFT = 4;
+const TREE_LABEL_LEFT_OFFSET = 40;
 
 function stripMdExtension(name: string): string {
   return name.toLowerCase().endsWith(".md") ? name.slice(0, -3) : name;
@@ -242,12 +242,15 @@ export default function FileTree({
   const renderInlineFolderInput = (parentPath: string, depth: number) => {
     if (inlineFolderParent !== parentPath) return null;
     return (
-      <li key={`inline-folder:${parentPath || "root"}`} className="grid gap-0.5 py-px">
+      <li key={`inline-folder:${parentPath || "root"}`} className="onb-tree-node">
         <div
-          className="flex min-w-0 items-center rounded-[2px] border border-ring/70 bg-background px-1"
-          style={{ marginLeft: `${FILE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px`, marginRight: "3px", height: "27px" }}
+          className="onb-tree-row onb-tree-inline-row"
+          style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
         >
-          <Folder className="mr-1 shrink-0 text-muted-foreground/95" size={16} strokeWidth={2} />
+          <span className="onb-tree-twistie" aria-hidden="true" />
+          <span className="onb-tree-icon" aria-hidden="true">
+            <Folder size={16} strokeWidth={1.8} />
+          </span>
           <input
             ref={inlineInputRef}
             value={inlineFolderName}
@@ -267,14 +270,14 @@ export default function FileTree({
               }
             }}
             onBlur={cancelInlineFolder}
-            className="h-6 min-w-0 flex-1 bg-transparent text-[14.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
+            className="onb-tree-inline-input"
             placeholder="New folder"
           />
         </div>
         {inlineFolderError && (
           <p
-            className="pr-2 text-[10px] leading-4 text-destructive"
-            style={{ paddingLeft: `${FILE_ROW_LEFT + 4 + depth * TREE_DEPTH_INDENT}px` }}
+            className="onb-tree-error"
+            style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET + depth * TREE_DEPTH_INDENT}px` }}
           >
             {inlineFolderError}
           </p>
@@ -291,16 +294,16 @@ export default function FileTree({
 
     if (node.isDirectory) {
       return (
-        <li key={`folder:${node.path}`} className="group/tree-node">
-          <div className="group relative">
+        <li key={`folder:${node.path}`} className="onb-tree-node">
+          <div
+            className={cn("onb-tree-row", hasActive && "onb-tree-row-descendant")}
+            style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
+            data-active={isActive ? "true" : "false"}
+            data-descendant-active={hasActive ? "true" : "false"}
+          >
             <button
               type="button"
-              className={cn(
-                "app-file-row app-file-folder-row relative flex w-full min-w-0 items-center border border-transparent pr-1 text-left transition-colors duration-100",
-                isActive || hasActive ? "text-accent-foreground" : "text-foreground/92",
-              )}
-              style={{ paddingLeft: `${FOLDER_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
-              data-active={isActive ? "true" : "false"}
+              className="onb-tree-main"
               onClick={() => {
                 onSelectDirectory(node.path);
                 toggleFolder(node.path);
@@ -308,16 +311,21 @@ export default function FileTree({
               aria-expanded={!isCollapsed}
               title={node.path}
             >
-              <ChevronRight
-                className={cn("mr-0.5 shrink-0 transition-transform", !isCollapsed && "rotate-90")}
-                size={14}
-                strokeWidth={2.15}
-              />
-              <FolderIcon className="mr-1 shrink-0 text-muted-foreground/95" size={16} strokeWidth={2} />
-              <span className="min-w-0 truncate text-[14.5px] font-medium leading-[26px]">{node.name}</span>
+              <span className="onb-tree-twistie" aria-hidden="true">
+                <ChevronRight
+                  className={cn("onb-tree-chevron", !isCollapsed && "onb-tree-chevron-expanded")}
+                  size={15}
+                  strokeWidth={1.9}
+                />
+              </span>
+              <span className="onb-tree-icon" aria-hidden="true">
+                <FolderIcon size={16} strokeWidth={1.8} />
+              </span>
+              <span className="onb-tree-label onb-tree-label-folder">{node.name}</span>
+              <span className="onb-tree-spacer" aria-hidden="true" />
             </button>
 
-            <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <div className="onb-tree-actions">
               <button
                 type="button"
                 title="重命名文件夹"
@@ -326,7 +334,7 @@ export default function FileTree({
                   e.stopPropagation();
                   onRenameItem(node.path, true);
                 }}
-                className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+                className="onb-tree-action"
               >
                 <Pencil />
               </button>
@@ -338,7 +346,7 @@ export default function FileTree({
                   e.stopPropagation();
                   onDeleteItem(node.path, true);
                 }}
-                className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
+                className="onb-tree-action onb-tree-action-danger"
               >
                 <Trash2 />
               </button>
@@ -349,8 +357,8 @@ export default function FileTree({
               {renderInlineFolderInput(node.path, depth + 1)}
               {node.children.length === 0 && inlineFolderParent !== node.path ? (
                 <li
-                  className="app-file-empty py-1 text-[11px] leading-4 text-muted-foreground/75"
-                  style={{ paddingLeft: `${FILE_ROW_LEFT + 1 + depth * TREE_DEPTH_INDENT}px` }}
+                  className="onb-tree-empty"
+                  style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET + (depth + 1) * TREE_DEPTH_INDENT}px` }}
                 >
                   空文件夹
                 </li>
@@ -363,49 +371,52 @@ export default function FileTree({
     }
 
     return (
-      <li key={`file:${node.path}`} className="group relative">
-        <button
-          type="button"
-          onClick={() => onSelectFile(node.path)}
-          title={node.path}
+      <li key={`file:${node.path}`} className="onb-tree-node">
+        <div
+          className="onb-tree-row"
+          style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
           data-active={isActive ? "true" : "false"}
-          className={cn(
-            "app-file-row relative flex w-full min-w-0 items-center border border-transparent pr-1 text-left transition-colors duration-100",
-            isActive ? "text-accent-foreground" : "text-foreground/92",
-          )}
-          style={{ paddingLeft: `${FILE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
         >
-          <FileText className="mr-1 shrink-0 text-muted-foreground/88" size={16} strokeWidth={1.95} />
-          <span className="app-file-name min-w-0 truncate text-[14.5px] font-normal leading-[26px]">
-            {getNodeDisplayTitle(node)}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => onSelectFile(node.path)}
+            title={node.path}
+            className="onb-tree-main"
+          >
+            <span className="onb-tree-twistie" aria-hidden="true" />
+            <span className="onb-tree-icon" aria-hidden="true">
+              <FileText size={16} strokeWidth={1.7} />
+            </span>
+            <span className="onb-tree-label">{getNodeDisplayTitle(node)}</span>
+            <span className="onb-tree-spacer" aria-hidden="true" />
+          </button>
 
-        <div className="app-file-actions absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-px opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <button
-            type="button"
-            title="重命名"
-            aria-label="重命名"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRenameItem(node.path, false);
-            }}
-            className="app-file-action flex items-center justify-center text-muted-foreground/80 hover:bg-muted hover:text-foreground"
-          >
-            <Pencil />
-          </button>
-          <button
-            type="button"
-            title="删除"
-            aria-label="删除"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteItem(node.path, false);
-            }}
-            className="app-file-action app-file-action-danger flex items-center justify-center text-muted-foreground/80 hover:bg-destructive/15 hover:text-destructive"
-          >
-            <Trash2 />
-          </button>
+          <div className="onb-tree-actions">
+            <button
+              type="button"
+              title="重命名"
+              aria-label="重命名"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRenameItem(node.path, false);
+              }}
+              className="onb-tree-action"
+            >
+              <Pencil />
+            </button>
+            <button
+              type="button"
+              title="删除"
+              aria-label="删除"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteItem(node.path, false);
+              }}
+              className="onb-tree-action onb-tree-action-danger"
+            >
+              <Trash2 />
+            </button>
+          </div>
         </div>
       </li>
     );
@@ -413,21 +424,21 @@ export default function FileTree({
 
   return (
     <div
-      className="app-file-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden"
+      className="onb-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden"
       onMouseDown={(event) => {
         const target = event.target as HTMLElement;
-        if (target.closest(".app-file-row, .app-file-actions, input")) return;
+        if (target.closest(".onb-tree-row, .onb-tree-actions, input")) return;
         onClearSelection();
       }}
     >
-      <div className="app-file-tree w-full px-1 py-1">
+      <div className="onb-tree w-full px-1 py-1">
         {rootCollapsed ? null : (
           <ul className="w-full space-y-px">
             {renderInlineFolderInput("", 0)}
             {tree.length === 0 && inlineFolderParent !== "" ? (
               <li
-                className="app-file-empty py-1 text-[11px] leading-4 text-muted-foreground/75"
-                style={{ paddingLeft: `${FILE_ROW_LEFT + 1}px` }}
+                className="onb-tree-empty"
+                style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET}px` }}
               >
                 No notes yet
               </li>
