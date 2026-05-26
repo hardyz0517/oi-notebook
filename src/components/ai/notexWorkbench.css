@@ -100,6 +100,33 @@
   background: var(--notex-surface);
 }
 
+.notex-command-list,
+.notex-composer textarea,
+.notex-workbench [class*="overflow-y-auto"] {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 20%, transparent) transparent;
+}
+
+.notex-command-list::-webkit-scrollbar,
+.notex-composer textarea::-webkit-scrollbar,
+.notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.notex-command-list::-webkit-scrollbar-thumb,
+.notex-composer textarea::-webkit-scrollbar-thumb,
+.notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted-foreground) 18%, transparent);
+}
+
+.notex-command-list::-webkit-scrollbar-track,
+.notex-composer textarea::-webkit-scrollbar-track,
+.notex-workbench [class*="overflow-y-auto"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .notex-message-list {
   gap: 10px !important;
 }
