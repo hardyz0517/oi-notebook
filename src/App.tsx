@@ -2321,7 +2321,8 @@ export default function App() {
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
   // null 时显示欢迎内容，选中文件后只把正文 body 放进主编辑器。
-  const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
+  const [committedMarkdown, setCommittedMarkdown] = useState(INITIAL_MARKDOWN);
+  const markdown = committedMarkdown;
   const [frontmatterPrefix, setFrontmatterPrefix] = useState("");
   const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
@@ -2414,6 +2415,7 @@ export default function App() {
 
   useEffect(() => {
     currentFilePathRef.current = currentFilePath;
+    activeFileKeyRef.current = currentFilePath;
   }, [currentFilePath]);
 
   const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
@@ -2543,6 +2545,10 @@ export default function App() {
     };
   }, []);
   const [isDirty, setIsDirty] = useState(false);
+  const isDirtyRef = useRef(false);
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode | null>(null);
   const [dialogValue, setDialogValue] = useState("");
@@ -2651,7 +2657,7 @@ export default function App() {
   const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
-  const deferredMarkdown = useDeferredValue(markdown);
+  const deferredMarkdown = useDeferredValue(committedMarkdown);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsCenterHostRef = useRef<SettingsCenterHostHandle>(null);
   const settingsCenterOpenRef = useRef(false);
@@ -2683,6 +2689,16 @@ export default function App() {
     frontmatterPrefix: "",
     markdown: INITIAL_MARKDOWN,
   });
+  const markdownLiveRef = useRef(INITIAL_MARKDOWN);
+  const activeFileKeyRef = useRef<string | null>(null);
+  const externalDocVersionRef = useRef(0);
+  const editorDocVersionRef = useRef(0);
+  const lastCommittedVersionRef = useRef(0);
+  const pendingCommitTimerRef = useRef<number | null>(null);
+  const pendingCommitRafRef = useRef<number | null>(null);
+  const pendingChangeQueueRef = useRef<Array<{ version: number; length: number }>>([]);
+  const [committedMarkdownVersion, setCommittedMarkdownVersion] = useState(0);
+  const [externalDocVersion, setExternalDocVersion] = useState(0);
   const cancelPendingSettingsCenterCloseCleanup = () => {
     if (settingsCloseCleanupRafRef.current !== null) {
       window.cancelAnimationFrame(settingsCloseCleanupRafRef.current);
@@ -2699,18 +2715,80 @@ export default function App() {
       isMountedRef.current = false;
       luoguPrepareRunRef.current.cancelled = true;
       cancelPendingSettingsCenterCloseCleanup();
+      if (pendingCommitRafRef.current !== null) {
+        window.cancelAnimationFrame(pendingCommitRafRef.current);
+      }
+      if (pendingCommitTimerRef.current !== null) {
+        window.clearTimeout(pendingCommitTimerRef.current);
+      }
     };
   }, []);
+
+  const cancelPendingCommittedSync = useCallback(() => {
+    if (pendingCommitRafRef.current !== null) {
+      window.cancelAnimationFrame(pendingCommitRafRef.current);
+      pendingCommitRafRef.current = null;
+    }
+    if (pendingCommitTimerRef.current !== null) {
+      window.clearTimeout(pendingCommitTimerRef.current);
+      pendingCommitTimerRef.current = null;
+    }
+  }, []);
+
+  const commitMarkdownSnapshot = useCallback((nextMarkdown: string, version: number) => {
+    lastCommittedVersionRef.current = version;
+    pendingChangeQueueRef.current = [];
+    setCommittedMarkdown(nextMarkdown);
+    setCommittedMarkdownVersion(version);
+  }, []);
+
+  const flushCommittedMarkdownSync = useCallback(() => {
+    cancelPendingCommittedSync();
+    commitMarkdownSnapshot(markdownLiveRef.current, editorDocVersionRef.current);
+  }, [cancelPendingCommittedSync, commitMarkdownSnapshot]);
+
+  const scheduleCommittedMarkdownSync = useCallback(() => {
+    if (pendingCommitRafRef.current !== null) return;
+
+    pendingCommitRafRef.current = window.requestAnimationFrame(() => {
+      pendingCommitRafRef.current = null;
+      if (pendingCommitTimerRef.current !== null) {
+        window.clearTimeout(pendingCommitTimerRef.current);
+      }
+      pendingCommitTimerRef.current = window.setTimeout(() => {
+        pendingCommitTimerRef.current = null;
+        if (lastCommittedVersionRef.current === editorDocVersionRef.current) return;
+        commitMarkdownSnapshot(markdownLiveRef.current, editorDocVersionRef.current);
+      }, 140);
+    });
+  }, [commitMarkdownSnapshot]);
+
+  const replaceEditorDocument = useCallback((nextMarkdown: string, path: string | null, nextFrontmatterPrefix: string) => {
+    cancelPendingCommittedSync();
+    activeFileKeyRef.current = path;
+    markdownLiveRef.current = nextMarkdown;
+    editorDocVersionRef.current += 1;
+    externalDocVersionRef.current += 1;
+    pendingChangeQueueRef.current = [];
+    lastCommittedVersionRef.current = editorDocVersionRef.current;
+    setFrontmatterPrefix(nextFrontmatterPrefix);
+    setCommittedMarkdown(nextMarkdown);
+    setCommittedMarkdownVersion(editorDocVersionRef.current);
+    setExternalDocVersion(externalDocVersionRef.current);
+  }, [cancelPendingCommittedSync]);
+
+  const getLiveFullMarkdown = useCallback(() => (
+    currentFilePathRef.current === null
+      ? markdownLiveRef.current
+      : combineMarkdown(frontmatterPrefix, markdownLiveRef.current)
+  ), [frontmatterPrefix]);
+
   useEffect(() => {
     setEditorSelectedTextLength(null);
   }, [currentFilePath, editorViewMode]);
-  const fullMarkdown = useMemo(
-    () => (currentFilePath === null ? markdown : combineMarkdown(frontmatterPrefix, markdown)),
-    [currentFilePath, frontmatterPrefix, markdown],
-  );
   const deferredFullMarkdown = useMemo(
     () => (currentFilePath === null ? deferredMarkdown : combineMarkdown(frontmatterPrefix, deferredMarkdown)),
-    [currentFilePath, deferredMarkdown, frontmatterPrefix],
+    [committedMarkdownVersion, currentFilePath, deferredMarkdown, frontmatterPrefix],
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(deferredFullMarkdown), [deferredFullMarkdown]);
@@ -5382,10 +5460,23 @@ export default function App() {
   };
 
   const handleEditorChange = useCallback((value: string) => {
+    markdownLiveRef.current = value;
+    editorDocVersionRef.current += 1;
+    pendingChangeQueueRef.current.push({
+      version: editorDocVersionRef.current,
+      length: value.length,
+    });
+    if (pendingChangeQueueRef.current.length > 64) {
+      pendingChangeQueueRef.current.splice(0, pendingChangeQueueRef.current.length - 64);
+    }
+
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, value);
-    setMarkdown(value);
-    setIsDirty(nextDirty);
-  }, [currentFilePath, frontmatterPrefix]);
+    if (isDirtyRef.current !== nextDirty) {
+      isDirtyRef.current = nextDirty;
+      setIsDirty(nextDirty);
+    }
+    scheduleCommittedMarkdownSync();
+  }, [currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync]);
 
   const handleEditorSelectionChange = useCallback((selectedText: string, range: MarkdownEditorSelectionRange | null, cursorOffset: number | null) => {
     startTransition(() => {
@@ -5412,23 +5503,23 @@ export default function App() {
     previewScrollApiRef.current = api;
   }, []);
 
-  const applyLoadedMarkdown = (content: string, path: string | null) => {
+  const applyLoadedMarkdown = useCallback((content: string, path: string | null) => {
     const loaded = splitLoadedMarkdown(content);
     savedSnapshotRef.current = {
       path,
       frontmatterPrefix: loaded.frontmatterPrefix,
       markdown: loaded.body,
     };
-    setFrontmatterPrefix(loaded.frontmatterPrefix);
-    setMarkdown(loaded.body);
+    replaceEditorDocument(loaded.body, path, loaded.frontmatterPrefix);
     if (path) {
       setDisplayTitleForPath(path, parseFrontmatterFields(content).fields.title);
     }
     setIsDirty(false);
+    isDirtyRef.current = false;
     if (loaded.warning) {
       toast.warning(loaded.warning);
     }
-  };
+  }, [replaceEditorDocument]);
 
   const handlePasteImage = async (file: File) => {
     if (!currentFilePath) {
@@ -5466,17 +5557,20 @@ export default function App() {
       return;
     }
 
+    const currentFullMarkdown = getLiveFullMarkdown();
     const nextFields = { ...frontmatter.fields, ...patch };
-    const nextMarkdown = mergeFrontmatterFields(fullMarkdown, nextFields);
-    if (nextMarkdown === fullMarkdown) return;
+    const nextMarkdown = mergeFrontmatterFields(currentFullMarkdown, nextFields);
+    if (nextMarkdown === currentFullMarkdown) return;
     const loaded = splitLoadedMarkdown(nextMarkdown);
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, loaded.frontmatterPrefix, loaded.body);
-    setFrontmatterPrefix(loaded.frontmatterPrefix);
-    setMarkdown(loaded.body);
+    replaceEditorDocument(loaded.body, currentFilePath, loaded.frontmatterPrefix);
     if (Object.prototype.hasOwnProperty.call(patch, "title")) {
       setDisplayTitleForPath(currentFilePath, String(patch.title ?? ""));
     }
-    setIsDirty(nextDirty);
+    if (isDirtyRef.current !== nextDirty) {
+      isDirtyRef.current = nextDirty;
+      setIsDirty(nextDirty);
+    }
   };
 
   const openTagPicker = useCallback(() => {
@@ -5697,6 +5791,7 @@ export default function App() {
       throw new Error("原选区已经变化，请重新选择文本后再润色。");
     }
 
+    const liveMarkdown = markdownLiveRef.current;
     let from: number | null = null;
     let to: number | null = null;
     if (
@@ -5705,8 +5800,8 @@ export default function App() {
       Number.isFinite(selectionRange.to) &&
       selectionRange.from >= 0 &&
       selectionRange.to >= selectionRange.from &&
-      selectionRange.to <= markdown.length &&
-      markdown.slice(selectionRange.from, selectionRange.to) === originalText
+      selectionRange.to <= liveMarkdown.length &&
+      liveMarkdown.slice(selectionRange.from, selectionRange.to) === originalText
     ) {
       from = selectionRange.from;
       to = selectionRange.to;
@@ -5718,8 +5813,8 @@ export default function App() {
         currentRange &&
         currentRange.from >= 0 &&
         currentRange.to >= currentRange.from &&
-        currentRange.to <= markdown.length &&
-        markdown.slice(currentRange.from, currentRange.to) === originalText
+        currentRange.to <= liveMarkdown.length &&
+        liveMarkdown.slice(currentRange.from, currentRange.to) === originalText
       ) {
         from = currentRange.from;
         to = currentRange.to;
@@ -5727,8 +5822,8 @@ export default function App() {
     }
 
     if (from === null || to === null) {
-      const firstIndex = markdown.indexOf(originalText);
-      const lastIndex = markdown.lastIndexOf(originalText);
+      const firstIndex = liveMarkdown.indexOf(originalText);
+      const lastIndex = liveMarkdown.lastIndexOf(originalText);
       if (firstIndex >= 0 && firstIndex === lastIndex) {
         from = firstIndex;
         to = firstIndex + originalText.length;
@@ -5739,10 +5834,13 @@ export default function App() {
       throw new Error("原选区已经变化，请重新选择文本后再润色。");
     }
 
-    const nextMarkdown = `${markdown.slice(0, from)}${polishedText}${markdown.slice(to)}`;
+    const nextMarkdown = `${liveMarkdown.slice(0, from)}${polishedText}${liveMarkdown.slice(to)}`;
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, nextMarkdown);
-    setMarkdown(nextMarkdown);
-    setIsDirty(nextDirty);
+    replaceEditorDocument(nextMarkdown, currentFilePath, frontmatterPrefix);
+    if (isDirtyRef.current !== nextDirty) {
+      isDirtyRef.current = nextDirty;
+      setIsDirty(nextDirty);
+    }
     toast.success("润色内容已应用到选区，请确认后保存");
   };
 
@@ -5758,13 +5856,16 @@ export default function App() {
     if (!originalBody || !polishedBody) {
       throw new Error("当前笔记内容已经变化，请重新执行全文润色。");
     }
-    if (markdown !== originalBody) {
+    if (markdownLiveRef.current !== originalBody) {
       throw new Error("当前笔记内容已经变化，请重新执行全文润色。");
     }
 
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, polishedBody);
-    setMarkdown(polishedBody);
-    setIsDirty(nextDirty);
+    replaceEditorDocument(polishedBody, currentFilePath, frontmatterPrefix);
+    if (isDirtyRef.current !== nextDirty) {
+      isDirtyRef.current = nextDirty;
+      setIsDirty(nextDirty);
+    }
     toast.success(applyKind === "solution-format"
       ? "题解格式化已应用到正文，请确认后保存"
       : "全文润色已应用到正文，请确认后保存");
@@ -5956,9 +6057,12 @@ export default function App() {
       return;
     }
 
+    const liveMarkdown = markdownLiveRef.current;
+    const liveFullMarkdown = getLiveFullMarkdown();
+    flushCommittedMarkdownSync();
     setIsSavingNote(true);
     try {
-      const warning = await writeNote(currentFilePath, fullMarkdown);
+      const warning = await writeNote(currentFilePath, liveFullMarkdown);
       try {
         const savedContent = await readNote(currentFilePath);
         applyLoadedMarkdown(savedContent, currentFilePath);
@@ -5967,7 +6071,7 @@ export default function App() {
         savedSnapshotRef.current = {
           path: currentFilePath,
           frontmatterPrefix,
-          markdown,
+          markdown: liveMarkdown,
         };
       }
       try {
@@ -6800,14 +6904,14 @@ export default function App() {
   useEffect(() => {
     if (currentFilePath === null) {
       // 无选中文件时恢复欢迎内容
-      setFrontmatterPrefix("");
-      setMarkdown(INITIAL_MARKDOWN);
+      replaceEditorDocument(INITIAL_MARKDOWN, null, "");
       savedSnapshotRef.current = {
         path: null,
         frontmatterPrefix: "",
         markdown: INITIAL_MARKDOWN,
       };
       setIsDirty(false);
+      isDirtyRef.current = false;
       return;
     }
 
@@ -9375,7 +9479,9 @@ export default function App() {
                     </details>
                   )}
                   <MarkdownEditor
-                    value={markdown}
+                    value={committedMarkdown}
+                    documentKey={currentFilePath ?? "__welcome__"}
+                    externalDocVersion={externalDocVersion}
                     onChange={handleEditorChange}
                     aiContextSelectionRange={aiContextSelectionRange}
                     onSelectionChange={handleEditorSelectionChange}

@@ -32,6 +32,8 @@ import { cn } from "@/lib/utils";
 // 鏆備笉鏆撮湶 EditorView ref锛屼繚鎸佺粍浠舵帴鍙ｇ畝娲併€傚眾鏃剁洿鎺ュ姞 ref prop 鍗冲彲銆?
 interface MarkdownEditorProps {
   value: string;
+  documentKey?: string | null;
+  externalDocVersion?: number;
   onChange: (value: string) => void;
   aiContextSelectionRange?: MarkdownEditorSelectionRange | null;
   onSelectionChange?: (selectedText: string, range: MarkdownEditorSelectionRange | null, cursorOffset: number | null) => void;
@@ -665,6 +667,8 @@ export function MarkdownEditorToolbar({
 
 export default function MarkdownEditor({
   value,
+  documentKey,
+  externalDocVersion,
   onChange,
   aiContextSelectionRange,
   onSelectionChange,
@@ -699,6 +703,10 @@ export default function MarkdownEditor({
 
   const editorOwnValue = useRef(value);
   const isApplyingExternalValueRef = useRef(false);
+  const lastAppliedExternalRef = useRef({
+    documentKey,
+    externalDocVersion: externalDocVersion ?? 0,
+  });
 
   const [insertDialog, setInsertDialog] = useState<InsertDialogState | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
@@ -847,7 +855,6 @@ export default function MarkdownEditor({
             },
           }),
 
-          // Listen for document changes and sync the latest content back to React.
           EditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) {
               const newValue = update.state.doc.toString();
@@ -856,7 +863,7 @@ export default function MarkdownEditor({
               if (isApplyingExternalValueRef.current) return;
               onChangeFn.current(newValue);
             }
-            if (update.selectionSet || update.docChanged) {
+            if (update.selectionSet) {
               const selection = update.state.selection.main;
               const selectedText = selection.empty ? "" : update.state.sliceDoc(selection.from, selection.to);
               const range = selection.empty ? null : {
@@ -996,6 +1003,20 @@ export default function MarkdownEditor({
     const view = viewRef.current;
     if (!view) return;
 
+    const nextExternalVersion = externalDocVersion ?? 0;
+    const lastAppliedExternal = lastAppliedExternalRef.current;
+    if (lastAppliedExternal.externalDocVersion === nextExternalVersion) {
+      lastAppliedExternalRef.current = {
+        documentKey,
+        externalDocVersion: nextExternalVersion,
+      };
+      return;
+    }
+    lastAppliedExternalRef.current = {
+      documentKey,
+      externalDocVersion: nextExternalVersion,
+    };
+
     const currentDoc = view.state.doc.toString();
     if (currentDoc === value) {
       editorOwnValue.current = value;
@@ -1021,7 +1042,7 @@ export default function MarkdownEditor({
       isApplyingExternalValueRef.current = false;
     }
     editorOwnValue.current = value;
-  }, [value]);
+  }, [documentKey, externalDocVersion, value]);
 
   useEffect(() => {
     onToolbarApiChange?.({
