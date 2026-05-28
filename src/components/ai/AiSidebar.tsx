@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -38,6 +38,8 @@ import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFo
 import { buildAiTagRecommendationInput, buildAiTagSuggestionMessagePayload, createAiTagRecommendationFailureMessage, normalizeAiTags, normalizeAiTagValue, type AiTagRecommendation, type AiTagRecommendationResult } from "@/lib/aiTagRecommendations";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
+import { VirtualMessageList } from "@/components/ai/VirtualMessageList";
+import { getMarkdownRenderCacheKey, readMarkdownRenderCache, writeMarkdownRenderCache } from "@/components/ai/markdownCache";
 import {
   openExternalUrl,
   fetchWebSourceExcerpts,
@@ -302,6 +304,8 @@ const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 64;
+const AI_MESSAGE_VIRTUAL_OVERSCAN = 7;
+const AI_HYDRATION_CHUNK_BUDGET_MS = 7;
 const LEGACY_UNTITLED_CONVERSATION_TITLE = "New chat";
 const UNTITLED_CONVERSATION_TITLE = "新对话";
 const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
@@ -1301,42 +1305,141 @@ const pruneBlankConversations = (conversations: AiConversation[], activeConversa
   ));
 };
 
-const loadConversationState = (): AiConversationStorage => {
-  const fallback = createEmptyConversation();
+const mergeHydratedConversations = (
+  hydratedConversations: AiConversation[],
+  currentConversations: AiConversation[],
+  activeConversationId: string,
+): AiConversation[] => {
+  const byId = new Map(hydratedConversations.map((conversation) => [conversation.id, conversation]));
 
-  try {
-    const raw = window.localStorage.getItem(AI_CONVERSATIONS_STORAGE_KEY);
-    if (!raw) {
-      return { conversations: [fallback], activeConversationId: fallback.id };
+  currentConversations.forEach((conversation) => {
+    if (!hasConversationContent(conversation)) return;
+    const hydrated = byId.get(conversation.id);
+    if (!hydrated || conversation.updatedAt >= hydrated.updatedAt || conversation.messages.length >= hydrated.messages.length) {
+      byId.set(conversation.id, conversation);
     }
+  });
 
-    const parsed = JSON.parse(raw) as Partial<AiConversationStorage>;
-    const conversations = limitConversations(
-      Array.isArray(parsed.conversations)
-        ? parsed.conversations.map(sanitizeConversation).filter((item): item is AiConversation => item !== null)
-        : [],
-    );
-    if (conversations.length === 0) {
-      return { conversations: [fallback], activeConversationId: fallback.id };
-    }
+  return limitConversations(pruneBlankConversations(Array.from(byId.values()), activeConversationId));
+};
 
-    const activeConversationId =
-      typeof parsed.activeConversationId === "string" &&
-      conversations.some((conversation) => conversation.id === parsed.activeConversationId)
-        ? parsed.activeConversationId
-        : conversations[0].id;
+type ChatHydrationPhase = "shell" | "metadata-ready" | "viewport-ready" | "hydrated";
 
-    const prunedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId));
-    return {
-      conversations: prunedConversations,
-      activeConversationId: prunedConversations.some((conversation) => conversation.id === activeConversationId)
-        ? activeConversationId
-        : prunedConversations[0].id,
-    };
-  } catch (error) {
-    console.warn("Load AI conversations failed:", error);
-    return { conversations: [fallback], activeConversationId: fallback.id };
+type DeferredHydrationTask = {
+  cancel: () => void;
+};
+
+const scheduleIdleWork = (callback: () => void): DeferredHydrationTask => {
+  let cancelled = false;
+  let timeoutId: number | null = null;
+  let idleId: number | null = null;
+
+  const run = () => {
+    if (!cancelled) callback();
+  };
+
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  if (typeof idleWindow.requestIdleCallback === "function") {
+    idleId = idleWindow.requestIdleCallback(run, { timeout: 120 });
+  } else {
+    timeoutId = window.setTimeout(run, 0);
   }
+
+  return {
+    cancel: () => {
+      cancelled = true;
+      if (idleId !== null && typeof idleWindow.cancelIdleCallback === "function") idleWindow.cancelIdleCallback(idleId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    },
+  };
+};
+
+const hydrateConversationStateInChunks = ({
+  fallback,
+  onPhase,
+  onHydrated,
+}: {
+  fallback: AiConversation;
+  onPhase: (phase: ChatHydrationPhase) => void;
+  onHydrated: (state: AiConversationStorage) => void;
+}): DeferredHydrationTask => {
+  let cancelled = false;
+  let task: DeferredHydrationTask | null = null;
+  let parsedConversations: unknown[] = [];
+  let parsedActiveConversationId: unknown;
+  const conversations: AiConversation[] = [];
+  let cursor = 0;
+
+  const schedule = (callback: () => void) => {
+    task = scheduleIdleWork(callback);
+  };
+
+  const finish = () => {
+    if (cancelled) return;
+    const limited = limitConversations(conversations);
+    const available = limited.length > 0 ? limited : [fallback];
+    const activeConversationId =
+      typeof parsedActiveConversationId === "string" &&
+      available.some((conversation) => conversation.id === parsedActiveConversationId)
+        ? parsedActiveConversationId
+        : available[0].id;
+    const pruned = limitConversations(pruneBlankConversations(available, activeConversationId));
+    onPhase("hydrated");
+    onHydrated({
+      conversations: pruned,
+      activeConversationId: pruned.some((conversation) => conversation.id === activeConversationId)
+        ? activeConversationId
+        : pruned[0].id,
+    });
+  };
+
+  const processChunk = () => {
+    if (cancelled) return;
+    const startedAt = performance.now();
+    while (cursor < parsedConversations.length && performance.now() - startedAt < AI_HYDRATION_CHUNK_BUDGET_MS) {
+      const conversation = sanitizeConversation(parsedConversations[cursor]);
+      if (conversation) conversations.push(conversation);
+      cursor += 1;
+    }
+    onPhase(cursor === 0 ? "metadata-ready" : "viewport-ready");
+    if (cursor < parsedConversations.length) {
+      schedule(processChunk);
+      return;
+    }
+    finish();
+  };
+
+  schedule(() => {
+    if (cancelled) return;
+    try {
+      const raw = window.localStorage.getItem(AI_CONVERSATIONS_STORAGE_KEY);
+      if (!raw) {
+        onPhase("hydrated");
+        onHydrated({ conversations: [fallback], activeConversationId: fallback.id });
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<AiConversationStorage>;
+      parsedConversations = Array.isArray(parsed.conversations) ? parsed.conversations : [];
+      parsedActiveConversationId = parsed.activeConversationId;
+      onPhase("metadata-ready");
+      schedule(processChunk);
+    } catch (error) {
+      console.warn("Load AI conversations failed:", error);
+      onPhase("hydrated");
+      onHydrated({ conversations: [fallback], activeConversationId: fallback.id });
+    }
+  });
+
+  return {
+    cancel: () => {
+      cancelled = true;
+      task?.cancel();
+    },
+  };
 };
 
 const getTheme = (): "dark" | "light" =>
@@ -1811,19 +1914,27 @@ const decorateAiCitationMarkers = (html: string, citations: Map<string, AiCitati
 };
 
 function AiMarkdownMessage({
+  messageId,
   markdown,
   citations,
   localNoteSources,
+  isStreaming = false,
   onCitationClick,
 }: {
+  messageId: string;
   markdown: string;
   citations?: WebSourceCitation[];
   localNoteSources?: LocalNoteSearchResult[];
+  isStreaming?: boolean;
   onCitationClick?: (citationId: string) => void;
 }) {
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const normalizedMarkdown = useMemo(() => normalizeAiMathDelimiters(markdown), [markdown]);
+  const citationSignature = useMemo(() => [
+    ...(citations ?? []).map((citation) => `${citation.citationId}:${citation.id}:${citation.url ?? ""}`),
+    ...(localNoteSources ?? []).map((source) => `${source.localCitationId ?? ""}:${source.id}:${source.relativePath}`),
+  ].join("|"), [citations, localNoteSources]);
   const citationMap = useMemo(
     () => getAiCitationDisplayMap(markdown, citations ?? [], localNoteSources),
     [citations, localNoteSources, markdown],
@@ -1831,21 +1942,47 @@ function AiMarkdownMessage({
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: number | null = null;
     const theme = getTheme();
+    const cacheKey = getMarkdownRenderCacheKey({
+      messageId,
+      content: normalizedMarkdown,
+      theme,
+      citationSignature,
+    });
+    const cachedHtml = readMarkdownRenderCache(cacheKey);
+    if (cachedHtml !== null) {
+      setRenderedHtml(cachedHtml);
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    renderMarkdownForTheme(normalizedMarkdown, theme)
-      .then((html) => {
-        if (!cancelled) setRenderedHtml(decorateAiCitationMarkers(decorateAiCodeBlocks(html), citationMap));
-      })
-      .catch((error) => {
-        console.warn("Render AI markdown message failed:", error);
-        if (!cancelled) setRenderedHtml("");
-      });
+    const render = () => {
+      renderMarkdownForTheme(normalizedMarkdown, theme)
+        .then((html) => {
+          if (cancelled) return;
+          const decoratedHtml = decorateAiCitationMarkers(decorateAiCodeBlocks(html), citationMap);
+          writeMarkdownRenderCache(cacheKey, decoratedHtml);
+          setRenderedHtml(decoratedHtml);
+        })
+        .catch((error) => {
+          console.warn("Render AI markdown message failed:", error);
+          if (!cancelled) setRenderedHtml("");
+        });
+    };
+
+    if (isStreaming) {
+      timeoutId = window.setTimeout(render, 100);
+    } else {
+      render();
+    }
 
     return () => {
       cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [citationMap, normalizedMarkdown]);
+  }, [citationMap, citationSignature, isStreaming, messageId, normalizedMarkdown]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -2136,6 +2273,17 @@ const getPlannerTriggerLabel = (trigger?: string): string => {
 const getBooleanLabel = (value: boolean | undefined): string =>
   value === true ? "是" : value === false ? "否" : "未记录";
 
+const splitDebugItem = (item: string): { key: string; value: string } => {
+  const separatorIndex = item.search(/[:：]/);
+  if (separatorIndex <= 0 || separatorIndex >= item.length - 1) {
+    return { key: "", value: item };
+  }
+  return {
+    key: item.slice(0, separatorIndex + 1),
+    value: item.slice(separatorIndex + 1).trim(),
+  };
+};
+
 function WebSearchPlanCard({
   decision,
   provider,
@@ -2157,7 +2305,7 @@ function WebSearchPlanCard({
   const readBudget = sourceStrategy?.readBudget ?? getWebReadBudgetPlan(decision);
 
   return (
-    <div className="mb-2 grid gap-3 rounded-xl border border-sky-200/70 bg-sky-50/65 px-3.5 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-sky-400/20 dark:bg-sky-400/[0.08] dark:text-slate-200">
+    <div className="notex-debug-card notex-diagnostics-card mb-2 grid gap-3 rounded-xl border border-sky-200/70 bg-sky-50/65 px-3.5 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-sky-400/20 dark:bg-sky-400/[0.08] dark:text-slate-200">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="font-medium text-foreground">联网搜索计划</span>
         <span className="rounded-full border border-sky-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] leading-4 text-sky-700 dark:border-sky-300/20 dark:bg-white/[0.05] dark:text-sky-200">
@@ -2919,7 +3067,7 @@ function WebSearchSourcesCard({
   const newsReadDiagnosticsLines = diagnosticsText ? formatNewsReadDiagnostics(diagnosticsText) : [];
 
   return (
-    <div className="mb-2 grid gap-2.5 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-3.5 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-emerald-400/20 dark:bg-emerald-400/[0.07] dark:text-slate-200">
+    <div className="notex-debug-card notex-web-source-card mb-2 grid gap-2.5 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-3.5 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-emerald-400/20 dark:bg-emerald-400/[0.07] dark:text-slate-200">
       {visibleSources.length > 0 ? (
         <>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -2999,11 +3147,11 @@ function WebSearchSourcesCard({
                 data-source-message-id={messageId}
                 data-source-citation-id={source.citationId}
                 className={cn(
-                  "grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 transition-colors dark:border-white/10 dark:bg-white/[0.04]",
+                  "notex-source-card grid min-w-0 gap-1 rounded-lg border border-border/60 bg-background/75 px-2.5 py-2 transition-colors dark:border-white/10 dark:bg-white/[0.04]",
                   highlightedCitationId && source.citationId === highlightedCitationId && "border-primary/60 bg-primary/10 ring-1 ring-primary/30 dark:bg-primary/15",
                 )}
               >
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <div className="notex-source-pill-row flex min-w-0 flex-wrap items-center gap-1.5">
                   {source.citationId && (
                     <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
                       {source.citationId}
@@ -3040,7 +3188,7 @@ function WebSearchSourcesCard({
                   >
                     {getSourceOriginLabel(source)}
                   </span>
-                  <span className="truncate text-[12px] text-muted-foreground">
+                  <span className="notex-source-pill min-w-0 max-w-full break-words text-[12px] text-muted-foreground">
                     {source.site ?? source.url}
                   </span>
                 </div>
@@ -3063,10 +3211,16 @@ function WebSearchSourcesCard({
                 <div className="min-w-0 break-all text-[11px] leading-5 text-muted-foreground/80">
                   {source.url}
                 </div>
-                <div className="flex min-w-0 flex-wrap gap-x-2.5 gap-y-1 text-[12px] leading-5 text-muted-foreground/80">
-                  {debugItems.map((item) => (
-                    <span key={item}>{item}</span>
-                  ))}
+                <div className="notex-source-detail-grid min-w-0 text-[12px] leading-5 text-muted-foreground/80">
+                  {debugItems.map((item) => {
+                    const debugItem = splitDebugItem(item);
+                    return (
+                      <span key={item} className="notex-source-detail-row">
+                        {debugItem.key && <span className="notex-source-detail-key">{debugItem.key}</span>}
+                        <span className="notex-source-detail-value">{debugItem.value}</span>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
               );
@@ -3616,6 +3770,9 @@ export default function AiSidebar({
   onClose,
   width,
   isMaximized = false,
+  isResizing = false,
+  onResizePointerDown,
+  onResizeDoubleClick,
   developerModeEnabled = false,
   onMaximizedChange,
   aiConfig,
@@ -3628,19 +3785,28 @@ export default function AiSidebar({
   onOpenPolishReview,
   onPolishReviewChange,
   onOpenLocalNote,
-}: AiSidebarProps) {
-  const initialConversationStateRef = useRef<AiConversationStorage | null>(null);
-  if (initialConversationStateRef.current === null) {
-    initialConversationStateRef.current = loadConversationState();
+}: AiSidebarProps & {
+  isResizing?: boolean;
+  onResizePointerDown?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onResizeDoubleClick?: () => void;
+}) {
+  const initialConversationRef = useRef<AiConversation | null>(null);
+  if (initialConversationRef.current === null) {
+    initialConversationRef.current = {
+      ...createEmptyConversation(),
+      ...getDefaultConversationModel(aiConfig),
+    };
   }
 
   const [inputValue, setInputValue] = useState("");
   const [conversations, setConversations] = useState<AiConversation[]>(
-    initialConversationStateRef.current.conversations,
+    [initialConversationRef.current],
   );
   const [activeConversationId, setActiveConversationId] = useState(
-    initialConversationStateRef.current.activeConversationId,
+    initialConversationRef.current.id,
   );
+  const [chatHydrationPhase, setChatHydrationPhase] = useState<ChatHydrationPhase>("shell");
+  const [isConversationHydrated, setIsConversationHydrated] = useState(false);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -3673,26 +3839,94 @@ export default function AiSidebar({
     messageId: string;
     status: "copied" | "failed";
   } | null>(null);
+  const [composerFlowHeight, setComposerFlowHeight] = useState(210);
   const messageSeqRef = useRef(0);
   const requestSeqRef = useRef(0);
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const streamTextBufferRef = useRef<Map<string, string>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
+  const hydrationTaskRef = useRef<DeferredHydrationTask | null>(null);
+  const hasPersistableConversationStateRef = useRef(false);
+  const hasLoadedConversationStateRef = useRef(false);
+  const hydrationGenerationRef = useRef(0);
+  const conversationMutationVersionRef = useRef(0);
   const messageCopyFeedbackTimerRef = useRef<number | null>(null);
   const citationHighlightTimerRef = useRef<number | null>(null);
   const localCitationHighlightTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerWrapRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const selectedProviderLabelRef = useRef("");
   const selectedModelLabelRef = useRef("");
 
+  useEffect(() => {
+    hydrationTaskRef.current?.cancel();
+    hydrationTaskRef.current = null;
+
+    if (!isOpen) {
+      if (!hasLoadedConversationStateRef.current) {
+        setChatHydrationPhase("shell");
+        setIsConversationHydrated(false);
+        hasPersistableConversationStateRef.current = false;
+      }
+      return undefined;
+    }
+
+    if (hasLoadedConversationStateRef.current) {
+      setChatHydrationPhase("hydrated");
+      setIsConversationHydrated(true);
+      hasPersistableConversationStateRef.current = true;
+      return undefined;
+    }
+
+    const fallback = initialConversationRef.current ?? createEmptyConversation();
+    const hydrationGeneration = hydrationGenerationRef.current + 1;
+    const mutationVersionAtStart = conversationMutationVersionRef.current;
+    hydrationGenerationRef.current = hydrationGeneration;
+    setChatHydrationPhase("shell");
+    setIsConversationHydrated(false);
+    hasPersistableConversationStateRef.current = false;
+
+    hydrationTaskRef.current = hydrateConversationStateInChunks({
+      fallback,
+      onPhase: setChatHydrationPhase,
+      onHydrated: (state) => {
+        if (hydrationGenerationRef.current !== hydrationGeneration) return;
+        const shouldPreserveRuntimeConversations = conversationMutationVersionRef.current !== mutationVersionAtStart;
+        startTransition(() => {
+          setConversations((current) => (
+            shouldPreserveRuntimeConversations
+              ? mergeHydratedConversations(state.conversations, current, activeConversationId)
+              : state.conversations
+          ));
+          setActiveConversationId((currentActiveConversationId) => (
+            shouldPreserveRuntimeConversations && currentActiveConversationId
+              ? currentActiveConversationId
+              : state.activeConversationId
+          ));
+          hasLoadedConversationStateRef.current = true;
+          setIsConversationHydrated(true);
+        });
+        hasPersistableConversationStateRef.current = true;
+      },
+    });
+
+    return () => {
+      hydrationTaskRef.current?.cancel();
+      hydrationTaskRef.current = null;
+    };
+  }, [isOpen]);
+
   const activeConversation =
     conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0];
-  const messages = (activeConversation?.messages ?? []).filter((message) => !isLegacyStatusMessage(message));
+  const activeConversationMessages = activeConversation?.messages;
+  const messages = useMemo(
+    () => (activeConversationMessages ?? []).filter((message) => !isLegacyStatusMessage(message)),
+    [activeConversationMessages],
+  );
   const enabledProviders = aiConfig?.providers.filter((provider) => provider.enabled) ?? [];
   const fallbackProvider = enabledProviders.find((provider) => provider.id === aiConfig?.default_provider_id) ?? enabledProviders[0];
   const activeProvider =
@@ -3814,6 +4048,7 @@ export default function AiSidebar({
         ...createEmptyConversation(),
         ...getDefaultConversationModel(aiConfig),
       };
+      conversationMutationVersionRef.current += 1;
       setConversations([nextConversation]);
       setActiveConversationId(nextConversation.id);
     }
@@ -3839,6 +4074,7 @@ export default function AiSidebar({
   }, [webSearchMode]);
 
   useEffect(() => {
+    if (!hasPersistableConversationStateRef.current) return;
     const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
       ...conversation,
       messages: sanitizeMessagesForStorage(conversation.messages),
@@ -3886,6 +4122,37 @@ export default function AiSidebar({
   }, []);
 
   useEffect(() => {
+    if (!isOpen) return undefined;
+    const element = composerWrapRef.current;
+    if (!element) return undefined;
+
+    let frameId: number | null = null;
+    const measureComposer = () => {
+      frameId = null;
+      const rect = element.getBoundingClientRect();
+      const nextHeight = Math.ceil(rect.height);
+      if (Number.isFinite(nextHeight) && nextHeight > 0) {
+        setComposerFlowHeight((current) => (Math.abs(current - nextHeight) <= 1 ? current : nextHeight));
+      }
+    };
+    const scheduleMeasure = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(measureComposer);
+    };
+
+    scheduleMeasure();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isCommandPanelOpen || visibleCommands.length === 0) return;
     const activeCommand = visibleCommands[activeCommandIndex];
     if (!activeCommand) return;
@@ -3914,6 +4181,11 @@ export default function AiSidebar({
     shouldAutoScrollRef.current = isNearBottom;
     setShowScrollToBottom(!isNearBottom);
   };
+
+  const closeSidebar = useCallback(() => {
+    onMaximizedChange?.(false);
+    onClose();
+  }, [onClose, onMaximizedChange]);
 
   const toggleCitationList = useCallback((messageId: string) => {
     setExpandedCitationMessageIds((current) => ({
@@ -4574,6 +4846,7 @@ export default function AiSidebar({
     conversationId: string,
     updater: (conversation: AiConversation) => AiConversation,
   ) => {
+    conversationMutationVersionRef.current += 1;
     setConversations((current) => {
       const now = Date.now();
       const next = current.map((conversation) => {
@@ -4637,6 +4910,7 @@ export default function AiSidebar({
       ...createEmptyConversation(),
       ...getDefaultConversationModel(aiConfig),
     };
+    conversationMutationVersionRef.current += 1;
     setConversations((current) => limitConversations(pruneBlankConversations([conversation, ...current], conversation.id)));
     setActiveConversationId(conversation.id);
     setViewMode("chat");
@@ -4712,6 +4986,7 @@ export default function AiSidebar({
       return;
     }
 
+    conversationMutationVersionRef.current += 1;
     setConversations((current) => limitConversations(current.map((conversation) => (
       conversation.id === conversationId
         ? { ...conversation, title, updatedAt: Date.now() }
@@ -4750,10 +5025,12 @@ export default function AiSidebar({
     const remaining = limitConversations(conversations.filter((item) => item.id !== conversationId));
     if (remaining.length === 0) {
       const fallback = createEmptyConversation();
+      conversationMutationVersionRef.current += 1;
       setConversations([fallback]);
       setActiveConversationId(fallback.id);
       setViewMode("conversations");
     } else {
+      conversationMutationVersionRef.current += 1;
       setConversations(remaining);
       if (conversationId === activeConversationId) {
         setActiveConversationId(remaining[0].id);
@@ -6413,6 +6690,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       : undefined;
 
     if (listConversation) {
+      conversationMutationVersionRef.current += 1;
       setConversations((current) => limitConversations(pruneBlankConversations([listConversation, ...current], listConversation.id)));
       setActiveConversationId(listConversation.id);
     }
@@ -6478,7 +6756,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     () => sortedConversations.filter(hasConversationContent),
     [sortedConversations],
   );
-  const recentConversations = visibleConversations.slice(0, 3);
+  const recentConversations = visibleConversations.slice(0, 8);
   const filteredConversations = useMemo(() => {
     const query = conversationSearch.trim().toLocaleLowerCase();
     if (!query) return visibleConversations;
@@ -6497,7 +6775,65 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     : width
       ? { width, flexBasis: width, maxWidth: "100%" }
       : undefined;
+  const workbenchStyle = {
+    ...sidebarStyle,
+    "--notex-composer-avoid-height": `${composerFlowHeight}px`,
+  } as CSSProperties;
   const contentColumnClass = isMaximized ? "w-full max-w-none" : "mx-auto w-full max-w-3xl";
+  const expandedCitationSignature = useMemo(
+    () => Object.entries(expandedCitationMessageIds)
+      .filter(([, isExpanded]) => isExpanded)
+      .map(([messageId]) => messageId)
+      .sort()
+      .join(","),
+    [expandedCitationMessageIds],
+  );
+  const expandedLocalNoteSignature = useMemo(
+    () => Object.entries(expandedLocalNoteMessageIds)
+      .filter(([, isExpanded]) => isExpanded)
+      .map(([messageId]) => messageId)
+      .sort()
+      .join(","),
+    [expandedLocalNoteMessageIds],
+  );
+  const virtualMessageRenderVersion = useMemo(() => [
+    elapsedNow,
+    developerModeEnabled ? "dev" : "normal",
+    activeWebSearchProvider,
+    isAiConfigured ? "configured" : "unconfigured",
+    selectedProviderId ?? "",
+    selectedModelId ?? "",
+    isResponding ? "responding" : "idle",
+    messageCopyFeedback ? `${messageCopyFeedback.messageId}:${messageCopyFeedback.status}` : "",
+    highlightedCitationId ?? "",
+    highlightedLocalCitationId ?? "",
+    applyingTagMessageId ?? "",
+    applyingPolishMessageId ?? "",
+    expandedCitationSignature,
+    expandedLocalNoteSignature,
+  ].join("|"), [
+    activeWebSearchProvider,
+    applyingPolishMessageId,
+    applyingTagMessageId,
+    developerModeEnabled,
+    elapsedNow,
+    expandedCitationSignature,
+    expandedLocalNoteSignature,
+    highlightedCitationId,
+    highlightedLocalCitationId,
+    isAiConfigured,
+    isResponding,
+    messageCopyFeedback,
+    selectedModelId,
+    selectedProviderId,
+  ]);
+  const estimateVirtualMessageSize = useCallback((message: AiChatMessage) => {
+    if (message.role === "user") return 84;
+    if (message.role === "system") return 96;
+    if (message.kind === "polish-preview" || message.kind === "tag-suggestion") return 260;
+    if (message.text.length > 1200) return 320;
+    return 180;
+  }, []);
   const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
     const title = getConversationDisplayTitle(conversation);
     const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
@@ -6589,16 +6925,30 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
   };
   let commandOrdinal = 0;
 
+  if (!isOpen) {
+    return null;
+  }
+
   return (
     <aside
       className={cn(
         "notex-workbench ai-sidebar-shell relative shrink-0 flex-col overflow-hidden border-l border-border/80 text-foreground",
-        isOpen ? "flex" : "hidden",
+        "flex",
         isMaximized && "absolute inset-0 z-40 border-l border-border/80 shadow-2xl",
       )}
-      style={isMaximized ? undefined : sidebarStyle}
+      style={workbenchStyle}
       aria-hidden={!isOpen}
     >
+      {isOpen && !isMaximized && onResizePointerDown && (
+        <button
+          type="button"
+          className={cn("notex-resize-rail", isResizing && "notex-resize-rail-active")}
+          onPointerDown={onResizePointerDown}
+          onDoubleClick={onResizeDoubleClick}
+          aria-label="Resize AI assistant"
+          title="Drag to resize AI assistant"
+        />
+      )}
       <div className="notex-top relative shrink-0">
         <div className="notex-header flex h-11 items-center justify-between gap-1.5 border-b border-border/40 px-3">
         <div className="notex-brand grid min-w-0 flex-1 gap-px">
@@ -6610,7 +6960,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         <button
           type="button"
           className={cn(
-            "notex-provider-button inline-flex h-7 min-w-0 max-w-[7.5rem] items-center justify-between gap-1 rounded-md border border-border/45 bg-background/25 px-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "notex-config-trigger notex-provider-button inline-flex h-7 min-w-0 max-w-[7.5rem] items-center justify-between gap-1 rounded-md border border-border/45 bg-background/25 px-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             isProviderPickerOpen && "bg-accent/35 text-foreground",
           )}
             onClick={() => {
@@ -6640,7 +6990,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           <button
             type="button"
             className="notex-icon-button inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={onClose}
+            onPointerDownCapture={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              closeSidebar();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              closeSidebar();
+            }}
             title="Hide NoteX"
             aria-label="Hide NoteX"
           >
@@ -6730,12 +7089,12 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         </div>
 
         {isProviderPickerOpen && (
-          <div className="absolute left-3 right-3 top-[calc(100%-0.15rem)] z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+          <div className="notex-config-menu absolute left-3 right-3 top-[calc(100%-0.15rem)] z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+            <div className="hidden">
               <span className="text-xs font-medium text-foreground">选择配置组</span>
               <button
                 type="button"
-                className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="notex-config-menu-action inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                 onClick={() => {
                   setIsProviderPickerOpen(false);
                   onOpenAiSettings();
@@ -6745,7 +7104,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 API 管理
               </button>
             </div>
-            <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+            <div className="notex-config-menu-list max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
               {enabledProviders.length > 0 ? (
                 enabledProviders.map((provider) => {
                   const isSelected = provider.id === selectedProviderId;
@@ -6755,24 +7114,26 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       key={provider.id}
                       type="button"
                       className={cn(
-                        "grid w-full min-w-0 gap-1 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                        isSelected && "bg-accent text-accent-foreground",
+                        "notex-config-menu-item flex w-full min-w-0 items-center rounded-md text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                        isSelected && "is-selected",
                       )}
+                      data-selected={isSelected ? "true" : undefined}
                       onClick={() => selectConversationProvider(provider)}
                     >
-                      <span className="truncate text-sm font-medium">{provider.name || provider.id}</span>
-                      <span className="truncate text-[11px] text-muted-foreground">
+                      <span className="notex-config-menu-name truncate text-sm font-medium">{provider.name || provider.id}</span>
+                      <span className="hidden">
                         {modelCount > 0 ? `${modelCount} models` : "无可用模型"}
                       </span>
+                      {isSelected && <span className="notex-config-menu-check" aria-hidden="true">√</span>}
                     </button>
                   );
                 })
               ) : (
-                <div className="grid gap-2 px-3 py-8 text-center text-sm text-muted-foreground">
+                <div className="notex-config-menu-empty grid gap-2 px-3 py-8 text-center text-sm text-muted-foreground">
                   <div>还没有可用配置组</div>
                   <button
                     type="button"
-                    className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                    className="hidden"
                     onClick={() => {
                       setIsProviderPickerOpen(false);
                       onOpenAiSettings();
@@ -6867,7 +7228,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
               <div className="grid gap-1">
-                {visibleConversations.map((conversation) => renderConversationItem(conversation))}
+                {recentConversations.map((conversation) => renderConversationItem(conversation))}
               </div>
               {false && visibleConversations.map((conversation) => (
                 <div
@@ -6954,7 +7315,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       <div className="notex-messages-region relative flex min-h-0 flex-1 overflow-hidden">
         <div
           ref={messagesScrollRef}
-          className="notex-messages min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
+          className="notex-scroll notex-messages min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
           onScroll={handleMessagesScroll}
         >
           {viewMode === "conversations" ? (
@@ -6972,7 +7333,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   还没有会话。直接在下方输入第一句话即可开始。
                 </div>
               )}
-              {visibleConversations.length > 3 && (
+              {visibleConversations.length > 8 && (
                 <button
                   type="button"
                   className="mt-1 inline-flex h-8 items-center justify-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -6988,6 +7349,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 </button>
               )}
             </div>
+          ) : !isConversationHydrated && messages.length === 0 ? (
+            <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center text-sm text-muted-foreground")}>
+              {chatHydrationPhase === "shell" ? "Loading recent messages..." : "Preparing recent messages..."}
+            </div>
           ) : messages.length === 0 ? (
             <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center")}>
             <div className="grid max-w-72 gap-3">
@@ -7001,8 +7366,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             </div>
           ) : (
-            <div className={cn("notex-message-list", contentColumnClass, "grid gap-3")}>
-            {messages.map((message) => {
+            <VirtualMessageList
+              messages={messages}
+              resetKey={activeConversation?.id ?? activeConversationId}
+              scrollRef={messagesScrollRef}
+              overscan={AI_MESSAGE_VIRTUAL_OVERSCAN}
+              renderVersion={virtualMessageRenderVersion}
+              className={cn("notex-message-list", contentColumnClass, "grid gap-3")}
+              estimateSize={estimateVirtualMessageSize}
+              renderMessage={(message) => {
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
                 const timingLabel = getAssistantTimingLabel(message, elapsedMs);
@@ -7097,9 +7469,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       ) : (
                         <>
                           <AiMarkdownMessage
+                            messageId={message.id}
                             markdown={message.text || (message.state === "streaming" ? "Generating..." : "")}
                             citations={sourceCitations}
                             localNoteSources={message.localNoteSources}
+                            isStreaming={message.state === "streaming"}
                             onCitationClick={(citationId) => {
                               if (isValidLocalCitationId(citationId)) {
                                 handleLocalNoteCitationClick(message.id, citationId);
@@ -7178,13 +7552,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
                 </div>
               );
-            })}
-            <div ref={messagesEndRef} />
-            </div>
+              }}
+            />
           )}
+          {viewMode === "chat" && <div className="notex-bottom-spacer" aria-hidden="true" />}
         </div>
         {isAllConversationsOpen && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/30 px-4 py-6 backdrop-blur-[2px]">
+          <div className="absolute inset-0 z-30">
             <button
               type="button"
               className="absolute inset-0 cursor-default"
@@ -7194,8 +7568,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               }}
               aria-label="关闭会话列表"
             />
-            <div className="relative z-10 grid max-h-full w-full max-w-3xl grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-2xl border border-border/70 bg-[#2b2d2f]/95 p-4 text-foreground shadow-[0_24px_80px_rgb(0_0_0/0.42)] dark:border-white/10">
-              <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="notex-session-popover absolute z-10 grid text-foreground">
+              <div className="hidden">
                 <div className="grid min-w-0 gap-1">
                   <div className="text-base font-semibold text-foreground">会话</div>
                   <div className="text-xs text-muted-foreground">选择最近会话，或用标题过滤。</div>
@@ -7217,9 +7591,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 value={conversationSearch}
                 onChange={(event) => setConversationSearch(event.target.value)}
                 placeholder="搜索最近会话"
-                className="h-9 min-w-0 rounded-md border border-white/10 bg-black/20 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+                className="notex-session-search"
               />
-              <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:thin]">
+              <div className="notex-session-popover-list min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
                 <div className="hidden">
                   <span>所有会话</span>
                   <span>{filteredConversations.length}</span>
@@ -7257,10 +7631,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         )}
       </div>
 
-      <div className={cn("notex-composer-wrap shrink-0", contentColumnClass)}>
+      <div ref={composerWrapRef} className={cn("notex-composer-wrap shrink-0", contentColumnClass)}>
         {isCommandPanelOpen && (
           <div className="notex-command-panel ai-command-panel absolute bottom-[calc(100%+0.4rem)] left-0 right-0 z-20 overflow-hidden rounded-[10px] border border-border/50 bg-popover/95 text-popover-foreground dark:border-white/10 dark:bg-[#2b2d2f]/96">
-            <div className="notex-command-header flex items-center justify-between border-b border-border/30 px-2.5 py-1 text-[11px] text-muted-foreground">
+            <div className="notex-command-header hidden">
               <div className="font-medium text-muted-foreground">选择命令</div>
               <div className="text-[10px] text-muted-foreground/55">↑↓ 选择 · Enter</div>
             </div>
@@ -7268,7 +7642,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               <div className="notex-command-list ai-command-list max-h-72 overflow-y-auto overflow-x-hidden px-1 py-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--muted-foreground)_18%,transparent)_transparent]">
                 {groupedVisibleCommands.map(({ category, commands }) => (
                   <div key={category} className="py-0.5">
-                    <div className="px-2 pb-0.5 pt-0.5 text-[11px] font-medium leading-4 text-muted-foreground/60">
+                    <div className="hidden">
                       {category}
                     </div>
                     <div className="grid gap-0.5">
@@ -7306,8 +7680,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             <span className="notex-command-icon flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-sm text-muted-foreground">
                               <Icon className="h-4 w-4" />
                             </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="grid min-w-0 gap-0.5 overflow-hidden">
+                            <span className="notex-command-content min-w-0 flex-1">
+                              <span className="flex min-w-0 items-center gap-3 overflow-hidden">
                                 <span className="notex-command-name truncate text-[13.5px] font-medium leading-4 text-foreground">{command.label}</span>
                                 <span className="notex-command-description truncate text-[12px] leading-[14px] text-muted-foreground">
                                   {getCommandDescriptionText(command, disabledReason)}
@@ -7339,7 +7713,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           />
         )}
 
-        <div className="notex-composer-card">
+        <div className={cn("notex-composer-card", isModelPickerOpen && "notex-composer-card-menu-open")}>
           <textarea
             ref={inputRef}
             value={inputValue}
@@ -7366,7 +7740,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               <button
                 type="button"
                 className={cn(
-                  "notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "notex-model-trigger notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                   isModelPickerOpen && "notex-composer-control-active",
                 )}
                 onClick={() => {
@@ -7386,7 +7760,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={includeCurrentNoteContext}
                 className={cn(
-                  "notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
                   includeCurrentNoteContext && "notex-composer-control-active",
                 )}
                 onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
@@ -7413,7 +7787,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={webSearchEnabled}
                 className={cn(
-                  "notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
                   webSearchEnabled && "notex-composer-control-active",
                 )}
                 onClick={handleWebSearchToggle}
@@ -7506,8 +7880,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </button>
           </div>
           {isModelPickerOpen && (
-            <div className="absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground">
-              <div className="grid gap-2 border-b border-border/70 p-2">
+            <div className="notex-model-menu absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground">
+              <div className="hidden">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-medium text-foreground">
                     {activeProvider ? activeProvider.name || activeProvider.id : "未选择配置组"}
@@ -7529,11 +7903,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     value={modelSearch}
                     onChange={(event) => setModelSearch(event.target.value)}
                     placeholder="搜索模型"
-                    className="h-7 rounded-md border border-input bg-[#2e2e2e] px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="notex-model-menu-search h-7 rounded-md border border-input bg-[#2e2e2e] px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   />
                 )}
               </div>
-              <div className="max-h-64 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+              <div className="notex-model-menu-list max-h-64 overflow-y-auto p-1.5 [scrollbar-width:thin]">
                 {selectableModels.length > 0 ? (
                   <div className="grid gap-0.5">
                     {selectableModels.map((model) => {
@@ -7543,15 +7917,17 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           key={model.id}
                           type="button"
                           className={cn(
-                            "grid min-w-0 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                            isSelected && "bg-accent text-accent-foreground",
+                            "notex-model-menu-item flex min-w-0 items-center rounded-md text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                            isSelected && "is-selected",
                           )}
+                          data-selected={isSelected ? "true" : undefined}
                           onClick={() => selectConversationModel(model)}
                         >
-                          <span className="truncate text-sm font-medium">{model.name || model.id}</span>
-                          <span className="truncate text-[11px] text-muted-foreground">
+                          <span className="notex-model-menu-name truncate text-sm font-medium">{model.name || model.id}</span>
+                          <span className="hidden">
                             {model.id} · {model.source === "manual" ? "手动" : "同步"}
                           </span>
+                          {isSelected && <span className="notex-model-menu-check" aria-hidden="true">√</span>}
                         </button>
                       );
                     })}
@@ -7575,6 +7951,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
           )}
         </div>
+        <div className="notex-composer-bottom-fill" aria-hidden="true" />
       </div>
       <Dialog
         open={!!pendingDeleteConversation}

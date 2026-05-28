@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { renderMarkdown } from "@/lib/markdown";
@@ -17,7 +17,7 @@ export interface MarkdownPreviewScrollApi {
   scrollToRatio: (ratio: number) => void;
 }
 
-export default function MarkdownPreview({
+function MarkdownPreview({
   markdown,
   noteRelativePath,
   onScroll,
@@ -495,3 +495,5 @@ function createCodeCopyIcon(icon: "copy" | "check") {
   svg.append(rect, path);
   return svg;
 }
+
+export default memo(MarkdownPreview);

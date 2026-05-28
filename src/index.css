@@ -1372,6 +1372,7 @@ html[data-theme="light"] .app-file-actions {
 }
 
 .onb-tree-row {
+  position: relative;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -1412,10 +1413,12 @@ html[data-theme="light"] .app-file-actions {
 .onb-tree-main {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   height: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   align-items: center;
   gap: 8px;
+  overflow: hidden;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1488,8 +1491,8 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 
 .onb-tree-label {
   min-width: 0;
-  max-width: 100%;
-  flex: 0 1 auto;
+  max-width: none;
+  flex: 1 1 auto;
   overflow: hidden;
   color: inherit;
   font-size: 20px;
@@ -1514,20 +1517,25 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 
 .onb-tree-spacer {
   min-width: 0;
-  flex: 1 1 0;
+  flex: 0 0 0;
 }
 
 .onb-tree-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
   display: flex;
-  height: 100%;
-  flex: 0 0 var(--onb-tree-actions-width);
+  height: 32px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 1px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 90ms ease;
+  transform: translateY(-50%);
   visibility: hidden;
+  z-index: 1;
 }
 
 .onb-tree-row:hover .onb-tree-actions,
@@ -1536,6 +1544,12 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
+}
+
+.onb-tree-row:hover .onb-tree-label,
+.onb-tree-row:focus-within .onb-tree-label,
+.onb-tree-row[data-active="true"] .onb-tree-label {
+  padding-right: calc(var(--onb-tree-actions-width) + 8px);
 }
 
 .onb-tree-action {

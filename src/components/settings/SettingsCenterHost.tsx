@@ -1,0 +1,273 @@
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+
+import SettingsCenterShell from "./SettingsCenterShell";
+import type { SettingsCenterShellProps } from "./SettingsCenterShell";
+import type {
+  SettingsActiveLabel,
+  SettingsCategory,
+  SettingsGroupId,
+  SettingsSection,
+  SettingsTarget,
+  SettingsView,
+} from "./settingsTypes";
+
+export interface SettingsCenterHostHandle {
+  open: () => SettingsSection;
+  openSection: (category: SettingsCategory) => SettingsSection;
+  openPage: (page: SettingsSection) => SettingsSection;
+  openTarget: (target: SettingsTarget) => SettingsSection;
+  openPromptEditor: (promptId?: string, returnTarget?: SettingsTarget | SettingsSection | null) => void;
+  closePromptEditor: () => SettingsSection;
+  close: () => void;
+  resetUiAfterClose: () => void;
+  isOpen: () => boolean;
+  getActivePage: () => SettingsSection;
+  getView: () => SettingsView;
+}
+
+type ShellControlledProps =
+  | "open"
+  | "onOpenChange"
+  | "settingsView"
+  | "expandedSettingsGroups"
+  | "activeSettingsGroupId"
+  | "activeSettingsTarget"
+  | "activeSettingsPageKey"
+  | "activeSettingsLabel"
+  | "onToggleGroup"
+  | "onOpenSettingsSection";
+
+interface SettingsCenterHostProps extends Omit<SettingsCenterShellProps, ShellControlledProps> {
+  disabled?: boolean;
+  defaultPage: SettingsSection;
+  sectionFallback: Record<SettingsCategory, SettingsSection>;
+  sectionLabels: Record<SettingsSection, SettingsActiveLabel & { groupId: SettingsGroupId }>;
+  onBeforeOpen?: () => void;
+  onOpenStateChange?: (open: boolean) => void;
+  onActivePageChange?: (page: SettingsSection) => void;
+  onSettingsViewChange?: (view: SettingsView) => void;
+}
+
+const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHostProps>(
+  (
+    {
+      disabled = false,
+      defaultPage,
+      sectionFallback,
+      sectionLabels,
+      visibleSettingsTree,
+      contentRef,
+      onBeforeOpen,
+      onOpenStateChange,
+      onActivePageChange,
+      onSettingsViewChange,
+      ...shellProps
+    },
+    ref,
+  ) => {
+    const [open, setOpen] = useState(false);
+    const [activePageKey, setActivePageKey] = useState<SettingsSection>(defaultPage);
+    const [settingsView, setSettingsView] = useState<SettingsView>("main");
+    const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>({});
+
+    const openRef = useRef(open);
+    const activePageRef = useRef(activePageKey);
+    const settingsViewRef = useRef(settingsView);
+    const promptEditorReturnPageRef = useRef<SettingsSection>(defaultPage);
+
+    const visiblePageIds = useMemo(
+      () => new Set(visibleSettingsTree.flatMap((group) => group.children.map((child) => child.id))),
+      [visibleSettingsTree],
+    );
+    const visibleGroupIds = useMemo(
+      () => new Set(visibleSettingsTree.map((group) => group.id)),
+      [visibleSettingsTree],
+    );
+
+    const resolvePage = useCallback((page: SettingsSection): SettingsSection => {
+      return visiblePageIds.has(page) ? page : defaultPage;
+    }, [defaultPage, visiblePageIds]);
+
+    const resolveTarget = useCallback((target: SettingsTarget | SettingsSection | null | undefined): SettingsSection => {
+      if (!target) return activePageRef.current;
+      if (typeof target === "string") return resolvePage(target);
+      if (target.type === "page") return resolvePage(target.page);
+      return resolvePage(sectionFallback[target.category] ?? defaultPage);
+    }, [defaultPage, resolvePage, sectionFallback]);
+
+    const setHostOpen = useCallback((nextOpen: boolean) => {
+      openRef.current = nextOpen;
+      setOpen(nextOpen);
+      onOpenStateChange?.(nextOpen);
+    }, [onOpenStateChange]);
+
+    const ensureOpen = useCallback(() => {
+      onBeforeOpen?.();
+      setHostOpen(true);
+    }, [onBeforeOpen, setHostOpen]);
+
+    const setActivePage = useCallback((page: SettingsSection) => {
+      const nextPage = resolvePage(page);
+      activePageRef.current = nextPage;
+      setActivePageKey(nextPage);
+      onActivePageChange?.(nextPage);
+      return nextPage;
+    }, [onActivePageChange, resolvePage]);
+
+    const setHostView = useCallback((view: SettingsView) => {
+      settingsViewRef.current = view;
+      setSettingsView(view);
+      onSettingsViewChange?.(view);
+    }, [onSettingsViewChange]);
+
+    const expandActiveGroup = useCallback((page: SettingsSection, forceReset: boolean) => {
+      const groupId = sectionLabels[page]?.groupId;
+      setExpandedSettingsGroups((current) => {
+        const next = forceReset ? {} : current;
+        return groupId && next[groupId] !== true ? { ...next, [groupId]: true } : next;
+      });
+    }, [sectionLabels]);
+
+    const openPageInternal = useCallback((page: SettingsSection, options?: { resetExpanded?: boolean }) => {
+      const wasOpen = openRef.current;
+      const nextPage = setActivePage(page);
+      setHostView("main");
+      expandActiveGroup(nextPage, options?.resetExpanded ?? !wasOpen);
+      ensureOpen();
+      return nextPage;
+    }, [ensureOpen, expandActiveGroup, setActivePage, setHostView]);
+
+    const openSettingsCenter = useCallback(() => {
+      return openPageInternal(defaultPage, { resetExpanded: true });
+    }, [defaultPage, openPageInternal]);
+
+    const openSection = useCallback((category: SettingsCategory) => {
+      const fallbackPage = sectionFallback[category] ?? defaultPage;
+      const fallbackGroupId = sectionLabels[fallbackPage]?.groupId;
+      const canShowFallbackPage =
+        category === "editor" ||
+        (fallbackGroupId !== undefined && visibleGroupIds.has(fallbackGroupId) && visiblePageIds.has(fallbackPage));
+      return openPageInternal(canShowFallbackPage ? fallbackPage : defaultPage);
+    }, [defaultPage, openPageInternal, sectionFallback, sectionLabels, visibleGroupIds, visiblePageIds]);
+
+    const openTarget = useCallback((target: SettingsTarget) => {
+      return target.type === "category" ? openSection(target.category) : openPageInternal(target.page);
+    }, [openPageInternal, openSection]);
+
+    const openPromptEditor = useCallback((_promptId?: string, returnTarget?: SettingsTarget | SettingsSection | null) => {
+      promptEditorReturnPageRef.current = resolveTarget(returnTarget);
+      setHostView("prompt-editor");
+      ensureOpen();
+    }, [ensureOpen, resolveTarget, setHostView]);
+
+    const closePromptEditor = useCallback(() => {
+      const nextPage = setActivePage(promptEditorReturnPageRef.current || sectionFallback.ai || defaultPage);
+      setHostView("main");
+      return nextPage;
+    }, [defaultPage, sectionFallback.ai, setActivePage, setHostView]);
+
+    const closeSettingsCenter = useCallback(() => {
+      setHostOpen(false);
+    }, [setHostOpen]);
+
+    const resetUiAfterClose = useCallback(() => {
+      setHostView("main");
+      setExpandedSettingsGroups({});
+    }, [setHostView]);
+
+    const toggleGroup = useCallback((groupId: string) => {
+      setExpandedSettingsGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
+    }, []);
+
+    const openSettingsSection = useCallback((target: SettingsSection | SettingsCategory) => {
+      if (target in sectionFallback) {
+        openSection(target as SettingsCategory);
+        return;
+      }
+      openPageInternal(target as SettingsSection);
+    }, [openPageInternal, openSection, sectionFallback]);
+
+    useImperativeHandle(ref, () => ({
+      open: openSettingsCenter,
+      openSection,
+      openPage: (page) => openPageInternal(page),
+      openTarget,
+      openPromptEditor,
+      closePromptEditor,
+      close: closeSettingsCenter,
+      resetUiAfterClose,
+      isOpen: () => openRef.current,
+      getActivePage: () => activePageRef.current,
+      getView: () => settingsViewRef.current,
+    }), [
+      closePromptEditor,
+      closeSettingsCenter,
+      openPageInternal,
+      openPromptEditor,
+      openSection,
+      openSettingsCenter,
+      openTarget,
+      resetUiAfterClose,
+    ]);
+
+    useEffect(() => {
+      openRef.current = open;
+      onOpenStateChange?.(open);
+    }, [onOpenStateChange, open]);
+
+    useEffect(() => {
+      activePageRef.current = activePageKey;
+      onActivePageChange?.(activePageKey);
+    }, [activePageKey, onActivePageChange]);
+
+    useEffect(() => {
+      settingsViewRef.current = settingsView;
+      onSettingsViewChange?.(settingsView);
+    }, [onSettingsViewChange, settingsView]);
+
+    useEffect(() => {
+      if (visiblePageIds.has(activePageKey)) return;
+      const fallbackCategory = visibleSettingsTree[0]?.id ?? "appearance";
+      setActivePage(sectionFallback[fallbackCategory] ?? defaultPage);
+      setHostView("main");
+    }, [activePageKey, defaultPage, sectionFallback, setActivePage, setHostView, visiblePageIds, visibleSettingsTree]);
+
+    useEffect(() => {
+      if (settingsView !== "main") return;
+      const settingsContent = contentRef.current;
+      if (settingsContent) settingsContent.scrollTop = 0;
+    }, [activePageKey, contentRef, settingsView]);
+
+    const activeSettingsGroupId = sectionLabels[activePageKey]?.groupId ?? "appearance";
+    const activeSettingsLabel = sectionLabels[activePageKey] ?? sectionLabels[defaultPage];
+    const activeSettingsTarget: SettingsTarget = { type: "page", page: activePageKey };
+
+    return (
+      <SettingsCenterShell
+        {...shellProps}
+        contentRef={contentRef}
+        open={open && !disabled}
+        settingsView={settingsView}
+        visibleSettingsTree={visibleSettingsTree}
+        expandedSettingsGroups={expandedSettingsGroups}
+        activeSettingsGroupId={activeSettingsGroupId}
+        activeSettingsTarget={activeSettingsTarget}
+        activeSettingsPageKey={activePageKey}
+        activeSettingsLabel={activeSettingsLabel}
+        onToggleGroup={toggleGroup}
+        onOpenSettingsSection={openSettingsSection}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) {
+            openSettingsCenter();
+            return;
+          }
+          shellProps.onCloseRequest();
+        }}
+      />
+    );
+  },
+);
+
+SettingsCenterHost.displayName = "SettingsCenterHost";
+
+export default SettingsCenterHost;
