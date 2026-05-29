@@ -31,7 +31,7 @@ type NoteSummary = {
 type NoteMetadata = {
   title?: string | null;
   summary?: string | null;
-  tags?: string[];
+  tags?: unknown;
   created?: string | null;
   updated?: string | null;
   draft?: boolean;
@@ -65,8 +65,18 @@ type NoteDetail = {
   body: string;
 };
 
+type RawNoteSummary = Omit<NoteSummary, "tags"> & {
+  tags?: unknown;
+  metadata?: NoteMetadata | null;
+};
+
+type RawNoteDetail = Omit<NoteDetail, "tags" | "metadata"> & {
+  tags?: unknown;
+  metadata?: NoteMetadata | null;
+};
+
 type NotesResponse = {
-  notes: NoteSummary[];
+  notes: RawNoteSummary[];
 };
 
 type Route =
@@ -320,6 +330,108 @@ function getNoteReturnTarget(): ReturnTarget {
 
 function getCategoryLabel(category: string) {
   return categoryLabels[category] ?? category;
+}
+
+function isDebugTagsEnabled() {
+  const params = getHashParams(window.location.hash);
+  const searchParams = new URLSearchParams(window.location.search);
+  const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
+  return (
+    viteEnv?.DEV === true ||
+    params.get("debugTags") === "1" ||
+    searchParams.get("debugTags") === "1" ||
+    window.localStorage.getItem("local-blog.debugTags") === "1"
+  );
+}
+
+function getUnknownTags(value: unknown) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return value ?? null;
+}
+
+function getRawNoteTagReason(note: RawNoteSummary) {
+  const tags = normalizeTags(note.tags);
+  const metadataTags = normalizeTags(note.metadata?.tags);
+  if (tags.length > 0 || metadataTags.length > 0) {
+    return "has tags";
+  }
+  if (!("tags" in note)) {
+    return "missing top-level tags";
+  }
+  if (Array.isArray(note.tags) && note.tags.length === 0) {
+    return "top-level tags is an empty array";
+  }
+  if (typeof note.tags === "string" && !note.tags.trim()) {
+    return "top-level tags is an empty string";
+  }
+  if (note.tags == null) {
+    return "top-level tags is null or undefined";
+  }
+  return "top-level tags has no usable string values";
+}
+
+function countTagTreeNodes(nodes: TagTreeNode[]) {
+  let count = 0;
+  for (const node of nodes) {
+    count += 1 + countTagTreeNodes(node.children);
+  }
+  return count;
+}
+
+function logTagDiagnostics(rawNotes: RawNoteSummary[], normalizedNotes: NoteSummary[], tagTree: TagTreeNode[]) {
+  if (!isDebugTagsEnabled()) {
+    return;
+  }
+
+  const normalizedTagTotal = normalizedNotes.reduce((count, note) => count + note.tags.length, 0);
+  console.groupCollapsed("[local-blog] tag diagnostics");
+  console.info("fetch /api/notes succeeded", true);
+  console.info("returned notes count", rawNotes.length);
+  console.info("raw first note keys", rawNotes[0] ? Object.keys(rawNotes[0]) : []);
+  console.table(
+    rawNotes.slice(0, 5).map((note) => ({
+      title: note.title,
+      path: note.relativePath,
+      tags: getUnknownTags(note.tags),
+      metadataTags: getUnknownTags(note.metadata?.tags),
+      frontmatterTags: getUnknownTags((note as { frontmatter?: { tags?: unknown } }).frontmatter?.tags),
+      draft: note.draft,
+    })),
+  );
+  console.table(
+    normalizedNotes.slice(0, 5).map((note) => ({
+      title: note.title,
+      path: note.relativePath,
+      tags: note.tags,
+      draft: note.draft,
+    })),
+  );
+  console.info("buildTagTree input tag total", normalizedTagTotal);
+  console.info("buildTagTree root count", tagTree.length);
+  console.info("buildTagTree node count", countTagTreeNodes(tagTree));
+  if (rawNotes.length > 0 && normalizedTagTotal === 0 && tagTree.length === 0) {
+    console.table(
+      rawNotes.slice(0, 5).map((note) => ({
+        title: note.title,
+        path: note.relativePath,
+        reason: getRawNoteTagReason(note),
+      })),
+    );
+  }
+  console.groupEnd();
+}
+
+function logTagFetchFailure(error: unknown) {
+  if (!isDebugTagsEnabled()) {
+    return;
+  }
+
+  console.groupCollapsed("[local-blog] tag diagnostics");
+  console.info("fetch /api/notes succeeded", false);
+  console.error("fetch /api/notes error", error);
+  console.groupEnd();
 }
 
 function trimYamlValue(value: string) {
@@ -592,10 +704,25 @@ function getFilenameTitle(relativePath: string) {
   return decodeURIComponent(filename.replace(/\.[^.]+$/, "")) || "\u672a\u547d\u540d\u6587\u7ae0";
 }
 
-function normalizeTags(tags: string[] | undefined) {
+function normalizeTagInput(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((tag): tag is string => typeof tag === "string")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return parseTagsValue(value);
+  }
+
+  return [];
+}
+
+function normalizeTags(tags: unknown) {
   return Array.from(
     new Set(
-      (tags ?? [])
+      normalizeTagInput(tags)
         .map((tag) => tag.trim())
         .filter((tag) => tag && !/^(title|summary|tags|category|type|kind|created|updated|date|draft):/i.test(tag)),
     ),
@@ -648,12 +775,15 @@ function inferArticleClass({
   return "\u672a\u5206\u7c7b";
 }
 
-function normalizeNoteSummary(note: NoteSummary): NoteSummary {
+function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
   const titleParts = splitFrontmatter(note.title);
   const summaryParts = splitFrontmatter(note.summary);
   const excerptParts = splitFrontmatter(note.excerpt);
   const metadata = { ...titleParts.metadata, ...summaryParts.metadata, ...excerptParts.metadata };
-  const tags = metadata.tags ? normalizeTags(metadata.tags) : normalizeTags(note.tags);
+  const metadataTags = normalizeTags(metadata.tags);
+  const responseMetadataTags = normalizeTags(note.metadata?.tags);
+  const noteTags = normalizeTags(note.tags);
+  const tags = metadataTags.length > 0 ? metadataTags : responseMetadataTags.length > 0 ? responseMetadataTags : noteTags;
   const summaryText = createCleanSummary(metadata.summary, summaryParts.body, excerptParts.body);
   const excerptText = createCleanSummary(excerptParts.body, metadata.summary, summaryParts.body);
 
@@ -676,14 +806,17 @@ function normalizeNoteSummary(note: NoteSummary): NoteSummary {
   };
 }
 
-function normalizeNoteDetail(note: NoteDetail): NoteDetail {
+function normalizeNoteDetail(note: RawNoteDetail): NoteDetail {
   const bodyParts = splitFrontmatter(note.body);
-  const metadata = { ...note.metadata, ...bodyParts.metadata };
+  const metadata = { ...(note.metadata ?? {}), ...bodyParts.metadata };
+  const bodyTags = normalizeTags(bodyParts.metadata.tags);
+  const metadataTags = normalizeTags(note.metadata?.tags);
+  const noteTags = normalizeTags(note.tags);
 
   return {
     ...note,
     title: metadata.title?.trim() || note.title || getFilenameTitle(note.relativePath),
-    tags: bodyParts.metadata.tags ? normalizeTags(bodyParts.metadata.tags) : normalizeTags(note.tags),
+    tags: bodyTags.length > 0 ? bodyTags : metadataTags.length > 0 ? metadataTags : noteTags,
     created: bodyParts.metadata.created ?? note.created,
     updated: bodyParts.metadata.updated ?? note.updated,
     date: bodyParts.metadata.date ?? note.date,
@@ -855,13 +988,16 @@ export default function App() {
         throw new Error("Invalid notes response");
       }
 
-      setNotes(data.notes.map(normalizeNoteSummary));
+      const normalizedNotes = data.notes.map(normalizeNoteSummary);
+      logTagDiagnostics(data.notes, normalizedNotes, buildTagTree(normalizedNotes));
+      setNotes(normalizedNotes);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
 
       console.error("Failed to load local blog notes", err);
+      logTagFetchFailure(err);
       setNotesError("无法读取本地笔记");
       setNotes([]);
     } finally {
@@ -1778,7 +1914,7 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
         throw new Error("HTTP " + response.status);
       }
 
-      const data = (await response.json()) as NoteDetail;
+      const data = (await response.json()) as RawNoteDetail;
       if (!data || typeof data.body !== "string") {
         throw new Error("Invalid note response");
       }

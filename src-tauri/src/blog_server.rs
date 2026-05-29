@@ -914,6 +914,8 @@ fn parse_frontmatter(frontmatter: &str) -> NoteFrontmatter {
                     let (tags, next_index) = parse_block_tags(&lines, index + 1);
                     parsed.tags = tags;
                     index = next_index.saturating_sub(1);
+                } else if let Some(tags) = parse_scalar(value) {
+                    parsed.tags = parse_legacy_tags_string(&tags);
                 }
             }
             _ => {}
@@ -981,6 +983,14 @@ fn parse_inline_tags(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_legacy_tags_string(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .filter_map(parse_scalar)
+        .filter(|tag| !tag.is_empty())
+        .collect()
+}
+
 fn parse_block_tags(lines: &[&str], start: usize) -> (Vec<String>, usize) {
     let mut tags = Vec::new();
     let mut index = start;
@@ -994,16 +1004,14 @@ fn parse_block_tags(lines: &[&str], start: usize) -> (Vec<String>, usize) {
             continue;
         }
 
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            break;
-        }
-
         if let Some(value) = trimmed.strip_prefix('-') {
             if let Some(tag) = parse_scalar(value.trim()) {
                 if !tag.is_empty() {
                     tags.push(tag);
                 }
             }
+        } else {
+            break;
         }
 
         index += 1;
@@ -1973,6 +1981,29 @@ summary: hi
         );
         assert_eq!(block.tags, vec!["dp", "shortest path"]);
         assert_eq!(block.summary.as_deref(), Some("hi"));
+
+        let serde_yaml_block = parse_frontmatter(
+            r#"
+title: Serde YAML block
+tags:
+- 算法/字符串/Z 函数
+- DP
+summary: keep parsing following fields
+"#,
+        );
+        assert_eq!(serde_yaml_block.tags, vec!["算法/字符串/Z 函数", "DP"]);
+        assert_eq!(
+            serde_yaml_block.summary.as_deref(),
+            Some("keep parsing following fields")
+        );
+
+        let legacy_string = parse_frontmatter(
+            r#"
+title: Legacy string
+tags: "算法/字符串/Z 函数, DP"
+"#,
+        );
+        assert_eq!(legacy_string.tags, vec!["算法/字符串/Z 函数", "DP"]);
     }
 
     #[test]
