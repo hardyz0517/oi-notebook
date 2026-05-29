@@ -6653,6 +6653,10 @@ export default function App() {
       closePromptEditorToSettings();
       return;
     }
+    if (settingsCenterViewRef.current === "ai-config-manager") {
+      settingsCenterHostRef.current?.closeAiConfigManager();
+      return;
+    }
     closeSettingsCenter();
   };
 
@@ -8492,6 +8496,33 @@ export default function App() {
           </aside>
         </div>
       )}
+      renderAiConfigManager={() => (
+        <AiConfigManager
+          mode="page"
+          config={aiConfigDraft}
+          selectedProvider={selectedAiProvider}
+          isLoading={isLoadingAiConfig}
+          isSaving={isSavingAiConfig}
+          busyProviderId={aiProviderBusyId}
+          modelSearchQuery={aiModelSearchQuery}
+          manualModelId={aiManualModelId}
+          filteredModels={filteredAiProviderModels}
+          onSelectProvider={selectAiProviderForEdit}
+          onCreateProvider={handleCreateAiProviderDraft}
+          onFillDeepSeekDefaults={handleFillDeepSeekDefaults}
+          onUpdateProvider={patchAiProviderDraft}
+          onSetDefaultProvider={handleSetDefaultAiProvider}
+          onSetDefaultModel={handleSetDefaultAiModel}
+          onDeleteProvider={handleDeleteAiProvider}
+          onTestProvider={handleTestAiProvider}
+          onSyncProviderModels={handleSyncAiProviderModels}
+          onModelSearchChange={setAiModelSearchQuery}
+          onManualModelIdChange={setAiManualModelId}
+          onAddModel={handleAddAiProviderModel}
+          onDeleteModel={handleDeleteAiProviderModel}
+          onReorderProviders={handleReorderAiProviders}
+        />
+      )}
       renderActivePage={(activePageKey) => (
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} />
@@ -8542,10 +8573,12 @@ export default function App() {
                         <div className="text-xs leading-5 text-muted-foreground">从独立管理中心维护 NoteX 使用的模型与 API 配置。</div>
                       </div>
                       <AiConfigManager
+                        mode="entry"
                         config={aiConfigDraft}
                         selectedProvider={selectedAiProvider}
                         isLoading={isLoadingAiConfig}
                         isSaving={isSavingAiConfig}
+                        onOpenManager={() => settingsCenterHostRef.current?.openAiConfigManager()}
                         busyProviderId={aiProviderBusyId}
                         modelSearchQuery={aiModelSearchQuery}
                         manualModelId={aiManualModelId}

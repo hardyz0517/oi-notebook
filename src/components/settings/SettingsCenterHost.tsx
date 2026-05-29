@@ -18,6 +18,8 @@ export interface SettingsCenterHostHandle {
   openTarget: (target: SettingsTarget) => SettingsSection;
   openPromptEditor: (promptId?: string, returnTarget?: SettingsTarget | SettingsSection | null) => void;
   closePromptEditor: () => SettingsSection;
+  openAiConfigManager: () => void;
+  closeAiConfigManager: () => void;
   close: () => void;
   resetUiAfterClose: () => void;
   isOpen: () => boolean;
@@ -166,6 +168,16 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       return nextPage;
     }, [defaultPage, sectionFallback.ai, setActivePage, setHostView]);
 
+    const openAiConfigManager = useCallback(() => {
+      setHostView("ai-config-manager");
+      ensureOpen();
+    }, [ensureOpen, setHostView]);
+
+    const closeAiConfigManager = useCallback(() => {
+      setActivePage(sectionFallback.ai ?? "ai-api");
+      setHostView("main");
+    }, [sectionFallback.ai, setActivePage, setHostView]);
+
     const closeSettingsCenter = useCallback(() => {
       setHostOpen(false);
     }, [setHostOpen]);
@@ -194,6 +206,8 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       openTarget,
       openPromptEditor,
       closePromptEditor,
+      openAiConfigManager,
+      closeAiConfigManager,
       close: closeSettingsCenter,
       resetUiAfterClose,
       isOpen: () => openRef.current,
@@ -202,6 +216,8 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
     }), [
       closePromptEditor,
       closeSettingsCenter,
+      openAiConfigManager,
+      closeAiConfigManager,
       openPageInternal,
       openPromptEditor,
       openSection,

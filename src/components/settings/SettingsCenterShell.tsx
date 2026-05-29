@@ -33,6 +33,7 @@ export interface SettingsCenterShellProps {
   promptHeaderContent?: ReactNode;
   promptHeaderActions?: ReactNode;
   renderPromptEditor: () => ReactNode;
+  renderAiConfigManager?: () => ReactNode;
   renderActivePage: (activePageKey: SettingsSection) => ReactNode;
   onOpenChange: (open: boolean) => void;
   onToggleMaximize: () => void;
@@ -60,6 +61,7 @@ export default function SettingsCenterShell({
   promptHeaderContent,
   promptHeaderActions,
   renderPromptEditor,
+  renderAiConfigManager,
   renderActivePage,
   onOpenChange,
   onToggleMaximize,
@@ -93,8 +95,8 @@ export default function SettingsCenterShell({
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             onClick={onCloseRequest}
-            title={settingsView === "prompt-editor" ? "返回设置" : "关闭设置中心"}
-            aria-label={settingsView === "prompt-editor" ? "返回设置" : "关闭设置中心"}
+            title={settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "返回设置" : "关闭设置中心"}
+            aria-label={settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "返回设置" : "关闭设置中心"}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -103,7 +105,7 @@ export default function SettingsCenterShell({
           className={cn(
             "settings-center-drag-handle shrink-0 border-b border-border/80 bg-muted/10 px-5 pr-24 text-left",
             isMaximized ? "cursor-default" : "cursor-grab active:cursor-grabbing",
-            settingsView === "prompt-editor" ? "py-2" : "py-3",
+            settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "py-2" : "py-3",
           )}
           onPointerDown={onBeginDrag}
         >
@@ -111,6 +113,8 @@ export default function SettingsCenterShell({
             <div className="min-w-0">
               {settingsView === "prompt-editor" ? (
                 promptHeaderContent
+              ) : settingsView === "ai-config-manager" ? (
+                <DialogTitle className="text-base">AI 配置组</DialogTitle>
               ) : (
                 <>
                   <DialogTitle className="text-base">设置中心</DialogTitle>
@@ -118,7 +122,7 @@ export default function SettingsCenterShell({
                 </>
               )}
             </div>
-            {settingsView === "main" ? mainHeaderActions : promptHeaderActions}
+            {settingsView === "main" ? mainHeaderActions : settingsView === "prompt-editor" ? promptHeaderActions : null}
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 overflow-hidden flex-col md:flex-row">
@@ -190,6 +194,8 @@ export default function SettingsCenterShell({
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
             {settingsView === "prompt-editor" ? (
               <div className="flex h-full min-h-0 flex-col overflow-hidden">{renderPromptEditor()}</div>
+            ) : settingsView === "ai-config-manager" && renderAiConfigManager ? (
+              <div className="flex h-full min-h-0 flex-col overflow-hidden">{renderAiConfigManager()}</div>
             ) : (
               <div ref={contentRef} className="h-full min-h-0 overflow-auto" data-settings-scroll-container="true">
                 <div className="sticky top-0 z-10 border-b border-border/80 bg-background/95 px-6 py-2 backdrop-blur">

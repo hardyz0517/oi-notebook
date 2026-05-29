@@ -27,7 +27,7 @@ export type SettingsTarget =
   | { type: "category"; category: SettingsGroupId }
   | { type: "page"; page: SettingsSection };
 
-export type SettingsView = "main" | "prompt-editor";
+export type SettingsView = "main" | "prompt-editor" | "ai-config-manager";
 
 export type SettingsResizeHandle = "left" | "right" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
