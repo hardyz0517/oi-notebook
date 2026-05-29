@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
@@ -2578,6 +2578,17 @@ export default function App() {
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
   const [luoguConnectionError, setLuoguConnectionError] = useState<string | null>(null);
   const [isScanningLuoguPreview, setIsScanningLuoguPreview] = useState(false);
+  const [isLuoguScanPaused, setIsLuoguScanPaused] = useState(false);
+  const luoguScanPauseFlagRef = useRef(false);
+  const luoguScanResumeRef = useRef<{
+    submissions: PreviewLuoguSubmission[];
+    seenSubmissionIds: Set<string>;
+    nextPage: number;
+    latestPageResult: Awaited<ReturnType<typeof previewLuoguSubmissionPage>> | null;
+    scannedPages: number;
+    cutoffMs: number | null;
+    rangeLabel: string;
+  } | null>(null);
   const [luoguPreviewResult, setLuoguPreviewResult] = useState<PreviewLuoguSubmissionsResult | null>(null);
   const [luoguScanError, setLuoguScanError] = useState<string | null>(null);
   const [luoguScanMode, setLuoguScanMode] = useState<LuoguScanMode>("count");
@@ -4216,38 +4227,75 @@ export default function App() {
   };
 
   const handlePreviewLuoguSubmissions = async () => {
-    const rangeLabel = getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
-    const cutoffMs =
-      luoguScanMode === "days" ? Date.now() - luoguScanDaysLimit * 24 * 60 * 60 * 1000 : null;
+    const saved = luoguScanResumeRef.current;
+    const isResume = saved !== null;
+    luoguScanResumeRef.current = null;
+
+    const rangeLabel = isResume ? saved.rangeLabel : getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
+    const cutoffMs = isResume ? saved.cutoffMs : (luoguScanMode === "days" ? Date.now() - luoguScanDaysLimit * 24 * 60 * 60 * 1000 : null);
+
     setIsScanningLuoguPreview(true);
-    setLuoguPreviewResult(null);
-    setLuoguScanError(null);
-    setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
-    setLuoguScanSummary(null);
-    setSelectedLuoguSubmissionIds(new Set<string>());
-    setSkippedLuoguSubmissionIds(new Set<string>());
-    setLuoguPreparedNotesById({});
-    setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById({});
-    setEditedLuoguPreparedMarkdownIds(new Set<string>());
-    setReviewSelectedLuoguSubmissionIds(new Set<string>());
-    setCurrentlyPreparingLuoguId(null);
-    setLuoguPrepareProgress(null);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguWriteResultsById({});
-    setCurrentlyWritingLuoguId(null);
-    setLuoguWriteProgress(null);
-    setActiveLuoguPreparedPreviewId(null);
-    setActiveLuoguPreviewDetailTab("rendered");
-    setLuoguImportStep("scan");
+    setIsLuoguScanPaused(false);
+    luoguScanPauseFlagRef.current = false;
+
+    if (!isResume) {
+      setLuoguPreviewResult(null);
+      setLuoguScanError(null);
+      setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
+      setLuoguScanSummary(null);
+      setSelectedLuoguSubmissionIds(new Set<string>());
+      setSkippedLuoguSubmissionIds(new Set<string>());
+      setLuoguPreparedNotesById({});
+      setLuoguPrepareErrorsById({});
+      setLuoguPrepareStatusesById({});
+      setEditedLuoguPreparedMarkdownIds(new Set<string>());
+      setReviewSelectedLuoguSubmissionIds(new Set<string>());
+      setCurrentlyPreparingLuoguId(null);
+      setLuoguPrepareProgress(null);
+      setIsStoppingLuoguPrepare(false);
+      setLuoguWriteResultsById({});
+      setCurrentlyWritingLuoguId(null);
+      setLuoguWriteProgress(null);
+      setActiveLuoguPreparedPreviewId(null);
+      setActiveLuoguPreviewDetailTab("rendered");
+      setLuoguImportStep("scan");
+    }
+
     try {
-      const submissions: PreviewLuoguSubmission[] = [];
-      const seenSubmissionIds = new Set<string>();
-      let latestPageResult: Awaited<ReturnType<typeof previewLuoguSubmissionPage>> | null = null;
-      let scannedPages = 0;
+      const submissions: PreviewLuoguSubmission[] = isResume ? [...saved.submissions] : [];
+      const seenSubmissionIds = isResume ? new Set(saved.seenSubmissionIds) : new Set<string>();
+      let latestPageResult: Awaited<ReturnType<typeof previewLuoguSubmissionPage>> | null = isResume ? saved.latestPageResult : null;
+      let scannedPages = isResume ? saved.scannedPages : 0;
       let shouldStop = false;
 
-      for (let page = 1; page <= LUOGU_SCAN_MAX_PAGES; page += 1) {
+      const startPage = isResume ? saved.nextPage : 1;
+      for (let page = startPage; page <= LUOGU_SCAN_MAX_PAGES; page += 1) {
+        if (luoguScanPauseFlagRef.current) {
+          luoguScanResumeRef.current = {
+            submissions: [...submissions],
+            seenSubmissionIds: new Set(seenSubmissionIds),
+            nextPage: page,
+            latestPageResult,
+            scannedPages,
+            cutoffMs,
+            rangeLabel,
+          };
+
+          const partialResult: PreviewLuoguSubmissionsResult = {
+            fetchedCount: submissions.length,
+            limit: luoguScanMode === "count" ? luoguScanCountLimit : submissions.length,
+            uidConfigured: latestPageResult?.uidConfigured ?? false,
+            clientIdConfigured: latestPageResult?.clientIdConfigured ?? false,
+            aiConfigured: latestPageResult?.aiConfigured ?? false,
+            lastSubmissionId: latestPageResult?.lastSubmissionId ?? null,
+            submissions: [...submissions],
+          };
+          setLuoguPreviewResult(partialResult);
+          setLuoguScanSummary(null);
+          setIsLuoguScanPaused(true);
+          return;
+        }
+
         setLuoguScanProgress({
           currentPage: page,
           foundCount: submissions.length,
@@ -4356,9 +4404,31 @@ export default function App() {
       setLuoguScanError(message);
       toast.error(`洛谷扫描失败：${message}`);
     } finally {
-      setLuoguScanProgress(null);
+      if (!luoguScanPauseFlagRef.current) {
+        setLuoguScanProgress(null);
+      }
       setIsScanningLuoguPreview(false);
     }
+  };
+
+  const handlePauseLuoguScan = () => {
+    if (!isScanningLuoguPreview || luoguScanPauseFlagRef.current) return;
+    luoguScanPauseFlagRef.current = true;
+  };
+
+  const handleResumeLuoguScan = () => {
+    if (isScanningLuoguPreview || !isLuoguScanPaused || !luoguScanResumeRef.current) return;
+    handlePreviewLuoguSubmissions();
+  };
+
+  const handleRestartLuoguScan = () => {
+    luoguScanResumeRef.current = null;
+    luoguScanPauseFlagRef.current = false;
+    setIsLuoguScanPaused(false);
+    setLuoguPreviewResult(null);
+    setLuoguScanError(null);
+    setLuoguScanSummary(null);
+    handlePreviewLuoguSubmissions();
   };
 
   const applyAiConfigState = (config: AiConfig) => {
@@ -4794,6 +4864,9 @@ export default function App() {
     const returnTarget = luoguDialogReturnTarget;
     setIsLuoguDialogOpen(false);
     setLuoguDialogReturnTarget(null);
+    setIsLuoguScanPaused(false);
+    luoguScanResumeRef.current = null;
+    luoguScanPauseFlagRef.current = false;
     setLuoguPreviewResult(null);
     setLuoguScanError(null);
     setLuoguScanProgress(null);
@@ -7551,14 +7624,45 @@ export default function App() {
                               </button>
                             ))}
                           </div>
-                          <Button
-                            size="sm"
-                            className="mt-1 h-10 w-full text-base font-semibold"
-                            onClick={handlePreviewLuoguSubmissions}
-                            disabled={!luoguConfigured || isLoadingLuoguConfig || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
-                          >
-                            {isScanningLuoguPreview ? "扫描中..." : "开始扫描"}
-                          </Button>
+                          {isScanningLuoguPreview ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="mt-1 h-10 w-full text-base font-semibold"
+                              onClick={handlePauseLuoguScan}
+                            >
+                              <Pause className="mr-1.5 h-4 w-4" />
+                              暂停扫描
+                            </Button>
+                          ) : isLuoguScanPaused ? (
+                            <div className="mt-1 grid gap-1.5">
+                              <Button
+                                size="sm"
+                                className="h-10 w-full text-base font-semibold"
+                                onClick={handleResumeLuoguScan}
+                              >
+                                <Play className="mr-1.5 h-4 w-4" />
+                                继续扫描
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-full text-xs"
+                                onClick={handleRestartLuoguScan}
+                              >
+                                重新扫描
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              className="mt-1 h-10 w-full text-base font-semibold"
+                              onClick={handlePreviewLuoguSubmissions}
+                              disabled={!luoguConfigured || isLoadingLuoguConfig || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+                            >
+                              开始扫描
+                            </Button>
+                          )}
                           {(luoguScanCountLimit === 200 || luoguScanMode === "days") && (
                             <div className="grid gap-1.5 border-t border-border pt-2 text-sm">
                               <div className="text-xs text-muted-foreground">自定义范围</div>
@@ -7601,14 +7705,16 @@ export default function App() {
                           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                             <div className="shrink-0 text-base font-medium text-foreground">扫描结果</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
-                              {luoguScanProgress
-                                ? `正在扫描，已发现 ${luoguScanProgress.foundCount} 条`
-                                : luoguScanSummary
-                                  ? `${luoguScanSummary.foundCount} 条 / 可导入 ${luoguScanSummary.candidateCount} / 跳过 ${luoguScanSummary.skippedCount}`
-                                  : luoguPreviewResult
-                                    ? `${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
-                                    : "还没有扫描结果。"}
-                              {luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
+                              {isLuoguScanPaused
+                                ? `扫描已暂停 — ${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
+                                : luoguScanProgress
+                                  ? `正在扫描，已发现 ${luoguScanProgress.foundCount} 条`
+                                  : luoguScanSummary
+                                    ? `${luoguScanSummary.foundCount} 条 / 可导入 ${luoguScanSummary.candidateCount} / 跳过 ${luoguScanSummary.skippedCount}`
+                                    : luoguPreviewResult
+                                      ? `${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
+                                      : "还没有扫描结果。"}
+                              {!isLuoguScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center justify-end gap-2">
@@ -7669,6 +7775,16 @@ export default function App() {
                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
                             <div className="mt-3 text-sm font-medium text-foreground">正在扫描{luoguImportCenterRangeLabel}提交……</div>
                             <div className="mt-1 text-xs text-muted-foreground">请稍候，结果会自动出现在右侧表格。</div>
+                          </div>
+                        </div>
+                      ) : isLuoguScanPaused ? (
+                        <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                          <div>
+                            <Pause className="mx-auto h-7 w-7 text-muted-foreground" />
+                            <div className="mt-3 text-sm font-medium text-foreground">扫描已暂停</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              已扫描 {luoguPreviewResult?.submissions.length ?? 0} 条提交，点击「继续扫描」从断点继续。
+                            </div>
                           </div>
                         </div>
                       ) : luoguScanError && !luoguPreviewResult ? (
