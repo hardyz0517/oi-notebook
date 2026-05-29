@@ -23,6 +23,7 @@ import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, ty
 import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
+import AiConfigManager from "@/components/settings/AiConfigManager";
 import SettingsCenterHost, { type SettingsCenterHostHandle } from "@/components/settings/SettingsCenterHost";
 import {
   AboutMarkdownSettingsPage,
@@ -3039,7 +3040,6 @@ export default function App() {
       model.source.toLowerCase().includes(query),
     );
   }, [aiModelSearchQuery, selectedAiProvider]);
-  const aiProviderBusy = aiProviderBusyId !== null;
   const luoguConfigured =
     luoguConfigUid.trim() !== "" &&
     luoguConfigClientId.trim() !== "";
@@ -4521,7 +4521,7 @@ export default function App() {
     setAiModelSearchQuery("");
   };
 
-  const handleCreateAiProviderDraft = () => {
+  const handleCreateAiProviderDraft = (): string | null => {
     const provider = createAiProviderDraft();
     setAiConfigDraft((current) => {
       const base = current ?? aiConfig ?? {
@@ -4542,6 +4542,7 @@ export default function App() {
     setSelectedAiProviderId(provider.id);
     setAiManualModelId("");
     setAiModelSearchQuery("");
+    return provider.id;
   };
 
   const refreshAiConfig = async () => {
@@ -4569,7 +4570,7 @@ export default function App() {
     await ensureAiConfigLoadedForSettings();
   };
 
-  const handleFillDeepSeekDefaults = () => {
+  const handleFillDeepSeekDefaults = (): string | null => {
     if (!selectedAiProvider) {
       const provider = {
         ...createAiProviderDraft(),
@@ -4597,7 +4598,7 @@ export default function App() {
       });
       setSelectedAiProviderId(provider.id);
       setAiModelSearchQuery("");
-      return;
+      return provider.id;
     }
     updateAiProviderDraft(selectedAiProvider.id, (provider) => ({
       ...provider,
@@ -4614,6 +4615,7 @@ export default function App() {
       default_model_id: current.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
     } : current);
     toast.info("已填入 DeepSeek 默认 base_url 和模型，检查 API key 后保存更改");
+    return selectedAiProvider.id;
   };
 
   const updateAiConfigDraft = (update: (config: AiConfig) => AiConfig) => {
@@ -4636,6 +4638,46 @@ export default function App() {
           : provider,
       ),
     }));
+  };
+
+  const patchAiProviderDraft = (providerId: string, patch: Partial<AiProvider>) => {
+    updateAiProviderDraft(providerId, (provider) => {
+      const nextProvider = { ...provider, ...patch };
+      return {
+        ...nextProvider,
+        models: patch.models ?? provider.models,
+      };
+    });
+    if (Object.prototype.hasOwnProperty.call(patch, "default_model")) {
+      setAiConfigDraft((current) => current && current.default_provider_id === providerId ? {
+        ...current,
+        default_model_id: patch.default_model ?? null,
+      } : current);
+    }
+  };
+
+  const handleSetDefaultAiProvider = (providerId: string) => {
+    updateAiConfigDraft((config) => {
+      const provider = config.providers.find((item) => item.id === providerId);
+      if (!provider) return config;
+      return {
+        ...config,
+        default_provider_id: providerId,
+        default_model_id: provider.default_model ?? provider.models.find((model) => model.enabled)?.id ?? provider.models[0]?.id ?? null,
+      };
+    });
+  };
+
+  const handleReorderAiProviders = (sourceId: string, targetId: string) => {
+    updateAiConfigDraft((config) => {
+      const sourceIndex = config.providers.findIndex((provider) => provider.id === sourceId);
+      const targetIndex = config.providers.findIndex((provider) => provider.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return config;
+      const providers = [...config.providers];
+      const [movedProvider] = providers.splice(sourceIndex, 1);
+      providers.splice(targetIndex, 0, movedProvider);
+      return { ...config, providers };
+    });
   };
 
   const updateWebSearchDraft = (patch: Partial<WebSearchConfig>) => {
@@ -5102,46 +5144,50 @@ export default function App() {
     setAiManualModelId("");
   };
 
-  const handleTestAiProvider = async (providerId: string) => {
+  const handleTestAiProvider = async (providerId: string): Promise<boolean> => {
     const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
-    if (!provider) return;
+    if (!provider) return false;
     if (!provider.base_url.trim()) {
       toast.error("请先填写 Base URL");
-      return;
+      return false;
     }
     if (!provider.api_key.trim()) {
       toast.error("请先填写 API Key");
-      return;
+      return false;
     }
     setAiProviderBusyId(providerId);
     try {
       const result = await testAiProviderDraft(provider);
       toast.success(`连接正常，发现 ${result.modelCount} 个模型`);
+      return true;
     } catch (e) {
       toast.error(`连接测试失败：${getErrorMessage(e)}`);
+      return false;
     } finally {
       setAiProviderBusyId(null);
     }
   };
 
-  const handleSyncAiProviderModels = async (providerId: string) => {
+  const handleSyncAiProviderModels = async (providerId: string): Promise<boolean> => {
     const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
-    if (!provider) return;
+    if (!provider) return false;
     if (!provider.base_url.trim()) {
       toast.error("请先填写 Base URL");
-      return;
+      return false;
     }
     if (!provider.api_key.trim()) {
       toast.error("请先填写 API Key");
-      return;
+      return false;
     }
     setAiProviderBusyId(providerId);
     try {
       const result = await syncAiProviderModelsDraft(provider);
       updateAiProviderDraft(providerId, () => result.provider);
       toast.success(`已同步 ${result.syncedCount} 个模型`);
+      return true;
     } catch (e) {
       toast.error(`模型同步失败：${getErrorMessage(e)}；可以手动添加模型`);
+      return false;
     } finally {
       setAiProviderBusyId(null);
     }
@@ -8492,73 +8538,33 @@ export default function App() {
                   {shouldRenderSettingsPage("ai-api", activePageKey) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">模型与 API</div>
-                        <div className="text-xs leading-5 text-muted-foreground">配置组、默认模型和连接测试。</div>
+                        <div className="text-base font-semibold text-foreground">AI 配置组</div>
+                        <div className="text-xs leading-5 text-muted-foreground">从独立管理中心维护 NoteX 使用的模型与 API 配置。</div>
                       </div>
-                      <SettingRow title="配置组" description="选择或新增 OpenAI-compatible API。" align="start">
-                        <div className="grid gap-2">
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={handleCreateAiProviderDraft} disabled={isLoadingAiConfig || isSavingAiConfig}><Plus className="h-3.5 w-3.5" />添加配置组</Button>
-                            <Button size="sm" variant="outline" onClick={handleFillDeepSeekDefaults} disabled={isSavingAiConfig}>填入 DeepSeek 默认配置</Button>
-                          </div>
-                          <div className="grid gap-1">
-                            {(aiConfigDraft?.providers ?? []).map((provider) => (
-                              <button key={provider.id} type="button" className={cn("flex min-w-0 items-center justify-between gap-2 border-b border-border/50 px-2 py-2 text-left", provider.id === selectedAiProviderId ? "bg-accent/70 text-accent-foreground" : "text-muted-foreground hover:bg-muted/40 hover:text-foreground")} onClick={() => selectAiProviderForEdit(provider)}>
-                                <span className="min-w-0 truncate text-sm font-medium">{provider.name || provider.id}</span>
-                                <span className="shrink-0 text-xs text-muted-foreground">{provider.models.length} models</span>
-                              </button>
-                            ))}
-                            {(aiConfigDraft?.providers.length ?? 0) === 0 && <div className="text-sm text-muted-foreground">还没有配置组。</div>}
-                          </div>
-                        </div>
-                      </SettingRow>
-                      {selectedAiProvider && (
-                        <>
-                          <SettingRow title="名称 / 默认模型" description="默认模型会作为该配置组的首选模型。" align="start">
-                            <div className="grid gap-2 md:grid-cols-2">
-                              <Input value={selectedAiProvider.name} placeholder="DeepSeek / OpenAI" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, name: event.target.value, updated_at: Date.now() }))} />
-                              <Input value={selectedAiProvider.default_model ?? ""} placeholder="deepseek-chat" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, default_model: event.target.value.trim() || null, updated_at: Date.now() }))} />
-                            </div>
-                          </SettingRow>
-                          <SettingRow title="Base URL" description="OpenAI-compatible endpoint。">
-                            <Input value={selectedAiProvider.base_url} placeholder="https://api.example.com/v1" onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, base_url: event.target.value, updated_at: Date.now() }))} />
-                          </SettingRow>
-                          <SettingRow title="API Key" description="明文只在输入框中临时显示。">
-                            <Input value={selectedAiProvider.api_key} type="password" placeholder="sk-..." onChange={(event) => updateAiProviderDraft(selectedAiProvider.id, (provider) => ({ ...provider, api_key: event.target.value, updated_at: Date.now() }))} />
-                          </SettingRow>
-                          <SettingRow title="连接操作" description="测试和同步都使用当前草稿。">
-                            <div className="flex flex-wrap gap-2">
-                              <Button variant="outline" size="sm" onClick={() => updateAiConfigDraft((config) => ({ ...config, default_provider_id: selectedAiProvider.id, default_model_id: selectedAiProvider.default_model ?? selectedAiProvider.models.find((model) => model.enabled)?.id ?? selectedAiProvider.models[0]?.id ?? null }))} disabled={isSavingAiConfig}>设为默认配置组</Button>
-                              <Button variant="outline" size="sm" onClick={() => void handleTestAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><PlugZap className="h-3.5 w-3.5" />{aiProviderBusyId === selectedAiProvider.id ? "处理中..." : "测试连接"}</Button>
-                              <Button variant="outline" size="sm" onClick={() => void handleSyncAiProviderModels(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><RefreshCw className="h-3.5 w-3.5" />同步模型</Button>
-                              <Button variant="destructive" size="sm" onClick={() => void handleDeleteAiProvider(selectedAiProvider.id)} disabled={aiProviderBusy || isSavingAiConfig}><Trash2 className="h-3.5 w-3.5" />删除</Button>
-                            </div>
-                          </SettingRow>
-                          <SettingRow title="模型列表" description="手动添加、删除或设为默认。" align="start">
-                            <div className="grid gap-2">
-                              <div className="flex min-w-0 flex-wrap gap-2">
-                                <Input value={aiModelSearchQuery} placeholder="搜索模型" onChange={(event) => setAiModelSearchQuery(event.target.value)} className="min-w-[160px] flex-1" />
-                                <Input value={aiManualModelId} placeholder="手动添加模型 ID" onChange={(event) => setAiManualModelId(event.target.value)} className="min-w-[180px] flex-1" />
-                                <Button variant="outline" size="sm" onClick={() => void handleAddAiProviderModel()} disabled={!aiManualModelId.trim()}>添加模型</Button>
-                              </div>
-                              <div className="max-h-[260px] overflow-auto border-y border-border/60">
-                                {filteredAiProviderModels.length > 0 ? filteredAiProviderModels.map((model) => {
-                                  const isDefault = selectedAiProvider.id === aiConfigDraft?.default_provider_id && model.id === aiConfigDraft.default_model_id;
-                                  return (
-                                    <div key={model.id} className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 px-2 py-2 text-sm last:border-b-0">
-                                      <div className="min-w-0 truncate text-foreground">{model.name || model.id}</div>
-                                      <div className="flex shrink-0 gap-1">
-                                        <Button size="xs" variant={isDefault ? "secondary" : "outline"} onClick={() => void handleSetDefaultAiModel(selectedAiProvider.id, model.id)}>{isDefault ? "已默认" : "设默认"}</Button>
-                                        <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteAiProviderModel(selectedAiProvider.id, model.id)}><Trash2 className="h-3 w-3" /></Button>
-                                      </div>
-                                    </div>
-                                  );
-                                }) : <div className="px-2 py-6 text-center text-sm text-muted-foreground">暂无匹配模型。</div>}
-                              </div>
-                            </div>
-                          </SettingRow>
-                        </>
-                      )}
+                      <AiConfigManager
+                        config={aiConfigDraft}
+                        selectedProvider={selectedAiProvider}
+                        isLoading={isLoadingAiConfig}
+                        isSaving={isSavingAiConfig}
+                        busyProviderId={aiProviderBusyId}
+                        modelSearchQuery={aiModelSearchQuery}
+                        manualModelId={aiManualModelId}
+                        filteredModels={filteredAiProviderModels}
+                        onSelectProvider={selectAiProviderForEdit}
+                        onCreateProvider={handleCreateAiProviderDraft}
+                        onFillDeepSeekDefaults={handleFillDeepSeekDefaults}
+                        onUpdateProvider={patchAiProviderDraft}
+                        onSetDefaultProvider={handleSetDefaultAiProvider}
+                        onSetDefaultModel={handleSetDefaultAiModel}
+                        onDeleteProvider={handleDeleteAiProvider}
+                        onTestProvider={handleTestAiProvider}
+                        onSyncProviderModels={handleSyncAiProviderModels}
+                        onModelSearchChange={setAiModelSearchQuery}
+                        onManualModelIdChange={setAiManualModelId}
+                        onAddModel={handleAddAiProviderModel}
+                        onDeleteModel={handleDeleteAiProviderModel}
+                        onReorderProviders={handleReorderAiProviders}
+                      />
                     </section>
                   )}
 
