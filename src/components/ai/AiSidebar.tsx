@@ -3671,7 +3671,13 @@ function PolishPreviewCard({
   );
 
   return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
+    <div
+      className={cn(
+        "notex-polish-preview-card overflow-hidden rounded-md border border-border/70 bg-background shadow-sm dark:border-white/10 dark:bg-zinc-950/80",
+        preview.previewKind === "solution-format" && "notex-solution-format-preview-card",
+      )}
+      data-preview-kind={preview.previewKind}
+    >
       <div className="grid min-w-0 gap-2 px-3 py-2">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</div>
@@ -3717,17 +3723,17 @@ function PolishPreviewCard({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="notex-preview-actions flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-opacity hover:opacity-90 dark:bg-zinc-100 dark:text-zinc-950"
+            className="notex-preview-action notex-preview-action-review inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-opacity hover:opacity-90 dark:bg-zinc-100 dark:text-zinc-950"
             onClick={onOpenReview}
           >
             审核
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center rounded-md border border-emerald-500/45 bg-emerald-500/10 px-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 disabled:pointer-events-none disabled:opacity-50 dark:text-emerald-300"
+            className="notex-preview-action notex-preview-action-apply inline-flex h-7 items-center rounded-md border border-emerald-500/45 bg-emerald-500/10 px-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 disabled:pointer-events-none disabled:opacity-50 dark:text-emerald-300"
             onClick={onApply}
             disabled={isApplying || !canApply}
           >
@@ -3735,7 +3741,7 @@ function PolishPreviewCard({
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+            className="notex-preview-action notex-preview-action-cancel inline-flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
             onClick={onIgnore}
             disabled={isApplying || preview.applied || preview.ignored}
           >
@@ -6752,18 +6758,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     () => limitConversations(pruneBlankConversations(conversations, activeConversationId)),
     [activeConversationId, conversations],
   );
-  const visibleConversations = useMemo(
-    () => sortedConversations.filter(hasConversationContent),
-    [sortedConversations],
-  );
-  const recentConversations = visibleConversations.slice(0, 8);
+  const allConversations = sortedConversations;
+  const recentConversations = allConversations.slice(0, 3);
   const filteredConversations = useMemo(() => {
     const query = conversationSearch.trim().toLocaleLowerCase();
-    if (!query) return visibleConversations;
-    return visibleConversations.filter((conversation) =>
+    if (!query) return allConversations;
+    return allConversations.filter((conversation) =>
       getConversationDisplayTitle(conversation).toLocaleLowerCase().includes(query),
     );
-  }, [conversationSearch, visibleConversations]);
+  }, [allConversations, conversationSearch]);
+  const shouldShowViewAllConversations = allConversations.length > recentConversations.length;
   const activeConversationTitle = getConversationDisplayTitle(activeConversation);
   const pendingDeleteConversation =
     conversations.find((conversation) => conversation.id === pendingDeleteConversationId) ?? null;
@@ -6837,16 +6841,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
   const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
     const title = getConversationDisplayTitle(conversation);
     const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
-    const hoverClass = variant === "overlay" ? "hover:bg-white/10" : "hover:bg-accent/70";
-    const actionHoverClass = variant === "overlay" ? "hover:bg-white/10" : "hover:bg-accent";
+    const isSelected = conversation.id === activeConversationId;
 
     if (editingConversationId === conversation.id) {
       return (
         <div
           key={conversation.id}
           className={cn(
-            "grid min-w-0 gap-1 rounded-md px-2.5 py-1.5",
-            variant === "overlay" ? "bg-white/5" : "bg-muted/30",
+            "notex-session-edit grid min-w-0 gap-1",
+            variant === "overlay" && "notex-session-popover-row",
           )}
         >
           <input
@@ -6876,28 +6879,26 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       <div
         key={conversation.id}
         className={cn(
-          "group flex h-9 w-full min-w-0 items-center gap-1 rounded-md px-1 transition-colors",
-          hoverClass,
+          "notex-session-item notex-session-row group flex w-full min-w-0 items-center transition-colors",
+          variant === "overlay" && "notex-session-popover-row",
         )}
+        data-selected={isSelected ? "true" : undefined}
       >
         <button
           type="button"
-          className="min-w-0 flex-1 truncate px-1.5 text-left text-sm font-medium text-foreground"
+          className="notex-session-title notex-session-row-title min-w-0 flex-1 truncate text-left"
           onClick={() => selectConversation(conversation.id)}
           title={title}
         >
           {title}
         </button>
-        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:hidden">
+        <span className="notex-session-time notex-session-row-meta shrink-0 text-right tabular-nums group-hover:hidden">
           {timeLabel}
         </span>
-        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+        <div className="notex-session-actions hidden shrink-0 items-center group-hover:flex">
           <button
             type="button"
-            className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              actionHoverClass,
-            )}
+            className="notex-session-action inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               startRenameConversation(conversation);
@@ -6909,7 +6910,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </button>
           <button
             type="button"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="notex-session-action inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               requestDeleteConversation(conversation.id);
@@ -7040,6 +7041,22 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               >
                 {activeConversationTitle}
               </span>
+              {shouldShowViewAllConversations && (
+                <button
+                  type="button"
+                  className="notex-session-view-all"
+                  onClick={() => {
+                    setConversationSearch("");
+                    setIsAllConversationsOpen((open) => !open);
+                    setIsHistoryOpen(false);
+                    setIsProviderPickerOpen(false);
+                    setIsModelPickerOpen(false);
+                  }}
+                  aria-expanded={isAllConversationsOpen}
+                >
+                  查看全部
+                </button>
+              )}
             </div>
           )}
           <div className="notex-mode-actions flex shrink-0 items-center gap-1">
@@ -7224,13 +7241,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           <div className="absolute right-3 top-[4.75rem] z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
               <span className="text-xs font-medium text-foreground">会话</span>
-              <span className="text-[11px] text-muted-foreground">{visibleConversations.length} 个</span>
+              <span className="text-[11px] text-muted-foreground">{allConversations.length} 个</span>
             </div>
             <div className="max-h-72 overflow-y-auto p-1.5 [scrollbar-width:thin]">
               <div className="grid gap-1">
                 {recentConversations.map((conversation) => renderConversationItem(conversation))}
               </div>
-              {false && visibleConversations.map((conversation) => (
+              {false && allConversations.map((conversation) => (
                 <div
                   key={conversation.id}
                   className="group flex w-full min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -7319,13 +7336,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           onScroll={handleMessagesScroll}
         >
           {viewMode === "conversations" ? (
-            <div className={cn(contentColumnClass, "grid gap-2")}>
+            <div className={cn(contentColumnClass, "notex-session-view grid gap-2")}>
               <div className="hidden">
                 <span />
-                <span>{visibleConversations.length}</span>
+                <span>{allConversations.length}</span>
               </div>
               {recentConversations.length > 0 ? (
-                <div className="grid gap-1">
+                <div className="notex-session-list grid">
                   {recentConversations.map((conversation) => renderConversationItem(conversation))}
                 </div>
               ) : (
@@ -7333,21 +7350,23 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   还没有会话。直接在下方输入第一句话即可开始。
                 </div>
               )}
-              {visibleConversations.length > 8 && (
+              {shouldShowViewAllConversations && (
                 <button
                   type="button"
-                  className="mt-1 inline-flex h-8 items-center justify-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="notex-session-view-all mt-1"
                   onClick={() => {
                     setConversationSearch("");
-                    setIsAllConversationsOpen(true);
+                    setIsAllConversationsOpen((open) => !open);
                     setIsHistoryOpen(false);
                     setIsProviderPickerOpen(false);
                     setIsModelPickerOpen(false);
                   }}
+                  aria-expanded={isAllConversationsOpen}
                 >
-                  查看全部（{visibleConversations.length} 个）
+                  查看全部（{allConversations.length} 个）
                 </button>
               )}
+              <div className="notex-bottom-spacer" aria-hidden="true" />
             </div>
           ) : !isConversationHydrated && messages.length === 0 ? (
             <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center text-sm text-muted-foreground")}>
@@ -7537,8 +7556,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
               if (message.role === "user") {
                 return (
-                  <div key={message.id} className="notex-message notex-message-user notex-user-message ml-auto max-w-[92%] rounded-lg border border-transparent bg-primary px-3 py-2 text-primary-foreground">
-                    <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                  <div key={message.id} className="notex-message notex-message-user notex-user-message ml-auto">
+                    <div className="notex-user-bubble whitespace-pre-wrap break-words">
+                      {message.text}
+                    </div>
                   </div>
                 );
               }
@@ -7557,60 +7578,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           )}
           {viewMode === "chat" && <div className="notex-bottom-spacer" aria-hidden="true" />}
         </div>
-        {isAllConversationsOpen && (
-          <div className="absolute inset-0 z-30">
-            <button
-              type="button"
-              className="absolute inset-0 cursor-default"
-              onClick={() => {
-                setIsAllConversationsOpen(false);
-                setConversationSearch("");
-              }}
-              aria-label="关闭会话列表"
-            />
-            <div className="notex-session-popover absolute z-10 grid text-foreground">
-              <div className="hidden">
-                <div className="grid min-w-0 gap-1">
-                  <div className="text-base font-semibold text-foreground">会话</div>
-                  <div className="text-xs text-muted-foreground">选择最近会话，或用标题过滤。</div>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  onClick={() => {
-                    setIsAllConversationsOpen(false);
-                    setConversationSearch("");
-                  }}
-                  title="关闭"
-                  aria-label="关闭"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <input
-                value={conversationSearch}
-                onChange={(event) => setConversationSearch(event.target.value)}
-                placeholder="搜索最近会话"
-                className="notex-session-search"
-              />
-              <div className="notex-session-popover-list min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
-                <div className="hidden">
-                  <span>所有会话</span>
-                  <span>{filteredConversations.length}</span>
-                </div>
-                {filteredConversations.length > 0 ? (
-                  <div className="grid gap-1">
-                    {filteredConversations.map((conversation) => renderConversationItem(conversation, "overlay"))}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-white/10 px-3 py-8 text-center text-sm text-muted-foreground">
-                    没有匹配的会话。
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
         {viewMode === "chat" && showScrollToBottom && (
           <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20">
             <div className={cn(contentColumnClass, "relative h-9")}>
@@ -7630,6 +7597,43 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         )}
       </div>
+
+      {isAllConversationsOpen && (
+        <div className="notex-session-popover-layer absolute inset-0">
+          <button
+            type="button"
+            className="notex-session-popover-backdrop absolute inset-0 cursor-default"
+            onClick={() => {
+              setIsAllConversationsOpen(false);
+              setConversationSearch("");
+            }}
+            aria-label="关闭会话列表"
+          />
+          <div className="notex-session-popover absolute grid text-foreground">
+            <div className="notex-session-popover-search">
+              <Search className="notex-session-search-icon" aria-hidden="true" />
+              <input
+                value={conversationSearch}
+                onChange={(event) => setConversationSearch(event.target.value)}
+                placeholder="搜索最近会话"
+                className="notex-session-search"
+              />
+            </div>
+            <div className="notex-session-popover-list min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
+              {filteredConversations.length > 0 ? (
+                <div className="notex-session-list grid">
+                  {filteredConversations.map((conversation) => renderConversationItem(conversation, "overlay"))}
+                </div>
+              ) : (
+                <div className="notex-session-empty px-3 py-5 text-center text-sm">
+                  没有匹配的会话。
+                </div>
+              )}
+            </div>
+            <div className="notex-session-popover-fade" aria-hidden="true" />
+          </div>
+        </div>
+      )}
 
       <div ref={composerWrapRef} className={cn("notex-composer-wrap shrink-0", contentColumnClass)}>
         {isCommandPanelOpen && (

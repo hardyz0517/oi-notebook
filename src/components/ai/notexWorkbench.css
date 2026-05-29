@@ -44,6 +44,7 @@
   --notex-radius-md: 10px;
   --notex-radius-lg: 18px;
   --notex-pad-x: 16px;
+  --notex-session-x: 15px;
   --notex-top-total-height: 115px;
   --notex-header-height: 56px;
   --notex-sessionbar-height: 59px;
@@ -589,27 +590,100 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-session-edit {
-  min-height: 48px;
-  padding: 6px 18px !important;
-  border-radius: 10px !important;
+  min-height: 40px;
+  padding: 6px 10px !important;
+  border-radius: 8px !important;
+  background: var(--notex-input-bg);
 }
 
 .notex-session-edit-input {
-  height: 30px !important;
-  font-size: 16px !important;
+  height: 28px !important;
+  font-size: 14px !important;
 }
 
 .notex-session-edit-hint {
-  font-size: 13px !important;
+  font-size: 12px !important;
+}
+
+.notex-session-strip {
+  display: flex;
+  min-height: 34px;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid color-mix(in oklch, var(--notex-border-subtle) 34%, transparent);
+  padding: 5px 15px;
+  background: var(--notex-bg);
+}
+
+.notex-session-strip-current {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.notex-session-strip-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--notex-text-subtle);
+}
+
+.notex-session-strip-title {
+  display: block;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--notex-text-muted);
+}
+
+.notex-session-view-all {
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0 8px;
+  color: var(--notex-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.notex-session-view-all:hover,
+.notex-session-view-all[aria-expanded="true"] {
+  background: var(--notex-hover);
+  color: var(--notex-text);
+}
+
+.notex-session-view-all:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--ring);
+}
+
+.notex-modebar .notex-session-view-all {
+  margin-left: 2px;
 }
 
 .notex-session-item {
-  height: 44px !important;
-  min-height: 44px;
+  height: var(--notex-session-item-height, 45px) !important;
+  min-height: var(--notex-session-item-height, 45px);
   gap: 8px !important;
-  border-radius: 10px !important;
-  padding: 0 14px !important;
+  border-radius: 8px !important;
+  padding: 0 10px !important;
   background: transparent !important;
+  border: 0;
 }
 
 .notex-session-item:hover {
@@ -628,21 +702,28 @@ html[data-theme="light"] .notex-workbench {
 
 .notex-session-title {
   padding: 0 !important;
-  font-size: 17px !important;
-  font-weight: 500 !important;
-  line-height: 21px !important;
+  border: 0;
+  background: transparent;
+  font-size: 15px !important;
+  font-weight: 400 !important;
+  line-height: 20px !important;
   color: var(--notex-text) !important;
+}
+
+.notex-session-item:hover .notex-session-title,
+.notex-session-item:focus-within .notex-session-title {
+  font-weight: 500 !important;
 }
 
 .notex-session-item[data-selected="true"] .notex-session-title {
   color: var(--notex-text) !important;
-  font-weight: 500 !important;
+  font-weight: 400 !important;
 }
 
 .notex-session-time {
-  width: 64px !important;
-  font-size: 13px !important;
-  line-height: 18px !important;
+  width: 52px !important;
+  font-size: 11px !important;
+  line-height: 16px !important;
   color: var(--notex-muted) !important;
 }
 
@@ -651,27 +732,45 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-session-action {
-  width: 28px !important;
-  height: 28px !important;
-  border-radius: 8px !important;
+  width: 26px !important;
+  height: 26px !important;
+  border: 0;
+  border-radius: 7px !important;
+  background: transparent;
+}
+
+.notex-session-action:hover {
+  background: var(--notex-hover);
+}
+
+.notex-session-popover-layer {
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.notex-session-popover-backdrop {
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .notex-session-popover {
-  --notex-session-item-height: 44px;
+  --notex-session-item-height: 45px;
   --notex-session-visible-count: 8;
   --notex-session-search-height: 48px;
-  --notex-session-list-max-height: 352px;
+  --notex-session-list-max-height: calc(var(--notex-session-item-height) * var(--notex-session-visible-count));
   --notex-session-panel-max-height: calc(var(--notex-session-search-height) + var(--notex-session-list-max-height) + 1px);
-  top: 8px;
+  top: calc(var(--notex-header-height) + 82px);
   right: 15px;
   left: 15px;
   display: grid;
-  max-height: min(var(--notex-session-panel-max-height), 58vh, calc(100% - 16px));
+  z-index: 1;
+  max-height: min(var(--notex-session-panel-max-height), 58vh, calc(100% - var(--notex-header-height) - 90px));
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
-  border: 1px solid var(--notex-border-soft);
-  border-radius: 16px;
+  border: 1px solid color-mix(in oklch, var(--notex-border-soft) 82%, transparent);
+  border-radius: 12px;
   background: var(--notex-surface-raised);
   box-shadow:
     0 16px 32px -22px var(--notex-shadow-strong),
@@ -684,51 +783,46 @@ html[data-theme="light"] .notex-workbench {
   content: none;
 }
 
-.notex-session-popover-tools {
-  position: relative;
+.notex-session-popover-search {
   display: flex;
   height: var(--notex-session-search-height);
   min-width: 0;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--notex-border-soft);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-}
-
-.notex-session-search-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  height: var(--notex-session-search-height);
   align-items: center;
   gap: 8px;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: color-mix(in oklch, var(--notex-input-bg) 48%, transparent);
   box-shadow: none;
-  padding: 0 48px 0 10px;
+  padding: 0 10px;
   color: var(--notex-muted);
 }
 
+.notex-session-popover-search::after {
+  content: "";
+  position: absolute;
+  top: var(--notex-session-search-height);
+  right: 10px;
+  left: 10px;
+  height: 1px;
+  background: var(--notex-border-soft);
+}
+
 .notex-session-search-icon {
-  width: 17px;
-  height: 17px;
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
   color: var(--notex-text-muted);
 }
 
 .notex-session-search {
   width: 100%;
-  height: 38px;
+  height: var(--notex-session-search-height);
   min-width: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--notex-text);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 20px;
   outline: none;
   box-shadow: none;
@@ -736,9 +830,7 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-session-popover > .notex-session-search {
-  height: var(--notex-session-search-height);
-  border-bottom: 1px solid var(--notex-border-soft);
-  padding: 0 10px;
+  border-bottom: 0;
 }
 
 .notex-session-search::placeholder {
@@ -772,9 +864,7 @@ html[data-theme="light"] .notex-workbench {
   max-height: var(--notex-session-list-max-height);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 42px), rgb(0 0 0 / 0));
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 42px), rgb(0 0 0 / 0));
+  padding: 5px 0;
 }
 
 .notex-session-popover-list::after {
@@ -792,19 +882,35 @@ html[data-theme="light"] .notex-workbench {
 .notex-session-list {
   gap: 2px;
   min-width: 0;
-  padding-right: 15px;
-  padding-left: 15px;
+  padding-right: var(--notex-session-x);
+  padding-left: var(--notex-session-x);
+}
+
+.notex-session-view > .notex-session-view-all {
+  justify-self: start;
+  margin-left: var(--notex-session-x);
 }
 
 .notex-session-popover .notex-session-list {
-  gap: 0;
+  gap: 1px;
   padding-right: 10px;
   padding-left: 10px;
 }
 
 .notex-session-popover .notex-session-item {
-  padding-right: 5px !important;
-  padding-left: 5px !important;
+  padding-right: 10px !important;
+  padding-left: 10px !important;
+}
+
+.notex-session-popover-fade {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  left: 1px;
+  height: 34px;
+  border-radius: 0 0 11px 11px;
+  background: linear-gradient(to bottom, transparent, var(--notex-surface-raised));
+  pointer-events: none;
 }
 
 .notex-session-empty {
@@ -1116,10 +1222,27 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
 
 .notex-user-message,
 .notex-message-user {
-  max-width: 88% !important;
-  border-color: var(--notex-border-soft) !important;
-  background: var(--notex-user-bubble-bg) !important;
-  color: var(--notex-text) !important;
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  justify-content: flex-end !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.notex-user-bubble {
+  width: fit-content;
+  max-width: min(72%, 520px);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  border: 1px solid var(--notex-border-soft);
+  border-radius: 10px;
+  background: var(--notex-user-bubble-bg);
+  color: var(--notex-text);
   box-shadow: none !important;
   font-size: 20px !important;
   line-height: 1.6 !important;
@@ -1446,6 +1569,55 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
   color: var(--notex-text) !important;
 }
 
+.notex-command-item:hover .notex-command-name,
+.notex-command-item[data-active="true"] .notex-command-name {
+  color: #f2f2f2 !important;
+}
+
+.notex-command-item:hover .notex-command-description,
+.notex-command-item[data-active="true"] .notex-command-description {
+  color: rgb(245 245 245 / 0.78) !important;
+}
+
+.notex-command-item:hover .notex-command-icon,
+.notex-command-item[data-active="true"] .notex-command-icon,
+.notex-command-item:hover .notex-command-icon svg,
+.notex-command-item[data-active="true"] .notex-command-icon svg {
+  color: #f2f2f2 !important;
+  opacity: 0.95;
+}
+
+.notex-command-item[aria-disabled="true"],
+.notex-command-item:disabled {
+  opacity: 0.45 !important;
+}
+
+.notex-command-item[aria-disabled="true"]:hover .notex-command-name,
+.notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-name,
+.notex-command-item:disabled:hover .notex-command-name,
+.notex-command-item:disabled[data-active="true"] .notex-command-name {
+  color: var(--notex-text-muted) !important;
+}
+
+.notex-command-item[aria-disabled="true"]:hover .notex-command-description,
+.notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-description,
+.notex-command-item:disabled:hover .notex-command-description,
+.notex-command-item:disabled[data-active="true"] .notex-command-description {
+  color: var(--notex-text-subtle) !important;
+}
+
+.notex-command-item[aria-disabled="true"]:hover .notex-command-icon,
+.notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon,
+.notex-command-item[aria-disabled="true"]:hover .notex-command-icon svg,
+.notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon svg,
+.notex-command-item:disabled:hover .notex-command-icon,
+.notex-command-item:disabled[data-active="true"] .notex-command-icon,
+.notex-command-item:disabled:hover .notex-command-icon svg,
+.notex-command-item:disabled[data-active="true"] .notex-command-icon svg {
+  color: var(--notex-text-muted) !important;
+  opacity: 0.75;
+}
+
 .notex-command-icon {
   width: 24px !important;
   height: 24px !important;
@@ -1486,6 +1658,48 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
   font-size: 20px !important;
   line-height: 40px !important;
   color: var(--notex-muted) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item:hover .notex-command-name,
+html[data-theme="light"] .notex-workbench .notex-command-item[data-active="true"] .notex-command-name {
+  color: var(--notex-text) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item:hover .notex-command-description,
+html[data-theme="light"] .notex-workbench .notex-command-item[data-active="true"] .notex-command-description {
+  color: color-mix(in oklch, var(--notex-text) 74%, transparent) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item:hover .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item[data-active="true"] .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item:hover .notex-command-icon svg,
+html[data-theme="light"] .notex-workbench .notex-command-item[data-active="true"] .notex-command-icon svg {
+  color: var(--notex-text) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"]:hover .notex-command-name,
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-name,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled:hover .notex-command-name,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled[data-active="true"] .notex-command-name {
+  color: var(--notex-text-muted) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"]:hover .notex-command-description,
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-description,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled:hover .notex-command-description,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled[data-active="true"] .notex-command-description {
+  color: var(--notex-text-subtle) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"]:hover .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"]:hover .notex-command-icon svg,
+html[data-theme="light"] .notex-workbench .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon svg,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled:hover .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled[data-active="true"] .notex-command-icon,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled:hover .notex-command-icon svg,
+html[data-theme="light"] .notex-workbench .notex-command-item:disabled[data-active="true"] .notex-command-icon svg {
+  color: var(--notex-text-muted) !important;
 }
 
 .notex-tag-output {
@@ -1617,4 +1831,133 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
   border-color: var(--notex-border) !important;
   background: var(--notex-send-bg) !important;
   color: var(--notex-send-fg) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-actions {
+  gap: 10px !important;
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.notex-solution-format-preview-card .notex-preview-action {
+  display: inline-flex;
+  height: 36px !important;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--notex-border) !important;
+  border-radius: var(--notex-radius-md) !important;
+  padding: 0 13px !important;
+  background: transparent !important;
+  color: var(--notex-text-muted) !important;
+  box-shadow: none !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  line-height: 20px !important;
+  opacity: 1 !important;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease,
+    transform 80ms ease !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--notex-text-muted) 32%, transparent) !important;
+  background: var(--notex-hover) !important;
+  color: var(--notex-text) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action:active:not(:disabled) {
+  transform: translateY(1px);
+  background: color-mix(in oklch, var(--notex-hover) 76%, black) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action:focus-visible {
+  outline: none !important;
+  box-shadow:
+    0 0 0 1px var(--notex-bg),
+    0 0 0 3px color-mix(in oklch, var(--ring) 62%, transparent) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action:disabled {
+  cursor: not-allowed;
+  pointer-events: auto !important;
+  border-color: rgb(255 255 255 / 0.1) !important;
+  background: rgb(255 255 255 / 0.08) !important;
+  color: rgb(232 232 232 / 0.56) !important;
+  opacity: 1 !important;
+  transform: none;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-review {
+  border-color: rgb(255 255 255 / 0.1) !important;
+  background: rgb(255 255 255 / 0.07) !important;
+  color: var(--notex-text-muted) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-review:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.095) !important;
+  color: var(--notex-text) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-apply {
+  min-width: 136px;
+  border-color: color-mix(in oklch, var(--ring) 42%, var(--notex-border)) !important;
+  background: color-mix(in oklch, var(--notex-surface-raised) 78%, var(--notex-hover)) !important;
+  color: var(--notex-text) !important;
+  font-weight: 600 !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-apply:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--ring) 62%, var(--notex-border)) !important;
+  background: color-mix(in oklch, var(--notex-surface-raised) 62%, rgb(255 255 255 / 0.13)) !important;
+  color: rgb(255 255 255 / 0.96) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-apply:active:not(:disabled) {
+  background: color-mix(in oklch, var(--notex-surface-raised) 86%, black) !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-cancel {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--notex-text-subtle) !important;
+  font-weight: 500 !important;
+}
+
+.notex-solution-format-preview-card .notex-preview-action-cancel:hover:not(:disabled) {
+  border-color: transparent !important;
+  background: var(--notex-hover) !important;
+  color: var(--notex-text-muted) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-solution-format-preview-card .notex-preview-action:disabled {
+  border-color: rgb(0 0 0 / 0.1) !important;
+  background: rgb(0 0 0 / 0.06) !important;
+  color: color-mix(in oklch, var(--notex-text) 52%, transparent) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-solution-format-preview-card .notex-preview-action-review {
+  border-color: rgb(0 0 0 / 0.1) !important;
+  background: rgb(0 0 0 / 0.045) !important;
+  color: var(--notex-text-muted) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-solution-format-preview-card .notex-preview-action-review:hover:not(:disabled) {
+  background: rgb(0 0 0 / 0.07) !important;
+  color: var(--notex-text) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-solution-format-preview-card .notex-preview-action-apply {
+  border-color: color-mix(in oklch, var(--ring) 34%, var(--notex-border)) !important;
+  background: color-mix(in oklch, var(--notex-text) 84%, var(--notex-surface-raised)) !important;
+  color: var(--notex-bg) !important;
+}
+
+html[data-theme="light"] .notex-workbench .notex-solution-format-preview-card .notex-preview-action-apply:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--ring) 48%, var(--notex-border)) !important;
+  background: color-mix(in oklch, var(--notex-text) 90%, var(--notex-surface-raised)) !important;
+  color: var(--notex-bg) !important;
 }
