@@ -460,6 +460,7 @@ type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
 type LuoguSubmitFilter = "acOnly" | "includeNonAc";
+type LuoguProblemIdFilter = "all" | "onlyP";
 type LuoguSameProblemStrategy = "latestAc" | "allAc" | "manual";
 type LuoguImportedProblemPolicy = "skip" | "showUnselected" | "regenerate";
 type LuoguMissingInsightStrategy = "skip" | "draft" | "review";
@@ -861,6 +862,7 @@ interface LuoguScanSummary {
 interface LuoguImportRules {
   requireAc: boolean;
   submitFilter: LuoguSubmitFilter;
+  problemIdFilter: LuoguProblemIdFilter;
   sameProblemStrategy: LuoguSameProblemStrategy;
   keepLatestAcOnly: boolean;
   importedProblemPolicy: LuoguImportedProblemPolicy;
@@ -898,6 +900,7 @@ interface LuoguCandidateDisplayState {
 const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
   requireAc: true,
   submitFilter: "acOnly",
+  problemIdFilter: "all",
   sameProblemStrategy: "latestAc",
   keepLatestAcOnly: true,
   importedProblemPolicy: "skip",
@@ -920,6 +923,7 @@ function normalizeLuoguImportRules(value: Partial<LuoguImportRules> | null | und
     ...value,
     submitFilter,
     requireAc: submitFilter === "acOnly",
+    problemIdFilter: value?.problemIdFilter === "onlyP" ? "onlyP" : DEFAULT_LUOGU_IMPORT_RULES.problemIdFilter,
     sameProblemStrategy,
     keepLatestAcOnly: sameProblemStrategy === "latestAc",
     missingInsightStrategy: value?.missingInsightStrategy ?? DEFAULT_LUOGU_IMPORT_RULES.missingInsightStrategy,
@@ -1383,6 +1387,11 @@ function isLuoguImportCandidate(submission: PreviewLuoguSubmission): boolean {
   return submission.statusLabel === "可候选";
 }
 
+function isLuoguProblemIdAllowedByRules(problemId: string, rules: LuoguImportRules): boolean {
+  if (rules.problemIdFilter !== "onlyP") return true;
+  return problemId.trim().toUpperCase().startsWith("P");
+}
+
 function parseLuoguSubmissionId(value: string): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -1397,6 +1406,10 @@ function getLuoguSubmissionCandidateState(
 ): LuoguSubmissionCandidateState {
   if (skippedIds.has(submission.submissionId)) {
     return { canSelect: false, defaultSelected: false, statusLabel: "已跳过" };
+  }
+
+  if (!isLuoguProblemIdAllowedByRules(submission.problemId, rules)) {
+    return { canSelect: false, defaultSelected: false, statusLabel: "题号类型不符合规则" };
   }
 
   const submissionId = parseLuoguSubmissionId(submission.submissionId);
@@ -1508,6 +1521,12 @@ function formatLuoguSubmissionTime(value: string): { absolute: string; compact: 
   if (diffMs >= 0 && diffHours < 24) return { absolute, compact, relative: `${diffHours}小时前` };
   if (diffMs >= 0 && diffDays < 7) return { absolute, compact, relative: `${diffDays}天前` };
   return { absolute, compact, relative: "" };
+}
+
+function formatLuoguSubmissionStatus(status: number | string | null | undefined): string {
+  if (status == null || status === "") return "未知";
+  if (String(status) === "12") return "通过";
+  return String(status);
 }
 
 function getLuoguStatusBadgeClass(tone: LuoguCandidateDisplayState["tone"]): string {
@@ -2876,10 +2895,13 @@ export default function App() {
   const displayedLuoguPreviewSubmissions = useMemo(
     () => {
       const submissions = luoguPreviewResult?.submissions ?? [];
-      if (luoguImportRules.scanResultVisibility !== "hideSkipped") return submissions;
-      return submissions.filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect);
+      const allowedSubmissions = submissions.filter((submission) =>
+        isLuoguProblemIdAllowedByRules(submission.problemId, luoguImportRules),
+      );
+      if (luoguImportRules.scanResultVisibility !== "hideSkipped") return allowedSubmissions;
+      return allowedSubmissions.filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect);
     },
-    [luoguImportRules.scanResultVisibility, luoguPreviewResult, luoguSubmissionCandidateStates],
+    [luoguImportRules, luoguPreviewResult, luoguSubmissionCandidateStates],
   );
   const selectedLuoguSelectableCount = useMemo(
     () => luoguSelectableSubmissionIds.filter((submissionId) => selectedLuoguSubmissionIds.has(submissionId)).length,
@@ -3407,6 +3429,17 @@ export default function App() {
       options: [
         { value: "acOnly", label: "只处理 AC" },
         { value: "includeNonAc", label: "包含非 AC" },
+      ],
+    },
+    {
+      id: "problemIdFilter",
+      title: "题号类型筛选",
+      description: "只保留 P 开头的公开题库题目，过滤 U / T 等题号。",
+      value: luoguImportRules.problemIdFilter,
+      onChange: (value: string) => updateLuoguImportRules({ problemIdFilter: value as LuoguProblemIdFilter }),
+      options: [
+        { value: "all", label: "全部题号" },
+        { value: "onlyP", label: "仅保留 P 题" },
       ],
     },
     {
@@ -4226,6 +4259,19 @@ export default function App() {
     }
   };
 
+  const buildLuoguPreviewResult = (
+    submissions: PreviewLuoguSubmission[],
+    latestPageResult: Awaited<ReturnType<typeof previewLuoguSubmissionPage>> | null,
+  ): PreviewLuoguSubmissionsResult => ({
+    fetchedCount: submissions.length,
+    limit: luoguScanMode === "count" ? luoguScanCountLimit : submissions.length,
+    uidConfigured: latestPageResult?.uidConfigured ?? false,
+    clientIdConfigured: latestPageResult?.clientIdConfigured ?? false,
+    aiConfigured: latestPageResult?.aiConfigured ?? false,
+    lastSubmissionId: latestPageResult?.lastSubmissionId ?? null,
+    submissions: [...submissions],
+  });
+
   const handlePreviewLuoguSubmissions = async () => {
     const saved = luoguScanResumeRef.current;
     const isResume = saved !== null;
@@ -4281,16 +4327,7 @@ export default function App() {
             rangeLabel,
           };
 
-          const partialResult: PreviewLuoguSubmissionsResult = {
-            fetchedCount: submissions.length,
-            limit: luoguScanMode === "count" ? luoguScanCountLimit : submissions.length,
-            uidConfigured: latestPageResult?.uidConfigured ?? false,
-            clientIdConfigured: latestPageResult?.clientIdConfigured ?? false,
-            aiConfigured: latestPageResult?.aiConfigured ?? false,
-            lastSubmissionId: latestPageResult?.lastSubmissionId ?? null,
-            submissions: [...submissions],
-          };
-          setLuoguPreviewResult(partialResult);
+          setLuoguPreviewResult(buildLuoguPreviewResult(submissions, latestPageResult));
           setLuoguScanSummary(null);
           setIsLuoguScanPaused(true);
           return;
@@ -4311,6 +4348,7 @@ export default function App() {
           shouldStop = true;
         }
 
+        const newInThisPage: PreviewLuoguSubmission[] = [];
         for (const submission of pageResult.submissions) {
           if (seenSubmissionIds.has(submission.submissionId)) continue;
 
@@ -4324,11 +4362,33 @@ export default function App() {
 
           seenSubmissionIds.add(submission.submissionId);
           submissions.push(submission);
+          newInThisPage.push(submission);
 
           if (luoguScanMode === "count" && submissions.length >= luoguScanCountLimit) {
             shouldStop = true;
             break;
           }
+        }
+
+        if (newInThisPage.length > 0) {
+          const incrementalResult = buildLuoguPreviewResult(submissions, latestPageResult);
+          setLuoguPreviewResult(incrementalResult);
+          setSelectedLuoguSubmissionIds((prev) => {
+            const next = new Set(prev);
+            for (const submission of newInThisPage) {
+              const state = getLuoguSubmissionCandidateState(
+                submission,
+                submissions,
+                luoguImportRules,
+                latestPageResult?.lastSubmissionId ?? null,
+                new Set<string>(),
+              );
+              if (state.defaultSelected) {
+                next.add(submission.submissionId);
+              }
+            }
+            return next;
+          });
         }
 
         setLuoguScanProgress({
@@ -7769,7 +7829,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {isScanningLuoguPreview ? (
+                      {isScanningLuoguPreview && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
@@ -7777,13 +7837,13 @@ export default function App() {
                             <div className="mt-1 text-xs text-muted-foreground">请稍候，结果会自动出现在右侧表格。</div>
                           </div>
                         </div>
-                      ) : isLuoguScanPaused ? (
+                      ) : isLuoguScanPaused && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Pause className="mx-auto h-7 w-7 text-muted-foreground" />
                             <div className="mt-3 text-sm font-medium text-foreground">扫描已暂停</div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              已扫描 {luoguPreviewResult?.submissions.length ?? 0} 条提交，点击「继续扫描」从断点继续。
+                              点击「继续扫描」从断点继续。
                             </div>
                           </div>
                         </div>
@@ -7827,7 +7887,7 @@ export default function App() {
                                     ref={luoguSelectAllCheckboxRef}
                                     type="checkbox"
                                     checked={areAllLuoguSelectableSubmissionsSelected}
-                                    disabled={luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                                    disabled={luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
                                     className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label={areAllLuoguSelectableSubmissionsSelected ? "取消选择当前可选提交" : "选择当前可选提交"}
                                     onChange={handleToggleAllLuoguSelectableSubmissions}
@@ -7886,23 +7946,21 @@ export default function App() {
                                     </div>
 
                                     <div className="min-w-0">
-                                      <div className="grid min-w-0 gap-0.5">
-                                        <div className="flex min-w-0 items-baseline gap-2">
-                                          <span className="shrink-0 font-mono text-base font-semibold text-foreground">{submission.problemId || "未知题号"}</span>
-                                          <span className="truncate font-mono text-xs text-muted-foreground">#{submission.submissionId}</span>
-                                        </div>
+                                      <div className="flex min-w-0 items-baseline gap-2">
+                                        <span className="shrink-0 font-mono text-base font-semibold text-foreground">{submission.problemId || "未知题号"}</span>
                                         <span
-                                          className="min-w-0 text-[15px] font-medium leading-5 text-foreground line-clamp-1"
+                                          className="min-w-0 truncate text-base font-medium leading-5 text-foreground"
                                           title={submission.problemTitle || "未读取到标题"}
                                         >
                                           {submission.problemTitle || "未读取到标题"}
                                         </span>
+                                        <span className="shrink-0 font-mono text-xs text-muted-foreground opacity-80">{`(#${submission.submissionId})`}</span>
                                       </div>
                                     </div>
 
                                     <div className="min-w-0">
                                       <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-medium", getLuoguStatusBadgeClass(submission.isAc ? "success" : "warning"))}>
-                                        {submission.status || "unknown"}
+                                        {formatLuoguSubmissionStatus(submission.status)}
                                       </span>
                                     </div>
 

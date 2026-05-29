@@ -167,10 +167,6 @@ function normalizeNewlines(input: string): string {
   return input.replace(/\r\n/g, "\n");
 }
 
-function isBlankLine(line: string | undefined): boolean {
-  return line === undefined || line.trim().length === 0;
-}
-
 function isCjkChar(char: string | undefined): boolean {
   return !!char && CJK_CHAR.test(char);
 }
@@ -253,6 +249,15 @@ function collapseInlineSpaces(input: string): string {
   return input.replace(/[ \t]{2,}/g, " ");
 }
 
+function splitTrailingInlineWhitespace(input: string): { body: string; trailingWhitespace: string } {
+  const match = input.match(/[ \t]+$/);
+  if (!match) return { body: input, trailingWhitespace: "" };
+  return {
+    body: input.slice(0, -match[0].length),
+    trailingWhitespace: match[0],
+  };
+}
+
 function isTableLikeLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed.includes("|")) return false;
@@ -270,12 +275,6 @@ function isQuoteLine(line: string): boolean {
 
 function isListLine(line: string): boolean {
   return /^(\s*)([-+*]|\d+\.)\s*/.test(line);
-}
-
-function getListKind(line: string): "ordered" | "unordered" | null {
-  const match = line.match(/^\s*([-+*]|\d+\.)\s*/);
-  if (!match) return null;
-  return /\d+\./.test(match[1]) ? "ordered" : "unordered";
 }
 
 function repairProtectedLiterals(input: string): string {
@@ -843,12 +842,13 @@ function formatInlineContent(
   rules: Record<SolutionFormatRuleId, boolean>,
   options: InlineFormatOptions = {},
 ): string {
+  const { body, trailingWhitespace } = splitTrailingInlineWhitespace(input);
   const codeSegments: string[] = [];
   const linkSegments: string[] = [];
   const urlSegments: string[] = [];
   const safeSegments: string[] = [];
   const mathSegments: string[] = [];
-  let value = repairProtectedLiterals(input);
+  let value = repairProtectedLiterals(body);
 
   value = protectMathSegments(value, counts, mathSegments);
   value = value.replace(/(`+)([^`\n]*?)\1/g, (match) => pushToken(codeSegments, CODE_TOKEN, match));
@@ -894,7 +894,7 @@ function formatInlineContent(
   value = collapseInlineSpaces(value);
   value = restoreProtectedSegments(value, CODE_TOKEN, codeSegments);
   value = restoreProtectedSegments(value, MATH_TOKEN, mathSegments);
-  return value;
+  return `${value}${trailingWhitespace}`;
 }
 
 function formatHeadingLine(
@@ -1024,28 +1024,30 @@ function formatTextBlock(
     }
 
     if (trimmed.length === 0) {
-      output.push("");
+      output.push(line);
       continue;
     }
 
-    if (isTableLikeLine(line)) {
-      output.push(formatTableLine(line, counts, rules));
+    const { body, trailingWhitespace } = splitTrailingInlineWhitespace(line);
+
+    if (isTableLikeLine(body)) {
+      output.push(`${formatTableLine(body, counts, rules)}${trailingWhitespace}`);
       continue;
     }
-    if (/^\s{0,3}#{1,6}(?:\s*|$)/.test(line)) {
-      output.push(formatHeadingLine(line, counts, rules));
+    if (/^\s{0,3}#{1,6}(?:\s*|$)/.test(body)) {
+      output.push(`${formatHeadingLine(body, counts, rules)}${trailingWhitespace}`);
       continue;
     }
-    if (isQuoteLine(line)) {
-      output.push(formatQuoteLine(line, counts, rules));
+    if (isQuoteLine(body)) {
+      output.push(`${formatQuoteLine(body, counts, rules)}${trailingWhitespace}`);
       continue;
     }
-    if (isListLine(line)) {
-      output.push(formatListLine(line, counts, rules));
+    if (isListLine(body)) {
+      output.push(`${formatListLine(body, counts, rules)}${trailingWhitespace}`);
       continue;
     }
 
-    output.push(formatInlineContent(line, counts, rules));
+    output.push(`${formatInlineContent(body, counts, rules)}${trailingWhitespace}`);
   }
 
   flushBlockMath();
@@ -1117,89 +1119,6 @@ function splitFenceBlocks(
   return blocks;
 }
 
-function normalizeBlankLinesAroundBlocks(
-  input: string,
-  counts: CountMap,
-  rules: Record<SolutionFormatRuleId, boolean>,
-): string {
-  const lines = input.split("\n");
-  const output: string[] = [];
-  let activeFenceMarker: string | null = null;
-
-  const ensureBlankBefore = (ruleId: SolutionFormatRuleId) => {
-    if (output.length === 0) return;
-    if (isBlankLine(output[output.length - 1])) return;
-    output.push("");
-    counts[ruleId] += 1;
-  };
-
-  const ensureBlankAfterCurrent = (index: number, ruleId: SolutionFormatRuleId) => {
-    if (index >= lines.length - 1) return;
-    if (isBlankLine(lines[index + 1])) return;
-    output.push("");
-    counts[ruleId] += 1;
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const fenceMatch = line.match(/^(\s{0,3})(`{3,}|~{3,})(.*)$/);
-
-    if (activeFenceMarker !== null) {
-      output.push(line);
-      if (new RegExp(`^\\s{0,3}${escapeRegExp(activeFenceMarker)}\\s*$`).test(line)) {
-        activeFenceMarker = null;
-        if (rules.blank_lines_around_code_fences) {
-          ensureBlankAfterCurrent(index, "blank_lines_around_code_fences");
-        }
-      }
-      continue;
-    }
-
-    if (fenceMatch) {
-      if (rules.blank_lines_around_code_fences) {
-        ensureBlankBefore("blank_lines_around_code_fences");
-      }
-      output.push(line);
-      activeFenceMarker = fenceMatch[2];
-      continue;
-    }
-
-    const isHeading = rules.blank_lines_around_headings && /^\s{0,3}#{1,6}(?:\s+|$)/.test(line);
-    const isList = rules.blank_lines_around_lists && isListLine(line);
-    const isTable = rules.blank_lines_around_lists && isTableLikeLine(line);
-    const prevIsTable = index > 0 && isTableLikeLine(lines[index - 1] ?? "");
-    const nextIsTable = index + 1 < lines.length && isTableLikeLine(lines[index + 1] ?? "");
-    const currentListKind = isList ? getListKind(line) : null;
-    const prevListKind = index > 0 ? getListKind(lines[index - 1] ?? "") : null;
-    const prevIsList = prevListKind !== null;
-
-    if (isHeading) ensureBlankBefore("blank_lines_around_headings");
-    if ((isList && (!prevIsList || prevListKind !== currentListKind)) || (isTable && !prevIsTable)) {
-      ensureBlankBefore("blank_lines_around_lists");
-    }
-
-    output.push(line);
-
-    if (isHeading) ensureBlankAfterCurrent(index, "blank_lines_around_headings");
-    if (isTable) {
-      if (!nextIsTable) ensureBlankAfterCurrent(index, "blank_lines_around_lists");
-      continue;
-    }
-    if (isList) {
-      const next = lines[index + 1];
-      const nextListKind = typeof next === "string" ? getListKind(next) : null;
-      const nextIsSameBlock = typeof next === "string" && (nextListKind === currentListKind || isQuoteLine(next));
-      if (!nextIsSameBlock) ensureBlankAfterCurrent(index, "blank_lines_around_lists");
-    }
-  }
-
-  while (output.length > 0 && output[output.length - 1] === "") {
-    output.pop();
-  }
-
-  return output.join("\n");
-}
-
 function buildChanges(counts: CountMap): SolutionFormatChange[] {
   return (Object.keys(counts) as SolutionFormatRuleId[]).map((ruleId) => ({
     ruleId,
@@ -1218,10 +1137,9 @@ export function formatLuoguSolution(markdownBody: string, options: FormatLuoguSo
   const formatted = blocks
     .map((block) => (block.type === "text" ? formatTextBlock(block.value, counts, rules) : block.value))
     .join("\n");
-  const normalizedBlankLines = normalizeBlankLinesAroundBlocks(formatted, counts, rules);
 
   return {
-    formattedBody: normalizedBlankLines.replace(/\n/g, eol),
+    formattedBody: formatted.replace(/\n/g, eol),
     changes: buildChanges(counts),
   };
 }
@@ -1273,10 +1191,19 @@ export function runSolutionFormatterSelfCheck(): void {
       includes: ["cnt<=n", "std.cpp", "3.14"],
       excludes: ["$cnt \\le n$", "$3.14$", "std\u3002cpp"],
     },
+    {
+      name: "preserve blank lines and hard breaks",
+      input: "# \u9898\u89e3\n\n\u7b2c\u4e00\u884c\u540e\u9762\u6709\u4e24\u4e2a\u7a7a\u683c  \n\u4e0b\u4e00\u884c\u5e94\u7ee7\u7eed\u4fdd\u7559\u4e3a\u72ec\u7acb\u6362\u884c\u3002\n\n\n- \u5217\u8868\u524d\u540e\u7684\u7a7a\u884c\u4e0d\u88ab\u5408\u5e76\n\n\u6700\u540e\u4e00\u6bb5",
+      includes: ["# \u9898\u89e3\n\n", "\u7b2c\u4e00\u884c\u540e\u9762\u6709\u4e24\u4e2a\u7a7a\u683c  \n", "\n\n\n- "],
+      excludes: ["# \u9898\u89e3\n\n\n", "\u6709\u4e24\u4e2a\u7a7a\u683c \n"],
+    },
   ];
 
   for (const testCase of cases) {
     const result = formatLuoguSolution(testCase.input).formattedBody;
+    if (result.split("\n").length !== testCase.input.split("\n").length) {
+      throw new Error(`solution formatter self check failed: ${testCase.name}\nline count changed\n${result}`);
+    }
     for (const expected of testCase.includes) {
       if (!result.includes(expected)) {
         throw new Error(`solution formatter self check failed: ${testCase.name}\nmissing: ${expected}\n${result}`);
