@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
@@ -2307,6 +2307,9 @@ export default function App() {
   const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
   const [appZoom, setAppZoom] = useState(getInitialAppZoom);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
+  const contentZoomRef = useRef(contentZoom);
+  const pendingContentZoomRef = useRef<number | null>(null);
+  const contentZoomFrameRef = useRef<number | null>(null);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
     getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
@@ -2377,6 +2380,10 @@ export default function App() {
     currentFilePathRef.current = currentFilePath;
     activeFileKeyRef.current = currentFilePath;
   }, [currentFilePath]);
+
+  useEffect(() => {
+    contentZoomRef.current = contentZoom;
+  }, [contentZoom]);
 
   const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
     if (suppressedScrollPaneRef.current === source) return;
@@ -3725,7 +3732,26 @@ export default function App() {
   const updateContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setContentZoom((currentZoom) => {
       const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
-      return clampContentZoom(rawZoom);
+      const clampedZoom = clampContentZoom(rawZoom);
+      contentZoomRef.current = clampedZoom;
+      return clampedZoom;
+    });
+  };
+
+  const scheduleContentZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
+    const currentZoom = pendingContentZoomRef.current ?? contentZoomRef.current;
+    const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
+    pendingContentZoomRef.current = clampContentZoom(rawZoom);
+
+    if (contentZoomFrameRef.current !== null) return;
+
+    contentZoomFrameRef.current = window.requestAnimationFrame(() => {
+      contentZoomFrameRef.current = null;
+      const zoom = pendingContentZoomRef.current;
+      pendingContentZoomRef.current = null;
+      if (zoom === null) return;
+
+      updateContentZoom(zoom);
     });
   };
 
@@ -3757,7 +3783,7 @@ export default function App() {
     if (!(event.ctrlKey || event.metaKey)) return;
 
     event.preventDefault();
-    updateContentZoom((currentZoom) =>
+    scheduleContentZoom((currentZoom) =>
       currentZoom + (event.deltaY < 0 ? CONTENT_ZOOM_STEP : -CONTENT_ZOOM_STEP),
     );
   };
@@ -6905,6 +6931,19 @@ export default function App() {
     window.localStorage.setItem(CONTENT_ZOOM_STORAGE_KEY, String(contentZoom));
   }, [contentZoom]);
 
+  useLayoutEffect(() => {
+    editorScrollApiRef.current?.requestMeasure();
+  }, [appZoom, contentZoom, editorFontSize, readingDensity]);
+
+  useEffect(() => {
+    return () => {
+      if (contentZoomFrameRef.current !== null) {
+        window.cancelAnimationFrame(contentZoomFrameRef.current);
+        contentZoomFrameRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     window.localStorage.setItem(EDITOR_FONT_SIZE_STORAGE_KEY, String(editorFontSize));
   }, [editorFontSize]);
@@ -7769,7 +7808,7 @@ export default function App() {
       </DialogContent>
     </Dialog>
     {isLuoguDialogOpen && (
-      <div className="fixed inset-0 z-[70] bg-background/80 backdrop-blur-sm">
+      <div className="fixed inset-0 z-[70] bg-slate-950/18 backdrop-blur-[1px] dark:bg-black/55 dark:backdrop-blur-sm">
         <section
           ref={luoguDialogPanelRef}
           className="fixed left-0 top-0 flex max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-2xl"
@@ -9800,7 +9839,7 @@ export default function App() {
                                 disabled={!frontmatter.canMerge}
                                 className={cn(
                                   "flex h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 text-left text-xs outline-none transition-colors hover:border-border focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80",
-                                  isDifficultyMenuOpen && "border-white/25 ring-1 ring-white/10",
+                                  isDifficultyMenuOpen && "border-ring/50 ring-1 ring-ring/20 dark:border-white/25 dark:ring-white/10",
                                   getDifficultyOptionClassName(frontmatter.fields.difficulty),
                                 )}
                                 aria-haspopup="listbox"
@@ -9825,14 +9864,14 @@ export default function App() {
                                 <div
                                   role="listbox"
                                   aria-labelledby="frontmatter-difficulty"
-                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-white/10 bg-[#222222] py-1 text-xs shadow-md shadow-black/20 dark:bg-[#222222]"
+                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-border/70 bg-popover py-1 text-xs text-popover-foreground shadow-lg shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
                                 >
                                   {!LUOGU_DIFFICULTY_OPTIONS.some((option) => option.value === frontmatter.fields.difficulty) && frontmatter.fields.difficulty.trim() && (
                                     <button
                                       type="button"
                                       role="option"
                                       aria-selected
-                                      className="flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left text-foreground transition-colors hover:bg-white/[0.06]"
+                                      className="flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
                                       onClick={() => setIsDifficultyMenuOpen(false)}
                                     >
                                       <span className="min-w-0 truncate">当前：{frontmatter.fields.difficulty}</span>
@@ -9848,8 +9887,8 @@ export default function App() {
                                         role="option"
                                         aria-selected={selected}
                                         className={cn(
-                                          "flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-white/[0.06]",
-                                          selected && "bg-white/[0.08]",
+                                          "flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.06]",
+                                          selected && "bg-accent/70 text-accent-foreground dark:bg-white/[0.08]",
                                           option.className,
                                         )}
                                         onClick={() => {

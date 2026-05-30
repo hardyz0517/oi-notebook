@@ -47,6 +47,7 @@ interface MarkdownEditorProps {
 
 export interface MarkdownEditorScrollApi {
   scrollToRatio: (ratio: number) => void;
+  requestMeasure: () => void;
 }
 
 export interface MarkdownEditorSelectionRange {
@@ -681,6 +682,7 @@ export default function MarkdownEditor({
 }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const measureFrameRef = useRef<number | null>(null);
   const onChangeFn = useRef(onChange);
   useEffect(() => {
     onChangeFn.current = onChange;
@@ -765,6 +767,15 @@ export default function MarkdownEditor({
     return true;
   };
 
+  const scheduleEditorMeasure = () => {
+    if (measureFrameRef.current !== null) return;
+
+    measureFrameRef.current = window.requestAnimationFrame(() => {
+      measureFrameRef.current = null;
+      viewRef.current?.requestMeasure();
+    });
+  };
+
   const closeInsertDialog = () => {
     setInsertDialog(null);
     requestAnimationFrame(() => viewRef.current?.focus());
@@ -813,7 +824,7 @@ export default function MarkdownEditor({
           markdown(),
           lineNumbers(),
           foldGutter({
-            openText: "⌄",
+            openText: "∨",
             closedText: "›",
           }),
           oneDark,
@@ -900,34 +911,45 @@ export default function MarkdownEditor({
               backgroundColor: "var(--background)",
               borderRight: "1px solid color-mix(in oklch, var(--border) 18%, transparent)",
               color: "var(--muted-foreground)",
-              paddingLeft: "1px",
-              paddingRight: "1px",
+              paddingLeft: "0",
+              paddingRight: "0",
               fontFamily: "var(--font-mono)",
               fontSize: "calc(var(--editor-font-size, 14px) * var(--md-content-zoom, 1) * 0.92)",
               lineHeight: "var(--content-line-height, 1.7)",
               userSelect: "none",
             },
             ".cm-lineNumbers .cm-gutterElement": {
-              minWidth: "2.55rem",
-              padding: "0 0.45rem 0 0.3rem",
+              minWidth: "2.45rem",
+              padding: "0 1px 0 0.3rem",
               fontVariantNumeric: "tabular-nums",
               textAlign: "right",
             },
             ".cm-foldGutter": {
-              minWidth: "0.95rem",
+              minWidth: "17px",
+              width: "17px",
+              overflow: "visible",
             },
             ".cm-foldGutter .cm-gutterElement": {
-              width: "0.95rem",
-              padding: "0 0.12rem 0 0",
-              textAlign: "center",
-              color: "color-mix(in oklch, var(--muted-foreground) 86%, transparent)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              width: "17px",
+              minWidth: "17px",
+              padding: "0",
+              overflow: "visible",
+              textAlign: "left",
+              lineHeight: "inherit",
+              fontSize: "0.82em",
+              color: "color-mix(in oklch, var(--muted-foreground) 62%, transparent)",
               cursor: "pointer",
+              backgroundColor: "transparent",
+              transform: "translate(2px, 2px)",
             },
             ".cm-foldGutter .cm-gutterElement:hover": {
-              color: "color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground))",
+              color: "color-mix(in oklch, var(--foreground) 72%, var(--muted-foreground))",
             },
             ".cm-content": {
-              padding: "12px 14px 12px 12px",
+              padding: "12px 14px 12px 4px",
               minHeight: "100%",
               caretColor: "var(--foreground)",
               fontSize: "calc(var(--editor-font-size, 14px) * var(--md-content-zoom, 1))",
@@ -980,9 +1002,23 @@ export default function MarkdownEditor({
     };
     view.scrollDOM.addEventListener("scroll", handleScroll);
 
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleEditorMeasure();
+          });
+    resizeObserver?.observe(containerRef.current);
+    scheduleEditorMeasure();
+
     // Clean up the EditorView instance on unmount, including StrictMode remounts.
     return () => {
       view.scrollDOM.removeEventListener("scroll", handleScroll);
+      resizeObserver?.disconnect();
+      if (measureFrameRef.current !== null) {
+        window.cancelAnimationFrame(measureFrameRef.current);
+        measureFrameRef.current = null;
+      }
       view.destroy();
       viewRef.current = null;
       onSelectionChangeFn.current?.("", null, null);
@@ -1069,6 +1105,9 @@ export default function MarkdownEditor({
 
         const nextRatio = Math.min(1, Math.max(0, ratio));
         el.scrollTop = nextRatio * max;
+      },
+      requestMeasure: () => {
+        viewRef.current?.requestMeasure();
       },
     });
 

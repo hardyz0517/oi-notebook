@@ -282,7 +282,7 @@ function MarkdownPreview({
           lineHeight: "var(--content-line-height, 1.7)",
         }}
         className={cn(
-          "min-w-0 max-w-full overflow-x-hidden break-words p-5 text-foreground",
+          "min-w-0 max-w-full overflow-x-hidden break-words px-4 py-4 text-foreground",
           "[&_h1]:mb-[calc(var(--content-block-spacing,0.75rem)*1.35)] [&_h1]:mt-[calc(var(--content-block-spacing,0.75rem)*2)] [&_h1]:text-[1.714em] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-tight",
           "[&_h2]:mb-[calc(var(--content-block-spacing,0.75rem)*1.15)] [&_h2]:mt-[calc(var(--content-block-spacing,0.75rem)*1.7)] [&_h2]:text-[1.43em] [&_h2]:font-semibold [&_h2]:leading-tight",
           "[&_h3]:mb-[var(--content-block-spacing,0.75rem)] [&_h3]:mt-[calc(var(--content-block-spacing,0.75rem)*1.35)] [&_h3]:text-[1.286em] [&_h3]:font-semibold [&_h3]:leading-snug",
@@ -365,7 +365,7 @@ function ensureCodeCopyButton(shell: HTMLElement) {
   button.setAttribute("aria-label", "Copy code");
   button.title = "Copy code";
   button.className =
-    "code-copy-button absolute right-3 top-3 z-20 grid h-8 min-w-8 place-items-center rounded-md border border-white/10 bg-black/55 px-2 text-[11px] font-medium text-zinc-200 opacity-85 shadow-sm backdrop-blur-sm transition hover:border-white/15 hover:bg-black/72 hover:text-white hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "code-copy-button absolute right-3 top-3 z-20 grid h-8 w-8 place-items-center rounded-full border-0 bg-transparent p-0 text-zinc-300 opacity-70 transition focus-visible:outline-none";
   setCodeCopyButtonIcon(button, "copy");
 
   shell.append(button);

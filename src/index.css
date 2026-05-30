@@ -288,10 +288,13 @@ html[data-theme="light"] .app-editor-workspace .cm-editor .cm-line span {
   color: #333330;
 }
 
-html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters,
-html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutterElement {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters {
   color: color-mix(in oklch, var(--text-muted) 78%, var(--surface-editor));
-  background-color: color-mix(in oklch, var(--surface-card-soft) 76%, var(--surface-editor)) !important;
+  background-color: #F5F5F5 !important;
+}
+
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutter {
+  background-color: #F5F5F5 !important;
 }
 
 html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters {
@@ -304,6 +307,7 @@ html[data-theme="light"] .app-editor-workspace .cm-editor .cm-activeLineGutter {
 
 html[data-theme="light"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement {
   color: var(--text-muted);
+  background-color: transparent !important;
 }
 
 html[data-theme="light"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement:hover {
@@ -311,13 +315,13 @@ html[data-theme="light"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gut
 }
 
 html[data-theme="light"] .app-editor-workspace .cm-editor,
-html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller,
-html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller {
   background-color: var(--surface-editor) !important;
 }
 
 html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement {
   color: #7d8590;
+  background-color: transparent;
 }
 
 html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutters,
@@ -426,7 +430,7 @@ html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller:focus-wit
   position: absolute;
   top: 0.95rem;
   bottom: 1rem;
-  left: 2.15rem;
+  left: 2.3rem;
   width: 1px;
   background: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
   pointer-events: none;
@@ -482,8 +486,7 @@ html[data-theme="light"] .open-tabs-scrollbar:focus-within::-webkit-scrollbar-th
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell {
-  background:
-    linear-gradient(180deg, #f6f6f3, var(--code-bg));
+  background: #F9F9F9;
   color: var(--code-text);
   border-color: var(--code-border);
   border-radius: 6px;
@@ -495,7 +498,7 @@ html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell {
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > pre,
 html[data-theme="light"] [data-markdown-preview-content] pre.shiki {
-  background: var(--code-bg) !important;
+  background: #F9F9F9 !important;
   color: var(--code-text) !important;
   border-radius: 4px !important;
 }
@@ -559,19 +562,18 @@ html[data-theme="light"] .markdown-preview-content pre.shiki .line.oi-code-line-
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button {
-  border-color: var(--code-border);
-  background: rgb(252 252 251 / 78%);
-  color: var(--text-secondary);
-  box-shadow: 0 1px 4px rgb(31 31 29 / 5%);
+  background: transparent;
+  color: color-mix(in oklch, var(--text-secondary) 76%, transparent);
+  box-shadow: none;
   backdrop-filter: none;
-  opacity: 0.58 !important;
+  opacity: 0.68 !important;
 }
 
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:hover,
 html[data-theme="light"] [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:focus-visible {
-  border-color: #b8b8b2;
-  background: var(--surface-paper);
+  background: rgb(0 0 0 / 6%);
   color: var(--text-title);
+  box-shadow: 0 1px 5px rgb(31 31 29 / 8%);
   opacity: 1 !important;
 }
 
@@ -581,19 +583,15 @@ html[data-theme="light"] [data-markdown-preview-content] {
 }
 
 html[data-theme="light"] .app-preview-pane > div {
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--surface-preview) 86%, #ffffff), var(--surface-preview));
-  padding: 12px;
+  background: var(--surface-paper);
+  padding: 0;
 }
 
 html[data-theme="light"] .app-preview-pane [data-markdown-preview-content] {
   min-height: 100%;
-  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--surface-paper) 96%, #ffffff), var(--surface-paper));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 80%),
-    0 1px 2px rgb(35 35 32 / 5%);
+  border: 0;
+  background: var(--surface-paper);
+  box-shadow: none;
 }
 
 [data-markdown-preview-content] {
@@ -731,26 +729,17 @@ html[data-theme="light"] .app-editor-workspace {
 }
 
 html[data-theme="light"] .app-editor-pane {
-  margin: 8px 0 8px 8px;
-  border: 1px solid color-mix(in oklch, var(--separator-strong) 90%, #9f9f99);
+  margin: 0;
+  border: 0;
   background: var(--surface-editor);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 72%),
-    0 1px 2px rgb(35 35 32 / 4%);
+  box-shadow: none;
 }
 
 html[data-theme="light"] .app-preview-pane {
-  margin: 8px 8px 8px 0;
-  border: 1px solid color-mix(in oklch, var(--separator-strong) 88%, #9f9f99);
+  margin: 0;
+  border: 0;
   background: color-mix(in oklch, var(--surface-preview) 86%, var(--surface-workspace));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 72%),
-    0 1px 2px rgb(35 35 32 / 4%);
-}
-
-html[data-theme="light"] .app-editor-pane + .app-column-resizer-editor,
-html[data-theme="light"] .app-column-resizer-editor + .app-preview-pane {
-  margin-left: 0;
+  box-shadow: none;
 }
 
 .open-tabs-bar {
@@ -1725,6 +1714,7 @@ html[data-theme="light"] .app-frontmatter-panel summary:hover {
 
 html[data-theme="light"] .app-frontmatter-body {
   background: color-mix(in oklch, var(--surface-editor) 92%, var(--surface-workspace));
+  row-gap: 0.75rem;
 }
 
 html[data-theme="light"] .app-frontmatter-actions {
@@ -1733,21 +1723,21 @@ html[data-theme="light"] .app-frontmatter-actions {
 }
 
 html[data-theme="light"] .app-frontmatter-field {
-  border: 1px solid color-mix(in oklch, var(--border-subtle) 80%, transparent);
-  background: color-mix(in oklch, var(--surface-paper) 72%, var(--surface-card-soft));
-  padding: 0.55rem;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 62%);
+  border: 0;
+  background: transparent;
+  padding: 0.15rem 0;
+  box-shadow: none;
 }
 
 html[data-theme="light"] .app-frontmatter-summary {
-  background: color-mix(in oklch, var(--surface-paper) 82%, var(--surface-card-soft));
+  background: transparent;
 }
 
 html[data-theme="light"] .app-frontmatter-draft {
   min-height: 2rem;
-  border: 1px solid color-mix(in oklch, var(--border-subtle) 82%, transparent);
-  background: color-mix(in oklch, var(--surface-paper) 64%, var(--surface-card-soft));
-  padding: 0.35rem 0.6rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0;
 }
 
 html[data-theme="light"] .app-frontmatter-panel label,
@@ -2024,7 +2014,7 @@ html[data-theme="light"] :where(button:disabled, input:disabled, textarea:disabl
 }
 
 html[data-theme="light"] [data-markdown-preview-content] :not(pre) > code {
-  background: var(--inline-code-bg);
+  background: #F9F9F9;
   color: var(--inline-code-text);
   border: 1px solid color-mix(in oklch, var(--code-border) 62%, transparent);
 }
@@ -2131,13 +2121,31 @@ html[data-theme="light"] .cn-toast {
   z-index: 30;
   display: inline-grid !important;
   visibility: visible !important;
-  opacity: 0.88 !important;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(209 213 219 / 80%);
+  box-shadow: none;
+  opacity: 0.72 !important;
   pointer-events: auto;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
 }
 
 [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:hover,
 [data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:focus-visible {
+  background: rgb(255 255 255 / 8%);
+  color: #ffffff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
   opacity: 1 !important;
+}
+
+[data-markdown-preview-content] .oi-code-block-shell > .code-copy-button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+  outline-offset: 2px;
 }
 
 [data-markdown-preview-content] pre.shiki .line {
