@@ -7041,22 +7041,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               >
                 {activeConversationTitle}
               </span>
-              {shouldShowViewAllConversations && (
-                <button
-                  type="button"
-                  className="notex-session-view-all"
-                  onClick={() => {
-                    setConversationSearch("");
-                    setIsAllConversationsOpen((open) => !open);
-                    setIsHistoryOpen(false);
-                    setIsProviderPickerOpen(false);
-                    setIsModelPickerOpen(false);
-                  }}
-                  aria-expanded={isAllConversationsOpen}
-                >
-                  查看全部
-                </button>
-              )}
             </div>
           )}
           <div className="notex-mode-actions flex shrink-0 items-center gap-1">

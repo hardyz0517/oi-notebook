@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ExternalLink, FolderOpen, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,11 +46,13 @@ export interface AppearanceSettingsPageProps {
   onThemeChange: (value: string) => void;
   uiScale: number;
   uiScaleLabel: string;
-  uiScalePresets: number[];
+  uiScaleMin: number;
+  uiScaleMax: number;
   onUiScaleChange: (value: number) => void;
   appZoom: number;
   appZoomLabel: string;
-  appZoomPresets: number[];
+  appZoomMin: number;
+  appZoomMax: number;
   onAppZoomChange: (value: number) => void;
   settingsFontSize: number;
   settingsFontSizeMin: number;
@@ -58,7 +60,8 @@ export interface AppearanceSettingsPageProps {
   onSettingsFontSizeChange: (value: number) => void;
   contentZoom: number;
   contentZoomLabel: string;
-  contentZoomPresets: number[];
+  contentZoomMin: number;
+  contentZoomMax: number;
   onContentZoomChange: (value: number) => void;
   toolbarFontSize: number;
   toolbarFontSizeMin: number;
@@ -76,6 +79,95 @@ export interface AppearanceSettingsPageProps {
   onReadingDensityChange: (value: string) => void;
 }
 
+function clampNumericSetting(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function NumericSettingInput({
+  value,
+  min,
+  max,
+  step,
+  unit,
+  ariaLabel,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  ariaLabel: string;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(() => String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commitDraft = () => {
+    if (draft.trim() === "") {
+      setDraft(String(value));
+      return;
+    }
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const nextValue = clampNumericSetting(parsed, min, max);
+    setDraft(String(nextValue));
+    if (nextValue !== value) onCommit(nextValue);
+  };
+
+  const commitStep = (direction: 1 | -1) => {
+    const parsedDraft = Number(draft);
+    const baseValue = Number.isFinite(parsedDraft) ? parsedDraft : value;
+    const nextValue = clampNumericSetting(baseValue + direction * step, min, max);
+    setDraft(String(nextValue));
+    if (nextValue !== value) onCommit(nextValue);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitDraft();
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      commitStep(1);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      commitStep(-1);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <Input
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          if (/^-?\d*$/.test(nextDraft)) setDraft(nextDraft);
+        }}
+        onBlur={commitDraft}
+        onKeyDown={handleKeyDown}
+        className="h-8 w-24 text-right"
+        aria-label={ariaLabel}
+      />
+      <span className="w-6 shrink-0 text-sm text-muted-foreground">{unit}</span>
+    </div>
+  );
+}
+
 export function AppearanceSettingsPage({
   className,
   appTheme,
@@ -84,11 +176,13 @@ export function AppearanceSettingsPage({
   onThemeChange,
   uiScale,
   uiScaleLabel,
-  uiScalePresets,
+  uiScaleMin,
+  uiScaleMax,
   onUiScaleChange,
   appZoom,
   appZoomLabel,
-  appZoomPresets,
+  appZoomMin,
+  appZoomMax,
   onAppZoomChange,
   settingsFontSize,
   settingsFontSizeMin,
@@ -96,7 +190,8 @@ export function AppearanceSettingsPage({
   onSettingsFontSizeChange,
   contentZoom,
   contentZoomLabel,
-  contentZoomPresets,
+  contentZoomMin,
+  contentZoomMax,
   onContentZoomChange,
   toolbarFontSize,
   toolbarFontSizeMin,
@@ -128,55 +223,81 @@ export function AppearanceSettingsPage({
         </div>
       </SettingRow>
       <SettingRow title="界面密度" description={`当前 ${uiScaleLabel}。`}>
-        <div className="flex flex-wrap gap-2">
-          {uiScalePresets.map((scale) => (
-            <Button key={scale} type="button" variant={Math.round(uiScale * 100) === Math.round(scale * 100) ? "default" : "outline"} size="sm" onClick={() => onUiScaleChange(scale)}>
-              {Math.round(scale * 100)}%
-            </Button>
-          ))}
-        </div>
+        <NumericSettingInput
+          value={Math.round(uiScale * 100)}
+          min={Math.round(uiScaleMin * 100)}
+          max={Math.round(uiScaleMax * 100)}
+          step={5}
+          unit="%"
+          ariaLabel="界面密度"
+          onCommit={(value) => onUiScaleChange(value / 100)}
+        />
       </SettingRow>
       <SettingRow title="全局界面缩放" description={`当前 ${appZoomLabel}。`}>
-        <div className="flex flex-wrap gap-2">
-          {appZoomPresets.map((zoom) => (
-            <Button key={zoom} type="button" variant={Math.round(appZoom * 100) === Math.round(zoom * 100) ? "default" : "outline"} size="sm" onClick={() => onAppZoomChange(zoom)}>
-              {Math.round(zoom * 100)}%
-            </Button>
-          ))}
-        </div>
+        <NumericSettingInput
+          value={Math.round(appZoom * 100)}
+          min={Math.round(appZoomMin * 100)}
+          max={Math.round(appZoomMax * 100)}
+          step={5}
+          unit="%"
+          ariaLabel="全局界面缩放"
+          onCommit={(value) => onAppZoomChange(value / 100)}
+        />
       </SettingRow>
       <SettingRow title="设置中心文字大小" description={`${settingsFontSize}px。`}>
-        <div className="flex min-w-0 items-center gap-2">
-          <input type="range" min={settingsFontSizeMin} max={settingsFontSizeMax} step={1} value={settingsFontSize} onChange={(event) => onSettingsFontSizeChange(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="设置中心文字大小" />
-          <Input type="number" min={settingsFontSizeMin} max={settingsFontSizeMax} value={settingsFontSize} onChange={(event) => onSettingsFontSizeChange(Number(event.target.value))} className="h-8 w-20" aria-label="设置中心文字大小数值" />
-        </div>
+        <NumericSettingInput
+          value={settingsFontSize}
+          min={settingsFontSizeMin}
+          max={settingsFontSizeMax}
+          step={1}
+          unit="px"
+          ariaLabel="设置中心文字大小"
+          onCommit={onSettingsFontSizeChange}
+        />
       </SettingRow>
       <SettingRow title="Markdown 内容缩放" description={`当前 ${contentZoomLabel}。`}>
-        <div className="flex flex-wrap gap-2">
-          {contentZoomPresets.map((zoom) => (
-            <Button key={zoom} type="button" variant={Math.round(contentZoom * 100) === Math.round(zoom * 100) ? "default" : "outline"} size="sm" onClick={() => onContentZoomChange(zoom)}>
-              {Math.round(zoom * 100)}%
-            </Button>
-          ))}
-        </div>
+        <NumericSettingInput
+          value={Math.round(contentZoom * 100)}
+          min={Math.round(contentZoomMin * 100)}
+          max={Math.round(contentZoomMax * 100)}
+          step={5}
+          unit="%"
+          ariaLabel="Markdown 内容缩放"
+          onCommit={(value) => onContentZoomChange(value / 100)}
+        />
       </SettingRow>
       <SettingRow title="工具栏文字大小" description={`${toolbarFontSize}px。`}>
-        <div className="flex min-w-0 items-center gap-2">
-          <input type="range" min={toolbarFontSizeMin} max={toolbarFontSizeMax} step={1} value={toolbarFontSize} onChange={(event) => onToolbarFontSizeChange(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="工具栏文字大小" />
-          <Input type="number" min={toolbarFontSizeMin} max={toolbarFontSizeMax} value={toolbarFontSize} onChange={(event) => onToolbarFontSizeChange(Number(event.target.value))} className="h-8 w-20" aria-label="工具栏文字大小数值" />
-        </div>
+        <NumericSettingInput
+          value={toolbarFontSize}
+          min={toolbarFontSizeMin}
+          max={toolbarFontSizeMax}
+          step={1}
+          unit="px"
+          ariaLabel="工具栏文字大小"
+          onCommit={onToolbarFontSizeChange}
+        />
       </SettingRow>
       <SettingRow title="编辑区字体大小" description={`${editorFontSize}px。`}>
-        <div className="flex min-w-0 items-center gap-2">
-          <input type="range" min={fontSizeMin} max={fontSizeMax} step={1} value={editorFontSize} onChange={(event) => onEditorFontSizeChange(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="编辑区字体大小" />
-          <Input type="number" min={fontSizeMin} max={fontSizeMax} value={editorFontSize} onChange={(event) => onEditorFontSizeChange(Number(event.target.value))} className="h-8 w-20" aria-label="编辑区字体大小数值" />
-        </div>
+        <NumericSettingInput
+          value={editorFontSize}
+          min={fontSizeMin}
+          max={fontSizeMax}
+          step={1}
+          unit="px"
+          ariaLabel="编辑区字体大小"
+          onCommit={onEditorFontSizeChange}
+        />
       </SettingRow>
       <SettingRow title="预览区字体大小" description={`${previewFontSize}px。`}>
-        <div className="flex min-w-0 items-center gap-2">
-          <input type="range" min={fontSizeMin} max={fontSizeMax} step={1} value={previewFontSize} onChange={(event) => onPreviewFontSizeChange(Number(event.target.value))} className="h-2 min-w-0 flex-1 accent-primary" aria-label="预览区字体大小" />
-          <Input type="number" min={fontSizeMin} max={fontSizeMax} value={previewFontSize} onChange={(event) => onPreviewFontSizeChange(Number(event.target.value))} className="h-8 w-20" aria-label="预览区字体大小数值" />
-        </div>
+        <NumericSettingInput
+          value={previewFontSize}
+          min={fontSizeMin}
+          max={fontSizeMax}
+          step={1}
+          unit="px"
+          ariaLabel="预览区字体大小"
+          onCommit={onPreviewFontSizeChange}
+        />
       </SettingRow>
       <SettingRow title="阅读密度" description={activeReadingDensityDescription}>
         <div className="flex flex-wrap gap-2">

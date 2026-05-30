@@ -747,9 +747,6 @@ const THEME_OPTIONS: Array<{ id: AppTheme; label: string; description: string }>
   { id: "dark", label: "黑色主题", description: "保持当前深色工作台视觉，适合长时间编辑。" },
   { id: "light", label: "白色主题", description: "切换到浅色界面，适合明亮环境和投屏演示。" },
 ];
-const APP_ZOOM_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
-const CONTENT_ZOOM_PRESETS = [0.9, 1, 1.1, 1.25, 1.5];
-const UI_SCALE_PRESETS = [0.9, 1, 1.1, 1.2, 1.3];
 const READING_DENSITY_OPTIONS: Array<{
   id: ReadingDensity;
   label: string;
@@ -1933,7 +1930,15 @@ const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProp
   const promptEditorPaddingY = Math.round(promptEditorLineHeight * 0.45);
   const lineCount = Math.max(value.split("\n").length, 1);
   const promptLineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => index + 1), [lineCount]);
-  const gutterWidth = Math.min(60, Math.max(48, String(lineCount).length * 8 + 28));
+  const maxLineNumberDigits = String(lineCount).length;
+  const lineNumberDigitWidth = Math.ceil(fontSize * 0.62);
+  const lineNumberLeftPadding = 25;
+  const lineNumberRightPadding = 12;
+  const lineNumberDigitsWidth = maxLineNumberDigits * lineNumberDigitWidth;
+  const lineNumberColumnWidth = Math.min(
+    96,
+    Math.max(46, lineNumberLeftPadding + lineNumberDigitsWidth + lineNumberRightPadding),
+  );
   const editorStyle = {
     fontSize: `${fontSize}px`,
     lineHeight: `${promptEditorLineHeight}px`,
@@ -1959,18 +1964,23 @@ const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProp
     >
       <div className="flex h-full min-h-0 overflow-hidden border border-border/70 bg-background">
         <div
-          className="shrink-0 select-none overflow-hidden border-r border-border/40 bg-muted/20 text-right text-muted-foreground"
-          style={{ ...editorStyle, width: gutterWidth, ...editorPaddingStyle }}
+          className="shrink-0 select-none overflow-hidden border-r border-border/40 bg-muted/20 text-muted-foreground"
+          style={{ ...editorStyle, width: lineNumberColumnWidth, ...editorPaddingStyle }}
           aria-hidden="true"
         >
           <div style={{ transform: `translateY(${-scrollTop}px)` }}>
             {promptLineNumbers.map((line) => (
               <div
                 key={line}
-                className="pr-3 tabular-nums"
-                style={{ height: `${promptEditorLineHeight}px`, lineHeight: `${promptEditorLineHeight}px` }}
+                className="flex items-center tabular-nums"
+                style={{
+                  height: `${promptEditorLineHeight}px`,
+                  lineHeight: `${promptEditorLineHeight}px`,
+                  paddingLeft: `${lineNumberLeftPadding}px`,
+                  paddingRight: `${lineNumberRightPadding}px`,
+                }}
               >
-                {line}
+                <span className="block text-center" style={{ width: `${lineNumberDigitsWidth}px` }}>{line}</span>
               </div>
             ))}
           </div>
@@ -8689,11 +8699,13 @@ export default function App() {
                       onThemeChange={(value) => setAppTheme(value as AppTheme)}
                       uiScale={uiScale}
                       uiScaleLabel={uiScaleLabel}
-                      uiScalePresets={UI_SCALE_PRESETS}
+                      uiScaleMin={0.9}
+                      uiScaleMax={1.3}
                       onUiScaleChange={updateUiScale}
                       appZoom={appZoom}
                       appZoomLabel={appZoomLabel}
-                      appZoomPresets={APP_ZOOM_PRESETS}
+                      appZoomMin={APP_ZOOM_MIN}
+                      appZoomMax={APP_ZOOM_MAX}
                       onAppZoomChange={updateAppZoom}
                       settingsFontSize={settingsFontSize}
                       settingsFontSizeMin={SETTINGS_FONT_SIZE_MIN}
@@ -8701,7 +8713,8 @@ export default function App() {
                       onSettingsFontSizeChange={updateSettingsFontSize}
                       contentZoom={contentZoom}
                       contentZoomLabel={contentZoomLabel}
-                      contentZoomPresets={CONTENT_ZOOM_PRESETS}
+                      contentZoomMin={CONTENT_ZOOM_MIN}
+                      contentZoomMax={CONTENT_ZOOM_MAX}
                       onContentZoomChange={updateContentZoom}
                       toolbarFontSize={toolbarFontSize}
                       toolbarFontSizeMin={TOOLBAR_FONT_SIZE_MIN}
@@ -8926,8 +8939,14 @@ export default function App() {
                         <div className="text-base font-semibold text-foreground">提示词模板</div>
                         <div className="text-xs leading-5 text-muted-foreground">管理本地 AI 提示词模板。打开编辑器后可保存、润色并查看变量说明。</div>
                       </div>
-                      <SettingRow title="NoteX 回答风格" description="只影响会话中的回答风格，不影响润色、总结、生成笔记等文件编辑类任务。" align="start">
-                        <div className="grid gap-2">
+                      <div className="grid gap-4 border-b border-border/60 py-4">
+                        <div className="grid gap-1">
+                          <h3 className="text-sm font-medium text-foreground">NoteX 回答风格</h3>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            只影响会话中的回答风格，不影响润色、总结、生成笔记等文件编辑类任务。
+                          </p>
+                        </div>
+                        <div className="grid w-full gap-2">
                           <textarea
                             value={chatResponseStyleDraft}
                             placeholder="例如：回答尽量自然一点，少用列表；解释算法时更注重直觉；不需要太官方的语气。"
@@ -8935,11 +8954,8 @@ export default function App() {
                             disabled={isLoadingAiConfig || !aiConfigDraft}
                             className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
                           />
-                          <div className="text-xs leading-5 text-muted-foreground">
-                            这段内容会作为聊天回答的附加风格偏好拼接到系统提示中；留空则使用默认回答风格。
-                          </div>
                         </div>
-                      </SettingRow>
+                      </div>
                       <div className="grid min-w-0 gap-3 border-b border-border/60 py-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
