@@ -20,6 +20,7 @@ type NoteSummary = {
   excerpt: string | null;
   tags: string[];
   category: string;
+  collection: string;
   articleClass?: string;
   created: string | null;
   updated: string | null;
@@ -32,6 +33,8 @@ type NoteMetadata = {
   title?: string | null;
   summary?: string | null;
   tags?: unknown;
+  category?: string | null;
+  collection?: string | null;
   created?: string | null;
   updated?: string | null;
   draft?: boolean;
@@ -41,6 +44,7 @@ type ParsedFrontmatter = {
   title?: string;
   summary?: string;
   tags?: string[];
+  collection?: string;
   category?: string;
   type?: string;
   kind?: string;
@@ -54,6 +58,7 @@ type ParsedFrontmatter = {
 type NoteDetail = {
   relativePath: string;
   category: string;
+  collection: string;
   title: string;
   tags: string[];
   created: string | null;
@@ -99,6 +104,13 @@ type CountItem = {
   count: number;
 };
 
+type CollectionGroup = {
+  name: string;
+  posts: NoteSummary[];
+  count: number;
+  latestUpdatedAt?: string;
+};
+
 type TagChipItem = {
   label: string;
   fullPath: string;
@@ -127,6 +139,7 @@ const frontmatterKeys = new Set([
   "title",
   "summary",
   "tags",
+  "collection",
   "category",
   "type",
   "kind",
@@ -529,6 +542,7 @@ function parseFrontmatterYaml(yaml: string): ParsedFrontmatter {
 
     if (key === "title") metadata.title = text;
     if (key === "summary") metadata.summary = text;
+    if (key === "collection") metadata.collection = text;
     if (key === "category") metadata.category = text;
     if (key === "type") metadata.type = text;
     if (key === "kind") metadata.kind = text;
@@ -557,7 +571,7 @@ function splitFrontmatter(value: string | null | undefined) {
   const lines = text.split("\n");
   const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
   const firstLine = firstContentIndex === -1 ? "" : lines[firstContentIndex];
-  if (!/^\s*(title|summary|tags|category|type|kind|source|created|updated|date|draft):\s*/i.test(firstLine)) {
+  if (!/^\s*(title|summary|tags|collection|category|type|kind|source|created|updated|date|draft):\s*/i.test(firstLine)) {
     return { metadata: {} as ParsedFrontmatter, body: text.trim() };
   }
 
@@ -567,7 +581,7 @@ function splitFrontmatter(value: string | null | undefined) {
     const line = lines[index];
     if (
       line.trim() === "" ||
-      /^\s*(title|summary|tags|category|type|kind|source|created|updated|date|draft):\s*/i.test(line) ||
+      /^\s*(title|summary|tags|collection|category|type|kind|source|created|updated|date|draft):\s*/i.test(line) ||
       /^\s*-\s+/.test(line)
     ) {
       yamlLines.push(line);
@@ -606,7 +620,7 @@ function stripMarkdownForSummary(value: string) {
     .replace(/^>\s?/gm, "")
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/^\s*\d+[.)\u3001]\s+/gm, "")
-    .replace(/^\s*(title|summary|tags|category|type|kind|source|raw|internal|debug|created|updated|date|draft):.*$/gim, " ")
+    .replace(/^\s*(title|summary|tags|collection|category|type|kind|source|raw|internal|debug|created|updated|date|draft):.*$/gim, " ")
     .replace(/^\s*-\s*['"]?[^'"\n]+['"]?\s*$/gm, " ")
     .replace(/[{}[\]]/g, " ")
     .replace(/[*_~>#]+/g, " ")
@@ -719,12 +733,34 @@ function normalizeTagInput(value: unknown): string[] {
   return [];
 }
 
+function getTagCollectionValue(tag: string) {
+  const match = tag.match(/^(?:\u6587\u96c6|collection)\s*[:\uff1a]\s*(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function isCollectionTag(tag: string) {
+  return Boolean(getTagCollectionValue(tag));
+}
+
+function getCollectionFromTags(tags: string[]) {
+  return tags.map(getTagCollectionValue).find((value): value is string => Boolean(value)) ?? null;
+}
+
+function getDisplayTags(post: { tags?: unknown }) {
+  return normalizeTags(post.tags);
+}
+
 function normalizeTags(tags: unknown) {
   return Array.from(
     new Set(
       normalizeTagInput(tags)
         .map((tag) => tag.trim())
-        .filter((tag) => tag && !/^(title|summary|tags|category|type|kind|created|updated|date|draft):/i.test(tag)),
+        .filter(
+          (tag) =>
+            tag &&
+            !isCollectionTag(tag) &&
+            !/^(title|summary|tags|collection|category|type|kind|created|updated|date|draft):/i.test(tag),
+        ),
     ),
   );
 }
@@ -747,7 +783,11 @@ function inferArticleClass({
   relativePath: string;
   category: string;
   tags: string[];
-  metadata: ParsedFrontmatter;
+  metadata: {
+    category?: string | null;
+    type?: string | null;
+    kind?: string | null;
+  };
 }) {
   const fromFrontmatter =
     matchArticleClass(metadata.category) ?? matchArticleClass(metadata.type) ?? matchArticleClass(metadata.kind);
@@ -775,14 +815,46 @@ function inferArticleClass({
   return "\u672a\u5206\u7c7b";
 }
 
+function normalizeCollectionName(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+
+  return getCategoryLabel(text);
+}
+
+function getPostCollection({
+  tags,
+  metadata,
+}: {
+  tags: string[];
+  metadata: {
+    collection?: string | null;
+    category?: string | null;
+  };
+}) {
+  return (
+    normalizeCollectionName(metadata.collection) ??
+    normalizeCollectionName(metadata.category) ??
+    normalizeCollectionName(getCollectionFromTags(tags)) ??
+    "\u672a\u5f52\u6863"
+  );
+}
+
 function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
   const titleParts = splitFrontmatter(note.title);
   const summaryParts = splitFrontmatter(note.summary);
   const excerptParts = splitFrontmatter(note.excerpt);
-  const metadata = { ...titleParts.metadata, ...summaryParts.metadata, ...excerptParts.metadata };
-  const metadataTags = normalizeTags(metadata.tags);
-  const responseMetadataTags = normalizeTags(note.metadata?.tags);
-  const noteTags = normalizeTags(note.tags);
+  const metadata = { ...(note.metadata ?? {}), ...titleParts.metadata, ...summaryParts.metadata, ...excerptParts.metadata };
+  const rawTags = [
+    ...normalizeTagInput(metadata.tags),
+    ...normalizeTagInput(note.metadata?.tags),
+    ...normalizeTagInput(note.tags),
+  ];
+  const metadataTags = getDisplayTags({ tags: metadata.tags });
+  const responseMetadataTags = getDisplayTags({ tags: note.metadata?.tags });
+  const noteTags = getDisplayTags(note);
   const tags = metadataTags.length > 0 ? metadataTags : responseMetadataTags.length > 0 ? responseMetadataTags : noteTags;
   const summaryText = createCleanSummary(metadata.summary, summaryParts.body, excerptParts.body);
   const excerptText = createCleanSummary(excerptParts.body, metadata.summary, summaryParts.body);
@@ -793,6 +865,10 @@ function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
     summary: summaryText || null,
     excerpt: excerptText || null,
     tags,
+    collection: getPostCollection({
+      tags: rawTags,
+      metadata,
+    }),
     articleClass: inferArticleClass({
       relativePath: note.relativePath,
       category: note.category,
@@ -809,14 +885,24 @@ function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
 function normalizeNoteDetail(note: RawNoteDetail): NoteDetail {
   const bodyParts = splitFrontmatter(note.body);
   const metadata = { ...(note.metadata ?? {}), ...bodyParts.metadata };
-  const bodyTags = normalizeTags(bodyParts.metadata.tags);
-  const metadataTags = normalizeTags(note.metadata?.tags);
-  const noteTags = normalizeTags(note.tags);
+  const rawTags = [
+    ...normalizeTagInput(bodyParts.metadata.tags),
+    ...normalizeTagInput(note.metadata?.tags),
+    ...normalizeTagInput(note.tags),
+  ];
+  const bodyTags = getDisplayTags({ tags: bodyParts.metadata.tags });
+  const metadataTags = getDisplayTags({ tags: note.metadata?.tags });
+  const noteTags = getDisplayTags(note);
+  const tags = bodyTags.length > 0 ? bodyTags : metadataTags.length > 0 ? metadataTags : noteTags;
 
   return {
     ...note,
     title: metadata.title?.trim() || note.title || getFilenameTitle(note.relativePath),
-    tags: bodyTags.length > 0 ? bodyTags : metadataTags.length > 0 ? metadataTags : noteTags,
+    tags,
+    collection: getPostCollection({
+      tags: rawTags,
+      metadata,
+    }),
     created: bodyParts.metadata.created ?? note.created,
     updated: bodyParts.metadata.updated ?? note.updated,
     date: bodyParts.metadata.date ?? note.date,
@@ -912,6 +998,31 @@ function getCategoryCounts(notes: NoteSummary[]) {
   return Array.from(counts, ([name, count]) => ({ name, count })).sort(
     (a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"),
   );
+}
+
+function buildCollections(posts: NoteSummary[]): CollectionGroup[] {
+  const collections = new Map<string, NoteSummary[]>();
+
+  for (const post of posts) {
+    const collection = post.collection.trim() || "\u672a\u5f52\u6863";
+    const collectionPosts = collections.get(collection) ?? [];
+    collectionPosts.push(post);
+    collections.set(collection, collectionPosts);
+  }
+
+  return Array.from(collections, ([name, collectionPosts]) => {
+    const latestPost = collectionPosts
+      .map((post) => ({ post, date: getNoteDate(post) }))
+      .filter((item): item is { post: NoteSummary; date: Date } => Boolean(item.date))
+      .sort((a, b) => b.date.getTime() - a.date.getTime())[0];
+
+    return {
+      name,
+      posts: collectionPosts,
+      count: collectionPosts.length,
+      latestUpdatedAt: latestPost ? getNoteDateValue(latestPost.post) ?? undefined : undefined,
+    };
+  }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
 }
 
 function searchNotes(notes: NoteSummary[], query: string) {
