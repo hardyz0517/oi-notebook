@@ -89,8 +89,8 @@ type Route =
   | { name: "articles"; page: number; year: string | null }
   | { name: "tags"; page: number }
   | { name: "tag"; tag: string; page: number }
-  | { name: "categories"; page: number }
-  | { name: "category"; category: string; page: number }
+  | { name: "collections"; page: number }
+  | { name: "collection"; collection: string; page: number }
   | { name: "search"; query: string; page: number }
   | { name: "note"; encodedPath: string; relativePath: string };
 
@@ -181,6 +181,9 @@ function getRouteFromHash(): Route {
   const notePrefix = "#/note/";
   const tagsPrefix = "#/tags/";
   const tagPrefix = "#/tag/";
+  const collectionsPrefix = "#/collections/";
+  const collectionPrefix = "#/collection/";
+  const categoriesPrefix = "#/categories/";
   const categoryPrefix = "#/category/";
   const searchPrefix = "#/search";
 
@@ -229,19 +232,43 @@ function getRouteFromHash(): Route {
     }
   }
 
-  if (hashPath === "#/categories") {
-    return { name: "categories", page };
+  if (hashPath === "#/collections" || hashPath === "#/categories") {
+    return { name: "collections", page };
+  }
+
+  if (hashPath.startsWith(collectionsPrefix)) {
+    try {
+      return { name: "collection", collection: decodeURIComponent(hashPath.slice(collectionsPrefix.length)), page };
+    } catch {
+      return { name: "collections", page: 1 };
+    }
+  }
+
+  if (hashPath.startsWith(collectionPrefix)) {
+    try {
+      return { name: "collection", collection: decodeURIComponent(hashPath.slice(collectionPrefix.length)), page };
+    } catch {
+      return { name: "collections", page: 1 };
+    }
+  }
+
+  if (hashPath.startsWith(categoriesPrefix)) {
+    try {
+      return { name: "collection", collection: decodeURIComponent(hashPath.slice(categoriesPrefix.length)), page };
+    } catch {
+      return { name: "collections", page: 1 };
+    }
   }
 
   if (hashPath.startsWith(categoryPrefix)) {
     try {
       return {
-        name: "category",
-        category: decodeURIComponent(hashPath.slice(categoryPrefix.length)),
+        name: "collection",
+        collection: decodeURIComponent(hashPath.slice(categoryPrefix.length)),
         page,
       };
     } catch {
-      return { name: "categories", page: 1 };
+      return { name: "collections", page: 1 };
     }
   }
 
@@ -279,8 +306,8 @@ function getTagHref(tag: string, page = 1) {
   return withPageParam(`#/tags/${encodeURIComponent(tag)}`, page);
 }
 
-function getCategoryHref(category: string, page = 1) {
-  return withPageParam(`#/category/${encodeURIComponent(category)}`, page);
+function getCollectionHref(collection: string, page = 1) {
+  return withPageParam(`#/collections/${encodeURIComponent(collection)}`, page);
 }
 
 function getSearchHref(query: string, page = 1) {
@@ -293,8 +320,8 @@ function getRouteReturnHref(route: Exclude<Route, { name: "note"; encodedPath: s
   if (route.name === "articles") return getArticlesHref(route.page, route.year);
   if (route.name === "tags") return withPageParam("#/tags", route.page);
   if (route.name === "tag") return getTagHref(route.tag, route.page);
-  if (route.name === "categories") return withPageParam("#/categories", route.page);
-  if (route.name === "category") return getCategoryHref(route.category, route.page);
+  if (route.name === "collections") return withPageParam("#/collections", route.page);
+  if (route.name === "collection") return getCollectionHref(route.collection, route.page);
   if (route.name === "search") return getSearchHref(route.query, route.page);
   return "#/articles";
 }
@@ -311,7 +338,11 @@ function isSafeReturnPath(path: string) {
     hashPath === "#/tags" ||
     hashPath.startsWith("#/tags/") ||
     hashPath.startsWith("#/tag/") ||
+    hashPath === "#/collections" ||
+    hashPath.startsWith("#/collections/") ||
+    hashPath.startsWith("#/collection/") ||
     hashPath === "#/categories" ||
+    hashPath.startsWith("#/categories/") ||
     hashPath.startsWith("#/category/") ||
     hashPath === "#/search"
   );
@@ -321,7 +352,14 @@ function getReturnLabel(path: string) {
   const hashPath = getHashPath(`#${path}`);
   if (hashPath === "#/") return "\u8fd4\u56de\u9996\u9875";
   if (hashPath === "#/tags" || hashPath.startsWith("#/tags/") || hashPath.startsWith("#/tag/")) return "\u8fd4\u56de\u6807\u7b7e";
-  if (hashPath === "#/categories" || hashPath.startsWith("#/category/")) return "\u8fd4\u56de\u5206\u7c7b";
+  if (
+    hashPath === "#/collections" ||
+    hashPath.startsWith("#/collections/") ||
+    hashPath.startsWith("#/collection/") ||
+    hashPath === "#/categories" ||
+    hashPath.startsWith("#/categories/") ||
+    hashPath.startsWith("#/category/")
+  ) return "\u8fd4\u56de\u6587\u96c6";
   if (hashPath === "#/search") return "\u8fd4\u56de\u641c\u7d22";
   return "\u8fd4\u56de\u6587\u7ae0\u5217\u8868";
 }
@@ -1036,7 +1074,7 @@ function searchNotes(notes: NoteSummary[], query: string) {
       note.title,
       note.summary ?? "",
       note.excerpt ?? "",
-      note.articleClass ?? "",
+      note.collection,
       note.relativePath,
       ...getArticleTagSearchTerms(note),
     ];
@@ -1133,7 +1171,7 @@ export default function App() {
   }, []);
 
   const tagTree = useMemo(() => buildTagTree(notes), [notes]);
-  const categoryCounts = useMemo(() => getCategoryCounts(notes), [notes]);
+  const collections = useMemo(() => buildCollections(notes), [notes]);
 
   return (
     <main className="site-shell">
@@ -1154,7 +1192,7 @@ export default function App() {
             route={route}
             notes={notes}
             tagTree={tagTree}
-            categoryCounts={categoryCounts}
+            collections={collections}
             isLoading={isLoadingNotes}
             error={notesError}
             onRetry={() => void loadNotes()}
@@ -1168,7 +1206,7 @@ function IndexView({
   route,
   notes,
   tagTree,
-  categoryCounts,
+  collections,
   isLoading,
   error,
   onRetry,
@@ -1176,7 +1214,7 @@ function IndexView({
   route: Exclude<Route, { name: "note"; encodedPath: string; relativePath: string }>;
   notes: NoteSummary[];
   tagTree: TagTreeNode[];
-  categoryCounts: CountItem[];
+  collections: CollectionGroup[];
   isLoading: boolean;
   error: string | null;
   onRetry: () => void;
@@ -1244,33 +1282,27 @@ function IndexView({
     );
   }
 
-  if (route.name === "categories") {
-    const paged = paginateNotes(notes, route.page, resultPageSize);
-
+  if (route.name === "collections") {
     return (
-      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u5206\u7c7b"}>
-        <CategoryList categories={categoryCounts} />
-        <PostResults
-          notes={paged.items}
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u96c6"}>
+        <CollectionList
+          collections={collections}
           isLoading={isLoading}
           error={error}
           onRetry={onRetry}
-          sourceHref={getRouteReturnHref(route)}
-          variant="list"
-          emptyTitle={"\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u5206\u7c7b"}
-          emptyDescription={"\u4fdd\u5b58\u7b2c\u4e00\u7bc7\u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6309\u6587\u7ae0\u5927\u7c7b\u6c47\u603b\u5206\u7c7b\u3002"}
         />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => withPageParam("#/categories", page)} />
       </ListingPage>
     );
   }
 
-  if (route.name === "category") {
-    const filteredNotes = notes.filter((note) => (note.articleClass ?? "\u672a\u5206\u7c7b") === route.category);
+  if (route.name === "collection") {
+    const collection = getCategoryLabel(route.collection);
+    const filteredNotes = notes.filter((note) => note.collection === collection);
     const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
 
     return (
-      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u5206\u7c7b \u2192 " + route.category}>
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u96c6 \u2192 " + collection}>
+        <CollectionDetailHeader collection={collection} count={filteredNotes.length} />
         <PostResults
           notes={paged.items}
           isLoading={isLoading}
@@ -1278,8 +1310,10 @@ function IndexView({
           onRetry={onRetry}
           sourceHref={getRouteReturnHref(route)}
           variant="list"
+          emptyTitle={"\u8fd9\u4e2a\u6587\u96c6\u4e0b\u8fd8\u6ca1\u6709\u6587\u7ae0"}
+          emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
         />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCategoryHref(route.category, page)} />
+        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCollectionHref(collection, page)} />
       </ListingPage>
     );
   }
@@ -1325,8 +1359,8 @@ function SiteNav({ route }: { route: Route }) {
       ? "articles"
       : route.name === "tag"
         ? "tags"
-        : route.name === "category"
-          ? "categories"
+        : route.name === "collection"
+          ? "collections"
           : route.name;
 
   return (
@@ -1341,8 +1375,8 @@ function SiteNav({ route }: { route: Route }) {
         <a className={activeName === "tags" ? "active" : undefined} href="#/tags">
           {"\u6807\u7b7e"}
         </a>
-        <a className={activeName === "categories" ? "active" : undefined} href="#/categories">
-          {"\u5206\u7c7b"}
+        <a className={activeName === "collections" ? "active" : undefined} href="#/collections">
+          {"\u6587\u96c6"}
         </a>
       </nav>
       <a className={activeName === "search" ? "search-link active" : "search-link"} href="#/search" aria-label={"\u641c\u7d22"} title={"\u641c\u7d22"} />
@@ -1613,17 +1647,49 @@ function TagCloud({ tags }: { tags: CountItem[] }) {
   );
 }
 
-function CategoryList({ categories }: { categories: CountItem[] }) {
-  if (categories.length === 0) {
-    return null;
+function CollectionDetailHeader({ collection, count }: { collection: string; count: number }) {
+  return (
+    <header className="tag-detail-header">
+      <h1>{collection}</h1>
+      <p className="tag-detail-count">{"\u5171 " + count + " \u7bc7\u6587\u7ae0"}</p>
+    </header>
+  );
+}
+
+function CollectionList({
+  collections,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  collections: CollectionGroup[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (isLoading) {
+    return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6587\u96c6"} description={"\u6b63\u5728\u6309\u680f\u76ee\u3001\u7cfb\u5217\u548c\u9636\u6bb5\u6574\u7406\u672c\u5730\u6587\u7ae0\u3002"} />;
+  }
+
+  if (error) {
+    return <ErrorState title={"\u65e0\u6cd5\u8bfb\u53d6\u6587\u96c6"} description={"\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u6c47\u603b\u6587\u96c6\u3002"} onRetry={onRetry} />;
+  }
+
+  if (collections.length === 0) {
+    return (
+      <EmptyState
+        title={"\u8fd8\u6ca1\u6709\u6587\u96c6"}
+        description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6c47\u603b\u6587\u96c6\u3002"}
+      />
+    );
   }
 
   return (
-    <div className="category-list" aria-label={"\u5206\u7c7b\u5217\u8868"}>
-      {categories.map((category) => (
-        <a className="category-item" href={getCategoryHref(category.name)} key={category.name}>
-          <span>{getCategoryLabel(category.name)}</span>
-          <small>{category.count + " \u7bc7\u6587\u7ae0"}</small>
+    <div className="category-list" aria-label={"\u6587\u96c6\u5217\u8868"}>
+      {collections.map((collection) => (
+        <a className="category-item" href={getCollectionHref(collection.name)} key={collection.name}>
+          <span>{collection.name}</span>
+          <small>{collection.count + " \u7bc7\u6587\u7ae0"}</small>
         </a>
       ))}
     </div>
@@ -1717,7 +1783,7 @@ function ArchiveList({
               <li key={note.relativePath}>
                 <time dateTime={getNoteDateValue(note) ?? undefined}>{formatArchiveDay(note)}</time>
                 <a href={getNoteHref(note.relativePath, sourceHref)}>{note.title}</a>
-                <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
+                <span>{note.collection}</span>
               </li>
             ))}
           </ol>
@@ -1794,8 +1860,8 @@ function SearchView({
         emptyTitle={query ? "\u6ca1\u6709\u627e\u5230\u76f8\u5173\u6587\u7ae0" : "\u8fd8\u6ca1\u6709\u8f93\u5165\u641c\u7d22\u8bcd"}
         emptyDescription={
           query
-            ? "\u6362\u4e00\u4e2a\u6807\u9898\u3001\u6807\u7b7e\u3001\u5206\u7c7b\u6216\u6458\u8981\u91cc\u7684\u5173\u952e\u8bcd\u518d\u8bd5\u8bd5\u3002"
-            : "\u53ef\u4ee5\u641c\u7d22\u4e2d\u6587\u6807\u9898\u3001\u6807\u7b7e\u3001\u6458\u8981\u3001\u5206\u7c7b\u540d\u6216\u76f8\u5bf9\u8def\u5f84\u3002"
+            ? "\u6362\u4e00\u4e2a\u6807\u9898\u3001\u6807\u7b7e\u3001\u6587\u96c6\u6216\u6458\u8981\u91cc\u7684\u5173\u952e\u8bcd\u518d\u8bd5\u8bd5\u3002"
+            : "\u53ef\u4ee5\u641c\u7d22\u4e2d\u6587\u6807\u9898\u3001\u6807\u7b7e\u3001\u6458\u8981\u3001\u6587\u96c6\u540d\u6216\u76f8\u5bf9\u8def\u5f84\u3002"
         }
       />
       <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(nextPage) => getSearchHref(query, nextPage)} />
@@ -1860,7 +1926,7 @@ function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceH
       <article className="recent-card">
         <a href={getNoteHref(note.relativePath, sourceHref)}>
           <div className="post-meta">
-            <span>{note.articleClass ?? inferArticleClass({ relativePath: note.relativePath, category: note.category, tags: note.tags, metadata: {} })}</span>
+            <span>{note.collection}</span>
             {displayDate ? (
               <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time>
             ) : null}
@@ -1885,7 +1951,7 @@ function PostGrid({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: st
         <article className="post-card" key={note.relativePath}>
           <a className="post-card-link" href={getNoteHref(note.relativePath, sourceHref)}>
             <div className="post-meta">
-              <span>{note.articleClass ?? inferArticleClass({ relativePath: note.relativePath, category: note.category, tags: note.tags, metadata: {} })}</span>
+              <span>{note.collection}</span>
               {formatOptionalDate(note.date, note.updated, note.created) ? (
                 <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
                   {formatOptionalDate(note.date, note.updated, note.created)}
@@ -1913,7 +1979,7 @@ function ArticleResultList({ notes, sourceHref }: { notes: NoteSummary[]; source
           <article className="result-item" key={note.relativePath}>
             <a href={getNoteHref(note.relativePath, sourceHref)}>
               <div className="post-meta">
-                <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
+                <span>{note.collection}</span>
                 {displayDate ? <time dateTime={getNoteDateValue(note) ?? undefined}>{displayDate}</time> : null}
               </div>
               <h2>{note.title}</h2>
@@ -2133,12 +2199,6 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
 
   const displayDate = formatOptionalDate(note.updated, note.created, note.date);
   const summary = note.summary?.trim() || note.metadata.summary?.trim();
-  const articleClass = inferArticleClass({
-    relativePath: note.relativePath,
-    category: note.category,
-    tags: note.tags,
-    metadata: {},
-  });
   const currentIndex = notes.findIndex((summaryNote) => summaryNote.relativePath === note.relativePath);
   const previousNote = currentIndex > 0 ? notes[currentIndex - 1] : null;
   const nextNote = currentIndex !== -1 && currentIndex < notes.length - 1 ? notes[currentIndex + 1] : null;
@@ -2153,7 +2213,7 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
         <article className="note-page">
           <header className="note-header">
             <div className="post-meta">
-              <a href={getCategoryHref(articleClass)}>{articleClass}</a>
+              <a href={getCollectionHref(note.collection)}>{note.collection}</a>
               {displayDate ? <time>{displayDate}</time> : null}
               {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
             </div>
@@ -2276,7 +2336,7 @@ function NoteNavigationItem({
       <span className="note-nav-label">{label}</span>
       <h2>{note.title}</h2>
       <div className="note-nav-meta">
-        <span>{note.articleClass ?? "\u672a\u5206\u7c7b"}</span>
+        <span>{note.collection}</span>
         {displayDate ? <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time> : null}
       </div>
     </a>
