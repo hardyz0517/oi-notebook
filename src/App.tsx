@@ -1,12 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
-import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
-import { history, historyKeymap } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
-import { Compartment, EditorState, Prec } from "@codemirror/state";
-import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type ViewUpdate } from "@codemirror/view";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -375,6 +371,26 @@ function getLocalIndexStatusLabel(status: LocalNoteIndexStatusResult | null, isB
 function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {
   if (!status?.updatedAt) return "尚未记录";
   return new Date(status.updatedAt * 1000).toLocaleString();
+}
+
+function formatLocalIndexSize(bytes: number | null | undefined, includeBytes = false): string {
+  const safeBytes = Math.max(0, bytes ?? 0);
+  const units = ["B", "KB", "MB", "GB"];
+  let size = safeBytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const formattedSize = unitIndex === 0 ? `${safeBytes} B` : `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+  return includeBytes && unitIndex > 0 ? `${formattedSize} (${safeBytes.toLocaleString()} bytes)` : formattedSize;
+}
+
+function getLocalIndexAccessLabel(status: LocalNoteIndexStatusResult): string {
+  if (status.readable && status.writable) return "可读写";
+  if (status.readable) return "只读";
+  if (status.writable) return "仅可写入";
+  return "不可读取";
 }
 
 function getResizedLuoguDialogRect(handle: SettingsResizeHandle, startRect: SettingsCenterRect, deltaX: number, deltaY: number): SettingsCenterRect {
@@ -1019,6 +1035,7 @@ function getDifficultyOptionClassName(value: string): string {
 function cloneAiConfig(config: AiConfig): AiConfig {
   return {
     ...config,
+    chat_response_style: config.chat_response_style ?? "",
     web_search: normalizeWebSearchConfig(config.web_search),
     providers: config.providers.map((provider) => ({
       ...provider,
@@ -1068,6 +1085,7 @@ function normalizeAiConfigDraft(config: AiConfig): AiConfig {
     base_url: defaultProvider?.base_url ?? config.base_url.trim(),
     api_key: defaultProvider?.api_key ?? config.api_key.trim(),
     model: defaultModel ?? config.model.trim(),
+    chat_response_style: (config.chat_response_style ?? "").trim().slice(0, 2000),
     providers,
     default_provider_id: defaultProvider?.id ?? null,
     default_model_id: defaultModel,
@@ -1872,165 +1890,31 @@ interface PromptCodeEditorProps {
   onFontSizeChange: (updater: (currentSize: number) => number) => void;
 }
 
-const promptEditorTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    minHeight: "0",
-    backgroundColor: "transparent",
-    color: "var(--foreground)",
-    fontSize: "var(--prompt-editor-font-size, 14px)",
-  },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": {
-    overflow: "auto",
-    fontFamily: "var(--font-mono)",
-    lineHeight: "1.55",
-    scrollbarColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent",
-    scrollbarWidth: "thin",
-  },
-  ".cm-scroller::-webkit-scrollbar": { width: "10px", height: "10px" },
-  ".cm-scroller::-webkit-scrollbar-track": { backgroundColor: "transparent" },
-  ".cm-scroller::-webkit-scrollbar-thumb": {
-    backgroundColor: "color-mix(in oklch, var(--muted-foreground) 30%, transparent)",
-    border: "3px solid transparent",
-    backgroundClip: "content-box",
-  },
-  ".cm-scroller::-webkit-scrollbar-thumb:hover": {
-    backgroundColor: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "transparent",
-    borderRight: "1px solid color-mix(in oklch, var(--border) 28%, transparent)",
-    color: "color-mix(in oklch, var(--muted-foreground) 86%, transparent)",
-    fontFamily: "var(--font-mono)",
-    fontSize: "calc(var(--prompt-editor-font-size, 14px) * 0.86)",
-    lineHeight: "1.55",
-    userSelect: "none",
-  },
-  ".cm-lineNumbers .cm-gutterElement": {
-    minWidth: "2.35rem",
-    padding: "0 0.55rem 0 0.25rem",
-    textAlign: "right",
-    fontVariantNumeric: "tabular-nums",
-  },
-  ".cm-content": {
-    minHeight: "100%",
-    padding: "10px 14px 18px 10px",
-    caretColor: "var(--foreground)",
-  },
-  ".cm-line": {
-    padding: "0",
-  },
-  ".cm-activeLine": {
-    backgroundColor: "color-mix(in oklch, var(--muted) 18%, transparent)",
-  },
-  ".cm-activeLineGutter": {
-    backgroundColor: "color-mix(in oklch, var(--muted) 16%, transparent)",
-    color: "var(--foreground)",
-  },
-  ".cm-selectionBackground": {
-    backgroundColor: "var(--editor-selection-bg-unfocused, var(--muted))",
-  },
-  "&.cm-focused .cm-selectionBackground, ::selection": {
-    backgroundColor: "var(--editor-selection-bg, var(--accent))",
-  },
-  ".cm-cursor": {
-    borderLeftColor: "var(--foreground)",
-  },
-});
-
 const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProps>(function PromptCodeEditor(
   { value, fontSize, disabled = false, readOnly = false, onChange, onSave, onFontSizeChange },
   ref,
 ) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
-  const valueRef = useRef(value);
-  const onChangeRef = useRef(onChange);
-  const onSaveRef = useRef(onSave);
-  const editableCompartmentRef = useRef(new Compartment());
-
-  onChangeRef.current = onChange;
-  onSaveRef.current = onSave;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
 
   useImperativeHandle(ref, () => ({
-    focus: () => viewRef.current?.focus(),
-    hasFocus: () => viewRef.current?.hasFocus ?? false,
+    focus: () => textareaRef.current?.focus(),
+    hasFocus: () => document.activeElement === textareaRef.current,
     insertVariable: (variableName: string) => {
-      const view = viewRef.current;
-      if (!view) return false;
-      view.dispatch(view.state.replaceSelection(variableName));
-      view.focus();
+      const textarea = textareaRef.current;
+      const start = textarea ? textarea.selectionStart : value.length;
+      const end = textarea ? textarea.selectionEnd : value.length;
+      const nextValue = value.slice(0, start) + variableName + value.slice(end);
+      onChange(nextValue);
+      window.requestAnimationFrame(() => {
+        if (!textareaRef.current) return;
+        const cursor = start + variableName.length;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(cursor, cursor);
+      });
       return true;
     },
-  }), []);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const editableCompartment = editableCompartmentRef.current;
-    const view = new EditorView({
-      parent: containerRef.current,
-      state: EditorState.create({
-        doc: valueRef.current,
-        extensions: [
-          markdown(),
-          lineNumbers(),
-          highlightActiveLine(),
-          highlightActiveLineGutter(),
-          EditorView.lineWrapping,
-          history(),
-          editableCompartment.of(EditorView.editable.of(!disabled && !readOnly)),
-          Prec.highest(keymap.of([
-            {
-              key: "Mod-s",
-              run: () => {
-                onSaveRef.current();
-                return true;
-              },
-            },
-          ])),
-          keymap.of(historyKeymap),
-          EditorView.domEventHandlers({
-            keydown(event) {
-              event.stopPropagation();
-              return false;
-            },
-          }),
-          EditorView.updateListener.of((update: ViewUpdate) => {
-            if (!update.docChanged) return;
-            const nextValue = update.state.doc.toString();
-            valueRef.current = nextValue;
-            onChangeRef.current(nextValue);
-          }),
-          promptEditorTheme,
-        ],
-      }),
-    });
-
-    viewRef.current = view;
-    return () => {
-      view.destroy();
-      viewRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    view.dispatch({
-      effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(!disabled && !readOnly)),
-    });
-  }, [disabled, readOnly]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view || value === valueRef.current) return;
-    valueRef.current = value;
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-    });
-  }, [value]);
+  }), [onChange, value]);
 
   const handleWheelCapture = (event: WheelEvent<HTMLDivElement>) => {
     if (!(event.ctrlKey || event.metaKey)) return;
@@ -2045,13 +1929,69 @@ const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProp
     );
   };
 
+  const promptEditorLineHeight = Math.round(fontSize * 1.55);
+  const promptEditorPaddingY = Math.round(promptEditorLineHeight * 0.45);
+  const lineCount = Math.max(value.split("\n").length, 1);
+  const promptLineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => index + 1), [lineCount]);
+  const gutterWidth = Math.min(60, Math.max(48, String(lineCount).length * 8 + 28));
+  const editorStyle = {
+    fontSize: `${fontSize}px`,
+    lineHeight: `${promptEditorLineHeight}px`,
+    fontFamily: "var(--font-mono)",
+  } as const;
+  const editorPaddingStyle = {
+    paddingTop: `${promptEditorPaddingY}px`,
+    paddingBottom: `${promptEditorPaddingY}px`,
+  } as const;
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    event.stopPropagation();
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      onSave();
+    }
+  };
+
   return (
     <div
-      ref={containerRef}
-      className={cn("prompt-code-editor h-full min-h-0 w-full", (disabled || readOnly) && "opacity-70")}
-      style={{ "--prompt-editor-font-size": `${fontSize}px` } as CSSProperties}
+      className={cn("prompt-code-editor h-full min-h-0 w-full overflow-hidden", (disabled || readOnly) && "opacity-70")}
       onWheelCapture={handleWheelCapture}
-    />
+    >
+      <div className="flex h-full min-h-0 overflow-hidden border border-border/70 bg-background">
+        <div
+          className="shrink-0 select-none overflow-hidden border-r border-border/40 bg-muted/20 text-right text-muted-foreground"
+          style={{ ...editorStyle, width: gutterWidth, ...editorPaddingStyle }}
+          aria-hidden="true"
+        >
+          <div style={{ transform: `translateY(${-scrollTop}px)` }}>
+            {promptLineNumbers.map((line) => (
+              <div
+                key={line}
+                className="pr-3 tabular-nums"
+                style={{ height: `${promptEditorLineHeight}px`, lineHeight: `${promptEditorLineHeight}px` }}
+              >
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          wrap="off"
+          spellCheck={false}
+          autoCapitalize="none"
+          autoCorrect="off"
+          disabled={disabled}
+          readOnly={readOnly}
+          className="h-full min-w-0 flex-1 resize-none overflow-auto whitespace-pre bg-transparent px-3 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          style={{ ...editorStyle, ...editorPaddingStyle, whiteSpace: "pre", overflowWrap: "normal", wordBreak: "normal" }}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+          onKeyDown={handleKeyDown}
+        />
+      </div>
+    </div>
   );
 });
 
@@ -2106,14 +2046,6 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
     editable: true,
   };
 }
-
-const PROMPT_STYLE_PLACEHOLDER: PromptUsageInfo = {
-  title: "NoteX 回答风格",
-  scope: "全局回答语气",
-  purpose: "通用语气、报告味和回答风格后续会作为独立模板接入；不会散落到每个任务提示词。",
-  variables: [],
-  editable: false,
-};
 
 interface LoadedMarkdownParts {
   frontmatterPrefix: string;
@@ -2654,6 +2586,7 @@ export default function App() {
   const [localIndexMessage, setLocalIndexMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
+  const [chatResponseStyleDraft, setChatResponseStyleDraft] = useState("");
   const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
   const [aiManualModelId, setAiManualModelId] = useState("");
   const [aiModelSearchQuery, setAiModelSearchQuery] = useState("");
@@ -2713,6 +2646,11 @@ export default function App() {
   const pendingAutoSaveDraftRef = useRef<AiConfig | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingAiConfigRef = useRef(false);
+  const aiConfigRef = useRef<AiConfig | null>(null);
+  const aiConfigDraftRef = useRef<AiConfig | null>(null);
+  const pendingChatResponseStyleRef = useRef<string | null>(null);
+  const chatResponseStyleAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingChatResponseStyleRef = useRef(false);
   const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
   const hasRestoredOpenTabsRef = useRef(false);
   const skipNextReadForPathRef = useRef<string | null>(null);
@@ -2731,6 +2669,14 @@ export default function App() {
   const pendingChangeQueueRef = useRef<Array<{ version: number; length: number }>>([]);
   const [committedMarkdownVersion, setCommittedMarkdownVersion] = useState(0);
   const [externalDocVersion, setExternalDocVersion] = useState(0);
+  useEffect(() => {
+    aiConfigRef.current = aiConfig;
+  }, [aiConfig]);
+
+  useEffect(() => {
+    aiConfigDraftRef.current = aiConfigDraft;
+  }, [aiConfigDraft]);
+
   const cancelPendingSettingsCenterCloseCleanup = () => {
     if (settingsCloseCleanupRafRef.current !== null) {
       window.cancelAnimationFrame(settingsCloseCleanupRafRef.current);
@@ -2747,6 +2693,9 @@ export default function App() {
       isMountedRef.current = false;
       luoguPrepareRunRef.current.cancelled = true;
       cancelPendingSettingsCenterCloseCleanup();
+      if (chatResponseStyleAutoSaveTimerRef.current) {
+        window.clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
+      }
       if (pendingCommitRafRef.current !== null) {
         window.cancelAnimationFrame(pendingCommitRafRef.current);
       }
@@ -3540,7 +3489,12 @@ export default function App() {
     () => SETTINGS_TREE.filter((group) => developerModeEnabled || !group.developerOnly),
     [developerModeEnabled],
   );
-  const shouldRenderSettingsPage = (pageKey: SettingsSection, activePageKey: SettingsSection): boolean => activePageKey === pageKey;
+  const shouldRenderSettingsPage = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
+    if (activeTarget.type === "category") {
+      return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeTarget.category;
+    }
+    return activePageKey === pageKey;
+  };
   const settingsPageSectionClass = "grid min-w-0 gap-0 px-6 py-5";
   const promptTemplateRows = useMemo(
     () => promptTemplates.map((prompt) => ({
@@ -4500,6 +4454,9 @@ export default function App() {
     const nextConfig = cloneAiConfig(config);
     setAiConfig(nextConfig);
     setAiConfigDraft(cloneAiConfig(nextConfig));
+    if (pendingChatResponseStyleRef.current === null) {
+      setChatResponseStyleDraft(nextConfig.chat_response_style ?? "");
+    }
     const defaultProvider =
       config.providers.find((provider) => provider.id === config.default_provider_id) ??
       config.providers[0] ??
@@ -4518,7 +4475,11 @@ export default function App() {
     setAiConfigDraft((current) => current ? {
       ...cloneAiConfig(current),
       web_search: normalizeWebSearchConfig(nextConfig.web_search),
+      chat_response_style: current.chat_response_style ?? nextConfig.chat_response_style ?? "",
     } : cloneAiConfig(nextConfig));
+    if (pendingChatResponseStyleRef.current === null) {
+      setChatResponseStyleDraft(nextConfig.chat_response_style ?? "");
+    }
   };
 
   const selectAiProviderForEdit = (provider: AiProvider) => {
@@ -4547,6 +4508,7 @@ export default function App() {
         base_url: "",
         api_key: "",
         model: "",
+        chat_response_style: "",
         providers: [],
         default_provider_id: null,
         default_model_id: null,
@@ -4631,6 +4593,7 @@ export default function App() {
           base_url: "",
           api_key: "",
           model: "",
+          chat_response_style: "",
           providers: [],
           default_provider_id: null,
           default_model_id: null,
@@ -4704,6 +4667,82 @@ export default function App() {
         setIsSavingAiConfig(false);
       }
     }, 250);
+  };
+
+  const saveChatResponseStyleNow = async (style: string) => {
+    if (isSavingChatResponseStyleRef.current) return;
+    if (isSavingAiConfigRef.current) {
+      if (chatResponseStyleAutoSaveTimerRef.current) clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
+      chatResponseStyleAutoSaveTimerRef.current = setTimeout(() => {
+        chatResponseStyleAutoSaveTimerRef.current = null;
+        const pending = pendingChatResponseStyleRef.current;
+        if (pending !== null) void saveChatResponseStyleNow(pending);
+      }, 500);
+      return;
+    }
+    const sourceConfig = aiConfigRef.current;
+    const sourceDraft = aiConfigDraftRef.current;
+    if (!sourceConfig && !sourceDraft) return;
+    const styleToSave = style.slice(0, 2000);
+    const nextConfig = normalizeAiConfigDraft({
+      ...(sourceDraft ?? sourceConfig!),
+      web_search: normalizeWebSearchConfig(sourceConfig?.web_search ?? sourceDraft?.web_search),
+      chat_response_style: styleToSave,
+    });
+    isSavingChatResponseStyleRef.current = true;
+    try {
+      await saveAiConfig(nextConfig);
+      setAiConfig(cloneAiConfig(nextConfig));
+      setAiConfigDraft((current) => current ? {
+        ...cloneAiConfig(current),
+        chat_response_style: styleToSave,
+      } : cloneAiConfig(nextConfig));
+      if (pendingChatResponseStyleRef.current === styleToSave) {
+        pendingChatResponseStyleRef.current = null;
+      }
+    } catch (e) {
+      console.error("NoteX answer style auto-save failed:", e);
+    } finally {
+      isSavingChatResponseStyleRef.current = false;
+      const pending = pendingChatResponseStyleRef.current;
+      if (pending !== null && pending !== styleToSave) {
+        if (chatResponseStyleAutoSaveTimerRef.current) clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
+        chatResponseStyleAutoSaveTimerRef.current = setTimeout(() => {
+          chatResponseStyleAutoSaveTimerRef.current = null;
+          const latest = pendingChatResponseStyleRef.current;
+          if (latest !== null) void saveChatResponseStyleNow(latest);
+        }, 350);
+      }
+    }
+  };
+
+  const scheduleChatResponseStyleAutoSave = (style: string) => {
+    pendingChatResponseStyleRef.current = style.slice(0, 2000);
+    if (chatResponseStyleAutoSaveTimerRef.current) clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
+    chatResponseStyleAutoSaveTimerRef.current = setTimeout(() => {
+      chatResponseStyleAutoSaveTimerRef.current = null;
+      const pending = pendingChatResponseStyleRef.current;
+      if (pending !== null) void saveChatResponseStyleNow(pending);
+    }, 500);
+  };
+
+  const flushChatResponseStyleAutoSave = () => {
+    if (chatResponseStyleAutoSaveTimerRef.current) {
+      clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
+      chatResponseStyleAutoSaveTimerRef.current = null;
+    }
+    const pending = pendingChatResponseStyleRef.current;
+    if (pending !== null) void saveChatResponseStyleNow(pending);
+  };
+
+  const handleChatResponseStyleChange = (value: string) => {
+    const nextValue = value.slice(0, 2000);
+    setChatResponseStyleDraft(nextValue);
+    setAiConfigDraft((current) => current ? {
+      ...current,
+      chat_response_style: nextValue,
+    } : current);
+    scheduleChatResponseStyleAutoSave(nextValue);
   };
 
   const updateAiProviderDraft = (providerId: string, update: (provider: AiProvider) => AiProvider) => {
@@ -4936,18 +4975,18 @@ export default function App() {
     }
   };
 
-  const ActiveSettingsPageEffects = ({ activePageKey }: { activePageKey: SettingsSection }) => {
+  const ActiveSettingsPageEffects = ({ activePageKey, activeTarget }: { activePageKey: SettingsSection; activeTarget: SettingsTarget }) => {
     useEffect(() => {
-      const localNotesVisible = activePageKey === "ai-local-notes";
+      const localNotesVisible = shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget);
       if (!localNotesVisible || localIndexStatus || isLoadingLocalIndexStatus || isRebuildingLocalIndex) return;
       void refreshLocalIndexStatus();
-    }, [activePageKey]);
+    }, [activePageKey, activeTarget]);
 
     useEffect(() => {
-      if (activePageKey !== "ai-prompts" || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
+      if (!shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
       hasRequestedPromptTemplatesRef.current = true;
       void loadPromptTemplates();
-    }, [activePageKey]);
+    }, [activePageKey, activeTarget]);
 
     return null;
   };
@@ -6719,6 +6758,7 @@ export default function App() {
       debugTagManager("settings.close.ignoredForTagManager");
       return;
     }
+    flushChatResponseStyleAutoSave();
     if (hasAiConfigDraftChanges) {
       if (hasNonProviderAiChanges) {
         if (!window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
@@ -8637,10 +8677,10 @@ export default function App() {
           onReorderProviders={handleReorderAiProviders}
         />
       )}
-      renderActivePage={(activePageKey) => (
+      renderActivePage={(activePageKey, activeTarget) => (
         <>
-                  <ActiveSettingsPageEffects activePageKey={activePageKey} />
-                  {shouldRenderSettingsPage("appearance-theme", activePageKey) && (
+                  <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
+                  {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
                     <AppearanceSettingsPage
                       className={settingsPageSectionClass}
                       appTheme={appTheme}
@@ -8680,7 +8720,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("ai-api", activePageKey) && (
+                  {shouldRenderSettingsPage("ai-api", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">AI 供应商</div>
@@ -8717,7 +8757,7 @@ export default function App() {
                     </section>
                   )}
 
-                  {shouldRenderSettingsPage("ai-local-notes", activePageKey) && (
+                  {shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记索引</div><div className="text-xs leading-5 text-muted-foreground">用于让 NoteX 更快、更准确地从你的 Markdown 笔记中检索相关段落，只保存在本机。</div></div>
                       <SettingRow title="本地索引状态" description="显示本地笔记是否已经建立索引；读取状态不会触发重建。" align="start">
@@ -8742,11 +8782,31 @@ export default function App() {
                             <span>上次更新时间：{getLocalIndexUpdatedLabel(localIndexStatus)}</span>
                           </div>
                           {localIndexMessage && <div className="text-xs leading-5 text-muted-foreground">{localIndexMessage}</div>}
-                          {developerModeEnabled && localIndexStatus && (
-                            <div className="grid gap-1 rounded-md border border-border/70 bg-muted/15 px-2.5 py-2 font-mono text-[11px] leading-5 text-muted-foreground">
-                              <span>path={localIndexStatus.pathLabel}</span>
-                              <span>readable={String(localIndexStatus.readable)} writable={String(localIndexStatus.writable)} size={localIndexStatus.approxSizeBytes} bytes</span>
-                              {localIndexStatus.lastError && <span>lastError={localIndexStatus.lastError}</span>}
+                          {localIndexStatus && (
+                            <div className="grid gap-1 border-t border-border/60 pt-2 text-xs leading-5 text-muted-foreground">
+                              <div className="grid gap-0.5">
+                                <span>存储：<code className="rounded-sm bg-muted/25 px-1 py-0.5 font-mono text-[11px] text-foreground/75">{localIndexStatus.pathLabel}</code></span>
+                                <span>大小：{formatLocalIndexSize(localIndexStatus.approxSizeBytes)}</span>
+                                <span>权限：{getLocalIndexAccessLabel(localIndexStatus)}</span>
+                              </div>
+                              {developerModeEnabled && (
+                                <div className="min-w-0 text-[11px] leading-5 text-muted-foreground/80">
+                                  <span className="mr-1">开发信息：</span>
+                                  <code className="inline-block max-w-full truncate align-bottom font-mono text-[11px] text-foreground/65">{localIndexStatus.pathLabel}</code>
+                                  <span className="mx-1">·</span>
+                                  <span>{localIndexStatus.approxSizeBytes.toLocaleString()} bytes</span>
+                                  <span className="mx-1">·</span>
+                                  <span>{localIndexStatus.readable ? "可读" : "不可读"}</span>
+                                  <span className="mx-1">·</span>
+                                  <span>{localIndexStatus.writable ? "可写" : "不可写"}</span>
+                                  {localIndexStatus.lastError && (
+                                    <div className="truncate text-red-600 dark:text-red-300">最近错误：{localIndexStatus.lastError}</div>
+                                  )}
+                                </div>
+                              )}
+                              {!developerModeEnabled && localIndexStatus.lastError && (
+                                <div className="truncate text-red-600 dark:text-red-300">最近错误：{localIndexStatus.lastError}</div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -8764,7 +8824,7 @@ export default function App() {
                     </section>
                   )}
 
-                  {shouldRenderSettingsPage("ai-web-search", activePageKey) && (
+                  {shouldRenderSettingsPage("ai-web-search", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">联网搜索</div>
@@ -8860,50 +8920,73 @@ export default function App() {
                     </section>
                   )}
 
-                  {shouldRenderSettingsPage("ai-prompts", activePageKey) && (
+                  {shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">提示词模板</div>
                         <div className="text-xs leading-5 text-muted-foreground">管理本地 AI 提示词模板。打开编辑器后可保存、润色并查看变量说明。</div>
                       </div>
-                      <SettingRow title="模板列表" description="模板内容从本地配置读取，只有进入本页时才加载。" align="start">
+                      <SettingRow title="NoteX 回答风格" description="只影响会话中的回答风格，不影响润色、总结、生成笔记等文件编辑类任务。" align="start">
                         <div className="grid gap-2">
-                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" size="sm" onClick={() => void loadPromptTemplates()} disabled={isLoadingPrompt || isSavingPrompt || isPolishingPrompt}>
-                              {isLoadingPrompt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                              {isLoadingPrompt ? "读取中..." : "刷新模板"}
-                            </Button>
+                          <textarea
+                            value={chatResponseStyleDraft}
+                            placeholder="例如：回答尽量自然一点，少用列表；解释算法时更注重直觉；不需要太官方的语气。"
+                            onChange={(event) => handleChatResponseStyleChange(event.target.value)}
+                            disabled={isLoadingAiConfig || !aiConfigDraft}
+                            className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                          <div className="text-xs leading-5 text-muted-foreground">
+                            这段内容会作为聊天回答的附加风格偏好拼接到系统提示中；留空则使用默认回答风格。
                           </div>
-                          {promptTemplateRows.length > 0 ? (
-                            <div className="grid gap-1 border-y border-border/60">
-                              {promptTemplateRows.map((prompt) => (
-                                <button
-                                  key={prompt.fileName}
-                                  type="button"
-                                  className="grid min-w-0 gap-1 border-b border-border/50 px-2 py-2 text-left last:border-b-0 hover:bg-muted/40"
-                                  onClick={() => handleEditPrompt(prompt.fileName)}
-                                  disabled={isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
-                                >
-                                  <span className="min-w-0 truncate text-sm font-medium text-foreground">{prompt.usage.title}</span>
-                                  <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{prompt.fileName}</span>
-                                  <span className="text-xs leading-5 text-muted-foreground">{prompt.usage.purpose}</span>
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="rounded-sm border border-border/70 bg-muted/10 px-3 py-4 text-sm text-muted-foreground">
-                              {isLoadingPrompt ? "正在读取提示词模板..." : "尚未加载到提示词模板。点击刷新模板重试。"}
-                            </div>
-                          )}
                         </div>
                       </SettingRow>
-                      <SettingRow title={PROMPT_STYLE_PLACEHOLDER.title} description={PROMPT_STYLE_PLACEHOLDER.purpose}>
-                        <span className="text-sm text-muted-foreground">后续作为独立模板接入；当前不会空白。</span>
-                      </SettingRow>
+                      <div className="grid min-w-0 gap-3 border-b border-border/60 py-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-medium text-foreground">模板列表</h3>
+                            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">模板内容从本地配置读取，只有进入本页时才加载。</p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 shrink-0 px-2.5 text-xs"
+                            onClick={() => void loadPromptTemplates()}
+                            disabled={isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
+                          >
+                            {isLoadingPrompt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            {isLoadingPrompt ? "读取中..." : "刷新模板"}
+                          </Button>
+                        </div>
+                        {promptTemplateRows.length > 0 ? (
+                          <div className="w-full border-y border-border/50">
+                            {promptTemplateRows.map((prompt) => (
+                              <button
+                                key={prompt.fileName}
+                                type="button"
+                                className="group flex w-full min-w-0 cursor-pointer items-start justify-between gap-6 border-b border-border/40 px-0 py-4 text-left last:border-b-0 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                onClick={() => handleEditPrompt(prompt.fileName)}
+                                disabled={isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                                    <h4 className="min-w-0 truncate text-sm font-medium text-foreground">{prompt.usage.title}</h4>
+                                    <code className="max-w-full shrink-0 truncate font-mono text-xs text-muted-foreground">{prompt.fileName}</code>
+                                  </div>
+                                  <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{prompt.usage.purpose}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="w-full border-y border-border/50 px-0 py-4 text-sm leading-6 text-muted-foreground">
+                            {isLoadingPrompt ? "正在读取提示词模板..." : "尚未加载到提示词模板。点击刷新模板重试。"}
+                          </div>
+                        )}
+                      </div>
                     </section>
                   )}
 
-                  {shouldRenderSettingsPage("luogu-account", activePageKey) && (
+                  {shouldRenderSettingsPage("luogu-account", activePageKey, activeTarget) && (
                     <LuoguAccountSettingsPage
                       className={settingsPageSectionClass}
                       configured={luoguConfigured}
@@ -8920,7 +9003,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("luogu-rules", activePageKey) && (
+                  {shouldRenderSettingsPage("luogu-rules", activePageKey, activeTarget) && (
                     <LuoguRulesSettingsPage
                       className={settingsPageSectionClass}
                       rows={luoguRuleSettingRows}
@@ -8933,7 +9016,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("luogu-import-center", activePageKey) && (
+                  {shouldRenderSettingsPage("luogu-import-center", activePageKey, activeTarget) && (
                     <LuoguImportCenterSettingsPage
                       className={settingsPageSectionClass}
                       accountLabel={luoguImportCenterAccountLabel}
@@ -8944,7 +9027,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-taxonomy", activePageKey) && (
+                  {shouldRenderSettingsPage("blog-tag-taxonomy", activePageKey, activeTarget) && (
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
                       isLoadingTagTaxonomyConfig={isLoadingTagTaxonomyConfig}
@@ -9007,7 +9090,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-manager", activePageKey) && (
+                  {shouldRenderSettingsPage("blog-tag-manager", activePageKey, activeTarget) && (
                     <BlogTagManagerSettingsPage
                       className={settingsPageSectionClass}
                       availableCandidateCount={tagManagerAvailableCandidateCount}
@@ -9018,7 +9101,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-preview", activePageKey) && (
+                  {shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget) && (
                     <BlogPreviewSettingsPage
                       className={settingsPageSectionClass}
                       isRestartingBlog={isRestartingBlog}
@@ -9027,7 +9110,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("data-storage", activePageKey) && (
+                  {shouldRenderSettingsPage("data-storage", activePageKey, activeTarget) && (
                     <DataStorageSettingsPage
                       className={settingsPageSectionClass}
                       isClearingWebCache={isClearingWebCache}
@@ -9036,7 +9119,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("about-version", activePageKey) && (
+                  {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
                     <AboutVersionSettingsPage
                       className={settingsPageSectionClass}
                       developerModeEnabled={developerModeEnabled}
@@ -9044,24 +9127,24 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("about-markdown", activePageKey) && (
+                  {shouldRenderSettingsPage("about-markdown", activePageKey, activeTarget) && (
                     <AboutMarkdownSettingsPage
                       className={settingsPageSectionClass}
                       capabilities={MARKDOWN_CAPABILITIES}
                     />
                   )}
 
-                  {shouldRenderSettingsPage("about-privacy", activePageKey) && (
+                  {shouldRenderSettingsPage("about-privacy", activePageKey, activeTarget) && (
                     <AboutPrivacySettingsPage className={settingsPageSectionClass} />
                   )}
 
-                  {developerModeEnabled && shouldRenderSettingsPage("diagnostics-search", activePageKey) && (
+                  {developerModeEnabled && shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
                     </section>
                   )}
 
-                  {developerModeEnabled && shouldRenderSettingsPage("git-sync", activePageKey) && (
+                  {developerModeEnabled && shouldRenderSettingsPage("git-sync", activePageKey, activeTarget) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 text-base font-semibold text-foreground">进阶同步入口</div>
                       <SettingRow title="Git 同步" description="整理完本地改动后再使用。"><Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}><Upload className="h-3.5 w-3.5" />{isPushingGit ? "同步中..." : "同步 Git"}</Button></SettingRow>
@@ -9957,3 +10040,4 @@ export default function App() {
     </>
   );
 }
+

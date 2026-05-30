@@ -264,12 +264,12 @@
   counter-reset: oi-code-line;
 }
 
-.cm-editor,
-.cm-editor .cm-scroller,
-.cm-editor .cm-content,
-.cm-editor .cm-content *,
-.cm-editor .cm-line,
-.cm-editor .cm-line * {
+.app-editor-workspace .cm-editor,
+.app-editor-workspace .cm-editor .cm-scroller,
+.app-editor-workspace .cm-editor .cm-content,
+.app-editor-workspace .cm-editor .cm-content *,
+.app-editor-workspace .cm-editor .cm-line,
+.app-editor-workspace .cm-editor .cm-line * {
   font-family: var(--font-mono) !important;
   font-variant-ligatures: none !important;
   font-feature-settings:
@@ -278,121 +278,121 @@
     "calt" 0 !important;
 }
 
-.cm-editor,
-.cm-editor .cm-content,
-.cm-editor .cm-line {
+.app-editor-workspace .cm-editor,
+.app-editor-workspace .cm-editor .cm-content,
+.app-editor-workspace .cm-editor .cm-line {
   color: var(--foreground);
 }
 
-html[data-theme="light"] .cm-editor .cm-line span {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-line span {
   color: #333330;
 }
 
-html[data-theme="light"] .cm-editor .cm-gutters,
-html[data-theme="light"] .cm-editor .cm-gutterElement {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters,
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutterElement {
   color: color-mix(in oklch, var(--text-muted) 78%, var(--surface-editor));
   background-color: color-mix(in oklch, var(--surface-card-soft) 76%, var(--surface-editor)) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-gutters {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters {
   border-right-color: color-mix(in oklch, var(--separator-strong) 86%, transparent) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-activeLineGutter {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-activeLineGutter {
   color: var(--text-secondary);
 }
 
-html[data-theme="light"] .cm-editor .cm-foldGutter .cm-gutterElement {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement {
   color: var(--text-muted);
 }
 
-html[data-theme="light"] .cm-editor .cm-foldGutter .cm-gutterElement:hover {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement:hover {
   color: var(--text-secondary);
 }
 
-html[data-theme="light"] .cm-editor,
-html[data-theme="light"] .cm-editor .cm-scroller,
-html[data-theme="light"] .cm-editor .cm-gutters {
+html[data-theme="light"] .app-editor-workspace .cm-editor,
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller,
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-gutters {
   background-color: var(--surface-editor) !important;
 }
 
-html[data-theme="dark"] .cm-editor .cm-foldGutter .cm-gutterElement {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement {
   color: #7d8590;
 }
 
-html[data-theme="dark"] .cm-editor .cm-gutters,
-html[data-theme="dark"] .cm-editor .cm-gutterElement {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutters,
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutterElement {
   background-color: var(--background);
 }
 
-html[data-theme="dark"] .cm-editor .cm-gutters {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutters {
   border-right-color: rgb(255 255 255 / 3%);
 }
 
-html[data-theme="dark"] .cm-editor .cm-lineNumbers .cm-gutterElement {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-lineNumbers .cm-gutterElement {
   color: #7d8590;
 }
 
-html[data-theme="dark"] .cm-editor .cm-activeLineGutter {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-activeLineGutter {
   color: #c9d1d9;
 }
 
-html[data-theme="dark"] .cm-editor .cm-foldGutter .cm-gutterElement:hover {
+html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutterElement:hover {
   color: #c9d1d9;
 }
 
-html[data-theme="light"] .cm-editor .cm-selectionBackground,
-html[data-theme="light"] .cm-editor.cm-focused .cm-selectionBackground {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-selectionBackground,
+html[data-theme="light"] .app-editor-workspace .cm-editor.cm-focused .cm-selectionBackground {
   background-color: var(--editor-selection-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor:not(.cm-focused) .cm-selectionBackground {
+html[data-theme="light"] .app-editor-workspace .cm-editor:not(.cm-focused) .cm-selectionBackground {
   background-color: var(--editor-selection-bg-unfocused) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-activeLine {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-activeLine {
   background-color: var(--editor-active-line-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-activeLineGutter {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-activeLineGutter {
   background-color: var(--editor-active-line-gutter-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-searchMatch {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-searchMatch {
   background-color: var(--editor-search-match-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-searchMatch.cm-searchMatch-selected {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-searchMatch.cm-searchMatch-selected {
   background-color: var(--editor-search-match-selected-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-selectionMatch {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-selectionMatch {
   background-color: var(--editor-search-match-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor ::selection {
+html[data-theme="light"] .app-editor-workspace .cm-editor ::selection {
   background-color: var(--editor-selection-bg) !important;
 }
 
-html[data-theme="light"] .cm-editor {
+html[data-theme="light"] .app-editor-workspace .cm-editor {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 62%);
 }
 
-html[data-theme="light"] .cm-editor .cm-content {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-content {
   color: #333330;
 }
 
-html[data-theme="light"] .cm-editor .cm-cursor,
-html[data-theme="light"] .cm-editor .cm-dropCursor {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-cursor,
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-dropCursor {
   border-left-color: var(--text-title) !important;
 }
 
-html[data-theme="light"] .cm-editor .cm-scroller::-webkit-scrollbar-thumb {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller::-webkit-scrollbar-thumb {
   background-color: transparent;
 }
 
-html[data-theme="light"] .cm-editor .cm-scroller:hover::-webkit-scrollbar-thumb,
-html[data-theme="light"] .cm-editor .cm-scroller:focus-within::-webkit-scrollbar-thumb {
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller:hover::-webkit-scrollbar-thumb,
+html[data-theme="light"] .app-editor-workspace .cm-editor .cm-scroller:focus-within::-webkit-scrollbar-thumb {
   background-color: color-mix(in oklch, var(--scrollbar-thumb) 56%, transparent);
 }
 

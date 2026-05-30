@@ -69,6 +69,7 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
   ) => {
     const [open, setOpen] = useState(false);
     const [activePageKey, setActivePageKey] = useState<SettingsSection>(defaultPage);
+    const [activeSettingsTarget, setActiveSettingsTarget] = useState<SettingsTarget>({ type: "page", page: defaultPage });
     const [settingsView, setSettingsView] = useState<SettingsView>("main");
     const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>({});
 
@@ -130,9 +131,18 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       });
     }, [sectionLabels]);
 
+    const expandGroup = useCallback((groupId: SettingsGroupId, forceReset: boolean) => {
+      setExpandedSettingsGroups((current) => {
+        const next = forceReset ? {} : current;
+        return next[groupId] === true ? next : { ...next, [groupId]: true };
+      });
+    }, []);
+
     const openPageInternal = useCallback((page: SettingsSection, options?: { resetExpanded?: boolean }) => {
       const wasOpen = openRef.current;
       const nextPage = setActivePage(page);
+      const nextTarget: SettingsTarget = { type: "page", page: nextPage };
+      setActiveSettingsTarget(nextTarget);
       setHostView("main");
       expandActiveGroup(nextPage, options?.resetExpanded ?? !wasOpen);
       ensureOpen();
@@ -149,8 +159,17 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       const canShowFallbackPage =
         category === "editor" ||
         (fallbackGroupId !== undefined && visibleGroupIds.has(fallbackGroupId) && visiblePageIds.has(fallbackPage));
-      return openPageInternal(canShowFallbackPage ? fallbackPage : defaultPage);
-    }, [defaultPage, openPageInternal, sectionFallback, sectionLabels, visibleGroupIds, visiblePageIds]);
+      const nextPage = setActivePage(canShowFallbackPage ? fallbackPage : defaultPage);
+      const targetCategory = visibleGroupIds.has(category as SettingsGroupId)
+        ? category as SettingsGroupId
+        : sectionLabels[nextPage]?.groupId ?? "appearance";
+      const nextTarget: SettingsTarget = { type: "category", category: targetCategory };
+      setActiveSettingsTarget(nextTarget);
+      setHostView("main");
+      expandGroup(targetCategory, !openRef.current);
+      ensureOpen();
+      return nextPage;
+    }, [defaultPage, ensureOpen, expandGroup, sectionFallback, sectionLabels, setActivePage, setHostView, visibleGroupIds, visiblePageIds]);
 
     const openTarget = useCallback((target: SettingsTarget) => {
       return target.type === "category" ? openSection(target.category) : openPageInternal(target.page);
@@ -242,21 +261,30 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
     }, [onSettingsViewChange, settingsView]);
 
     useEffect(() => {
-      if (visiblePageIds.has(activePageKey)) return;
+      if (activeSettingsTarget.type === "category" && visibleGroupIds.has(activeSettingsTarget.category)) return;
+      if (activeSettingsTarget.type === "page" && visiblePageIds.has(activePageKey)) return;
       const fallbackCategory = visibleSettingsTree[0]?.id ?? "appearance";
-      setActivePage(sectionFallback[fallbackCategory] ?? defaultPage);
+      const fallbackPage = setActivePage(sectionFallback[fallbackCategory] ?? defaultPage);
+      const nextTarget: SettingsTarget = { type: "page", page: fallbackPage };
+      setActiveSettingsTarget(nextTarget);
       setHostView("main");
-    }, [activePageKey, defaultPage, sectionFallback, setActivePage, setHostView, visiblePageIds, visibleSettingsTree]);
+    }, [activePageKey, activeSettingsTarget, defaultPage, sectionFallback, setActivePage, setHostView, visibleGroupIds, visiblePageIds, visibleSettingsTree]);
 
     useEffect(() => {
       if (settingsView !== "main") return;
       const settingsContent = contentRef.current;
       if (settingsContent) settingsContent.scrollTop = 0;
-    }, [activePageKey, contentRef, settingsView]);
+    }, [activePageKey, activeSettingsTarget, contentRef, settingsView]);
 
-    const activeSettingsGroupId = sectionLabels[activePageKey]?.groupId ?? "appearance";
-    const activeSettingsLabel = sectionLabels[activePageKey] ?? sectionLabels[defaultPage];
-    const activeSettingsTarget: SettingsTarget = { type: "page", page: activePageKey };
+    const activeSettingsGroupId =
+      activeSettingsTarget.type === "category"
+        ? activeSettingsTarget.category
+        : sectionLabels[activePageKey]?.groupId ?? "appearance";
+    const activeGroupLabel = visibleSettingsTree.find((group) => group.id === activeSettingsGroupId)?.label ?? sectionLabels[activePageKey]?.group ?? sectionLabels[defaultPage].group;
+    const activeSettingsLabel =
+      activeSettingsTarget.type === "category"
+        ? { group: activeGroupLabel, section: "" }
+        : sectionLabels[activePageKey] ?? sectionLabels[defaultPage];
 
     return (
       <SettingsCenterShell

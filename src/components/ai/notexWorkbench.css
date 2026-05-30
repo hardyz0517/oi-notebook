@@ -339,11 +339,12 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-model-menu {
-  bottom: calc(100% + 8px) !important;
-  left: 30px !important;
+  bottom: 54px !important;
+  left: 14px !important;
   z-index: 45;
-  width: min(340px, calc(100% - 60px));
-  max-width: calc(100% - 60px);
+  width: min(340px, calc(100% - 28px));
+  min-width: min(260px, calc(100% - 28px));
+  max-width: calc(100% - 28px);
   max-height: min(360px, calc(100dvh - var(--notex-top-total-height) - var(--notex-composer-avoid-height) - 48px));
   border-radius: 18px !important;
   border-color: var(--notex-border) !important;

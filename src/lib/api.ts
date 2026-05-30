@@ -42,6 +42,7 @@ export interface AiConfig {
   base_url: string;
   api_key: string;
   model: string;
+  chat_response_style: string;
   providers: AiProvider[];
   default_provider_id: string | null;
   default_model_id: string | null;

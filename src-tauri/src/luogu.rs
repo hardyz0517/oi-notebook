@@ -49,6 +49,8 @@ pub struct AiConfigFields {
     #[serde(default)]
     pub model: String,
     #[serde(default)]
+    pub chat_response_style: String,
+    #[serde(default)]
     pub providers: Vec<AiProvider>,
     #[serde(default)]
     pub default_provider_id: Option<String>,

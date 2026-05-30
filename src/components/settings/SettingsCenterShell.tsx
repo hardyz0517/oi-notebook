@@ -34,7 +34,7 @@ export interface SettingsCenterShellProps {
   promptHeaderActions?: ReactNode;
   renderPromptEditor: () => ReactNode;
   renderAiConfigManager?: () => ReactNode;
-  renderActivePage: (activePageKey: SettingsSection) => ReactNode;
+  renderActivePage: (activePageKey: SettingsSection, activeTarget: SettingsTarget) => ReactNode;
   onOpenChange: (open: boolean) => void;
   onToggleMaximize: () => void;
   onCloseRequest: () => void;
@@ -165,7 +165,7 @@ export default function SettingsCenterShell({
                         {isExpanded && (
                           <div className="grid gap-0 pl-5">
                             {group.children.map((child) => {
-                              const isActive = activeSettingsPageKey === child.id;
+                              const isActive = activeSettingsTarget.type === "page" && activeSettingsPageKey === child.id;
                               return (
                                 <button
                                   key={child.id}
@@ -202,7 +202,7 @@ export default function SettingsCenterShell({
                   <div className="text-sm font-semibold text-foreground">{activeSettingsLabel.group}</div>
                   {activeSettingsLabel.section && <div className="text-xs text-muted-foreground">{activeSettingsLabel.section}</div>}
                 </div>
-                <div className="grid min-w-0 gap-0 px-0 py-2">{renderActivePage(activeSettingsPageKey)}</div>
+                <div className="grid min-w-0 gap-0 px-0 py-2">{renderActivePage(activeSettingsPageKey, activeSettingsTarget)}</div>
               </div>
             )}
           </main>

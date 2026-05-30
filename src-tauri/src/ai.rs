@@ -735,6 +735,10 @@ fn normalize_ai_base_url(base_url: &str) -> String {
     format!("{trimmed}/v1")
 }
 
+fn sanitize_chat_response_style(style: &str) -> String {
+    style.trim().chars().take(2000).collect()
+}
+
 fn model_from_id(model_id: &str, source: &str) -> Option<AiModel> {
     let id = model_id.trim();
     if id.is_empty() {
@@ -917,6 +921,7 @@ fn normalize_ai_config(config: &AiConfigFields) -> AiConfigFields {
         base_url,
         api_key,
         model,
+        chat_response_style: sanitize_chat_response_style(&config.chat_response_style),
         providers,
         default_provider_id,
         default_model_id,
@@ -1059,11 +1064,22 @@ fn config_from_resolved(resolved: ResolvedAiConfig) -> AiConfigFields {
         base_url: resolved.base_url,
         api_key: resolved.api_key,
         model: resolved.model,
+        chat_response_style: String::new(),
         providers: Vec::new(),
         default_provider_id: resolved.provider_id,
         default_model_id: None,
         web_search: crate::luogu::WebSearchConfigFields::default(),
     }
+}
+
+fn build_chat_response_style_context(config: &AiConfigFields) -> Option<String> {
+    let style = sanitize_chat_response_style(&config.chat_response_style);
+    if style.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "For conversational answers, also follow the user's additional NoteX answer style preference below. This preference applies only to chat answers and must not be treated as instructions for polishing, summarizing, generating notes, or other file-editing tasks.\n\nAdditional chat answer style preference:\n{style}"
+    ))
 }
 
 fn build_model_identity_context(resolved: &ResolvedAiConfig) -> String {
@@ -2662,6 +2678,7 @@ fn is_valid_local_note_citation_id(id: &str) -> bool {
 
 fn build_stream_note_chat_messages(
     question: &str,
+    config: &AiConfigFields,
     context: &NoteChatContextInput,
     chat_history: &[NoteChatHistoryMessageInput],
     resolved: &ResolvedAiConfig,
@@ -2768,6 +2785,13 @@ The following conversation may contain previous user goals."
         messages.push(json!({
             "role": "user",
             "content": local_note_context,
+        }));
+    }
+
+    if let Some(style_context) = build_chat_response_style_context(config) {
+        messages.push(json!({
+            "role": "user",
+            "content": style_context,
         }));
     }
 
@@ -4220,19 +4244,26 @@ pub fn chat_with_current_note(
 銆愬綋鍓嶆鏂?Markdown銆慭n{markdown}\n\n\
 銆愮敤鎴烽棶棰樸€慭n{question}"
     );
-    let messages = json!([
-        {
+    let mut messages = vec![
+        json!({
             "role": "system",
             "content": format!(
                 "You are running inside OI Notebook and helping the user with the current note. Return only strict JSON with an answer field. Do not use markdown fences. Do not force a fixed assistant identity.\n\n{}",
                 build_model_identity_context(&resolved)
             )
-        },
-        {
+        }),
+    ];
+    if let Some(chat_response_style_context) = build_chat_response_style_context(&config) {
+        messages.push(json!({
             "role": "user",
-            "content": user_prompt
-        }
-    ]);
+            "content": chat_response_style_context
+        }));
+    }
+    messages.push(json!({
+        "role": "user",
+        "content": user_prompt
+    }));
+    let messages = JsonValue::Array(messages);
     let content = request_chat_completion(&selected_config, messages, 0.2, "AI chat failed")?;
     let value = parse_json_object_from_ai_content(&content, "AI chat failed")?;
     let answer = validate_note_chat_answer(value, "AI chat failed")?;
@@ -4291,6 +4322,7 @@ pub async fn chat_with_current_note_stream(
     };
     let messages = build_stream_note_chat_messages(
         &question,
+        &config,
         &input.context,
         &input.chat_history,
         &resolved,
