@@ -63,7 +63,7 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 ## 你可以用它做什么
 
 - 写 Markdown 笔记：左边编辑，右边实时预览，支持标题、列表、代码块、表格、图片和公式。
-- 打开本地博客复习：点击左侧 Activity Bar 的“博客”，用更适合阅读的页面回看自己的笔记。
+- 打开本地博客复习：点击左侧 Activity Bar 的"博客"，用更适合阅读的页面回看自己的笔记。
 - 用 AI 整理内容：配置 API 后，可以让 AI 补全标题、标签、摘要，也可以尝试润色正文。
 - 同步洛谷心得：配置洛谷 Cookie 后，可以把 AC 提交里的沉淀内容同步成笔记。
 
@@ -71,13 +71,13 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 笔记默认保存在本机数据目录的 \`notes/\` 里。开发版会打开项目里的 \`notes/\`，安装版会打开系统 app data 里的 \`notes/\`。
 
-想看真实位置，可以点设置中心的“数据与存储”。
+想看真实位置，可以点设置中心的"数据与存储"。
 
 ## 推荐第一步
 
-1. 点左侧笔记列表右上角的“+”，新建一篇 trick 或 problem 笔记。
-2. 写几行 Markdown，然后点顶部“保存”。
-3. 点左侧 Activity Bar 的“博客”，看看它在本地博客里的效果。
+1. 点左侧笔记列表右上角的"+"，新建一篇 trick 或 problem 笔记。
+2. 写几行 Markdown，然后点顶部"保存"。
+3. 点左侧 Activity Bar 的"博客"，看看它在本地博客里的效果。
 
 普通写笔记和本地博客不需要配置 AI 或洛谷；这些能力可以等你熟悉后再打开。
 `;
@@ -1038,7 +1038,7 @@ function normalizeAiConfigDraft(config: AiConfig): AiConfig {
         updated_at: model.updated_at ?? null,
       }))
       .filter((model, index, items) => model.id && items.findIndex((item) => item.id === model.id) === index);
-    const defaultModel = provider.default_model?.trim() || models.find((model) => model.enabled)?.id || models[0]?.id || null;
+    const defaultModel = provider.default_model?.trim() || null;
 
     return {
       ...provider,
@@ -1062,8 +1062,6 @@ function normalizeAiConfigDraft(config: AiConfig): AiConfig {
   const defaultModel =
     defaultProvider?.models.find((model) => model.id === config.default_model_id && model.enabled)?.id ??
     defaultProvider?.default_model ??
-    defaultProvider?.models.find((model) => model.enabled)?.id ??
-    defaultProvider?.models[0]?.id ??
     null;
 
   return {
@@ -2712,6 +2710,9 @@ export default function App() {
   const luoguPrepareRunSeqRef = useRef(0);
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
   const isMountedRef = useRef(true);
+  const pendingAutoSaveDraftRef = useRef<AiConfig | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingAiConfigRef = useRef(false);
   const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
   const hasRestoredOpenTabsRef = useRef(false);
   const skipNextReadForPathRef = useRef<string | null>(null);
@@ -3030,6 +3031,10 @@ export default function App() {
     aiConfigDraft !== null &&
     aiConfig !== null &&
     getAiConfigComparable(aiConfigDraft) !== getAiConfigComparable(aiConfig);
+  const hasNonProviderAiChanges =
+    aiConfigDraft !== null &&
+    aiConfig !== null &&
+    JSON.stringify(aiConfigDraft.web_search) !== JSON.stringify(aiConfig.web_search);
   const filteredAiProviderModels = useMemo(() => {
     if (!selectedAiProvider) return [];
     const query = aiModelSearchQuery.trim().toLowerCase();
@@ -4499,11 +4504,12 @@ export default function App() {
       config.providers.find((provider) => provider.id === config.default_provider_id) ??
       config.providers[0] ??
       null;
-    if (defaultProvider) {
-      setSelectedAiProviderId(defaultProvider.id);
-    } else {
-      setSelectedAiProviderId("");
-    }
+    setSelectedAiProviderId((currentProviderId) => {
+      if (config.providers.some((provider) => provider.id === currentProviderId)) {
+        return currentProviderId;
+      }
+      return defaultProvider?.id ?? "";
+    });
   };
 
   const handleAiConfigChangeFromSidebar = (config: AiConfig) => {
@@ -4521,8 +4527,21 @@ export default function App() {
     setAiModelSearchQuery("");
   };
 
-  const handleCreateAiProviderDraft = (): string | null => {
-    const provider = createAiProviderDraft();
+  const createAiProviderFromDraft = (draft: { name: string; baseUrl: string; apiKey: string; defaultModel: string; models: string[] }): AiProvider => {
+    const modelIds = [...new Set(draft.models.map((modelId) => modelId.trim()).filter(Boolean))];
+    const defaultModel = draft.defaultModel.trim() || null;
+    return {
+      ...createAiProviderDraft(),
+      name: draft.name.trim(),
+      base_url: draft.baseUrl.trim(),
+      api_key: draft.apiKey.trim(),
+      default_model: defaultModel,
+      models: modelIds.map((modelId) => createAiModelDraft(modelId)),
+    };
+  };
+
+  const handleCreateAiProviderDraft = (draft: { name: string; baseUrl: string; apiKey: string; defaultModel: string; models: string[] }): AiProvider | null => {
+    const provider = createAiProviderFromDraft(draft);
     setAiConfigDraft((current) => {
       const base = current ?? aiConfig ?? {
         base_url: "",
@@ -4533,16 +4552,44 @@ export default function App() {
         default_model_id: null,
         web_search: DEFAULT_WEB_SEARCH_CONFIG,
       };
-      return {
+      const next = {
         ...cloneAiConfig(base),
         providers: [...base.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model })) })), provider],
-        default_provider_id: base.default_provider_id ?? provider.id,
+        default_provider_id: base.providers.length === 0 ? provider.id : base.default_provider_id,
+        default_model_id: base.providers.length === 0 ? provider.default_model : base.default_model_id,
       };
+      pendingAutoSaveDraftRef.current = next;
+      return next;
     });
-    setSelectedAiProviderId(provider.id);
     setAiManualModelId("");
     setAiModelSearchQuery("");
-    return provider.id;
+    scheduleAutoSave();
+    return provider;
+  };
+
+  const handleTestCreateAiProviderDraft = async (draft: { name: string; baseUrl: string; apiKey: string; defaultModel: string; models: string[] }): Promise<{ ok: boolean; message: string }> => {
+    const provider = createAiProviderFromDraft(draft);
+    if (!provider.base_url.trim()) return { ok: false, message: "请先填写 Base URL" };
+    if (!provider.api_key.trim()) return { ok: false, message: "请先填写 API Key" };
+    try {
+      const result = await testAiProviderDraft(provider);
+      return { ok: true, message: `连接正常，发现 ${result.modelCount} 个模型` };
+    } catch (e) {
+      return { ok: false, message: `连接测试失败：${getErrorMessage(e)}` };
+    }
+  };
+
+  const handleSyncCreateAiProviderModels = async (draft: { name: string; baseUrl: string; apiKey: string; defaultModel: string; models: string[] }): Promise<{ ok: boolean; models: string[]; message: string }> => {
+    const provider = createAiProviderFromDraft(draft);
+    if (!provider.base_url.trim()) return { ok: false, models: draft.models, message: "请先填写 Base URL" };
+    if (!provider.api_key.trim()) return { ok: false, models: draft.models, message: "请先填写 API Key" };
+    try {
+      const result = await syncAiProviderModelsDraft(provider);
+      const models = result.provider.models.map((model) => model.id).filter(Boolean);
+      return { ok: true, models, message: `已获取 ${result.syncedCount} 个模型` };
+    } catch (e) {
+      return { ok: false, models: draft.models, message: `模型获取失败：${getErrorMessage(e)}；可以手动填写默认模型` };
+    }
   };
 
   const refreshAiConfig = async () => {
@@ -4589,15 +4636,19 @@ export default function App() {
           default_model_id: null,
           web_search: DEFAULT_WEB_SEARCH_CONFIG,
         };
-        return {
+        const next = {
           ...cloneAiConfig(base),
           providers: [...base.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model })) })), provider],
           default_provider_id: base.default_provider_id ?? provider.id,
           default_model_id: base.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
         };
+        pendingAutoSaveDraftRef.current = next;
+        return next;
       });
       setSelectedAiProviderId(provider.id);
       setAiModelSearchQuery("");
+      scheduleAutoSave();
+      toast.info("已填入 DeepSeek 默认 Base URL 和模型，请填写 API Key");
       return provider.id;
     }
     updateAiProviderDraft(selectedAiProvider.id, (provider) => ({
@@ -4609,12 +4660,17 @@ export default function App() {
         : [...provider.models, createAiModelDraft(DEEPSEEK_DEFAULT_MODEL)],
       updated_at: Date.now(),
     }));
-    setAiConfigDraft((current) => current ? {
-      ...current,
-      default_provider_id: current.default_provider_id ?? selectedAiProvider.id,
-      default_model_id: current.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
-    } : current);
-    toast.info("已填入 DeepSeek 默认 base_url 和模型，检查 API key 后保存更改");
+    setAiConfigDraft((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        default_provider_id: current.default_provider_id ?? selectedAiProvider.id,
+        default_model_id: current.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
+      };
+      pendingAutoSaveDraftRef.current = next;
+      return next;
+    });
+    toast.info("已填入 DeepSeek 默认 Base URL 和模型，请填写 API Key");
     return selectedAiProvider.id;
   };
 
@@ -4622,8 +4678,32 @@ export default function App() {
     setAiConfigDraft((current) => {
       const base = current ?? aiConfig;
       if (!base) return current;
-      return update(cloneAiConfig(base));
+      const next = update(cloneAiConfig(base));
+      pendingAutoSaveDraftRef.current = next;
+      return next;
     });
+  };
+
+  const scheduleAutoSave = () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(async () => {
+      autoSaveTimerRef.current = null;
+      if (isSavingAiConfigRef.current) return;
+      const draft = pendingAutoSaveDraftRef.current;
+      if (!draft) return;
+      const nextConfig = normalizeAiConfigDraft(draft);
+      isSavingAiConfigRef.current = true;
+      setIsSavingAiConfig(true);
+      try {
+        await saveAiConfig(nextConfig);
+        applyAiConfigState(nextConfig);
+      } catch (e) {
+        toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
+      } finally {
+        isSavingAiConfigRef.current = false;
+        setIsSavingAiConfig(false);
+      }
+    }, 250);
   };
 
   const updateAiProviderDraft = (providerId: string, update: (provider: AiProvider) => AiProvider) => {
@@ -4638,6 +4718,7 @@ export default function App() {
           : provider,
       ),
     }));
+    scheduleAutoSave();
   };
 
   const patchAiProviderDraft = (providerId: string, patch: Partial<AiProvider>) => {
@@ -4649,10 +4730,15 @@ export default function App() {
       };
     });
     if (Object.prototype.hasOwnProperty.call(patch, "default_model")) {
-      setAiConfigDraft((current) => current && current.default_provider_id === providerId ? {
-        ...current,
-        default_model_id: patch.default_model ?? null,
-      } : current);
+      setAiConfigDraft((current) => {
+        if (!current || current.default_provider_id !== providerId) return current;
+        const next = {
+          ...current,
+          default_model_id: patch.default_model ?? null,
+        };
+        pendingAutoSaveDraftRef.current = next;
+        return next;
+      });
     }
   };
 
@@ -4666,6 +4752,7 @@ export default function App() {
         default_model_id: provider.default_model ?? provider.models.find((model) => model.enabled)?.id ?? provider.models[0]?.id ?? null,
       };
     });
+    scheduleAutoSave();
   };
 
   const handleReorderAiProviders = (sourceId: string, targetId: string) => {
@@ -4678,6 +4765,7 @@ export default function App() {
       providers.splice(targetIndex, 0, movedProvider);
       return { ...config, providers };
     });
+    scheduleAutoSave();
   };
 
   const updateWebSearchDraft = (patch: Partial<WebSearchConfig>) => {
@@ -5124,10 +5212,10 @@ export default function App() {
     toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
 
-  const handleDeleteAiProvider = async (providerId: string) => {
+  const handleDeleteAiProvider = async (providerId: string, options?: { skipConfirm?: boolean }) => {
     const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
     if (!provider) return;
-    if (!window.confirm(`删除配置组「${provider.name || provider.id}」？删除后需要点击“保存更改”才会持久化。`)) return;
+    if (!options?.skipConfirm && !window.confirm(`删除供应商「${provider.name || provider.id}」？此操作会立即生效。`)) return;
     updateAiConfigDraft((config) => {
       const providers = config.providers.filter((item) => item.id !== providerId);
       const nextSelected = providers.find((item) => item.id === config.default_provider_id) ?? providers[0] ?? null;
@@ -5141,6 +5229,7 @@ export default function App() {
         default_model_id: config.default_provider_id === providerId ? nextSelected?.default_model ?? nextSelected?.models[0]?.id ?? null : config.default_model_id,
       };
     });
+    scheduleAutoSave();
     setAiManualModelId("");
   };
 
@@ -5182,7 +5271,13 @@ export default function App() {
     setAiProviderBusyId(providerId);
     try {
       const result = await syncAiProviderModelsDraft(provider);
-      updateAiProviderDraft(providerId, () => result.provider);
+      const targetProviderId = providerId;
+      updateAiProviderDraft(targetProviderId, (currentProvider) => ({
+        ...result.provider,
+        id: targetProviderId,
+        created_at: result.provider.created_at ?? currentProvider.created_at,
+        updated_at: result.provider.updated_at ?? Date.now(),
+      }));
       toast.success(`已同步 ${result.syncedCount} 个模型`);
       return true;
     } catch (e) {
@@ -5209,7 +5304,7 @@ export default function App() {
       };
     });
     setAiManualModelId("");
-    toast.success("模型已加入草稿，保存更改后生效");
+    toast.success("模型已添加");
   };
 
   const handleDeleteAiProviderModel = async (providerId: string, modelId: string) => {
@@ -6624,11 +6719,28 @@ export default function App() {
       debugTagManager("settings.close.ignoredForTagManager");
       return;
     }
-    if (hasAiConfigDraftChanges && !window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
-      return;
+    if (hasAiConfigDraftChanges) {
+      if (hasNonProviderAiChanges) {
+        if (!window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
+          return;
+        }
+      } else {
+        // Provider-only changes: flush pending auto-save before closing
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+          autoSaveTimerRef.current = null;
+        }
+        const draft = pendingAutoSaveDraftRef.current;
+        if (draft && !isSavingAiConfigRef.current) {
+          const nextConfig = normalizeAiConfigDraft(draft);
+          void saveAiConfig(nextConfig).catch((e) => {
+            console.error("Auto-save on close failed:", e);
+          });
+        }
+      }
     }
     settingsCenterHostRef.current?.close();
-    scheduleSettingsCenterCloseCleanup(hasAiConfigDraftChanges && Boolean(aiConfig));
+    scheduleSettingsCenterCloseCleanup(hasNonProviderAiChanges && Boolean(aiConfig));
   };
 
   const closePromptEditorToSettings = () => {
@@ -7911,7 +8023,7 @@ export default function App() {
                           <div>
                             <div className="text-sm font-medium text-foreground">还没有扫描结果。</div>
                             <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                              选择扫描范围后，点击“开始扫描”。
+                              选择扫描范围后，点击"开始扫描"。
                             </div>
                           </div>
                         </div>
@@ -8079,7 +8191,7 @@ export default function App() {
 
                       {selectedLuoguPreviewSubmissions.length === 0 ? (
                         <section className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-                          还没有生成预览。请返回选择提交后点击“生成预览”。
+                          还没有生成预览。请返回选择提交后点击"生成预览"。
                         </section>
                       ) : (
                         <section className="grid min-h-0 grid-cols-[minmax(260px,300px)_minmax(0,1fr)] overflow-hidden max-lg:grid-cols-1 max-lg:grid-rows-[minmax(170px,0.32fr)_minmax(0,1fr)]">
@@ -8397,7 +8509,7 @@ export default function App() {
       onBeginDrag={beginSettingsCenterDrag}
       onBeginResize={beginSettingsCenterResize}
       mainHeaderActions={
-        hasAiConfigDraftChanges ? (
+        hasNonProviderAiChanges ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2 pr-1">
             <Button type="button" variant="outline" size="sm" onClick={handleDiscardAiConfigDraft} disabled={isSavingAiConfig}>
               放弃 AI 更改
@@ -8516,6 +8628,8 @@ export default function App() {
           onDeleteProvider={handleDeleteAiProvider}
           onTestProvider={handleTestAiProvider}
           onSyncProviderModels={handleSyncAiProviderModels}
+          onTestCreateProvider={handleTestCreateAiProviderDraft}
+          onSyncCreateProviderModels={handleSyncCreateAiProviderModels}
           onModelSearchChange={setAiModelSearchQuery}
           onManualModelIdChange={setAiManualModelId}
           onAddModel={handleAddAiProviderModel}
@@ -8569,7 +8683,7 @@ export default function App() {
                   {shouldRenderSettingsPage("ai-api", activePageKey) && (
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">AI 配置组</div>
+                        <div className="text-base font-semibold text-foreground">AI 供应商</div>
                         <div className="text-xs leading-5 text-muted-foreground">从独立管理中心维护 NoteX 使用的模型与 API 配置。</div>
                       </div>
                       <AiConfigManager
@@ -8592,6 +8706,8 @@ export default function App() {
                         onDeleteProvider={handleDeleteAiProvider}
                         onTestProvider={handleTestAiProvider}
                         onSyncProviderModels={handleSyncAiProviderModels}
+                        onTestCreateProvider={handleTestCreateAiProviderDraft}
+                        onSyncCreateProviderModels={handleSyncCreateAiProviderModels}
                         onModelSearchChange={setAiModelSearchQuery}
                         onManualModelIdChange={setAiManualModelId}
                         onAddModel={handleAddAiProviderModel}
