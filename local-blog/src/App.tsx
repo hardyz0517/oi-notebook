@@ -129,6 +129,15 @@ const categoryLabels: Record<string, string> = {
   uncategorized: "\u672a\u5206\u7c7b",
 };
 
+const unfiledCollectionName = "\u672a\u5f52\u6863";
+
+const collectionDescriptions: Record<string, string> = {
+  "\u9898\u89e3": "\u505a\u9898\u601d\u8def\u3001\u5b9e\u73b0\u5751\u70b9\u4e0e\u4ee3\u7801\u590d\u76d8\u3002",
+  "\u6280\u5de7": "\u53ef\u590d\u7528\u7684\u7b97\u6cd5\u6280\u5de7\u3001\u6a21\u578b\u548c\u5957\u8def\u6574\u7406\u3002",
+  "\u590d\u76d8": "\u8bad\u7ec3\u3001\u6bd4\u8d5b\u4e0e\u9636\u6bb5\u6027\u603b\u7ed3\u3002",
+  "\u6742\u8c08": "\u548c\u5b66\u4e60\u3001\u5de5\u5177\u3001\u751f\u6d3b\u6709\u5173\u7684\u968f\u7b14\u3002",
+};
+
 const articleClassWords = ["\u9898\u89e3", "\u590d\u76d8", "\u5fc3\u5f97", "\u6280\u5de7", "\u6a21\u677f", "\u6742\u8c08"] as const;
 const summaryFallback = "\u8fd9\u7bc7\u7b14\u8bb0\u8fd8\u6ca1\u6709\u6458\u8981\uff0c\u6253\u5f00\u6587\u7ae0\u9875\u53ef\u4ee5\u7ee7\u7eed\u9605\u8bfb\u5168\u6587\u3002";
 const homePageSize = 9;
@@ -862,6 +871,10 @@ function normalizeCollectionName(value: string | null | undefined) {
   return getCategoryLabel(text);
 }
 
+function getCollectionDescription(collection: string) {
+  return collectionDescriptions[collection] ?? "\u6536\u5f55\u8fd9\u4e00\u4e3b\u9898\u4e0b\u7684\u76f8\u5173\u6587\u7ae0\u3002";
+}
+
 function getPostCollection({
   tags,
   metadata,
@@ -876,7 +889,7 @@ function getPostCollection({
     normalizeCollectionName(metadata.collection) ??
     normalizeCollectionName(metadata.category) ??
     normalizeCollectionName(getCollectionFromTags(tags)) ??
-    "\u672a\u5f52\u6863"
+    unfiledCollectionName
   );
 }
 
@@ -964,6 +977,19 @@ function formatDate(value: string | null) {
   return `${date.getFullYear()} \u5e74 ${date.getMonth() + 1} \u6708 ${date.getDate()} \u65e5`;
 }
 
+function formatCompactDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 function formatOptionalDate(...values: Array<string | null | undefined>) {
   for (const value of values) {
     const formatted = formatDate(value ?? null);
@@ -1042,7 +1068,7 @@ function buildCollections(posts: NoteSummary[]): CollectionGroup[] {
   const collections = new Map<string, NoteSummary[]>();
 
   for (const post of posts) {
-    const collection = post.collection.trim() || "\u672a\u5f52\u6863";
+    const collection = post.collection.trim() || unfiledCollectionName;
     const collectionPosts = collections.get(collection) ?? [];
     collectionPosts.push(post);
     collections.set(collection, collectionPosts);
@@ -1060,7 +1086,23 @@ function buildCollections(posts: NoteSummary[]): CollectionGroup[] {
       count: collectionPosts.length,
       latestUpdatedAt: latestPost ? getNoteDateValue(latestPost.post) ?? undefined : undefined,
     };
-  }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
+  }).sort((a, b) => {
+    if (a.name === unfiledCollectionName && b.name !== unfiledCollectionName) {
+      return 1;
+    }
+
+    if (b.name === unfiledCollectionName && a.name !== unfiledCollectionName) {
+      return -1;
+    }
+
+    const aDate = a.latestUpdatedAt ? new Date(a.latestUpdatedAt).getTime() : 0;
+    const bDate = b.latestUpdatedAt ? new Date(b.latestUpdatedAt).getTime() : 0;
+    if (aDate !== bDate) {
+      return bDate - aDate;
+    }
+
+    return b.count - a.count || a.name.localeCompare(b.name, "zh-CN");
+  });
 }
 
 function searchNotes(notes: NoteSummary[], query: string) {
@@ -1667,6 +1709,7 @@ function CollectionList({
   error: string | null;
   onRetry: () => void;
 }) {
+  const content = (() => {
   if (isLoading) {
     return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6587\u96c6"} description={"\u6b63\u5728\u6309\u680f\u76ee\u3001\u7cfb\u5217\u548c\u9636\u6bb5\u6574\u7406\u672c\u5730\u6587\u7ae0\u3002"} />;
   }
@@ -1685,14 +1728,32 @@ function CollectionList({
   }
 
   return (
-    <div className="category-list" aria-label={"\u6587\u96c6\u5217\u8868"}>
+    <div className="collection-card-grid" aria-label={"\u6587\u96c6\u5217\u8868"}>
       {collections.map((collection) => (
-        <a className="category-item" href={getCollectionHref(collection.name)} key={collection.name}>
-          <span>{collection.name}</span>
-          <small>{collection.count + " \u7bc7\u6587\u7ae0"}</small>
+        <a className="collection-card" href={getCollectionHref(collection.name)} key={collection.name}>
+          <span className="collection-card-spine" aria-hidden="true" />
+          <span className="collection-card-body">
+            <span className="collection-card-kicker">{collection.count + " \u7bc7\u6587\u7ae0"}</span>
+            <span className="collection-card-title">{collection.name}</span>
+            <span className="collection-card-description">{getCollectionDescription(collection.name)}</span>
+            <span className="collection-card-updated">
+              {"\u6700\u8fd1\u66f4\u65b0\uff1a" + (formatCompactDate(collection.latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}
+            </span>
+          </span>
         </a>
       ))}
     </div>
+  );
+  })();
+
+  return (
+    <section className="collection-overview">
+      <header className="collection-overview-header">
+        <h1>{"\u6587\u96c6"}</h1>
+        <p>{"\u6309\u680f\u76ee\u3001\u7cfb\u5217\u548c\u9636\u6bb5\u6574\u7406\u6587\u7ae0\u3002"}</p>
+      </header>
+      {content}
+    </section>
   );
 }
 
