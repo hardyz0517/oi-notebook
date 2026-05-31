@@ -4,10 +4,10 @@ tags:
 - git
 - auto-commit
 - blog-test
-difficulty: test
+difficulty: ''
 source: manual-test
 created: 2026-05-03T12:00:00+08:00
-updated: 2026-05-31T10:13:08.430269300+08:00
+updated: 2026-05-31T14:25:49.917863600+08:00
 summary: Tracked draft note for testing save-time Git auto commit and blog rendering.
 draft: false
 collection:
