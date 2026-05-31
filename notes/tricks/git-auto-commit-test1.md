@@ -7,14 +7,13 @@ tags:
 difficulty: ''
 source: manual-test
 created: 2026-05-03T12:00:00+08:00
-updated: 2026-05-31T14:25:49.917863600+08:00
+updated: 2026-05-31T16:26:28.548206200+08:00
 summary: Tracked draft note for testing save-time Git auto commit and blog rendering.
 draft: false
 collection:
 - 杂谈
 - 题解
 ---
-
 ## Test Purpose
 
 This is an intentionally artificial draft note. It exists to test the desktop save flow, automatic single-file Git commit behavior, and blog UI rendering.
