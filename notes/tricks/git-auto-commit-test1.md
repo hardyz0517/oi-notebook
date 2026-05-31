@@ -7,9 +7,12 @@ tags:
 difficulty: test
 source: manual-test
 created: 2026-05-03T12:00:00+08:00
-updated: 2026-05-03T20:56:39.217253200+08:00
+updated: 2026-05-31T10:13:08.430269300+08:00
 summary: Tracked draft note for testing save-time Git auto commit and blog rendering.
 draft: false
+collection:
+- 杂谈
+- 题解
 ---
 
 ## Test Purpose
