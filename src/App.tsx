@@ -1014,6 +1014,7 @@ function applyLuoguPreparedRules(
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
+const COMMON_COLLECTIONS = ["题解", "技巧", "复盘", "杂谈", "集训日志"];
 const LUOGU_DIFFICULTY_OPTIONS = [
   { value: "", label: "无", className: "text-[#9ca3af]" },
   { value: "入门", label: "入门", className: "text-[#f08a9b]" },
@@ -1244,6 +1245,74 @@ function formatWebSearchTestError(error: unknown): string {
 
 function normalizeTagValue(tag: string): string {
   return tag.trim().replace(/\s+/g, " ");
+}
+
+function isCollectionTag(tag: string): boolean {
+  const normalized = normalizeTagValue(tag).toLocaleLowerCase();
+  return normalized.startsWith("文集:") || normalized.startsWith("collection:");
+}
+
+function getCollectionFromTag(tag: string): string | null {
+  const normalized = normalizeTagValue(tag);
+  const lower = normalized.toLocaleLowerCase();
+  if (normalized.startsWith("文集:")) return normalizeTagValue(normalized.slice("文集:".length)) || null;
+  if (lower.startsWith("collection:")) return normalizeTagValue(normalized.slice("collection:".length)) || null;
+  return null;
+}
+
+function getDisplayTags(tags: string[]): string[] {
+  return tags.filter((tag) => !isCollectionTag(tag));
+}
+
+function normalizeCollectionValues(collections: string[]): string[] {
+  const normalizedCollections: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawCollection of collections) {
+    const collection = normalizeTagValue(rawCollection);
+    if (!collection || collection === "未归档") continue;
+    const key = collection.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalizedCollections.push(collection);
+  }
+
+  return normalizedCollections;
+}
+
+function getEffectiveCollections(fields: FrontmatterFields): string[] {
+  const collections = [...fields.collection];
+
+  const legacyCategory = normalizeTagValue(fields.category);
+  if (legacyCategory) collections.push(legacyCategory);
+  for (const tag of fields.tags) {
+    const collection = getCollectionFromTag(tag);
+    if (collection) collections.push(collection);
+  }
+
+  return normalizeCollectionValues(collections);
+}
+
+function buildCollectionCandidates(fields: FrontmatterFields, extraCandidates: string[] = []): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (rawCandidate: string | null | undefined) => {
+    const candidate = normalizeTagValue(rawCandidate ?? "");
+    if (!candidate || candidate === "未归档") return;
+    const key = candidate.toLocaleLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
+  for (const collection of COMMON_COLLECTIONS) addCandidate(collection);
+  for (const collection of fields.collection) addCandidate(collection);
+  addCandidate(fields.category);
+  for (const tag of fields.tags) addCandidate(getCollectionFromTag(tag));
+  for (const collection of extraCandidates) addCandidate(collection);
+
+  return candidates;
 }
 
 function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | null): UserTagTaxonomyConfig {
@@ -1887,6 +1956,10 @@ interface PromptCodeEditorProps {
   onFontSizeChange: (updater: (currentSize: number) => number) => void;
 }
 
+function isPromptEditorEventTarget(target: EventTarget | null) {
+  return target instanceof Element && target.closest("[data-prompt-editor='true']");
+}
+
 const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProps>(function PromptCodeEditor(
   { value, fontSize, disabled = false, readOnly = false, onChange, onSave, onFontSizeChange },
   ref,
@@ -1950,15 +2023,24 @@ const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProp
   } as const;
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    event.stopPropagation();
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    if (!(event.ctrlKey || event.metaKey)) return;
+
+    const key = event.key.toLowerCase();
+    if (key === "s") {
       event.preventDefault();
+      event.stopPropagation();
       onSave();
+      return;
+    }
+
+    if (key === "z" || key === "y" || key === "a" || key === "x" || key === "c" || key === "v") {
+      event.stopPropagation();
     }
   };
 
   return (
     <div
+      data-prompt-editor="true"
       className={cn("prompt-code-editor h-full min-h-0 w-full overflow-hidden", (disabled || readOnly) && "opacity-70")}
       onWheelCapture={handleWheelCapture}
     >
@@ -1998,7 +2080,7 @@ const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProp
           style={{ ...editorStyle, ...editorPaddingStyle, whiteSpace: "pre", overflowWrap: "normal", wordBreak: "normal" }}
           onChange={(event) => onChange(event.currentTarget.value)}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-          onKeyDown={handleKeyDown}
+          onKeyDownCapture={handleKeyDown}
         />
       </div>
     </div>
@@ -2523,6 +2605,7 @@ export default function App() {
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
+  const [collectionCandidatesFromNotes, setCollectionCandidatesFromNotes] = useState<string[]>([]);
   const [isTagNormalizationDetailsOpen, setIsTagNormalizationDetailsOpen] = useState(false);
   const [isDifficultyMenuOpen, setIsDifficultyMenuOpen] = useState(false);
   const difficultyDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -2790,9 +2873,15 @@ export default function App() {
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(deferredFullMarkdown), [deferredFullMarkdown]);
+  const frontmatterDisplayTags = useMemo(() => getDisplayTags(frontmatter.fields.tags), [frontmatter.fields.tags]);
+  const effectiveCollections = useMemo(() => getEffectiveCollections(frontmatter.fields), [frontmatter.fields]);
+  const collectionCandidates = useMemo(
+    () => buildCollectionCandidates(frontmatter.fields, collectionCandidatesFromNotes),
+    [collectionCandidatesFromNotes, frontmatter.fields],
+  );
   const tagNormalizationPlan = useMemo(
-    () => analyzeTagListNormalization(frontmatter.fields.tags, { userConfig: tagTaxonomyUserConfig }),
-    [frontmatter.fields.tags, tagTaxonomyUserConfig],
+    () => analyzeTagListNormalization(frontmatterDisplayTags, { userConfig: tagTaxonomyUserConfig }),
+    [frontmatterDisplayTags, tagTaxonomyUserConfig],
   );
   const tagNormalizationSuggestions = tagNormalizationPlan.suggestions;
   useEffect(() => {
@@ -3616,6 +3705,33 @@ export default function App() {
     [files],
   );
   const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCollectionCandidates = async () => {
+      const candidates: string[] = [];
+
+      for (const file of noteFiles) {
+        try {
+          const content = await readNote(file.path);
+          const parsed = parseFrontmatterFields(content);
+          candidates.push(...getEffectiveCollections(parsed.fields));
+        } catch (error) {
+          console.warn("Failed to read note collection candidates", file.path, error);
+        }
+      }
+
+      if (!cancelled) {
+        setCollectionCandidatesFromNotes(normalizeCollectionValues(candidates));
+      }
+    };
+
+    void loadCollectionCandidates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [noteFiles]);
   const displayFiles = useMemo<NoteFileInfo[]>(
     () =>
       files.map((file) => ({
@@ -5929,18 +6045,18 @@ export default function App() {
   const closeTagPicker = useCallback(() => {
     setIsTagPickerOpen(false);
   }, []);
-  const confirmTagPicker = useCallback((tags: string[]) => {
+  const confirmTagPicker = useCallback((tags: string[], collections: string[]) => {
     if (!frontmatter.canMerge || !frontmatter.canEditTags) return;
-    updateFrontmatter({ tags });
+    updateFrontmatter({ tags, collection: normalizeCollectionValues(collections) });
     setIsTagPickerOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, updateFrontmatter]);
   const applyTagNormalizationSuggestions = useCallback(() => {
     if (!frontmatter.canMerge || !frontmatter.canEditTags || tagNormalizationSuggestions.length === 0) return;
 
-    const nextTags = applyTagNormalizationPlan(frontmatter.fields.tags, tagNormalizationPlan);
+    const nextTags = applyTagNormalizationPlan(frontmatterDisplayTags, tagNormalizationPlan);
     updateFrontmatter({ tags: nextTags });
     setIsTagNormalizationDetailsOpen(false);
-  }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatter.fields.tags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
+  }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatterDisplayTags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
   const handleScanLegacyTags = useCallback(async () => {
     if (isScanningTagNormalization) return;
 
@@ -6122,8 +6238,9 @@ export default function App() {
       throw new Error(frontmatter.warning ?? "当前标签暂不能通过表单改写");
     }
 
-    const nextTags = mergeTagsStable(frontmatter.fields.tags, suggestedTags, tagTaxonomyUserConfig);
-    if (nextTags.length === frontmatter.fields.tags.length) return;
+    const currentTags = getDisplayTags(frontmatter.fields.tags);
+    const nextTags = mergeTagsStable(currentTags, suggestedTags, tagTaxonomyUserConfig);
+    if (nextTags.length === currentTags.length) return;
     updateFrontmatter({ tags: nextTags });
   };
 
@@ -6881,6 +6998,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === "s")) return;
+      if (isPromptEditorEventTarget(e.target)) return;
       e.preventDefault();
       if (settingsCenterOpenRef.current && settingsCenterViewRef.current === "prompt-editor") {
         void handleSavePrompt();
@@ -7446,7 +7564,9 @@ export default function App() {
     </Dialog>
     <TagPickerDialog
       open={isTagPickerOpen}
-      selectedTags={frontmatter.fields.tags}
+      selectedTags={frontmatterDisplayTags}
+      selectedCollections={effectiveCollections}
+      collectionCandidates={collectionCandidates}
       userConfig={tagTaxonomyUserConfig}
       onOpenChange={(open) => {
         if (!open) closeTagPicker();
@@ -9789,7 +9909,7 @@ export default function App() {
                               <span className="flex h-full min-w-0 items-center justify-between gap-3 overflow-hidden">
                                 <span className="truncate text-muted-foreground">选择标签</span>
                                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                                  已选 {frontmatter.fields.tags.length} 个
+                                  已选 {frontmatterDisplayTags.length} 个
                                 </span>
                               </span>
                             </div>
@@ -9914,18 +10034,6 @@ export default function App() {
                               className="h-9 px-2.5 text-xs"
                               autoComplete="off"
                               onChange={(e) => updateFrontmatter({ source: e.target.value })}
-                            />
-                          </div>
-                          <div className="app-frontmatter-field grid gap-1">
-                            <Label htmlFor="frontmatter-collection">{"\u6587\u96c6"}</Label>
-                            <Input
-                              id="frontmatter-collection"
-                              value={frontmatter.fields.collection}
-                              disabled={!frontmatter.canMerge}
-                              className="h-9 px-2.5 text-xs"
-                              autoComplete="off"
-                              placeholder={"\u4f8b\u5982\uff1a\u9898\u89e3\u3001\u6280\u5de7\u3001\u590d\u76d8\u3001\u6742\u8c08"}
-                              onChange={(e) => updateFrontmatter({ collection: e.target.value })}
                             />
                           </div>
                         </div>

@@ -21,6 +21,7 @@ type NoteSummary = {
   tags: string[];
   category: string;
   collection: string;
+  collections: string[];
   articleClass?: string;
   created: string | null;
   updated: string | null;
@@ -34,7 +35,7 @@ type NoteMetadata = {
   summary?: string | null;
   tags?: unknown;
   category?: string | null;
-  collection?: string | null;
+  collection?: unknown;
   created?: string | null;
   updated?: string | null;
   draft?: boolean;
@@ -44,7 +45,7 @@ type ParsedFrontmatter = {
   title?: string;
   summary?: string;
   tags?: string[];
-  collection?: string;
+  collection?: string[];
   category?: string;
   type?: string;
   kind?: string;
@@ -59,6 +60,7 @@ type NoteDetail = {
   relativePath: string;
   category: string;
   collection: string;
+  collections: string[];
   title: string;
   tags: string[];
   created: string | null;
@@ -70,13 +72,17 @@ type NoteDetail = {
   body: string;
 };
 
-type RawNoteSummary = Omit<NoteSummary, "tags"> & {
+type RawNoteSummary = Omit<NoteSummary, "tags" | "collection" | "collections"> & {
   tags?: unknown;
+  collection?: unknown;
+  collections?: unknown;
   metadata?: NoteMetadata | null;
 };
 
-type RawNoteDetail = Omit<NoteDetail, "tags" | "metadata"> & {
+type RawNoteDetail = Omit<NoteDetail, "tags" | "collection" | "collections" | "metadata"> & {
   tags?: unknown;
+  collection?: unknown;
+  collections?: unknown;
   metadata?: NoteMetadata | null;
 };
 
@@ -521,6 +527,17 @@ function parseTagsValue(value: string) {
     .filter(Boolean);
 }
 
+function parseCollectionValue(value: string) {
+  const trimmed = trimYamlValue(value);
+  if (!trimmed) {
+    return [];
+  }
+
+  return trimmed.startsWith("[") && trimmed.endsWith("]")
+    ? parseTagsValue(trimmed)
+    : [trimmed];
+}
+
 function parseBooleanValue(value: string) {
   const normalized = trimYamlValue(value).toLocaleLowerCase("en-US");
   if (["true", "yes", "1"].includes(normalized)) {
@@ -551,26 +568,28 @@ function parseFrontmatterYaml(yaml: string): ParsedFrontmatter {
       continue;
     }
 
-    if (key === "tags") {
+    if (key === "tags" || key === "collection") {
       if (value.trim()) {
-        metadata.tags = parseTagsValue(value);
+        if (key === "tags") metadata.tags = parseTagsValue(value);
+        if (key === "collection") metadata.collection = parseCollectionValue(value);
         continue;
       }
 
-      const tags: string[] = [];
+      const items: string[] = [];
       for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
         const itemMatch = lines[nextIndex].match(/^\s*-\s*(.+)$/);
         if (!itemMatch) {
           break;
         }
 
-        const tag = trimYamlValue(itemMatch[1]);
-        if (tag) {
-          tags.push(tag);
+        const item = trimYamlValue(itemMatch[1]);
+        if (item) {
+          items.push(item);
         }
         index = nextIndex;
       }
-      metadata.tags = tags;
+      if (key === "tags") metadata.tags = items;
+      if (key === "collection") metadata.collection = items;
       continue;
     }
 
@@ -589,7 +608,6 @@ function parseFrontmatterYaml(yaml: string): ParsedFrontmatter {
 
     if (key === "title") metadata.title = text;
     if (key === "summary") metadata.summary = text;
-    if (key === "collection") metadata.collection = text;
     if (key === "category") metadata.category = text;
     if (key === "type") metadata.type = text;
     if (key === "kind") metadata.kind = text;
@@ -789,8 +807,8 @@ function isCollectionTag(tag: string) {
   return Boolean(getTagCollectionValue(tag));
 }
 
-function getCollectionFromTags(tags: string[]) {
-  return tags.map(getTagCollectionValue).find((value): value is string => Boolean(value)) ?? null;
+function getCollectionsFromTags(tags: string[]) {
+  return tags.map(getTagCollectionValue).filter((value): value is string => Boolean(value));
 }
 
 function getDisplayTags(post: { tags?: unknown }) {
@@ -871,26 +889,38 @@ function normalizeCollectionName(value: string | null | undefined) {
   return getCategoryLabel(text);
 }
 
+function normalizeCollectionInput(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(normalizeCollectionInput);
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return parseCollectionValue(value);
+}
+
 function getCollectionDescription(collection: string) {
   return collectionDescriptions[collection] ?? "\u6536\u5f55\u8fd9\u4e00\u4e3b\u9898\u4e0b\u7684\u76f8\u5173\u6587\u7ae0\u3002";
 }
 
-function getPostCollection({
+function getPostCollections({
   tags,
-  metadata,
+  sources,
 }: {
   tags: string[];
-  metadata: {
-    collection?: string | null;
-    category?: string | null;
-  };
+  sources: unknown[];
 }) {
-  return (
-    normalizeCollectionName(metadata.collection) ??
-    normalizeCollectionName(metadata.category) ??
-    normalizeCollectionName(getCollectionFromTags(tags)) ??
-    unfiledCollectionName
+  const collections = Array.from(
+    new Set(
+      [...sources.flatMap(normalizeCollectionInput), ...getCollectionsFromTags(tags)]
+        .map(normalizeCollectionName)
+        .filter((collection): collection is string => Boolean(collection)),
+    ),
   );
+
+  return collections.length > 0 ? collections : [unfiledCollectionName];
 }
 
 function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
@@ -909,6 +939,10 @@ function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
   const tags = metadataTags.length > 0 ? metadataTags : responseMetadataTags.length > 0 ? responseMetadataTags : noteTags;
   const summaryText = createCleanSummary(metadata.summary, summaryParts.body, excerptParts.body);
   const excerptText = createCleanSummary(excerptParts.body, metadata.summary, summaryParts.body);
+  const collections = getPostCollections({
+    tags: rawTags,
+    sources: [metadata.collection, metadata.category, note.collections, note.collection],
+  });
 
   return {
     ...note,
@@ -916,10 +950,8 @@ function normalizeNoteSummary(note: RawNoteSummary): NoteSummary {
     summary: summaryText || null,
     excerpt: excerptText || null,
     tags,
-    collection: getPostCollection({
-      tags: rawTags,
-      metadata,
-    }),
+    collection: collections[0],
+    collections,
     articleClass: inferArticleClass({
       relativePath: note.relativePath,
       category: note.category,
@@ -945,15 +977,17 @@ function normalizeNoteDetail(note: RawNoteDetail): NoteDetail {
   const metadataTags = getDisplayTags({ tags: note.metadata?.tags });
   const noteTags = getDisplayTags(note);
   const tags = bodyTags.length > 0 ? bodyTags : metadataTags.length > 0 ? metadataTags : noteTags;
+  const collections = getPostCollections({
+    tags: rawTags,
+    sources: [metadata.collection, metadata.category, note.collections, note.collection],
+  });
 
   return {
     ...note,
     title: metadata.title?.trim() || note.title || getFilenameTitle(note.relativePath),
     tags,
-    collection: getPostCollection({
-      tags: rawTags,
-      metadata,
-    }),
+    collection: collections[0],
+    collections,
     created: bodyParts.metadata.created ?? note.created,
     updated: bodyParts.metadata.updated ?? note.updated,
     date: bodyParts.metadata.date ?? note.date,
@@ -1068,10 +1102,11 @@ function buildCollections(posts: NoteSummary[]): CollectionGroup[] {
   const collections = new Map<string, NoteSummary[]>();
 
   for (const post of posts) {
-    const collection = post.collection.trim() || unfiledCollectionName;
-    const collectionPosts = collections.get(collection) ?? [];
-    collectionPosts.push(post);
-    collections.set(collection, collectionPosts);
+    for (const collection of post.collections) {
+      const collectionPosts = collections.get(collection) ?? [];
+      collectionPosts.push(post);
+      collections.set(collection, collectionPosts);
+    }
   }
 
   return Array.from(collections, ([name, collectionPosts]) => {
@@ -1116,7 +1151,7 @@ function searchNotes(notes: NoteSummary[], query: string) {
       note.title,
       note.summary ?? "",
       note.excerpt ?? "",
-      note.collection,
+      ...note.collections,
       note.relativePath,
       ...getArticleTagSearchTerms(note),
     ];
@@ -1347,7 +1382,7 @@ function IndexView({
   if (route.name === "collection") {
     const collection = getCategoryLabel(route.collection);
     const collectionGroup = collections.find((item) => item.name === collection);
-    const filteredNotes = sortNotesByRecent(notes.filter((note) => note.collection === collection));
+    const filteredNotes = sortNotesByRecent(notes.filter((note) => note.collections.includes(collection)));
     const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
 
     return (

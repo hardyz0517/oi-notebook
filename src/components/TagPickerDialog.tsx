@@ -24,6 +24,7 @@ const TAG_PICKER_MARGIN_X = 36;
 const TAG_PICKER_MARGIN_TOP = 36;
 const TAG_PICKER_MARGIN_BOTTOM = 36;
 const TAG_PICKER_SEARCH_RESULT_LIMIT = 100;
+const COLLECTION_ROOT_NAME = "文集";
 
 type TagPickerRect = {
   left: number;
@@ -77,9 +78,11 @@ type DraftSelection = {
 type TagPickerDialogProps = {
   open: boolean;
   selectedTags: string[];
+  selectedCollections?: string[];
+  collectionCandidates?: string[];
   userConfig?: UserTagTaxonomyConfig | null;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (tags: string[]) => void;
+  onConfirm: (tags: string[], collections: string[]) => void;
 };
 
 function normalizeTagValue(tag: string): string {
@@ -106,6 +109,35 @@ function getTagIdentityKey(tag: string, userConfig?: UserTagTaxonomyConfig | nul
     return `path:${normalized.fullPath.toLocaleLowerCase()}`;
   }
   return `text:${normalizeTagValue(tag).toLocaleLowerCase()}`;
+}
+
+function normalizeCollectionValue(collection: string): string {
+  return collection.trim().replace(/\s+/g, " ");
+}
+
+function isCollectionTagValue(tag: string): boolean {
+  const normalized = normalizeTagValue(tag).toLocaleLowerCase();
+  return normalized.startsWith("文集:") || normalized.startsWith("collection:");
+}
+
+function normalizeCollectionIdentity(collection: string): string {
+  return normalizeCollectionValue(collection).toLocaleLowerCase();
+}
+
+function mergeCollectionCandidates(candidates: string[] = [], selectedCollections: string[] = []): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawCandidate of [...selectedCollections, ...candidates]) {
+    const candidate = normalizeCollectionValue(rawCandidate);
+    if (!candidate || candidate === "未归档") continue;
+    const key = normalizeCollectionIdentity(candidate);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(candidate);
+  }
+
+  return merged;
 }
 
 function mergeTagsStable(existingTags: string[], suggestedTags: string[], userConfig?: UserTagTaxonomyConfig | null): string[] {
@@ -369,39 +401,55 @@ function buildTagPickerGroups(candidates: TagPickerCatalogItem[]): TagPickerRoot
 const TagPickerDialog = memo(function TagPickerDialog({
   open,
   selectedTags,
+  selectedCollections = [],
+  collectionCandidates = [],
   userConfig,
   onOpenChange,
   onConfirm,
 }: TagPickerDialogProps) {
   const catalog = useMemo(() => getCachedTagPickerCatalog(userConfig), [userConfig]);
   const [draftSelection, setDraftSelection] = useState<DraftSelection>(() => createDraftSelection(selectedTags, userConfig));
+  const [draftCollections, setDraftCollections] = useState(() => mergeCollectionCandidates([], selectedCollections));
   const [searchQuery, setSearchQuery] = useState("");
   const [activeRoot, setActiveRoot] = useState<string | null>(null);
   const [rect, setRect] = useState<TagPickerRect>(getDefaultTagPickerRect);
   const panelRef = useRef<HTMLDivElement>(null);
+  const normalizedCollectionCandidates = useMemo(
+    () => mergeCollectionCandidates(collectionCandidates, selectedCollections),
+    [collectionCandidates, selectedCollections],
+  );
+  const rootNames = useMemo(
+    () => [...catalog.rootNames.filter((rootName) => rootName !== COLLECTION_ROOT_NAME), COLLECTION_ROOT_NAME],
+    [catalog.rootNames],
+  );
 
   useEffect(() => {
     if (!open) return;
     setDraftSelection(createDraftSelection(selectedTags, userConfig));
+    setDraftCollections(mergeCollectionCandidates([], selectedCollections));
     setSearchQuery("");
-  }, [open, selectedTags, userConfig]);
+  }, [open, selectedCollections, selectedTags, userConfig]);
 
   const selectedCountByRoot = useMemo(() => {
     const counts = new Map<string, number>();
+    if (draftCollections.length > 0) {
+      counts.set(COLLECTION_ROOT_NAME, draftCollections.length);
+    }
     for (const item of draftSelection.items) {
       counts.set(item.root, (counts.get(item.root) ?? 0) + 1);
     }
     return counts;
-  }, [draftSelection.items]);
+  }, [draftCollections, draftSelection.items]);
 
   const activeRootName = useMemo(() => (
-    activeRoot && catalog.rootNames.includes(activeRoot)
+    activeRoot && rootNames.includes(activeRoot)
       ? activeRoot
-      : catalog.rootNames[0] ?? null
-  ), [activeRoot, catalog.rootNames]);
+      : rootNames[0] ?? null
+  ), [activeRoot, rootNames]);
 
   const visibleCandidates = useMemo(() => {
     if (!open) return [];
+    if (activeRootName === COLLECTION_ROOT_NAME && !normalizeTagValue(searchQuery)) return [];
     const query = normalizeTagValue(searchQuery);
     if (!query) {
       return activeRootName
@@ -416,15 +464,38 @@ const TagPickerDialog = memo(function TagPickerDialog({
       .map((item) => item.suggestion);
   }, [activeRootName, catalog.suggestions, catalog.suggestionsByRoot, open, searchQuery]);
 
+  const visibleCollectionCandidates = useMemo(() => {
+    if (!open) return [];
+    const query = normalizeCollectionValue(searchQuery).toLocaleLowerCase();
+    if (!query) {
+      return activeRootName === COLLECTION_ROOT_NAME ? normalizedCollectionCandidates : [];
+    }
+    return normalizedCollectionCandidates.filter((candidate) => candidate.toLocaleLowerCase().includes(query));
+  }, [activeRootName, normalizedCollectionCandidates, open, searchQuery]);
+
   const groups = useMemo(() => (open ? buildTagPickerGroups(visibleCandidates) : []), [open, visibleCandidates]);
 
   const canAddCustomTag = useMemo(() => {
     if (!open) return false;
     const query = normalizeTagValue(searchQuery);
     if (!query) return false;
+    if (activeRootName === COLLECTION_ROOT_NAME || isCollectionTagValue(query)) return false;
     const queryKey = getTagIdentityKey(query, userConfig);
     return !draftSelection.identityKeys.has(queryKey) && !catalog.identityKeys.has(queryKey);
-  }, [catalog.identityKeys, draftSelection.identityKeys, open, searchQuery, userConfig]);
+  }, [activeRootName, catalog.identityKeys, draftSelection.identityKeys, open, searchQuery, userConfig]);
+
+  const canAddCustomCollection = useMemo(() => {
+    if (!open) return false;
+    const query = normalizeCollectionValue(searchQuery);
+    if (!query || query === "未归档") return false;
+    const queryKey = normalizeCollectionIdentity(query);
+    return (
+      (activeRootName === COLLECTION_ROOT_NAME || searchQuery.trim().length > 0) &&
+      !draftCollections.some((collection) => normalizeCollectionIdentity(collection) === queryKey) &&
+      !normalizedCollectionCandidates.some((candidate) => normalizeCollectionIdentity(candidate) === queryKey)
+    );
+  }, [activeRootName, draftCollections, normalizedCollectionCandidates, open, searchQuery]);
+  const showCollectionPanel = activeRootName === COLLECTION_ROOT_NAME || visibleCollectionCandidates.length > 0 || canAddCustomCollection;
 
   const style = useMemo(() => {
     const maxSize = getMaxSize();
@@ -451,9 +522,9 @@ const TagPickerDialog = memo(function TagPickerDialog({
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
 
   const confirm = useCallback(() => {
-    onConfirm(mergeTagsStable([], draftSelection.items.map((item) => item.value), userConfig));
+    onConfirm(mergeTagsStable([], draftSelection.items.map((item) => item.value), userConfig), draftCollections);
     onOpenChange(false);
-  }, [draftSelection.items, onConfirm, onOpenChange, userConfig]);
+  }, [draftCollections, draftSelection.items, onConfirm, onOpenChange, userConfig]);
 
   const toggleCandidate = useCallback((candidate: TagPickerCatalogItem) => {
     setDraftSelection((current) => {
@@ -488,7 +559,7 @@ const TagPickerDialog = memo(function TagPickerDialog({
 
   const addCustomTag = useCallback(() => {
     const customTag = normalizeTagValue(searchQuery);
-    if (!customTag) return;
+    if (!customTag || isCollectionTagValue(customTag)) return;
     const item = createDraftSelectedTag(customTag, userConfig);
     if (!item) return;
     setDraftSelection((current) => {
@@ -502,6 +573,32 @@ const TagPickerDialog = memo(function TagPickerDialog({
     });
     setSearchQuery("");
   }, [searchQuery, userConfig]);
+
+  const selectCollection = useCallback((collection: string) => {
+    const normalizedCollection = normalizeCollectionValue(collection);
+    if (!normalizedCollection) return;
+    setDraftCollections((current) => {
+      const collectionKey = normalizeCollectionIdentity(normalizedCollection);
+      if (current.some((item) => normalizeCollectionIdentity(item) === collectionKey)) {
+        return current.filter((item) => normalizeCollectionIdentity(item) !== collectionKey);
+      }
+
+      return [...current, normalizedCollection];
+    });
+  }, []);
+
+  const removeCollection = useCallback((collection: string) => {
+    const collectionKey = normalizeCollectionIdentity(collection);
+    setDraftCollections((current) => current.filter((item) => normalizeCollectionIdentity(item) !== collectionKey));
+  }, []);
+
+  const addCustomCollection = useCallback(() => {
+    const collection = normalizeCollectionValue(searchQuery);
+    if (!collection || collection === "未归档") return;
+    setDraftCollections((current) => mergeCollectionCandidates([collection], current));
+    setSearchQuery("");
+    setActiveRoot(COLLECTION_ROOT_NAME);
+  }, [searchQuery]);
 
   const beginDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -657,8 +754,8 @@ const TagPickerDialog = memo(function TagPickerDialog({
           <div className="shrink-0 border-b border-border/80 bg-background px-5 py-3">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex min-w-0 flex-wrap gap-2">
-                {catalog.rootNames.length > 0 ? (
-                  catalog.rootNames.map((rootName) => {
+                {rootNames.length > 0 ? (
+                  rootNames.map((rootName) => {
                     const selectedCount = selectedCountByRoot.get(rootName) ?? 0;
                     const active = !searchQuery.trim() && activeRootName === rootName;
                     return (
@@ -701,10 +798,24 @@ const TagPickerDialog = memo(function TagPickerDialog({
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="shrink-0 border-b border-border/80 bg-muted/10 px-5 py-3">
-              <div className="mb-2 text-xs font-medium text-muted-foreground">已选标签（{draftSelection.items.length}）</div>
-              {draftSelection.items.length > 0 && (
+              <div className="mb-2 text-xs font-medium text-muted-foreground">
+                当前文集与标签（{draftSelection.items.length} 个标签）
+              </div>
+              {(draftCollections.length > 0 || draftSelection.items.length > 0) && (
                 <div className="max-h-[112px] overflow-y-auto">
                   <div className="flex min-w-0 flex-wrap gap-2 pr-1">
+                    {draftCollections.map((collection) => (
+                      <button
+                        key={collection}
+                        type="button"
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-sm border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-left text-xs text-emerald-600 dark:text-emerald-300"
+                        title={`文集：${collection}`}
+                        onClick={() => removeCollection(collection)}
+                      >
+                        <span className="min-w-0 whitespace-normal break-words font-medium [overflow-wrap:anywhere]">{collection}</span>
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    ))}
                     {draftSelection.items.map((item) => (
                       <button
                         key={`${item.identityKey}-${item.value}`}
@@ -722,7 +833,7 @@ const TagPickerDialog = memo(function TagPickerDialog({
               )}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
-              {groups.length === 0 ? (
+              {groups.length === 0 && !showCollectionPanel ? (
                 <div className="grid gap-3 py-8 text-center">
                   <div className="text-sm text-muted-foreground">
                     {searchQuery.trim() ? "没有找到匹配的标签。" : "暂无可选标签。"}
@@ -737,6 +848,49 @@ const TagPickerDialog = memo(function TagPickerDialog({
                 </div>
               ) : (
                 <div className="grid gap-6">
+                  {showCollectionPanel && (
+                    <section className="grid gap-3">
+                      {searchQuery.trim() && (
+                        <div className="text-sm font-semibold text-foreground">{COLLECTION_ROOT_NAME}</div>
+                      )}
+                      <div className="grid gap-2 md:grid-cols-[156px_minmax(0,1fr)] md:gap-4">
+                        <div className="whitespace-nowrap text-sm font-medium text-muted-foreground">
+                          文章文集
+                        </div>
+                        <div className="grid min-w-0 gap-2">
+                          <div className="flex min-w-0 flex-wrap gap-2">
+                            {visibleCollectionCandidates.map((collection) => {
+                              const selected = draftCollections.some((item) => normalizeCollectionIdentity(item) === normalizeCollectionIdentity(collection));
+                              return (
+                                <button
+                                  key={collection}
+                                  type="button"
+                                  title={`文集：${collection}`}
+                                  className={cn(
+                                    "inline-flex max-w-full rounded-sm border px-2.5 py-1.5 text-left text-sm leading-snug transition-colors",
+                                    selected
+                                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                                      : "border-border bg-muted/25 text-foreground hover:border-emerald-500 hover:bg-emerald-500/5 hover:text-emerald-600 dark:hover:text-emerald-300",
+                                  )}
+                                  onClick={() => selectCollection(collection)}
+                                >
+                                  <span className="min-w-0 whitespace-normal break-words font-medium [overflow-wrap:anywhere]">{collection}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {canAddCustomCollection && (
+                            <div className="rounded-sm border border-dashed border-emerald-500/40 bg-emerald-500/[0.06] px-3 py-2 text-sm">
+                              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200" onClick={addCustomCollection}>
+                                <Plus className="h-3.5 w-3.5" />
+                                新建文集：{normalizeCollectionValue(searchQuery)}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
                   {canAddCustomTag && (
                     <div className="rounded-sm border border-dashed border-border/80 bg-muted/10 px-3 py-2 text-sm">
                       <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[#146BB7]" onClick={addCustomTag}>

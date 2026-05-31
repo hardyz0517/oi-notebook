@@ -55,6 +55,7 @@ struct BlogNote {
     excerpt: String,
     tags: Vec<String>,
     category: String,
+    collections: Vec<String>,
     created: Option<String>,
     updated: Option<String>,
     date: String,
@@ -84,6 +85,7 @@ struct BlogNoteApiResponse {
     category: String,
     title: String,
     tags: Vec<String>,
+    collections: Vec<String>,
     created: Option<String>,
     updated: Option<String>,
     date: String,
@@ -103,6 +105,9 @@ struct NoteFrontmatter {
     title: Option<String>,
     summary: Option<String>,
     tags: Vec<String>,
+    collection: Vec<String>,
+    collections: Vec<String>,
+    category: Option<String>,
     updated: Option<String>,
     created: Option<String>,
     draft: bool,
@@ -356,6 +361,7 @@ fn serialize_note_api_json(detail: BlogNoteDetail) -> Result<String, String> {
         category: note.category,
         title: note.title,
         tags: note.tags,
+        collections: note.collections,
         created: note.created,
         updated: note.updated,
         date: note.date,
@@ -467,7 +473,8 @@ fn read_blog_note_detail(root: &Path, path: &Path) -> Result<BlogNoteDetail, Str
     let markdown = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read note {}: {e}", path.display()))?;
     let (frontmatter, body) = split_frontmatter(&markdown);
-    let metadata = frontmatter.map(parse_frontmatter).unwrap_or_default();
+    let mut metadata = frontmatter.map(parse_frontmatter).unwrap_or_default();
+    metadata.collections = effective_collections(&metadata);
     let note = blog_note_from_parts(root, path, body, metadata.clone());
 
     Ok(BlogNoteDetail {
@@ -492,6 +499,7 @@ fn blog_note_from_parts(root: &Path, path: &Path, body: &str, parsed: NoteFrontm
         .unwrap_or("Untitled")
         .to_string();
     let modified_key = modified_sort_key(path);
+    let collections = effective_collections(&parsed);
     let summary = parsed.summary.unwrap_or_default();
     let excerpt = if summary.is_empty() {
         excerpt_from_markdown(body)
@@ -508,7 +516,6 @@ fn blog_note_from_parts(root: &Path, path: &Path, body: &str, parsed: NoteFrontm
         .clone()
         .or(created.clone())
         .unwrap_or_else(|| modified_key.clone());
-
     BlogNote {
         title: parsed.title.unwrap_or(fallback_title),
         relative_path,
@@ -516,6 +523,7 @@ fn blog_note_from_parts(root: &Path, path: &Path, body: &str, parsed: NoteFrontm
         excerpt,
         tags: parsed.tags,
         category,
+        collections,
         created,
         updated,
         date,
@@ -907,6 +915,17 @@ fn parse_frontmatter(frontmatter: &str) -> NoteFrontmatter {
             "updated" => parsed.updated = parse_scalar(value),
             "created" => parsed.created = parse_scalar(value),
             "draft" => parsed.draft = parse_bool(value).unwrap_or(false),
+            "category" => parsed.category = parse_scalar(value),
+            "collection" => {
+                let (collections, next_index) = parse_string_list(&lines, index, value);
+                parsed.collection = collections;
+                index = next_index;
+            }
+            "collections" => {
+                let (collections, next_index) = parse_string_list(&lines, index, value);
+                parsed.collections = collections;
+                index = next_index;
+            }
             "tags" => {
                 if value.starts_with('[') && value.ends_with(']') {
                     parsed.tags = parse_inline_tags(value);
@@ -989,6 +1008,80 @@ fn parse_legacy_tags_string(value: &str) -> Vec<String> {
         .filter_map(parse_scalar)
         .filter(|tag| !tag.is_empty())
         .collect()
+}
+
+fn parse_string_list(lines: &[&str], index: usize, value: &str) -> (Vec<String>, usize) {
+    if value.starts_with('[') && value.ends_with(']') {
+        return (parse_inline_tags(value), index);
+    }
+
+    if value.is_empty() {
+        let (values, next_index) = parse_block_tags(lines, index + 1);
+        return (values, next_index.saturating_sub(1));
+    }
+
+    (parse_scalar(value).into_iter().collect(), index)
+}
+
+fn effective_collections(frontmatter: &NoteFrontmatter) -> Vec<String> {
+    let mut collections = Vec::new();
+
+    for collection in frontmatter
+        .collection
+        .iter()
+        .chain(frontmatter.collections.iter())
+    {
+        push_collection(&mut collections, collection);
+    }
+
+    if let Some(category) = &frontmatter.category {
+        push_collection(&mut collections, category);
+    }
+
+    for tag in &frontmatter.tags {
+        if let Some(collection) = collection_from_tag(tag) {
+            push_collection(&mut collections, collection);
+        }
+    }
+
+    if collections.is_empty() {
+        collections.push("未归档".to_string());
+    }
+
+    collections
+}
+
+fn collection_from_tag(tag: &str) -> Option<&str> {
+    let tag = tag.trim();
+    if let Some(collection) = tag
+        .strip_prefix("文集:")
+        .or_else(|| tag.strip_prefix("文集："))
+    {
+        return Some(collection);
+    }
+
+    let lower = tag.to_ascii_lowercase();
+    if lower.starts_with("collection:") {
+        return Some(&tag["collection:".len()..]);
+    }
+    if lower.starts_with("collection：") {
+        return Some(&tag["collection：".len()..]);
+    }
+
+    None
+}
+
+fn push_collection(collections: &mut Vec<String>, value: &str) {
+    let collection = value.trim();
+    if collection.is_empty()
+        || collections
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(collection))
+    {
+        return;
+    }
+
+    collections.push(collection.to_string());
 }
 
 fn parse_block_tags(lines: &[&str], start: usize) -> (Vec<String>, usize) {
@@ -2007,6 +2100,72 @@ tags: "算法/字符串/Z 函数, DP"
     }
 
     #[test]
+    fn parses_and_normalizes_collections() {
+        let scalar = parse_frontmatter("collection: 题解");
+        assert_eq!(effective_collections(&scalar), vec!["题解"]);
+
+        let block = parse_frontmatter(
+            r#"
+collection:
+  - 题解
+  - 集训日志
+"#,
+        );
+        assert_eq!(effective_collections(&block), vec!["题解", "集训日志"]);
+
+        let plural = parse_frontmatter(
+            r#"
+collections:
+  - 题解
+  - 集训日志
+"#,
+        );
+        assert_eq!(effective_collections(&plural), vec!["题解", "集训日志"]);
+
+        let inline = parse_frontmatter("collection: [题解, 集训日志]");
+        assert_eq!(effective_collections(&inline), vec!["题解", "集训日志"]);
+
+        let compatible_sources = parse_frontmatter(
+            r#"
+category: 技巧
+tags:
+  - 文集:复盘
+  - collection:杂谈
+  - DP
+"#,
+        );
+        assert_eq!(
+            effective_collections(&compatible_sources),
+            vec!["技巧", "复盘", "杂谈"]
+        );
+        assert_eq!(
+            compatible_sources.tags,
+            vec!["文集:复盘", "collection:杂谈", "DP"]
+        );
+
+        let deduplicated = parse_frontmatter(
+            r#"
+collection: 题解
+collections:
+  - 题解
+  - 集训日志
+category: 题解
+tags:
+  - 文集:集训日志
+"#,
+        );
+        assert_eq!(
+            effective_collections(&deduplicated),
+            vec!["题解", "集训日志"]
+        );
+
+        assert_eq!(
+            effective_collections(&NoteFrontmatter::default()),
+            vec!["未归档"]
+        );
+    }
+
+    #[test]
     fn scans_notes_and_skips_assets() {
         let dir = tempdir().unwrap();
         let notes_dir = dir.path();
@@ -2036,6 +2195,7 @@ This note becomes an excerpt.
         assert_eq!(notes[0].summary, "");
         assert!(notes[0].excerpt.contains("Demo body"));
         assert_eq!(notes[0].category, "tricks");
+        assert_eq!(notes[0].collections, vec!["未归档"]);
         assert_eq!(
             notes[0].created.as_deref(),
             Some("2026-05-01T00:00:00+08:00")
@@ -2059,6 +2219,7 @@ title: A "quote" <x>
 tags:
   - 数学
   - "图论"
+collections: [review, diary]
 summary: "Use <unsafe> & quotes"
 created: 2026-05-01T00:00:00+08:00
 updated: 2026-05-06T00:00:00+08:00
@@ -2096,6 +2257,7 @@ Inline body excerpt.
         assert_eq!(notes[0]["excerpt"], "Use <unsafe> & quotes");
         assert_eq!(notes[0]["tags"], serde_json::json!(["数学", "图论"]));
         assert_eq!(notes[0]["category"], "tricks");
+        assert_eq!(notes[0]["collections"], serde_json::json!(["review", "diary"]));
         assert_eq!(notes[0]["created"], "2026-05-01T00:00:00+08:00");
         assert_eq!(notes[0]["updated"], "2026-05-06T00:00:00+08:00");
         assert_eq!(notes[0]["date"], "2026-05-06T00:00:00+08:00");
@@ -2217,6 +2379,7 @@ title: API Detail
 tags:
   - dp
   - "中文"
+collection: [solutions, training]
 summary: "A summary"
 created: 2026-05-01T00:00:00+08:00
 updated: 2026-05-06T00:00:00+08:00
@@ -2238,6 +2401,10 @@ Body with "quotes" and <unsafe>.
         assert_eq!(value["category"], "tricks");
         assert_eq!(value["title"], "API Detail");
         assert_eq!(value["tags"], serde_json::json!(["dp", "中文"]));
+        assert_eq!(
+            value["collections"],
+            serde_json::json!(["solutions", "training"])
+        );
         assert_eq!(value["created"], "2026-05-01T00:00:00+08:00");
         assert_eq!(value["updated"], "2026-05-06T00:00:00+08:00");
         assert_eq!(value["date"], "2026-05-06T00:00:00+08:00");
@@ -2246,6 +2413,10 @@ Body with "quotes" and <unsafe>.
         assert_eq!(value["metadata"]["title"], "API Detail");
         assert_eq!(value["metadata"]["summary"], "A summary");
         assert_eq!(value["metadata"]["tags"], serde_json::json!(["dp", "中文"]));
+        assert_eq!(
+            value["metadata"]["collections"],
+            serde_json::json!(["solutions", "training"])
+        );
         assert_eq!(value["metadata"]["created"], "2026-05-01T00:00:00+08:00");
         assert_eq!(value["metadata"]["updated"], "2026-05-06T00:00:00+08:00");
         assert_eq!(value["metadata"]["draft"], true);
@@ -2371,6 +2542,7 @@ Body with "quotes" and <unsafe>.
                 excerpt: "<summary>".to_string(),
                 tags: vec!["<tag>".to_string()],
                 category: "tricks".to_string(),
+                collections: vec!["未归档".to_string()],
                 created: None,
                 updated: None,
                 date: "2026-05-05".to_string(),
@@ -2400,6 +2572,7 @@ Body with "quotes" and <unsafe>.
                 excerpt: "Formula note".to_string(),
                 tags: vec![],
                 category: "tricks".to_string(),
+                collections: vec!["未归档".to_string()],
                 created: None,
                 updated: None,
                 date: "2026-05-06".to_string(),

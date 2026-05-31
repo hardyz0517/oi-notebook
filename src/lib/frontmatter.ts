@@ -1,7 +1,8 @@
 export interface FrontmatterFields {
   title: string;
   tags: string[];
-  collection: string;
+  collection: string[];
+  category: string;
   summary: string;
   draft: boolean;
   difficulty: string;
@@ -34,7 +35,8 @@ type TagParseResult =
 const EMPTY_FIELDS: FrontmatterFields = {
   title: "",
   tags: [],
-  collection: "",
+  collection: [],
+  category: "",
   summary: "",
   draft: false,
   difficulty: "",
@@ -114,6 +116,7 @@ export function parseFrontmatterFields(markdown: string): ParsedFrontmatter {
   const fields = { ...EMPTY_FIELDS };
   const lines = splitLines(split.yaml);
   const tagResult = parseTags(lines);
+  const collectionResult = parseCollection(lines);
   let canEditTags = true;
 
   if (tagResult.ok) {
@@ -122,14 +125,19 @@ export function parseFrontmatterFields(markdown: string): ParsedFrontmatter {
     canEditTags = false;
   }
 
+  if (collectionResult.ok) {
+    fields.collection = collectionResult.collection;
+  }
+
   for (let index = 0; index < lines.length; index += 1) {
     if (index >= tagResult.start && index <= tagResult.end) continue;
+    if (index >= collectionResult.start && index <= collectionResult.end) continue;
     const parsed = parseTopLevelKeyValue(lines[index]);
     if (!parsed) continue;
 
     if (parsed.key === "title") fields.title = parseScalar(parsed.value);
     else if (parsed.key === "summary") fields.summary = parseScalar(parsed.value);
-    else if (parsed.key === "collection") fields.collection = parseScalar(parsed.value);
+    else if (parsed.key === "category") fields.category = parseScalar(parsed.value);
     else if (parsed.key === "difficulty") fields.difficulty = parseScalar(parsed.value);
     else if (parsed.key === "source") fields.source = parseScalar(parsed.value);
     else if (parsed.key === "draft") fields.draft = parseBoolean(parsed.value);
@@ -160,10 +168,12 @@ export function mergeFrontmatterFields(
 
   const lines = splitLines(split.yaml);
   const tagResult = parseTags(lines);
+  const collectionResult = parseCollection(lines);
   const fieldLines = new Map<keyof FrontmatterFields, number>();
 
   for (let index = 0; index < lines.length; index += 1) {
     if (index >= tagResult.start && index <= tagResult.end) continue;
+    if (index >= collectionResult.start && index <= collectionResult.end) continue;
     const parsed = parseTopLevelKeyValue(lines[index]);
     if (!parsed) continue;
     if (isKnownField(parsed.key) && parsed.key !== "tags") {
@@ -178,9 +188,18 @@ export function mergeFrontmatterFields(
     lines[lineIndex] = serializeField(key, fields);
   }
 
+  const replacements: Array<{ start: number; end: number; lines: string[] }> = [];
+
   if (tagResult.ok && tagResult.start >= 0) {
-    const tagLines = serializeTags(fields.tags);
-    lines.splice(tagResult.start, tagResult.end - tagResult.start + 1, ...tagLines);
+    replacements.push({ start: tagResult.start, end: tagResult.end, lines: serializeTags(fields.tags) });
+  }
+
+  if (collectionResult.ok && collectionResult.start >= 0) {
+    replacements.push({ start: collectionResult.start, end: collectionResult.end, lines: serializeStringList("collection", fields.collection) });
+  }
+
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+    lines.splice(replacement.start, replacement.end - replacement.start + 1, ...replacement.lines);
   }
 
   const existingFields = collectKnownFields(lines);
@@ -298,6 +317,55 @@ function parseTags(lines: string[]): TagParseResult {
   return { ok: true, tags, start: tagLineIndex, end };
 }
 
+type CollectionParseResult =
+  | { ok: true; collection: string[]; start: number; end: number }
+  | { ok: false; start: number; end: number };
+
+function parseCollection(lines: string[]): CollectionParseResult {
+  const collectionLineIndex = lines.findIndex((line) => parseTopLevelKeyValue(line)?.key === "collection");
+
+  if (collectionLineIndex === -1) {
+    return { ok: true, collection: [], start: -1, end: -1 };
+  }
+
+  const parsed = parseTopLevelKeyValue(lines[collectionLineIndex]);
+  const value = parsed?.value ?? "";
+
+  if (value !== "") {
+    if (value.startsWith("[") || value.endsWith("]")) {
+      const flowCollection = parseFlowTags(value);
+      if (!flowCollection) return { ok: false, start: collectionLineIndex, end: collectionLineIndex };
+      return { ok: true, collection: flowCollection, start: collectionLineIndex, end: collectionLineIndex };
+    }
+
+    if (!isSimpleScalar(value)) return { ok: false, start: collectionLineIndex, end: collectionLineIndex };
+    const collection = parseScalar(value);
+    return { ok: true, collection: collection ? [collection] : [], start: collectionLineIndex, end: collectionLineIndex };
+  }
+
+  const collection: string[] = [];
+  let end = collectionLineIndex;
+
+  for (let index = collectionLineIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (parseTopLevelKeyValue(line)) break;
+    if (line.trim() === "") {
+      end = index;
+      continue;
+    }
+
+    const item = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (!item) return { ok: false, start: collectionLineIndex, end: index };
+
+    const valueText = item[1].trim();
+    if (!isSimpleScalar(valueText)) return { ok: false, start: collectionLineIndex, end: index };
+    collection.push(parseScalar(valueText));
+    end = index;
+  }
+
+  return { ok: true, collection, start: collectionLineIndex, end };
+}
+
 function parseFlowTags(value: string): string[] | null {
   if (value === "[]") return [];
   if (!value.startsWith("[") || !value.endsWith("]")) return null;
@@ -385,6 +453,7 @@ function serializeMetadataPatch(patch: FrontmatterMetadataPatch): string {
 
 function serializeField(key: keyof FrontmatterFields, fields: FrontmatterFields): string {
   if (key === "tags") return serializeTags(fields.tags).join("\n");
+  if (key === "collection") return serializeStringList("collection", fields.collection).join("\n");
   if (key === "draft") return `draft: ${fields.draft ? "true" : "false"}`;
   return `${key}: ${formatScalar(fields[key])}`;
 }
@@ -392,6 +461,11 @@ function serializeField(key: keyof FrontmatterFields, fields: FrontmatterFields)
 function serializeTags(tags: string[]): string[] {
   if (tags.length === 0) return ["tags: []"];
   return ["tags:", ...tags.map((tag) => `- ${formatScalar(tag)}`)];
+}
+
+function serializeStringList(key: string, values: string[]): string[] {
+  if (values.length === 0) return [`${key}: []`];
+  return [`${key}:`, ...values.map((value) => `- ${formatScalar(value)}`)];
 }
 
 function formatScalar(value: string | string[] | boolean): string {
