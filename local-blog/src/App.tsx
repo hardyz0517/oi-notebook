@@ -1154,6 +1154,13 @@ function groupNotesByYear(notes: NoteSummary[]) {
   });
 }
 
+function sortNotesByRecent(notes: NoteSummary[]) {
+  return notes
+    .map((note, index) => ({ note, index, date: getNoteDate(note)?.getTime() ?? 0 }))
+    .sort((a, b) => b.date - a.date || a.index - b.index)
+    .map((item) => item.note);
+}
+
 export default function App() {
   const [route, setRoute] = useState<Route>(() => getRouteFromHash());
   const [notes, setNotes] = useState<NoteSummary[]>([]);
@@ -1339,23 +1346,33 @@ function IndexView({
 
   if (route.name === "collection") {
     const collection = getCategoryLabel(route.collection);
-    const filteredNotes = notes.filter((note) => note.collection === collection);
+    const collectionGroup = collections.find((item) => item.name === collection);
+    const filteredNotes = sortNotesByRecent(notes.filter((note) => note.collection === collection));
     const paged = paginateNotes(filteredNotes, route.page, resultPageSize);
 
     return (
       <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u96c6 \u2192 " + collection}>
-        <CollectionDetailHeader collection={collection} count={filteredNotes.length} />
-        <PostResults
-          notes={paged.items}
-          isLoading={isLoading}
-          error={error}
-          onRetry={onRetry}
-          sourceHref={getRouteReturnHref(route)}
-          variant="list"
-          emptyTitle={"\u8fd9\u4e2a\u6587\u96c6\u4e0b\u8fd8\u6ca1\u6709\u6587\u7ae0"}
-          emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
-        />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCollectionHref(collection, page)} />
+        <section className="collection-detail">
+          <a className="collection-detail-back" href="#/collections">{"\u2190 \u8fd4\u56de\u6587\u96c6"}</a>
+          <CollectionDetailHeader
+            collection={collection}
+            count={filteredNotes.length}
+            latestUpdatedAt={collectionGroup?.latestUpdatedAt}
+          />
+          <div className="collection-detail-results">
+            <PostResults
+              notes={paged.items}
+              isLoading={isLoading}
+              error={error}
+              onRetry={onRetry}
+              sourceHref={getRouteReturnHref(route)}
+              variant="list"
+              emptyTitle={"\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6587\u96c6"}
+              emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
+            />
+            <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCollectionHref(collection, page)} />
+          </div>
+        </section>
       </ListingPage>
     );
   }
@@ -1689,11 +1706,24 @@ function TagCloud({ tags }: { tags: CountItem[] }) {
   );
 }
 
-function CollectionDetailHeader({ collection, count }: { collection: string; count: number }) {
+function CollectionDetailHeader({
+  collection,
+  count,
+  latestUpdatedAt,
+}: {
+  collection: string;
+  count: number;
+  latestUpdatedAt?: string;
+}) {
   return (
-    <header className="tag-detail-header">
+    <header className="collection-detail-header">
       <h1>{collection}</h1>
-      <p className="tag-detail-count">{"\u5171 " + count + " \u7bc7\u6587\u7ae0"}</p>
+      <p className="collection-detail-meta">
+        {"\u5171 " + count + " \u7bc7"}
+        <span aria-hidden="true">{" \u00b7 "}</span>
+        {"\u6700\u8fd1\u66f4\u65b0 " + (formatCompactDate(latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}
+      </p>
+      <p className="collection-detail-description">{getCollectionDescription(collection)}</p>
     </header>
   );
 }
