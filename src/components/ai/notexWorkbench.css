@@ -581,13 +581,10 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-message-list {
+  align-content: start;
   gap: 18px !important;
   min-width: 0;
   max-width: 100%;
-}
-
-.notex-message-list[data-virtual-message-list="true"] {
-  align-content: start;
 }
 
 .notex-session-edit {

@@ -38,7 +38,6 @@ import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFo
 import { buildAiTagRecommendationInput, buildAiTagSuggestionMessagePayload, createAiTagRecommendationFailureMessage, normalizeAiTags, normalizeAiTagValue, type AiTagRecommendation, type AiTagRecommendationResult } from "@/lib/aiTagRecommendations";
 import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
-import { VirtualMessageList } from "@/components/ai/VirtualMessageList";
 import { getMarkdownRenderCacheKey, readMarkdownRenderCache, writeMarkdownRenderCache } from "@/components/ai/markdownCache";
 import {
   openExternalUrl,
@@ -304,7 +303,6 @@ const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 24;
-const AI_MESSAGE_VIRTUAL_OVERSCAN = 7;
 const AI_STREAM_REVEAL_INTERVAL_MS = 28;
 const AI_STREAM_REVEAL_FAST_INTERVAL_MS = 16;
 const AI_STREAM_REVEAL_BACKLOG_INTERVAL_MS = 12;
@@ -5420,7 +5418,7 @@ export default function AiSidebar({
 
   useEffect(() => {
     if (!isOpen || viewMode !== "chat") return undefined;
-    const messagesList = messagesScrollRef.current?.querySelector<HTMLElement>("[data-virtual-message-list=\"true\"]");
+    const messagesList = messagesScrollRef.current?.querySelector<HTMLElement>("[data-notex-message-list=\"true\"]");
     if (!messagesList) return undefined;
 
     const observer = new ResizeObserver(() => {
@@ -7020,60 +7018,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     "--notex-composer-avoid-height": `${composerFlowHeight}px`,
   } as CSSProperties;
   const contentColumnClass = isMaximized ? "w-full max-w-none" : "mx-auto w-full max-w-3xl";
-  const expandedCitationSignature = useMemo(
-    () => Object.entries(expandedCitationMessageIds)
-      .filter(([, isExpanded]) => isExpanded)
-      .map(([messageId]) => messageId)
-      .sort()
-      .join(","),
-    [expandedCitationMessageIds],
-  );
-  const expandedLocalNoteSignature = useMemo(
-    () => Object.entries(expandedLocalNoteMessageIds)
-      .filter(([, isExpanded]) => isExpanded)
-      .map(([messageId]) => messageId)
-      .sort()
-      .join(","),
-    [expandedLocalNoteMessageIds],
-  );
-  const virtualMessageRenderVersion = useMemo(() => [
-    elapsedNow,
-    developerModeEnabled ? "dev" : "normal",
-    activeWebSearchProvider,
-    isAiConfigured ? "configured" : "unconfigured",
-    selectedProviderId ?? "",
-    selectedModelId ?? "",
-    isResponding ? "responding" : "idle",
-    messageCopyFeedback ? `${messageCopyFeedback.messageId}:${messageCopyFeedback.status}` : "",
-    highlightedCitationId ?? "",
-    highlightedLocalCitationId ?? "",
-    applyingTagMessageId ?? "",
-    applyingPolishMessageId ?? "",
-    expandedCitationSignature,
-    expandedLocalNoteSignature,
-  ].join("|"), [
-    activeWebSearchProvider,
-    applyingPolishMessageId,
-    applyingTagMessageId,
-    developerModeEnabled,
-    elapsedNow,
-    expandedCitationSignature,
-    expandedLocalNoteSignature,
-    highlightedCitationId,
-    highlightedLocalCitationId,
-    isAiConfigured,
-    isResponding,
-    messageCopyFeedback,
-    selectedModelId,
-    selectedProviderId,
-  ]);
-  const estimateVirtualMessageSize = useCallback((message: AiChatMessage) => {
-    if (message.role === "user") return 84;
-    if (message.role === "system") return 96;
-    if (message.kind === "polish-preview" || message.kind === "tag-suggestion") return 260;
-    if (message.text.length > 1200) return 320;
-    return 180;
-  }, []);
   const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
     const title = getConversationDisplayTitle(conversation);
     const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
@@ -7605,15 +7549,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             </div>
           ) : (
-            <VirtualMessageList
-              messages={messages}
-              resetKey={activeConversation?.id ?? activeConversationId}
-              scrollRef={messagesScrollRef}
-              overscan={AI_MESSAGE_VIRTUAL_OVERSCAN}
-              renderVersion={virtualMessageRenderVersion}
+            <div
               className={cn("notex-message-list", contentColumnClass, "grid gap-3")}
-              estimateSize={estimateVirtualMessageSize}
-              renderMessage={(message) => {
+              data-notex-message-list="true"
+            >
+              {messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => {
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
                 const timingLabel = getAssistantTimingLabel(message, elapsedMs);
@@ -7793,8 +7733,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
                 </div>
               );
-              }}
-            />
+              })}
+            </div>
           )}
           {viewMode === "chat" && <div className="notex-bottom-spacer" aria-hidden="true" />}
         </div>
