@@ -623,6 +623,25 @@ html[data-theme="light"] [data-markdown-preview-content] a:focus-visible {
   text-decoration-color: #217dbb;
 }
 
+html[data-theme="dark"] [data-markdown-preview-content] a,
+html[data-theme="dark"] [data-markdown-preview-content] a:visited {
+  color: #04395E !important;
+  text-decoration-color: color-mix(in oklch, #04395E 68%, transparent);
+}
+
+html[data-theme="dark"] [data-markdown-preview-content] a:hover,
+html[data-theme="dark"] [data-markdown-preview-content] a:focus-visible {
+  color: #2899f5 !important;
+  text-decoration-color: #2899f5;
+}
+
+[data-markdown-preview-content] pre a,
+[data-markdown-preview-content] code a {
+  color: inherit !important;
+  text-decoration: inherit;
+  text-decoration-color: inherit;
+}
+
 html[data-theme="light"] [data-markdown-preview-content] hr {
   border-color: var(--border-subtle);
 }

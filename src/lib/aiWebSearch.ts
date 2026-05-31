@@ -296,7 +296,7 @@ export const mapResearchIntentToSearchIntent = (
 ): SearchIntent => {
   if (vertical === "explicit_url") return "explicit_url";
   if (vertical === "docs") return "docs_technical";
-  if (vertical === "news" || freshness === "news") return "news_recent";
+  if (vertical === "news" || vertical === "world_news" || freshness === "news") return "news_recent";
   if (vertical === "oi" || vertical === "algorithm") return "oi_algorithm";
   if (intent === "oi_problem" || intent === "oi_discussion" || intent === "algorithm_reference" || intent === "debug_issue") {
     return "oi_algorithm";
@@ -306,6 +306,7 @@ export const mapResearchIntentToSearchIntent = (
 
 export type SearchVertical =
   | "news"
+  | "world_news"
   | "oi"
   | "algorithm"
   | "general_web"
@@ -355,6 +356,7 @@ export type NewsSourceFreshnessStatus =
   | "fresh_yesterday"
   | "fresh_72h"
   | "recent_week"
+  | "recent_fortnight"
   | "stale"
   | "undated";
 
@@ -814,7 +816,15 @@ const NEWS_TOPIC_KEYWORDS = [
   "artificial intelligence",
   "LLM",
   "model",
+  "国际新闻",
+  "国际大事",
+  "世界新闻",
+  "世界大事",
+  "world news",
+  "international news",
+  "major world events",
 ];
+const WORLD_NEWS_TOPIC_KEYWORDS = ["国际新闻", "国际大事", "世界新闻", "世界大事", "world news", "international news", "major world events"];
 const AI_NEWS_RELEVANCE_KEYWORDS = [
   "AI",
   "人工智能",
@@ -878,6 +888,14 @@ const NEWS_AUTHORITY_DOMAINS = [
   "finance.sina.com.cn",
   "new.qq.com",
   "thepaper.cn",
+  "bbc.com",
+  "aljazeera.com",
+  "theguardian.com",
+  "dw.com",
+  "france24.com",
+  "cnn.com",
+  "news.cn",
+  "cctv.com",
 ];
 const NEWS_EVENT_KEYWORDS = [
   "发布",
@@ -946,7 +964,7 @@ const SEARCH_CONFIDENCE_THRESHOLD = 0.65;
 
 const CRITICAL_RECENT_TIME_KEYWORDS = ["\u6700\u8fd1", "\u8fd1\u671f", "\u6700\u65b0", "\u4eca\u5929", "\u6628\u5929", "\u4eca\u5e74", "\u672c\u5468", "\u672c\u6708"];
 const CRITICAL_RECENT_CONTENT_KEYWORDS = ["\u65b0\u95fb", "\u6d88\u606f", "\u66f4\u65b0", "\u52a8\u6001", "\u8fdb\u5c55", "\u53d1\u5e03"];
-const CRITICAL_NEWS_TOPIC_KEYWORDS = ["AI", "\u4eba\u5de5\u667a\u80fd", "\u5927\u6a21\u578b", "OpenAI", "ChatGPT", "DeepSeek", "Gemini", "Claude", "Anthropic", "Google", "Microsoft", "LLM"];
+const CRITICAL_NEWS_TOPIC_KEYWORDS = ["AI", "\u4eba\u5de5\u667a\u80fd", "\u5927\u6a21\u578b", "OpenAI", "ChatGPT", "DeepSeek", "Gemini", "Claude", "Anthropic", "Google", "Microsoft", "LLM", "\u56fd\u9645\u65b0\u95fb", "\u56fd\u9645\u5927\u4e8b", "\u4e16\u754c\u65b0\u95fb", "\u4e16\u754c\u5927\u4e8b", "world news", "international news", "major world events"];
 const CRITICAL_OI_DISCUSSION_KEYWORDS = ["\u8ba8\u8bba", "\u5e38\u89c1\u5751", "\u5751", "\u5b9e\u73b0\u5751", "\u6ce8\u610f\u4e8b\u9879"];
 const CRITICAL_ALGORITHM_KEYWORDS = ["\u70b9\u5206\u6cbb", "\u70b9\u5206\u6811", "\u7ebf\u6bb5\u6811", "\u5e76\u67e5\u96c6", "\u6700\u77ed\u8def", "Dijkstra", "LCA", "DSU", "KMP"];
 const CRITICAL_TECH_DOC_KEYWORDS = ["react", "useeffect", "hook", "javascript", "css", "html", "web api", "python", "rust", "tauri", "vite", "tailwind", "typescript", "node.js", "nodejs"];
@@ -1049,6 +1067,14 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     ["arstechnica.com", "Ars Technica", 18, "tech_news", "en"],
     ["reuters.com", "Reuters", 26, "official_news", "en"],
     ["apnews.com", "AP News", 24, "official_news", "en"],
+    ["bbc.com", "BBC World", 24, "world_news", "en"],
+    ["aljazeera.com", "Al Jazeera", 23, "world_news", "en"],
+    ["theguardian.com", "The Guardian World", 22, "world_news", "en"],
+    ["dw.com", "DW News", 20, "world_news", "en"],
+    ["france24.com", "France 24", 20, "world_news", "en"],
+    ["cnn.com", "CNN World", 20, "world_news", "en"],
+    ["news.cn", "新华社国际", 23, "world_news", "zh"],
+    ["cctv.com", "央视新闻国际", 21, "world_news", "zh"],
     ["bloomberg.com", "Bloomberg", 22, "official_news", "en"],
     ["36kr.com", "36Kr", 18, "tech_news", "zh"],
     ["qbitai.com", "QbitAI", 18, "tech_news", "zh"],
@@ -1057,7 +1083,7 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
   ].map(([domain, label, reliabilityWeight, sourceType, language]) => ({
     domain: String(domain),
     label: String(label),
-    verticals: ["news" as const],
+    verticals: ["news" as const, "world_news" as const],
     sourceTypes: [String(sourceType), "news"],
     reliabilityWeight: Number(reliabilityWeight),
     freshnessWeight: 12,
@@ -1822,6 +1848,13 @@ const buildNewsQueries = (question: string, topicKeywords: string[]): string[] =
   return unique(queries.map(trimQuery).filter((query) => query && !isGenericOnlySearchQuery(query))).slice(0, 3);
 };
 
+const isWorldNewsQuery = (text: string): boolean =>
+  WORLD_NEWS_TOPIC_KEYWORDS.some((keyword) => containsSearchKeyword(text, keyword)) ||
+  /(?:这几天|最近|近期).*(?:世界上|全球).*(?:大事|新闻|发生了什么)/.test(text);
+
+const isNewsVertical = (vertical: SearchVertical | undefined): boolean =>
+  vertical === "news" || vertical === "world_news";
+
 const buildGeneralWebQueries = (
   question: string,
   recentInfoRequested: boolean,
@@ -1829,6 +1862,12 @@ const buildGeneralWebQueries = (
 ): string[] => {
   if (recentInfoRequested) {
     const monthHint = getCurrentChineseMonthHint();
+    const englishMonthHint = new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+    if (isWorldNewsQuery(question)) {
+      return /[\u4e00-\u9fff]/.test(question)
+        ? ["国际新闻", `最近国际大事 ${monthHint}`, `world news today ${englishMonthHint}`].map(trimQuery)
+        : ["world news today", `international news today ${englishMonthHint}`, "major world events"].map(trimQuery);
+    }
     if (/\bopenai\b/i.test(question) || topicKeywords.some((keyword) => keyword.toLocaleLowerCase() === "openai")) {
       return [`OpenAI \u65b0\u95fb`, `OpenAI \u6700\u65b0\u6d88\u606f ${monthHint}`, `OpenAI latest news ${new Date().toLocaleString("en-US", { month: "long", year: "numeric" })}`].map(trimQuery).slice(0, 3);
     }
@@ -1876,7 +1915,7 @@ const buildGeneralWebQueries = (
 const hasUrlLikeText = (value: string): boolean =>
   /\bhttps?:\/\//i.test(value) || /\bwww\.[^\s]+/i.test(value);
 
-const SEARCH_VERTICALS = new Set<SearchVertical>(["news", "oi", "algorithm", "general_web", "product", "docs", "explicit_url", "no_search"]);
+const SEARCH_VERTICALS = new Set<SearchVertical>(["news", "world_news", "oi", "algorithm", "general_web", "product", "docs", "explicit_url", "no_search"]);
 const SEARCH_DEPTHS = new Set<SearchDepth>(["quick", "normal", "deep", "news", "oi_research"]);
 
 const isSearchVertical = (value: unknown): value is SearchVertical =>
@@ -1890,6 +1929,7 @@ const inferSearchVertical = (decision: SearchDecision, plan?: Partial<AiSearchQu
   if (decision.problemId || decision.intent === "oi_problem" || decision.intent === "oi_discussion") return "oi";
   if (decision.intent === "algorithm_reference" || decision.intent === "debug_issue") return "algorithm";
   if (decision.intent === "no_search") return "no_search";
+  if (decision.vertical === "world_news") return "world_news";
   if (decision.newsIntent || plan?.freshness === "news") return "news";
   return "general_web";
 };
@@ -1970,7 +2010,7 @@ export const validateAiSearchQueryPlan = (
   const vertical = inferSearchVertical(decision, item);
   const depth = isSearchDepth(item.depth)
     ? item.depth
-    : vertical === "news"
+    : isNewsVertical(vertical)
       ? "news"
       : vertical === "oi" || vertical === "algorithm"
         ? "oi_research"
@@ -1997,7 +2037,7 @@ export const validateAiSearchQueryPlan = (
       negativeKeywords,
       freshness,
       depth,
-      readBudget: clampReadBudget(item.readBudget, 1, vertical === "news" ? 12 : 10, vertical === "news" ? 8 : depth === "quick" ? 3 : 6),
+      readBudget: clampReadBudget(item.readBudget, 1, isNewsVertical(vertical) ? 12 : 10, isNewsVertical(vertical) ? 8 : depth === "quick" ? 3 : 6),
       preferredSourceTypes,
       preferredDomains,
       avoidSourceTypes,
@@ -2087,10 +2127,14 @@ export const buildOfflineAiQueryPlannerPreview = (decision: SearchDecision): AiS
     requiredKeywords: topicKeywords.slice(0, 6),
     negativeKeywords: ["dictionary", "translate", "meaning", "Wikipedia", "百科", "英语怎么说"],
     freshness: decision.newsIntent ? "news" : decision.recencyIntent ? "recent" : "none",
-    depth: vertical === "news" ? "news" : "normal",
-    readBudget: vertical === "news" ? 8 : 6,
+    depth: isNewsVertical(vertical) ? "news" : "normal",
+    readBudget: isNewsVertical(vertical) ? 8 : 6,
     preferredSourceTypes: decision.newsIntent ? ["news", "official blog", "company announcement"] : [],
-    preferredDomains: vertical === "news" ? ["openai.com", "techcrunch.com", "qbitai.com"] : [],
+    preferredDomains: vertical === "world_news"
+      ? ["reuters.com", "apnews.com", "bbc.com", "aljazeera.com", "theguardian.com", "dw.com", "france24.com"]
+      : vertical === "news"
+        ? ["openai.com", "techcrunch.com", "qbitai.com"]
+        : [],
     avoidSourceTypes: decision.newsIntent ? ["dictionary", "translation", "definition", "lyrics", "video"] : [],
     reason: "离线诊断只验证搜索规划触发和 query 质量，不会发起 AI 或公网请求。",
     confidence: 0.72,
@@ -2125,7 +2169,7 @@ export const getWebReadBudgetPlan = (decision: SearchDecision): WebReadBudgetPla
   const plannedDepth = decision.aiPlanner?.depth;
   const depth: SearchDepth = plannedDepth && SEARCH_DEPTHS.has(plannedDepth)
     ? plannedDepth
-    : vertical === "news"
+    : isNewsVertical(vertical)
       ? "news"
       : vertical === "oi" || vertical === "algorithm"
         ? "oi_research"
@@ -2161,9 +2205,9 @@ const buildTargetedQueries = (
   const topicQuery = baseQueries[0] ?? decision.topicKeywords?.slice(0, 4).join(" ") ?? "";
   if (!topicQuery) return { queries: [], dropped: [] };
   const focus = getQueryFocusEntities(decision.rawQuestion, decision.queries);
-  const companySpecificNews = vertical === "news" && focus.entities.length === 1;
+  const companySpecificNews = isNewsVertical(vertical) && focus.entities.length === 1;
   const focusEntity = focus.entities[0];
-  const maxDomains = vertical === "news" ? 3 : 2;
+  const maxDomains = isNewsVertical(vertical) ? 3 : 2;
   const keptDomains: string[] = [];
   const dropped: Array<{ query: string; reason: string }> = [];
   for (const domain of preferredDomains) {
@@ -2188,7 +2232,7 @@ const filterCompanySpecificSiteQueries = (
   queries: string[],
 ): { queries: string[]; dropped: Array<{ query: string; reason: string }> } => {
   const focus = getQueryFocusEntities(decision.rawQuestion, decision.queries);
-  const companySpecificNews = vertical === "news" && focus.entities.length === 1;
+  const companySpecificNews = isNewsVertical(vertical) && focus.entities.length === 1;
   if (!companySpecificNews) return { queries, dropped: [] };
   const focusEntity = focus.entities[0];
   const kept: string[] = [];
@@ -2217,14 +2261,14 @@ export const buildSourceStrategyPlan = (
     ...registryEntries
       .sort((left, right) => (right.reliabilityWeight + right.freshnessWeight) - (left.reliabilityWeight + left.freshnessWeight))
       .map((entry) => entry.domain),
-  ]).slice(0, vertical === "news" ? 8 : 6);
+  ]).slice(0, isNewsVertical(vertical) ? 8 : 6);
   const preferredSourceTypes = unique([
     ...(decision.aiPlanner?.preferredSourceTypes ?? []),
     ...registryEntries.flatMap((entry) => entry.sourceTypes),
   ]).slice(0, 10);
   const avoidedSourceTypes = unique([
     ...(decision.aiPlanner?.avoidSourceTypes ?? []),
-    ...(vertical === "news" ? ["docs", "wiki", "github", "homepage", "dictionary", "translation"] : []),
+    ...(isNewsVertical(vertical) ? ["docs", "wiki", "github", "homepage", "dictionary", "translation"] : []),
   ]).slice(0, 10);
   const readBudget = getWebReadBudgetPlan({ ...decision, vertical });
   const targetedQueryPlan = buildTargetedQueries(decision, vertical, preferredDomains, provider);
@@ -2243,7 +2287,7 @@ export const buildSourceStrategyPlan = (
       .map((entry) => ({
         domain: entry.domain,
         label: entry.label,
-        weight: entry.reliabilityWeight + (vertical === "news" ? entry.freshnessWeight : 0),
+        weight: entry.reliabilityWeight + (isNewsVertical(vertical) ? entry.freshnessWeight : 0),
         reason: `${entry.label} matches ${vertical}`,
       })),
     readBudget,
@@ -2257,7 +2301,7 @@ export const applySourceStrategyPlan = (
   provider: WebSearchProvider,
 ): SearchDecision => {
   const strategy = buildSourceStrategyPlan(decision, provider);
-  const maxBaseQueries = provider === "bing" ? (strategy.vertical === "news" ? 5 : 1) : 5;
+  const maxBaseQueries = provider === "bing" ? (isNewsVertical(strategy.vertical) ? 5 : 1) : 5;
   const filteredBaseQueries = filterCompanySpecificSiteQueries(
     decision,
     strategy.vertical,
@@ -2266,7 +2310,7 @@ export const applySourceStrategyPlan = (
   const queries = unique([
     ...filteredBaseQueries.queries,
     ...strategy.targetedQueries,
-  ]).slice(0, provider === "bing" ? (strategy.vertical === "news" ? 5 : 3) : 6);
+  ]).slice(0, provider === "bing" ? (isNewsVertical(strategy.vertical) ? 5 : 3) : 6);
   return {
     ...decision,
     vertical: strategy.vertical,
@@ -2428,10 +2472,10 @@ export const getNewsFreshnessPolicy = (query: string, now = new Date()): NewsFre
   return {
     currentDate: now.toISOString().slice(0, 10),
     strictWindowHours: today ? 24 : 72,
-    fallbackWindowDays: today ? 2 : 7,
-    maxNewsAgeDays: today ? 3 : 7,
+    fallbackWindowDays: today ? 7 : 14,
+    maxNewsAgeDays: today ? 7 : 14,
     requestedFreshness: today ? "today" : "default_recent",
-    freshnessWindowLabel: today ? "近 24-48 小时" : "近几天到近一周",
+    freshnessWindowLabel: today ? "优先近 24 小时，不足时放宽到 7 天" : "优先近 7 天，不足时放宽到 14 天",
     explicitRange: false,
   };
 };
@@ -2454,7 +2498,8 @@ export const assessNewsSourceFreshness = (
   if (ageHours <= 24) freshnessStatus = "fresh_today";
   else if (ageHours <= 48) freshnessStatus = "fresh_yesterday";
   else if (ageHours <= policy.strictWindowHours) freshnessStatus = "fresh_72h";
-  else if (ageDays <= policy.maxNewsAgeDays) freshnessStatus = "recent_week";
+  else if (ageDays <= 7) freshnessStatus = "recent_week";
+  else if (ageDays <= policy.maxNewsAgeDays) freshnessStatus = "recent_fortnight";
   else freshnessStatus = "stale";
   return {
     sourcePublishedAt: date.toISOString().slice(0, 10),
@@ -2535,7 +2580,7 @@ const getSourceRegistryRank = (
     score += boost;
     reasons.push(`${match.label} registry +${boost}`);
   }
-  if (vertical === "news") {
+  if (isNewsVertical(vertical)) {
     const text = getSourceSearchText(source);
     if (/(?:github\.com|github\.io|wikipedia\.org|docs\.|developer\.mozilla\.org|react\.dev|rust-lang\.org|tailwindcss\.com|vite\.dev|tauri\.app)/i.test(text)) {
       score -= 22;
@@ -2915,6 +2960,8 @@ export const classifyNewsCandidateForVertical = (
   const docsOrHomepage =
     isCompanyHomepage ||
     isCompanyReferencePath ||
+    path === "/" ||
+    /\/(?:tags?|topics?|category|categories|search)(?:\/|$)/i.test(path) ||
     path.includes("/docs") ||
     path.includes("/documentation") ||
     path.includes("/learn/what-is") ||
@@ -2934,7 +2981,7 @@ export const classifyNewsCandidateForVertical = (
   if (isObviousOffTopicNewsResult(source)) {
     return { newsLike: false, filteredReason: "not_news_like", score: -80, reason: "dictionary/translation/lyrics/video-like result" };
   }
-  if (topicPool.length > 0 && topicMatches.length === 0) {
+  if (!isWorldNewsQuery(topicKeywords.join(" ")) && topicPool.length > 0 && topicMatches.length === 0) {
     return { newsLike: false, filteredReason: "topic_mismatch", score: -70, reason: "result does not match news topic keywords" };
   }
 
@@ -2990,7 +3037,7 @@ const classifyGeneralWebSourceRelevance = (
   const offTopic = isObviousOffTopicNewsResult(source);
   const vertical = decision.vertical ?? decision.aiPlanner?.vertical ?? inferSearchVertical(decision);
 
-  if (vertical === "news") {
+  if (isNewsVertical(vertical)) {
     const newsClassification = classifyNewsCandidateForVertical(source, topicKeywords, userInput || decision.rawQuestion, decision.queries);
     if (!newsClassification.newsLike) {
       return {
@@ -3156,7 +3203,7 @@ export const rankPreparedWebSources = (
   const focusEntities = focus.entities;
   const companySpecificNews = recentInfoRequested && focusEntities.length === 1;
   const readBudget = decision.sourceStrategy?.readBudget ?? getWebReadBudgetPlan(decision);
-  const clusterForRoundup = isBroadAiNewsRoundupDecision(decision, userInput);
+  const clusterForRoundup = isBroadAiNewsRoundupDecision(decision, userInput) || decision.vertical === "world_news";
   const clusterNewsSources = clusterForRoundup || recentInfoRequested;
   let selectedCandidateCount = 0;
   let selectedStrongCount = 0;
@@ -3652,7 +3699,7 @@ const prepareWebSourcesForDecisionBase = (
     const filteredReasonCounts = scored
       .filter((item) => item.relevance === "unrelated")
       .reduce<Record<string, number>>((acc, item) => {
-        const classification = vertical === "news" ? classifyNewsCandidateForVertical(item.source, topicKeywords, userInput || decision.rawQuestion, decision.queries) : undefined;
+        const classification = isNewsVertical(vertical) ? classifyNewsCandidateForVertical(item.source, topicKeywords, userInput || decision.rawQuestion, decision.queries) : undefined;
         const reason = classification?.filteredReason ?? item.reason ?? "query/topic mismatch";
         acc[reason] = (acc[reason] ?? 0) + 1;
         return acc;
@@ -3683,8 +3730,8 @@ const prepareWebSourcesForDecisionBase = (
         entityMatchStrength: item.entityMatchStrength,
         entityFilterApplied: item.entityFilterApplied,
         rejectedWrongEntityReason: item.rejectedWrongEntityReason,
-        newsLike: vertical === "news" ? true : item.source.newsLike,
-        freshnessScore: vertical === "news" ? getWebSourceFreshnessScore(item.source) : item.source.freshnessScore,
+        newsLike: isNewsVertical(vertical) ? true : item.source.newsLike,
+        freshnessScore: isNewsVertical(vertical) ? getWebSourceFreshnessScore(item.source) : item.source.freshnessScore,
         filteredReason: undefined,
         finalIncludedInPrompt: index < 8,
         selected: index < 8,
@@ -3817,6 +3864,7 @@ export const buildSearchModeDecision = (input: SearchModePolicyInput): SearchMod
   const docsTechnicalEligible = canonicalIntent === "docs_technical" || decision.vertical === "docs";
   const newsRecentEligible = canonicalIntent === "news_recent" ||
     decision.vertical === "news" ||
+    decision.vertical === "world_news" ||
     decision.newsIntent === true;
   const localFirstEligible = input.currentNoteAvailable === true && !decision.shouldSearch;
   const guards: string[] = [];
@@ -3967,6 +4015,7 @@ export function buildSearchDecision(
   const newsIntent = isNewsIntentRequest(question, topicKeywords) ||
     (topicKeywords.length > 0 &&
       (hasKeyword(question, CRITICAL_RECENT_TIME_KEYWORDS) || hasKeyword(question, CRITICAL_RECENT_CONTENT_KEYWORDS)));
+  const worldNewsIntent = isWorldNewsQuery(question);
   const technicalDocsKeywords = collectKeywords(haystack, CRITICAL_TECH_DOC_KEYWORDS);
   const explanationOnlyRequested = hasKeyword(question, EXPLANATION_ONLY_KEYWORDS);
   const problemTitle = getProblemTitleCandidate(question, context);
@@ -3997,9 +4046,13 @@ export function buildSearchDecision(
     confidence += 0.36;
     reasons.push("问题在询问最近新闻 / 消息 / 更新");
   }
-  if (newsIntent) {
+  if (newsIntent || worldNewsIntent) {
     confidence += 0.18;
     reasons.push(`识别到新闻主题：${topicKeywords.slice(0, 3).join(" / ")}`);
+  }
+  if (worldNewsIntent) {
+    confidence += 0.48;
+    reasons.push("识别到泛国际新闻聚合请求");
   }
   if (technicalDocsKeywords.length > 0) {
     confidence += 0.62;
@@ -4049,7 +4102,7 @@ export function buildSearchDecision(
       algorithmKeywords: algorithmKeywords.length > 0 ? algorithmKeywords : undefined,
       errorKeywords: errorKeywords.length > 0 ? errorKeywords : undefined,
       topicKeywords: topicKeywords.length > 0 ? topicKeywords : undefined,
-      newsIntent,
+      newsIntent: newsIntent || worldNewsIntent,
       recencyIntent: recentInfoRequested,
       vertical: "oi",
       queries: shouldSearch ? buildProblemQueries(problemId, problemTitle, discussionKeywords, errorKeywords, question) : [],
@@ -4109,16 +4162,16 @@ export function buildSearchDecision(
     });
   }
 
-  if (generalWebKeywords.length > 0 || explicitWebSearchRequested || recentInfoRequested) {
+  if (generalWebKeywords.length > 0 || explicitWebSearchRequested || recentInfoRequested || worldNewsIntent) {
     return withSearchModeDecision({
       shouldSearch,
       intent: "general_web",
       rawQuestion: question,
       topicKeywords: topicKeywords.length > 0 ? topicKeywords : undefined,
-      newsIntent,
+      newsIntent: newsIntent || worldNewsIntent,
       recencyIntent: recentInfoRequested,
-      vertical: newsIntent ? "news" : "general_web",
-      queries: shouldSearch ? buildGeneralWebQueries(question, recentInfoRequested || newsIntent, topicKeywords) : [],
+      vertical: worldNewsIntent ? "world_news" : newsIntent ? "news" : "general_web",
+      queries: shouldSearch ? buildGeneralWebQueries(question, recentInfoRequested || newsIntent || worldNewsIntent, topicKeywords) : [],
       confidence,
       reason: reasons.join("，") || "用户在请求外部网页资料。",
     });

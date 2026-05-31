@@ -37,6 +37,7 @@ import {
   LuoguAccountSettingsPage,
   LuoguImportCenterSettingsPage,
   LuoguRulesSettingsPage,
+  SettingsInlineSelect,
   type LuoguRuleSettingRow,
 } from "@/components/settings/pages/LuoguSettingsPages";
 import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxonomySettingsPage";
@@ -1143,11 +1144,6 @@ function normalizeBlogConfigDraft(config: BlogConfig): BlogConfig {
     title: normalizeText(config.title),
     subtitle: normalizeText(config.subtitle),
   };
-}
-
-function getAiConfigComparable(config: AiConfig | null): string {
-  if (!config) return "";
-  return JSON.stringify(normalizeAiConfigDraft(config));
 }
 
 function quoteYamlString(value: string): string {
@@ -2708,6 +2704,7 @@ export default function App() {
   const [luoguScanDaysLimit, setLuoguScanDaysLimit] = useState<LuoguScanDaysLimit>(30);
   const [luoguImportRules, setLuoguImportRules] = useState<LuoguImportRules>(readStoredLuoguImportRules);
   const [expandedLuoguRuleId, setExpandedLuoguRuleId] = useState<string | null>(null);
+  const [expandedWebSearchSelectId, setExpandedWebSearchSelectId] = useState<string | null>(null);
   const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
   const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
@@ -2873,6 +2870,9 @@ export default function App() {
       isMountedRef.current = false;
       luoguPrepareRunRef.current.cancelled = true;
       cancelPendingSettingsCenterCloseCleanup();
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
       if (chatResponseStyleAutoSaveTimerRef.current) {
         window.clearTimeout(chatResponseStyleAutoSaveTimerRef.current);
       }
@@ -3162,14 +3162,6 @@ export default function App() {
     () => normalizeWebSearchConfig(aiConfigDraft?.web_search),
     [aiConfigDraft?.web_search],
   );
-  const hasAiConfigDraftChanges =
-    aiConfigDraft !== null &&
-    aiConfig !== null &&
-    getAiConfigComparable(aiConfigDraft) !== getAiConfigComparable(aiConfig);
-  const hasNonProviderAiChanges =
-    aiConfigDraft !== null &&
-    aiConfig !== null &&
-    JSON.stringify(aiConfigDraft.web_search) !== JSON.stringify(aiConfig.web_search);
   const filteredAiProviderModels = useMemo(() => {
     if (!selectedAiProvider) return [];
     const query = aiModelSearchQuery.trim().toLowerCase();
@@ -4929,26 +4921,38 @@ export default function App() {
     });
   };
 
-  const scheduleAutoSave = () => {
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(async () => {
-      autoSaveTimerRef.current = null;
-      if (isSavingAiConfigRef.current) return;
-      const draft = pendingAutoSaveDraftRef.current;
-      if (!draft) return;
-      const nextConfig = normalizeAiConfigDraft(draft);
-      isSavingAiConfigRef.current = true;
-      setIsSavingAiConfig(true);
-      try {
-        await saveAiConfig(nextConfig);
-        applyAiConfigState(nextConfig);
-      } catch (e) {
-        toast.error(`AI 配置保存失败：${getErrorMessage(e)}`);
-      } finally {
-        isSavingAiConfigRef.current = false;
-        setIsSavingAiConfig(false);
+  const savePendingAiConfigDraft = async () => {
+    if (isSavingAiConfigRef.current) return;
+    const draft = pendingAutoSaveDraftRef.current;
+    if (!draft) return;
+    const nextConfig = normalizeAiConfigDraft(draft);
+    isSavingAiConfigRef.current = true;
+    setIsSavingAiConfig(true);
+    try {
+      await saveAiConfig(nextConfig);
+      if (pendingAutoSaveDraftRef.current === draft) {
+        pendingAutoSaveDraftRef.current = null;
       }
-    }, 250);
+      applyAiConfigState(nextConfig);
+      if (pendingAutoSaveDraftRef.current) {
+        setAiConfigDraft(cloneAiConfig(pendingAutoSaveDraftRef.current));
+      }
+      toast.success("AI 配置已自动保存", { id: "ai-config-auto-save" });
+    } catch (e) {
+      toast.error(`AI 配置保存失败：${getErrorMessage(e)}`, { id: "ai-config-auto-save" });
+    } finally {
+      isSavingAiConfigRef.current = false;
+      setIsSavingAiConfig(false);
+      if (pendingAutoSaveDraftRef.current) scheduleAutoSave();
+    }
+  };
+
+  const scheduleAutoSave = (delay = 250) => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void savePendingAiConfigDraft();
+    }, delay);
   };
 
   const saveChatResponseStyleNow = async (style: string) => {
@@ -5094,27 +5098,11 @@ export default function App() {
       ...config,
       web_search: normalizeWebSearchConfig({ ...webSearchDraft, ...patch }),
     }));
-    setWebSearchConnectionMessage(null);
-  };
-
-  const handleSaveAiConfigDraft = async () => {
-    if (!aiConfigDraft || isSavingAiConfig) return;
-    const nextConfig = normalizeAiConfigDraft(aiConfigDraft);
-    setIsSavingAiConfig(true);
-    try {
-      await saveAiConfig(nextConfig);
-      applyAiConfigState(nextConfig);
-      toast.success("AI/API 设置已保存");
-    } catch (e) {
-      toast.error(`AI/API 设置保存失败：${getErrorMessage(e)}`);
-    } finally {
-      setIsSavingAiConfig(false);
-    }
-  };
-
-  const handleDiscardAiConfigDraft = () => {
-    if (!aiConfig) return;
-    setAiConfigDraft(cloneAiConfig(aiConfig));
+    const shouldSaveImmediately =
+      Object.prototype.hasOwnProperty.call(patch, "enabled") ||
+      Object.prototype.hasOwnProperty.call(patch, "provider") ||
+      Object.prototype.hasOwnProperty.call(patch, "publicSearchConsent");
+    scheduleAutoSave(shouldSaveImmediately ? 0 : 500);
     setWebSearchConnectionMessage(null);
   };
 
@@ -7045,7 +7033,7 @@ export default function App() {
     cancelPendingSettingsCenterCloseCleanup();
     settingsCenterHostRef.current?.open();
   };
-  const scheduleSettingsCenterCloseCleanup = (shouldResetAiConfigDraft: boolean) => {
+  const scheduleSettingsCenterCloseCleanup = () => {
     cancelPendingSettingsCenterCloseCleanup();
     settingsCloseCleanupRafRef.current = window.requestAnimationFrame(() => {
       settingsCloseCleanupRafRef.current = null;
@@ -7054,9 +7042,6 @@ export default function App() {
         promptPolishRunRef.current += 1;
         setIsPolishingPrompt(false);
         setPromptPolishMessage(null);
-        if (shouldResetAiConfigDraft && aiConfig) {
-          setAiConfigDraft(cloneAiConfig(aiConfig));
-        }
         settingsCenterHostRef.current?.resetUiAfterClose();
       }, 0);
     });
@@ -7074,34 +7059,13 @@ export default function App() {
       return;
     }
     flushChatResponseStyleAutoSave();
-    if (hasAiConfigDraftChanges) {
-      if (hasNonProviderAiChanges) {
-        const ok = await requestConfirm({
-          title: "放弃 AI/API 管理更改？",
-          description: "AI/API 管理有未保存更改，关闭设置中心后这些更改将丢失。",
-          confirmText: "放弃并关闭",
-          danger: true,
-        });
-        if (!ok) {
-          return;
-        }
-      } else {
-        // Provider-only changes: flush pending auto-save before closing
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-          autoSaveTimerRef.current = null;
-        }
-        const draft = pendingAutoSaveDraftRef.current;
-        if (draft && !isSavingAiConfigRef.current) {
-          const nextConfig = normalizeAiConfigDraft(draft);
-          void saveAiConfig(nextConfig).catch((e) => {
-            console.error("Auto-save on close failed:", e);
-          });
-        }
-      }
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
+    void savePendingAiConfigDraft();
     settingsCenterHostRef.current?.close();
-    scheduleSettingsCenterCloseCleanup(hasNonProviderAiChanges && Boolean(aiConfig));
+    scheduleSettingsCenterCloseCleanup();
   };
 
   const closePromptEditorToSettings = () => {
@@ -8879,19 +8843,6 @@ export default function App() {
       onCloseRequest={handleSettingsCenterCloseRequest}
       onBeginDrag={beginSettingsCenterDrag}
       onBeginResize={beginSettingsCenterResize}
-      mainHeaderActions={
-        hasNonProviderAiChanges ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-2 pr-1">
-            <Button type="button" variant="outline" size="sm" onClick={handleDiscardAiConfigDraft} disabled={isSavingAiConfig}>
-              放弃 AI 更改
-            </Button>
-            <Button type="button" size="sm" onClick={() => void handleSaveAiConfigDraft()} disabled={isSavingAiConfig}>
-              <Save className="h-3.5 w-3.5" />
-              {isSavingAiConfig ? "保存中..." : "保存 AI 更改"}
-            </Button>
-          </div>
-        ) : null
-      }
       promptHeaderContent={(
         <>
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -9203,47 +9154,57 @@ export default function App() {
                           <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", webSearchDraft.enabled && "translate-x-5")} />
                         </button>
                       </SettingRow>
-                      <SettingRow title="搜索 Provider" description="Bing 使用公开搜索；Bocha / Brave 需要填写对应 API Key。">
-                        <div className="flex flex-wrap gap-2">
-                          {(["bing", "bocha", "brave"] as WebSearchConfig["provider"][]).map((provider) => (
-                            <Button
-                              key={provider}
-                              type="button"
-                              variant={webSearchDraft.provider === provider ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => updateWebSearchDraft({ provider })}
-                              disabled={isSavingAiConfig || isLoadingAiConfig}
-                            >
-                              {provider === "bing" ? "Bing 公开搜索" : provider === "bocha" ? "Bocha" : "Brave Search"}
-                            </Button>
-                          ))}
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="Bocha 配置" description="仅在选择 Bocha 时使用。">
-                        <div className="grid gap-2 md:grid-cols-2">
-                          <Input
-                            value={webSearchDraft.bochaApiKey}
-                            type="password"
-                            placeholder="Bocha API Key"
-                            onChange={(event) => updateWebSearchDraft({ bochaApiKey: event.target.value })}
-                            disabled={isSavingAiConfig || isLoadingAiConfig}
-                          />
-                          <Input
-                            value={webSearchDraft.bochaEndpoint}
-                            placeholder={DEFAULT_WEB_SEARCH_CONFIG.bochaEndpoint}
-                            onChange={(event) => updateWebSearchDraft({ bochaEndpoint: event.target.value })}
-                            disabled={isSavingAiConfig || isLoadingAiConfig}
-                          />
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="Brave 配置" description="仅在选择 Brave Search 时使用。">
-                        <Input
-                          value={webSearchDraft.braveApiKey}
-                          type="password"
-                          placeholder="Brave Search API Key"
-                          onChange={(event) => updateWebSearchDraft({ braveApiKey: event.target.value })}
+                      <SettingRow title="搜索 Provider" description="Bing 使用公开搜索；Bocha / Brave 需要填写对应 API Key。" layout="stacked">
+                        <SettingsInlineSelect
+                          id="web-search-provider"
+                          value={webSearchDraft.provider}
+                          options={[
+                            { value: "bing", label: "Bing 公开搜索" },
+                            { value: "bocha", label: "Bocha" },
+                            { value: "brave", label: "Brave Search" },
+                          ]}
+                          onChange={(provider) => updateWebSearchDraft({ provider: provider as WebSearchConfig["provider"] })}
                           disabled={isSavingAiConfig || isLoadingAiConfig}
+                          ariaLabel="搜索 Provider"
+                          expandedRuleId={expandedWebSearchSelectId}
+                          onExpandedRuleChange={setExpandedWebSearchSelectId}
+                          themed
                         />
+                      </SettingRow>
+                      <SettingRow title="Bocha 配置" description="仅在选择 Bocha 时使用。" layout="stacked">
+                        <div className="grid max-w-2xl gap-3">
+                          <label className="grid gap-1.5 text-xs font-medium text-foreground">
+                            API Key
+                            <Input
+                              value={webSearchDraft.bochaApiKey}
+                              type="password"
+                              placeholder="Bocha API Key"
+                              onChange={(event) => updateWebSearchDraft({ bochaApiKey: event.target.value })}
+                              disabled={isSavingAiConfig || isLoadingAiConfig}
+                            />
+                          </label>
+                          <label className="grid gap-1.5 text-xs font-medium text-foreground">
+                            Endpoint
+                            <Input
+                              value={webSearchDraft.bochaEndpoint}
+                              placeholder={DEFAULT_WEB_SEARCH_CONFIG.bochaEndpoint}
+                              onChange={(event) => updateWebSearchDraft({ bochaEndpoint: event.target.value })}
+                              disabled={isSavingAiConfig || isLoadingAiConfig}
+                            />
+                          </label>
+                        </div>
+                      </SettingRow>
+                      <SettingRow title="Brave 配置" description="仅在选择 Brave Search 时使用。" layout="stacked">
+                        <label className="grid max-w-2xl gap-1.5 text-xs font-medium text-foreground">
+                          Brave Search API Key
+                          <Input
+                            value={webSearchDraft.braveApiKey}
+                            type="password"
+                            placeholder="Brave Search API Key"
+                            onChange={(event) => updateWebSearchDraft({ braveApiKey: event.target.value })}
+                            disabled={isSavingAiConfig || isLoadingAiConfig}
+                          />
+                        </label>
                       </SettingRow>
                       <SettingRow title="公开网页授权" description="开启后才允许 NoteX 为回答读取公开 http/https 网页摘录。">
                         <button

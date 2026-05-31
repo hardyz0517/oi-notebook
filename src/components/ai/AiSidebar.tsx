@@ -303,8 +303,14 @@ const AI_RECENT_HISTORY_AFTER_COMPRESSION_LIMIT = 4;
 const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
-const AI_SCROLL_BOTTOM_THRESHOLD = 64;
+const AI_SCROLL_BOTTOM_THRESHOLD = 24;
 const AI_MESSAGE_VIRTUAL_OVERSCAN = 7;
+const AI_STREAM_REVEAL_INTERVAL_MS = 28;
+const AI_STREAM_REVEAL_FAST_INTERVAL_MS = 16;
+const AI_STREAM_REVEAL_BACKLOG_INTERVAL_MS = 12;
+const AI_STREAM_REVEAL_BACKLOG_THRESHOLD = 160;
+const AI_STREAM_REVEAL_PUNCTUATION_PATTERN = /[\s,.;:!?，。；：！？、]/;
+const AI_STREAM_REVEAL_FAST_END_PATTERN = /[\r\n,.;:!?，。；：！？、]$/;
 const AI_HYDRATION_CHUNK_BUDGET_MS = 7;
 const LEGACY_UNTITLED_CONVERSATION_TITLE = "New chat";
 const UNTITLED_CONVERSATION_TITLE = "新对话";
@@ -320,6 +326,45 @@ const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
   "blank_lines_around_lists",
   "normalize_code_fence_lang",
 ]);
+
+const isStreamRevealCjk = (value: string) => /[\u3400-\u9fff\uf900-\ufaff]/.test(value);
+
+const isInsideStreamRevealFence = (visibleText: string) => {
+  const fenceLines = visibleText.match(/(?:^|\n)[ \t]*(?:`{3,}|~{3,})/g) ?? [];
+  return fenceLines.length % 2 === 1;
+};
+
+const takeStreamRevealChunk = (pendingText: string, visibleText: string) => {
+  if (!pendingText) return "";
+  if (pendingText.startsWith("\r\n")) return "\r\n";
+  if (pendingText[0] === "\r" || pendingText[0] === "\n") return pendingText[0];
+
+  const isInsideFence = isInsideStreamRevealFence(visibleText);
+  const startsWithCjk = isStreamRevealCjk(pendingText[0]);
+  const chunkLimit = isInsideFence
+    ? pendingText.length > AI_STREAM_REVEAL_BACKLOG_THRESHOLD ? 16 : 10
+    : pendingText.length > AI_STREAM_REVEAL_BACKLOG_THRESHOLD
+      ? startsWithCjk ? 6 : 10
+      : startsWithCjk ? 3 : 6;
+
+  let length = 1;
+  while (length < chunkLimit && length < pendingText.length) {
+    const nextChar = pendingText[length];
+    if (nextChar === "\r" || nextChar === "\n") break;
+    length += 1;
+    if (AI_STREAM_REVEAL_PUNCTUATION_PATTERN.test(nextChar)) break;
+    if (!isInsideFence && startsWithCjk !== isStreamRevealCjk(nextChar) && length >= 3) break;
+  }
+  return pendingText.slice(0, length);
+};
+
+const getStreamRevealDelay = (chunk: string, pendingLength: number, visibleText: string) => {
+  if (pendingLength > AI_STREAM_REVEAL_BACKLOG_THRESHOLD) return AI_STREAM_REVEAL_BACKLOG_INTERVAL_MS;
+  if (isInsideStreamRevealFence(visibleText)) return AI_STREAM_REVEAL_FAST_INTERVAL_MS;
+  return AI_STREAM_REVEAL_FAST_END_PATTERN.test(chunk)
+    ? AI_STREAM_REVEAL_FAST_INTERVAL_MS
+    : AI_STREAM_REVEAL_INTERVAL_MS;
+};
 
 const readIncludeCurrentNoteContextPreference = (): boolean => {
   try {
@@ -1482,6 +1527,35 @@ const normalizeBareParenMath = (segment: string): string =>
     hasLatexCommand(content) ? inlineMath(content) : match,
   );
 
+const mapOutsideInlineCode = (segment: string, transformOutside: (outside: string) => string): string => {
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < segment.length) {
+    const markerStart = segment.indexOf("`", cursor);
+    if (markerStart === -1) {
+      output += transformOutside(segment.slice(cursor));
+      break;
+    }
+
+    output += transformOutside(segment.slice(cursor, markerStart));
+    let markerEnd = markerStart + 1;
+    while (segment[markerEnd] === "`") markerEnd += 1;
+    const marker = segment.slice(markerStart, markerEnd);
+    const closingStart = segment.indexOf(marker, markerEnd);
+    if (closingStart === -1) {
+      output += segment.slice(markerStart);
+      break;
+    }
+
+    const closingEnd = closingStart + marker.length;
+    output += segment.slice(markerStart, closingEnd);
+    cursor = closingEnd;
+  }
+
+  return output;
+};
+
 const mapOutsideDollarMath = (segment: string, transformOutside: (outside: string) => string): string => {
   const matches = Array.from(segment.matchAll(/\$\$[\s\S]*?\$\$|\$[^\n$]*?\$/g));
   if (matches.length === 0) return transformOutside(segment);
@@ -1501,9 +1575,10 @@ const mapOutsideDollarMath = (segment: string, transformOutside: (outside: strin
 };
 
 const normalizeMathInSegment = (segment: string): string => {
-  const withEscapedDelimiters = normalizeEscapedMathDelimiters(segment);
-  return mapOutsideDollarMath(withEscapedDelimiters, (outside) =>
-    normalizeBareParenMath(normalizeStandaloneBracketDisplayMath(outside)),
+  return mapOutsideInlineCode(segment, (outsideInlineCode) =>
+    mapOutsideDollarMath(normalizeEscapedMathDelimiters(outsideInlineCode), (outsideDollarMath) =>
+      normalizeBareParenMath(normalizeStandaloneBracketDisplayMath(outsideDollarMath)),
+    ),
   );
 };
 
@@ -1552,6 +1627,54 @@ const splitMarkdownByFencedCode = (markdown: string): Array<{ text: string; isCo
 const normalizeAiMathDelimiters = (markdown: string): string =>
   splitMarkdownByFencedCode(markdown)
     .map((chunk) => (chunk.isCode ? chunk.text : normalizeMathInSegment(chunk.text)))
+    .join("");
+
+const isEscapedAt = (value: string, index: number): boolean => {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+};
+
+const escapeLastUnclosedDollarDelimiter = (segment: string): string => {
+  const openDelimiters: Array<{ index: number; length: number }> = [];
+
+  for (let cursor = 0; cursor < segment.length;) {
+    if (segment[cursor] === "`") {
+      let markerEnd = cursor + 1;
+      while (segment[markerEnd] === "`") markerEnd += 1;
+      const marker = segment.slice(cursor, markerEnd);
+      const closingStart = segment.indexOf(marker, markerEnd);
+      if (closingStart === -1) break;
+      cursor = closingStart + marker.length;
+      continue;
+    }
+
+    if (segment[cursor] !== "$" || isEscapedAt(segment, cursor)) {
+      cursor += 1;
+      continue;
+    }
+
+    const length = segment[cursor + 1] === "$" && !isEscapedAt(segment, cursor + 1) ? 2 : 1;
+    const current = openDelimiters[openDelimiters.length - 1];
+    if (current?.length === length) {
+      openDelimiters.pop();
+    } else {
+      openDelimiters.push({ index: cursor, length });
+    }
+    cursor += length;
+  }
+
+  const unclosed = openDelimiters[openDelimiters.length - 1];
+  if (!unclosed) return segment;
+  const escaped = unclosed.length === 2 ? "\\$\\$" : "\\$";
+  return `${segment.slice(0, unclosed.index)}${escaped}${segment.slice(unclosed.index + unclosed.length)}`;
+};
+
+const escapeStreamingUnclosedMathDelimiter = (markdown: string): string =>
+  splitMarkdownByFencedCode(markdown)
+    .map((chunk) => (chunk.isCode ? chunk.text : escapeLastUnclosedDollarDelimiter(chunk.text)))
     .join("");
 
 const finishAssistantTiming = (message: AiChatMessage, now = Date.now()): Pick<AiChatMessage, "finishedAt" | "elapsedMs"> => {
@@ -1930,7 +2053,10 @@ function AiMarkdownMessage({
 }) {
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const normalizedMarkdown = useMemo(() => normalizeAiMathDelimiters(markdown), [markdown]);
+  const normalizedMarkdown = useMemo(
+    () => normalizeAiMathDelimiters(isStreaming ? escapeStreamingUnclosedMathDelimiter(markdown) : markdown),
+    [isStreaming, markdown],
+  );
   const citationSignature = useMemo(() => [
     ...(citations ?? []).map((citation) => `${citation.citationId}:${citation.id}:${citation.url ?? ""}`),
     ...(localNoteSources ?? []).map((source) => `${source.localCitationId ?? ""}:${source.id}:${source.relativePath}`),
@@ -3850,6 +3976,9 @@ export default function AiSidebar({
   const requestSeqRef = useRef(0);
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const streamTextBufferRef = useRef<Map<string, string>>(new Map());
+  const streamPendingTextRef = useRef<Map<string, string>>(new Map());
+  const streamVisibleTextRef = useRef<Map<string, string>>(new Map());
+  const streamRevealTimerRef = useRef<Map<string, number>>(new Map());
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
   const hydrationTaskRef = useRef<DeferredHydrationTask | null>(null);
@@ -3864,7 +3993,9 @@ export default function AiSidebar({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerWrapRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
-  const shouldAutoScrollRef = useRef(true);
+  const isAtBottomRef = useRef(true);
+  const userPinnedToBottomRef = useRef(true);
+  const pendingMessagesScrollFrameRef = useRef<number | null>(null);
   const selectedProviderLabelRef = useRef("");
   const selectedModelLabelRef = useRef("");
 
@@ -4182,9 +4313,29 @@ export default function AiSidebar({
     setShowScrollToBottom(false);
   };
 
+  const cancelScheduledMessagesScroll = () => {
+    if (pendingMessagesScrollFrameRef.current === null) return;
+    window.cancelAnimationFrame(pendingMessagesScrollFrameRef.current);
+    pendingMessagesScrollFrameRef.current = null;
+  };
+
+  const scheduleMessagesScrollToBottom = () => {
+    if (!userPinnedToBottomRef.current || pendingMessagesScrollFrameRef.current !== null) return;
+    pendingMessagesScrollFrameRef.current = window.requestAnimationFrame(() => {
+      pendingMessagesScrollFrameRef.current = null;
+      if (userPinnedToBottomRef.current) {
+        scrollMessagesToBottom("auto");
+      }
+    });
+  };
+
   const handleMessagesScroll = () => {
     const isNearBottom = isMessagesNearBottom();
-    shouldAutoScrollRef.current = isNearBottom;
+    isAtBottomRef.current = isNearBottom;
+    userPinnedToBottomRef.current = isNearBottom;
+    if (!isNearBottom) {
+      cancelScheduledMessagesScroll();
+    }
     setShowScrollToBottom(!isNearBottom);
   };
 
@@ -4537,6 +4688,13 @@ export default function AiSidebar({
       const readDebug = newsRoundup
         ? [
           "debug=newsRead",
+          `vertical=${activeDecision.vertical ?? activeDecision.aiPlanner?.vertical ?? "none"}`,
+          `queries=${encodeDebugValue(activeDecision.queries.join(" / ") || "none")}`,
+          `selectedNewsSources=${encodeDebugValue(selectedRoundupSources.map((source) => source.site ?? source.url).join(" / ") || "none")}`,
+          `candidateCount=${sourcesWithExcerpts.length}`,
+          `freshCandidateCount=${freshSources.length}`,
+          `filteredOldNewsCount=${staleSources.filter((source) => source.injectedIntoAnswer === false || source.finalIncludedInPrompt === false).length}`,
+          `evidenceSourceCount=${freshUsableSources.length}`,
           `newsReadAttempts=${excerptResults.length}`,
           `newsReadSuccesses=${excerptResults.filter((result) => result.fetched).length}`,
           `usableEvidenceCount=${rankedSources.filter((source) => source.usableEvidence === true && source.evidenceStatus === "usable").length}`,
@@ -4893,6 +5051,82 @@ export default function AiSidebar({
     }));
   };
 
+  const clearStreamRevealTimer = (streamId: string) => {
+    const timerId = streamRevealTimerRef.current.get(streamId);
+    if (timerId === undefined) return;
+    window.clearTimeout(timerId);
+    streamRevealTimerRef.current.delete(streamId);
+  };
+
+  const appendStreamRevealChunk = (streamId: string, chunk: string) => {
+    const target = streamTargetsRef.current.get(streamId);
+    if (!target || !chunk) return;
+    streamVisibleTextRef.current.set(streamId, `${streamVisibleTextRef.current.get(streamId) ?? ""}${chunk}`);
+    replaceMessage(target.conversationId, target.messageId, (message) => ({
+      ...message,
+      text: message.state === "streaming" ? `${message.text}${chunk}` : message.text,
+    }));
+  };
+
+  const revealNextStreamChunk = (streamId: string) => {
+    streamRevealTimerRef.current.delete(streamId);
+    if (!streamTargetsRef.current.has(streamId)) return;
+    const pendingText = streamPendingTextRef.current.get(streamId) ?? "";
+    if (!pendingText) return;
+
+    const visibleText = streamVisibleTextRef.current.get(streamId) ?? "";
+    const chunk = takeStreamRevealChunk(pendingText, visibleText);
+    const remainingText = pendingText.slice(chunk.length);
+    if (remainingText) {
+      streamPendingTextRef.current.set(streamId, remainingText);
+    } else {
+      streamPendingTextRef.current.delete(streamId);
+    }
+    appendStreamRevealChunk(streamId, chunk);
+    if (!remainingText || !streamTargetsRef.current.has(streamId)) return;
+
+    const timerId = window.setTimeout(
+      () => revealNextStreamChunk(streamId),
+      getStreamRevealDelay(chunk, remainingText.length, `${visibleText}${chunk}`),
+    );
+    streamRevealTimerRef.current.set(streamId, timerId);
+  };
+
+  const startStreamRevealLoop = (streamId: string) => {
+    if (streamRevealTimerRef.current.has(streamId)) return;
+    const timerId = window.setTimeout(() => revealNextStreamChunk(streamId), AI_STREAM_REVEAL_INTERVAL_MS);
+    streamRevealTimerRef.current.set(streamId, timerId);
+  };
+
+  const queueStreamRevealText = (streamId: string, delta: string) => {
+    if (!streamTargetsRef.current.has(streamId) || !delta) return;
+    streamPendingTextRef.current.set(streamId, `${streamPendingTextRef.current.get(streamId) ?? ""}${delta}`);
+    startStreamRevealLoop(streamId);
+  };
+
+  const flushStreamRevealText = (streamId: string) => {
+    clearStreamRevealTimer(streamId);
+    const pendingText = streamPendingTextRef.current.get(streamId) ?? "";
+    streamPendingTextRef.current.delete(streamId);
+    appendStreamRevealChunk(streamId, pendingText);
+  };
+
+  const initializeStreamRevealState = (streamId: string) => {
+    clearStreamRevealTimer(streamId);
+    streamPendingTextRef.current.set(streamId, "");
+    streamVisibleTextRef.current.set(streamId, "");
+  };
+
+  const clearStreamRuntime = (streamId: string) => {
+    clearStreamRevealTimer(streamId);
+    streamPendingTextRef.current.delete(streamId);
+    streamVisibleTextRef.current.delete(streamId);
+    streamTextBufferRef.current.delete(streamId);
+    streamTargetsRef.current.delete(streamId);
+    activeStreamsRef.current.delete(streamId);
+    webSearchPrepTokensRef.current.delete(streamId);
+  };
+
   const createNewConversation = () => {
     if (viewMode === "conversations") {
       setIsHistoryOpen(false);
@@ -4920,7 +5154,7 @@ export default function AiSidebar({
     setConversations((current) => limitConversations(pruneBlankConversations([conversation, ...current], conversation.id)));
     setActiveConversationId(conversation.id);
     setViewMode("chat");
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     cancelRenameConversation();
     setIsHistoryOpen(false);
@@ -4969,7 +5203,7 @@ export default function AiSidebar({
     setModelSearch("");
     setEditingConversationId(null);
     setEditingConversationTitle("");
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
@@ -5021,10 +5255,7 @@ export default function AiSidebar({
 
     for (const [streamId, target] of Array.from(streamTargetsRef.current.entries())) {
       if (target.conversationId !== conversationId) continue;
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
     }
     updateRespondingState();
 
@@ -5045,7 +5276,7 @@ export default function AiSidebar({
 
     setPendingDeleteConversationId(null);
     cancelRenameConversation();
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
@@ -5067,16 +5298,14 @@ export default function AiSidebar({
       if (disposed || !target || !delta) return;
 
       streamTextBufferRef.current.set(streamId, `${streamTextBufferRef.current.get(streamId) ?? ""}${delta}`);
-      replaceMessage(target.conversationId, target.messageId, (message) => ({
-        ...message,
-        text: message.state === "streaming" ? `${message.text}${delta}` : message.text,
-      }));
+      queueStreamRevealText(streamId, delta);
     }).then((unlisten) => unlisteners.push(unlisten));
 
     void listen<NoteChatStreamDoneEvent>("ai-chat-stream-done", (event) => {
       const { streamId } = event.payload;
       const target = streamTargetsRef.current.get(streamId);
       if (disposed || !target) return;
+      flushStreamRevealText(streamId);
 
       if (target.mode === "compress-context") {
         const rawSummary = (streamTextBufferRef.current.get(streamId) ?? "").trim();
@@ -5126,10 +5355,7 @@ export default function AiSidebar({
             )),
           }));
         }
-        streamTextBufferRef.current.delete(streamId);
-        streamTargetsRef.current.delete(streamId);
-        activeStreamsRef.current.delete(streamId);
-        webSearchPrepTokensRef.current.delete(streamId);
+        clearStreamRuntime(streamId);
         updateRespondingState();
         return;
       }
@@ -5142,10 +5368,7 @@ export default function AiSidebar({
         webSearchStatusText: undefined,
         ...finishAssistantTiming(message),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -5153,46 +5376,68 @@ export default function AiSidebar({
       const { streamId, message, detail } = event.payload;
       const target = streamTargetsRef.current.get(streamId);
       if (disposed || !target) return;
+      flushStreamRevealText(streamId);
       if (detail) {
         console.warn("AI sidebar stream failed", { streamId, detail });
       }
 
       replaceMessage(target.conversationId, target.messageId, (currentMessage) => ({
         ...currentMessage,
-        text: getChatErrorMessage(message),
+        text: currentMessage.text.trim().length > 0 ? currentMessage.text : getChatErrorMessage(message),
         kind: currentMessage.kind === "compression-result" ? "text" : currentMessage.kind,
         state: "error",
         webSearchStatus: currentMessage.webSearchStatus ? "failed" : undefined,
         webSearchStatusText: currentMessage.webSearchStatus ? "生成回答失败" : undefined,
         ...finishAssistantTiming(currentMessage),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
     }).then((unlisten) => unlisteners.push(unlisten));
 
     return () => {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
+      streamRevealTimerRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      streamRevealTimerRef.current.clear();
     };
   }, []);
 
   useEffect(() => {
-    shouldAutoScrollRef.current = true;
+    isAtBottomRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
-    window.requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+    scheduleMessagesScrollToBottom();
   }, [activeConversationId, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
-    if (shouldAutoScrollRef.current || isMessagesNearBottom()) {
-      window.requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+    if (userPinnedToBottomRef.current) {
+      scheduleMessagesScrollToBottom();
       return;
     }
     setShowScrollToBottom(true);
   }, [isOpen, messages]);
+
+  useEffect(() => {
+    if (!isOpen || viewMode !== "chat") return undefined;
+    const messagesList = messagesScrollRef.current?.querySelector<HTMLElement>("[data-virtual-message-list=\"true\"]");
+    if (!messagesList) return undefined;
+
+    const observer = new ResizeObserver(() => {
+      if (userPinnedToBottomRef.current) {
+        scheduleMessagesScrollToBottom();
+      }
+    });
+    observer.observe(messagesList);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeConversationId, isOpen, messages.length, viewMode]);
+
+  useEffect(() => () => {
+    cancelScheduledMessagesScroll();
+  }, []);
 
   const buildChatContext = (
     options: { includeNoteContext?: boolean } = {},
@@ -5269,7 +5514,7 @@ export default function AiSidebar({
   };
 
   const appendCommandNotice = (conversationId: string, commandText: string, notice: string) => {
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(
       conversationId,
@@ -5442,7 +5687,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
     setInputValue("");
@@ -5457,6 +5702,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       compressionSourceChars: compressionInput.sourceChars,
       compressionStartedAt: startedAt,
     });
+    initializeStreamRevealState(streamId);
     activeStreamsRef.current.add(streamId);
     updateRespondingState();
 
@@ -5475,17 +5721,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       });
       const target = streamTargetsRef.current.get(streamId);
       if (!target) return;
+      flushStreamRevealText(streamId);
       replaceMessage(target.conversationId, target.messageId, (message) => ({
         ...message,
-        text: message.state === "error" ? message.text : getChatErrorMessage(error),
+        text: message.text.trim().length > 0 ? message.text : getChatErrorMessage(error),
         kind: "text",
         state: "error",
         ...finishAssistantTiming(message),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
     });
   };
@@ -5506,7 +5750,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     }
 
     if (!isAiConfigured) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5517,7 +5761,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5550,7 +5794,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
     setInputValue("");
@@ -5618,7 +5862,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     }
 
     if (!isAiConfigured) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5629,7 +5873,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5676,7 +5920,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
     setInputValue("");
@@ -5753,7 +5997,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     }
 
     if (!isAiConfigured) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5764,7 +6008,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -5802,7 +6046,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
     setInputValue("");
@@ -5889,7 +6133,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(
       conversationId,
@@ -6074,7 +6318,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const userFacingText = displayText.trim() || question;
 
     if (!isAiConfigured) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -6085,7 +6329,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
-      shouldAutoScrollRef.current = true;
+      userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
       appendMessages(
         conversationId,
@@ -6131,7 +6375,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
 
@@ -6145,6 +6389,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       requestId,
       mode: "chat",
     });
+    initializeStreamRevealState(streamId);
     activeStreamsRef.current.add(streamId);
     const webSearchPrepToken = requestId;
     webSearchPrepTokensRef.current.set(streamId, webSearchPrepToken);
@@ -6229,10 +6474,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchStatusText: getUserFacingSearchError(searchError, effectiveSearchDecision),
         ...finishAssistantTiming(message),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
       return;
     }
@@ -6275,16 +6517,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       });
       const target = streamTargetsRef.current.get(streamId);
       if (!target) return;
+      flushStreamRevealText(streamId);
       replaceMessage(target.conversationId, target.messageId, (message) => ({
         ...message,
-        text: message.state === "error" ? message.text : getChatErrorMessage(error),
+        text: message.text.trim().length > 0 ? message.text : getChatErrorMessage(error),
         state: "error",
         ...finishAssistantTiming(message),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
     });
   };
@@ -6385,7 +6625,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       startedAt,
     });
 
-    shouldAutoScrollRef.current = true;
+    userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     updateConversationMessages(conversationId, (currentConversation) => ({
       ...currentConversation,
@@ -6399,6 +6639,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       requestId,
       mode: "chat",
     });
+    initializeStreamRevealState(streamId);
     activeStreamsRef.current.add(streamId);
     const webSearchPrepToken = requestId;
     webSearchPrepTokensRef.current.set(streamId, webSearchPrepToken);
@@ -6484,10 +6725,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         webSearchStatusText: getUserFacingSearchError(searchError, effectiveSearchDecision),
           ...finishAssistantTiming(current),
         }));
-        streamTextBufferRef.current.delete(streamId);
-        streamTargetsRef.current.delete(streamId);
-        activeStreamsRef.current.delete(streamId);
-        webSearchPrepTokensRef.current.delete(streamId);
+        clearStreamRuntime(streamId);
         updateRespondingState();
         return;
       }
@@ -6531,16 +6769,14 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       });
       const target = streamTargetsRef.current.get(streamId);
       if (!target) return;
+      flushStreamRevealText(streamId);
       replaceMessage(target.conversationId, target.messageId, (current) => ({
         ...current,
-        text: current.state === "error" ? current.text : getChatErrorMessage(error),
+        text: current.text.trim().length > 0 ? current.text : getChatErrorMessage(error),
         state: "error",
         ...finishAssistantTiming(current),
       }));
-      streamTextBufferRef.current.delete(streamId);
-      streamTargetsRef.current.delete(streamId);
-      activeStreamsRef.current.delete(streamId);
-      webSearchPrepTokensRef.current.delete(streamId);
+      clearStreamRuntime(streamId);
       updateRespondingState();
     });
   };
@@ -7569,7 +7805,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               type="button"
               className="pointer-events-auto absolute left-1/2 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 dark:bg-[#2f3134]/95"
               onClick={() => {
-                shouldAutoScrollRef.current = true;
+                isAtBottomRef.current = true;
+                userPinnedToBottomRef.current = true;
                 scrollMessagesToBottom("smooth");
               }}
               title="回到底部"

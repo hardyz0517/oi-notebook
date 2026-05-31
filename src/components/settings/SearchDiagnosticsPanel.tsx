@@ -167,6 +167,7 @@ const shouldTriggerOfflineDirectNewsDiscovery = (input: string, decision: Search
     /latest|recent|news/i.test(queryText);
   const newsLike = decision.newsIntent === true ||
     decision.vertical === "news" ||
+    decision.vertical === "world_news" ||
     /新闻|资讯|动态|news/i.test(input) ||
     /新闻|资讯|动态|news/i.test(queryText);
   return freshLike && newsLike;
@@ -175,10 +176,12 @@ const shouldTriggerOfflineDirectNewsDiscovery = (input: string, decision: Search
 const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   const cases = [
     ["direct-ai-news-clean", "\u6700\u8fd1\u6709\u4ec0\u4e48 AI \u65b0\u95fb\uff1f", true, "应触发 news Direct Discovery；candidate=0 时也要显示 attempted/source tried。"],
+    ["direct-world-news-clean", "\u6700\u8fd1\u53d1\u751f\u4e86\u4ec0\u4e48\u56fd\u9645\u5927\u4e8b\uff1f", true, "应触发 world_news Direct Discovery，并优先国际新闻来源。"],
     ["direct-openai-news-clean", "\u6700\u8fd1 OpenAI \u6709\u4ec0\u4e48\u65b0\u95fb\uff1f", true, "应触发 news Direct Discovery，并优先 OpenAI source。"],
     ["direct-recent-word-clean", "\u6700\u8fd1\u8fd9\u4e2a\u8bcd\u82f1\u8bed\u600e\u4e48\u8bf4\uff1f", false, "词义/翻译问题应跳过 news Direct Discovery。"],
     ["direct-react-docs-clean", "React useEffect \u662f\u4ec0\u4e48\uff1f", true, "应触发 docs Direct Discovery，并构造 react.dev candidate。"],
     ["direct-ai-news", "最近有什么 AI 新闻？", true, "应触发 news Direct Discovery；candidate=0 时也要显示 attempted/source tried。"],
+    ["direct-world-news", "这几天世界上发生了什么大事？", true, "应触发 world_news Direct Discovery，并优先国际新闻来源。"],
     ["direct-openai-news", "最近 OpenAI 有什么新闻？", true, "应触发 news Direct Discovery，并优先 OpenAI source。"],
     ["direct-recent-word", "最近这个词英语怎么说？", false, "词义/翻译问题应跳过 news Direct Discovery。"],
     ["direct-react-docs", "React useEffect 是什么？", true, "应触发 docs Direct Discovery，并构造 react.dev candidate。"],
@@ -407,6 +410,18 @@ const buildDecisionDiagnostics = (): DiagnosticItem[] => {
       expected: "shouldSearch=true, intent=algorithm_reference, query 保留点分树/动态点分治/实现坑语义，不构造洛谷题号。",
       check: (decision) => decision.shouldSearch && decision.intent === "algorithm_reference" && !decision.problemId && hasQueryKeyword(decision, ["点分树", "动态点分治", "常见错误", "实现坑"]),
       warnCheck: (decision) => decision.shouldSearch && !decision.problemId,
+    },
+    {
+      id: "world-news",
+      input: "最近发生了什么国际大事？",
+      expected: "shouldSearch=true, vertical=world_news, query 最多 3 条，优先国际新闻词并携带当前日期/月信息。",
+      check: (decision) => decision.shouldSearch &&
+        decision.intent === "general_web" &&
+        decision.vertical === "world_news" &&
+        decision.newsIntent === true &&
+        decision.queries.length > 0 &&
+        decision.queries.length <= 3 &&
+        hasQueryKeyword(decision, ["国际新闻", "国际大事", "world news", "international news", "major world events"]),
     },
     {
       id: "ai-news",

@@ -107,6 +107,7 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
     }, [onOpenStateChange]);
 
     const ensureOpen = useCallback(() => {
+      if (openRef.current) return;
       onBeforeOpen?.();
       setHostOpen(true);
     }, [onBeforeOpen, setHostOpen]);

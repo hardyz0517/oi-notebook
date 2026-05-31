@@ -95,6 +95,13 @@ export type EvidenceDiagnostics = {
 };
 
 export type NewsReadBudgetDiagnostics = UrlReaderDiagnostics & EvidenceDiagnostics & {
+  vertical?: string;
+  queries?: string;
+  selectedNewsSources?: string;
+  candidateCount?: string;
+  freshCandidateCount?: string;
+  filteredOldNewsCount?: string;
+  evidenceSourceCount?: string;
   queryDiversification?: string;
   droppedQueryDiversification?: string;
   droppedQueryReason?: string;
@@ -514,6 +521,13 @@ export const parseNewsReadBudgetDiagnostics = (raw: string): NewsReadBudgetDiagn
   const parts = chunk.split(";").map((part) => part.trim()).filter(Boolean);
   const clusteringEnabled = lookupDebugField(parts, "newsClusteringEnabled");
   return {
+    vertical: lookupDebugField(parts, "vertical"),
+    queries: lookupDebugField(parts, "queries"),
+    selectedNewsSources: lookupDebugField(parts, "selectedNewsSources"),
+    candidateCount: lookupDebugField(parts, "candidateCount"),
+    freshCandidateCount: lookupDebugField(parts, "freshCandidateCount"),
+    filteredOldNewsCount: lookupDebugField(parts, "filteredOldNewsCount"),
+    evidenceSourceCount: lookupDebugField(parts, "evidenceSourceCount"),
     readAttempts: lookupDebugField(parts, "newsReadAttempts"),
     readSuccesses: lookupDebugField(parts, "newsReadSuccesses"),
     usableEvidenceCount: lookupDebugField(parts, "usableEvidenceCount"),
@@ -615,6 +629,13 @@ export const formatNewsReadDiagnostics = (raw: string): string[] => {
   const diagnostics = parseNewsReadBudgetDiagnostics(raw);
   if (!diagnostics) return [];
   return [
+    `vertical: ${diagnostics.vertical || "none"}`,
+    `queries: ${diagnostics.queries || "none"}`,
+    `selectedNewsSources: ${diagnostics.selectedNewsSources || "none"}`,
+    `candidateCount: ${diagnostics.candidateCount ?? "0"}`,
+    `freshCandidateCount: ${diagnostics.freshCandidateCount ?? "0"}`,
+    `filteredOldNewsCount: ${diagnostics.filteredOldNewsCount ?? "0"}`,
+    `evidenceSourceCount: ${diagnostics.evidenceSourceCount ?? "0"}`,
     `newsReadAttempts: ${diagnostics.readAttempts ?? "0"}`,
     `newsReadSuccesses: ${diagnostics.readSuccesses ?? "0"}`,
     `usableEvidenceCount: ${diagnostics.usableEvidenceCount ?? "0"}`,

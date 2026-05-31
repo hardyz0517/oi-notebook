@@ -33,6 +33,12 @@ const SHIKI_LANGS: BuiltinLanguage[] = [
 
 const shikiHighlightCache = new Map<string, Root>();
 
+const katexOptions = {
+  throwOnError: false,
+  errorColor: "inherit",
+  strict: "ignore" as const,
+};
+
 const luoguCodeLineTransformer: ShikiTransformer = {
   name: "oi-luogu-code-lines",
   pre(node) {
@@ -58,7 +64,7 @@ const processor = unified()
   .use(remarkLuoguCallouts)
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeKatex)
+  .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeShiki, {
     defaultLanguage: "cpp",
@@ -82,7 +88,7 @@ const lightThemeProcessor = unified()
   .use(remarkLuoguCallouts)
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeKatex)
+  .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeShiki, {
     defaultLanguage: "cpp",
@@ -102,7 +108,7 @@ const darkThemeProcessor = unified()
   .use(remarkLuoguCallouts)
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeKatex)
+  .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeShiki, {
     defaultLanguage: "cpp",

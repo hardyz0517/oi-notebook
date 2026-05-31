@@ -80,6 +80,7 @@ export function SettingsInlineSelect({
   ariaLabel,
   expandedRuleId,
   onExpandedRuleChange,
+  themed = false,
 }: {
   id: string;
   value: string;
@@ -89,6 +90,7 @@ export function SettingsInlineSelect({
   ariaLabel: string;
   expandedRuleId: string | null;
   onExpandedRuleChange: (id: string | null) => void;
+  themed?: boolean;
 }) {
   const expanded = expandedRuleId === id;
   const selectedOption = options.find((option) => option.value === value) ?? options[0];
@@ -190,7 +192,10 @@ export function SettingsInlineSelect({
           ref={menuRef}
           data-no-window-drag="true"
           className={cn(
-            "absolute left-0 z-[80] grid w-full rounded-md border border-border bg-[#1f1f1f] p-1 text-sm text-foreground shadow-lg transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+            "absolute left-0 z-[80] grid w-full border p-1 text-sm shadow-lg transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+            themed
+              ? "rounded-lg border-border/70 bg-popover text-popover-foreground shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
+              : "rounded-md border-border bg-[#1f1f1f] text-foreground",
             menuLayout.shouldScroll ? "overflow-y-auto" : "overflow-visible",
             menuLayout.direction === "down" ? "top-[calc(100%+6px)]" : "bottom-[calc(100%+6px)]",
           )}
@@ -220,7 +225,13 @@ export function SettingsInlineSelect({
                 disabled={option.disabled}
                 className={cn(
                   "flex h-9 min-w-0 items-center gap-2 rounded-sm px-2.5 text-left text-sm transition-colors",
-                  selected ? "bg-[#343434] text-foreground" : "text-foreground hover:bg-[#2a2a2a]",
+                  themed
+                    ? selected
+                      ? "bg-accent/70 text-accent-foreground dark:bg-white/[0.08] dark:text-foreground"
+                      : "text-popover-foreground hover:bg-accent/60 hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
+                    : selected
+                      ? "bg-[#343434] text-foreground"
+                      : "text-foreground hover:bg-[#2a2a2a]",
                   option.disabled && "cursor-not-allowed opacity-50",
                 )}
                 title={option.label}
@@ -234,6 +245,9 @@ export function SettingsInlineSelect({
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (event.detail !== 0 || option.disabled) return;
+                  if (option.value !== value) onChange(option.value);
+                  onExpandedRuleChange(null);
                 }}
               >
                 <span className="flex h-4 w-4 shrink-0 items-center justify-center">

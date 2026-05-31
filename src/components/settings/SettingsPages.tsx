@@ -10,16 +10,19 @@ export function SettingRow({
   description,
   children,
   align = "center",
+  layout = "split",
 }: {
   title: string;
   description?: ReactNode;
   children?: ReactNode;
   align?: "center" | "start";
+  layout?: "split" | "stacked";
 }) {
   return (
     <div
       className={cn(
-        "grid min-w-0 gap-3 border-b border-border/60 py-3 xl:grid-cols-[minmax(260px,1fr)_320px]",
+        "grid min-w-0 gap-3 border-b border-border/60 py-3",
+        layout === "split" && "xl:grid-cols-[minmax(260px,1fr)_320px]",
         align === "center" ? "lg:items-center" : "lg:items-start",
       )}
     >

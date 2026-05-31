@@ -6,6 +6,10 @@ use std::{
     net::{IpAddr, ToSocketAddrs},
     panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -2190,7 +2194,7 @@ fn build_search_sources_context(sources: &[WebSearchResult]) -> Option<String> {
         if news_event_cluster_count <= 1 {
             "News roundup mode is active, but the usable news evidence appears to cover only one event cluster. Each source includes Event cluster, Event cluster label, Event cluster size, and duplicate-selection fields. For news/recent questions, answer in Chinese based only on successfully read public sources. Do not split one launch, conference, or company event into many fake news items. Start with one overview sentence that says the readable sources are concentrated in one cluster, then write 1-3 event-level points. Merge product details from the same event under one point. Do not use rejected candidates or model memory to add unverified news."
         } else {
-            "News roundup mode is active with multiple event clusters. Each source includes Event cluster, Event cluster label, Event cluster size, and duplicate-selection fields. For news/recent questions, answer in Chinese as a concise event-level roundup based only on successfully read public sources. Start with one overview sentence, then cover 3-6 independent events when evidence supports them, or fewer with a source-scope note if coverage is narrow. Each point should explain what happened, why it matters, and likely impact. Do not split one launch, conference, or company event into many fake news items; merge same-cluster product details under one point. Do not use rejected candidates or model memory to add unverified news."
+            "News roundup mode is active with multiple event clusters. Each source includes Event cluster, Event cluster label, Event cluster size, and duplicate-selection fields. For news/recent questions, answer in Chinese as a concise event-level roundup based only on successfully read public sources. Start with one overview sentence, then cover 5-8 independent events when evidence supports them, or fewer with a source-scope note if coverage is narrow. Each point should explain what happened, why it matters, and likely impact. Do not split one launch, conference, or company event into many fake news items; merge same-cluster product details under one point. Do not use rejected candidates or model memory to add unverified news."
         }
     } else {
         "News roundup mode is inactive or evidence is limited. For news/recent questions, keep the answer cautious and avoid padding beyond the successfully read sources."
@@ -2848,6 +2852,7 @@ async fn request_chat_completion_stream(
     scope: &str,
     app: tauri::AppHandle,
     stream_id: String,
+    emitted_any_delta: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let resolved = require_ai_config_resolved(config)?;
     let (base_url, api_key, model) = require_resolved_ai_config(&resolved)?;
@@ -2902,7 +2907,6 @@ async fn request_chat_completion_stream(
     }
 
     let mut buffer = String::new();
-    let mut emitted_any_delta = false;
     while let Some(chunk) = response
         .chunk()
         .await
@@ -2914,7 +2918,7 @@ async fn request_chat_completion_stream(
             buffer.drain(..=newline_index);
             match parse_stream_line(&line, scope) {
                 Ok(Some(delta)) => {
-                    emitted_any_delta = true;
+                    emitted_any_delta.store(true, Ordering::Relaxed);
                     emit_stream_chunk(&app, &stream_id, delta)?;
                 }
                 Ok(None) => {}
@@ -2931,7 +2935,7 @@ async fn request_chat_completion_stream(
     if !trailing.is_empty() {
         match parse_stream_line(trailing, scope) {
             Ok(Some(delta)) => {
-                emitted_any_delta = true;
+                emitted_any_delta.store(true, Ordering::Relaxed);
                 emit_stream_chunk(&app, &stream_id, delta)?;
             }
             Ok(None) => {}
@@ -2943,7 +2947,7 @@ async fn request_chat_completion_stream(
         }
     }
 
-    if !emitted_any_delta {
+    if !emitted_any_delta.load(Ordering::Relaxed) {
         return Err(format!(
             "{scope}: AI service returned an empty stream; debug=http_status={status_code}"
         ));
@@ -4330,19 +4334,70 @@ pub async fn chat_with_current_note_stream(
         &input.local_note_sources,
     );
     let selected_config = config_from_resolved(resolved);
+    let emitted_any_delta = Arc::new(AtomicBool::new(false));
     let result = request_chat_completion_stream(
         &selected_config,
-        messages,
+        messages.clone(),
         0.2,
         "AI chat stream failed",
         app.clone(),
         stream_id.clone(),
+        Arc::clone(&emitted_any_delta),
     )
     .await;
 
-    if let Err(error) = result {
-        emit_stream_error(&app, &stream_id, error.clone());
-        return Err(error);
+    if let Err(stream_error) = result {
+        if emitted_any_delta.load(Ordering::Relaxed) {
+            emit_stream_error(&app, &stream_id, stream_error.clone());
+            return Err(stream_error);
+        }
+
+        let fallback_result = match tauri::async_runtime::spawn_blocking(move || {
+            request_chat_completion_with_options(
+                &selected_config,
+                messages,
+                0.2,
+                "AI chat fallback failed",
+                ChatCompletionRequestOptions {
+                    timeout_secs: 120,
+                    json_response: false,
+                    max_tokens: None,
+                },
+            )
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(join_error) => {
+                let error = format!(
+                    "{stream_error}; debug=non_stream_fallback_task_join_failed; error={join_error}"
+                );
+                emit_stream_error(&app, &stream_id, error.clone());
+                return Err(error);
+            }
+        };
+
+        match fallback_result {
+            Ok(content) if !content.trim().is_empty() => {
+                emit_stream_chunk(&app, &stream_id, content)?;
+                emit_stream_done(&app, &stream_id)?;
+            }
+            Ok(_) => {
+                let error = format!(
+                    "{stream_error}; debug=non_stream_fallback_returned_empty_content"
+                );
+                emit_stream_error(&app, &stream_id, error.clone());
+                return Err(error);
+            }
+            Err(fallback_error) => {
+                let error = format!(
+                    "{stream_error}; debug=non_stream_fallback_failed; fallback_error={}",
+                    sanitize_ai_detail(&fallback_error)
+                );
+                emit_stream_error(&app, &stream_id, error.clone());
+                return Err(error);
+            }
+        }
     }
 
     Ok(())
@@ -9127,12 +9182,13 @@ fn direct_discovery_topic_keywords(request: &WebSearchRequestInput) -> Vec<Strin
             keywords.push(value.to_string());
         }
     }
+    for value in ["国际新闻", "国际大事", "世界新闻", "世界大事", "world news", "international news", "major world events"] {
+        if lower.contains(&value.to_ascii_lowercase()) || combined.contains(value) {
+            keywords.push(value.to_string());
+        }
+    }
     if keywords.is_empty() && is_direct_news_discovery_request(request) {
-        keywords.extend(
-            ["AI", "OpenAI", "ChatGPT", "DeepSeek", "LLM"]
-                .into_iter()
-                .map(ToOwned::to_owned),
-        );
+        keywords.push("world_news".to_string());
     }
     keywords.sort_by_key(|value| value.to_ascii_lowercase());
     keywords.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
@@ -9286,12 +9342,192 @@ fn news_source_registry() -> Vec<NewsSourceDefinition> {
             notes: "Chinese AI media RSS; only candidate discovery.",
         },
         NewsSourceDefinition {
+            id: "reuters-world",
+            name: "Reuters",
+            homepage: "https://www.reuters.com/world/",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://www.reuters.com/world/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Reuters World landing candidate; URL Reader and Evidence Gate reject non-article pages.",
+        },
+        NewsSourceDefinition {
+            id: "ap-world",
+            name: "AP News",
+            homepage: "https://apnews.com/world-news",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://apnews.com/world-news"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "AP World landing candidate; URL Reader and Evidence Gate reject non-article pages.",
+        },
+        NewsSourceDefinition {
+            id: "bbc-world",
+            name: "BBC World",
+            homepage: "https://www.bbc.com/news/world",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://feeds.bbci.co.uk/news/world/rss.xml"],
+            site_urls: &["https://www.bbc.com/news/world"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "BBC World RSS candidate discovery.",
+        },
+        NewsSourceDefinition {
+            id: "guardian-world",
+            name: "The Guardian World",
+            homepage: "https://www.theguardian.com/world",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://www.theguardian.com/world/rss"],
+            site_urls: &["https://www.theguardian.com/world"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Guardian World RSS candidate discovery.",
+        },
+        NewsSourceDefinition {
+            id: "aljazeera-world",
+            name: "Al Jazeera",
+            homepage: "https://www.aljazeera.com/news/",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://www.aljazeera.com/xml/rss/all.xml"],
+            site_urls: &["https://www.aljazeera.com/news/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "Al Jazeera RSS candidate discovery.",
+        },
+        NewsSourceDefinition {
+            id: "dw-world",
+            name: "DW News",
+            homepage: "https://www.dw.com/en/world/s-1429",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://rss.dw.com/rdf/rss-en-world"],
+            site_urls: &["https://www.dw.com/en/world/s-1429"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "DW World RSS candidate discovery.",
+        },
+        NewsSourceDefinition {
+            id: "france24-world",
+            name: "France 24",
+            homepage: "https://www.france24.com/en/",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &["https://www.france24.com/en/rss"],
+            site_urls: &["https://www.france24.com/en/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 3,
+            timeout_ms: 5000,
+            notes: "France 24 RSS candidate discovery.",
+        },
+        NewsSourceDefinition {
+            id: "cnn-world",
+            name: "CNN World",
+            homepage: "https://edition.cnn.com/world",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["en"],
+            regions: &["global"],
+            rss_urls: &[],
+            site_urls: &["https://edition.cnn.com/world"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "CNN World landing candidate; URL Reader and Evidence Gate reject non-article pages.",
+        },
+        NewsSourceDefinition {
+            id: "xinhua-world",
+            name: "新华社国际",
+            homepage: "https://www.news.cn/world/",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["zh"],
+            regions: &["global", "cn"],
+            rss_urls: &[],
+            site_urls: &["https://www.news.cn/world/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "Xinhua World landing candidate; URL Reader and Evidence Gate reject non-article pages.",
+        },
+        NewsSourceDefinition {
+            id: "cctv-world",
+            name: "央视新闻国际",
+            homepage: "https://news.cctv.com/world/",
+            source_type: "world_media",
+            reliability: "high",
+            topics: &["world_news"],
+            languages: &["zh"],
+            regions: &["global", "cn"],
+            rss_urls: &[],
+            site_urls: &["https://news.cctv.com/world/"],
+            official: false,
+            aggregator: false,
+            enabled_by_default: true,
+            max_items: 2,
+            timeout_ms: 5000,
+            notes: "CCTV World landing candidate; URL Reader and Evidence Gate reject non-article pages.",
+        },
+        NewsSourceDefinition {
             id: "bing-news-fallback",
             name: "Bing News fallback",
             homepage: BING_NEWS_SEARCH_ENDPOINT,
             source_type: "search_fallback",
             reliability: "fallback",
-            topics: &["ai_general", "ai_model", "ai_agent", "openai", "anthropic", "google_ai", "deepmind", "microsoft_ai", "china_ai", "hardware", "regulation", "security", "funding", "developer_tools"],
+            topics: &["world_news", "ai_general", "ai_model", "ai_agent", "openai", "anthropic", "google_ai", "deepmind", "microsoft_ai", "china_ai", "hardware", "regulation", "security", "funding", "developer_tools"],
             languages: &["en", "zh"],
             regions: &["global"],
             rss_urls: &[],
@@ -9314,6 +9550,12 @@ fn infer_news_topic_tags(request: &WebSearchRequestInput, keywords: &[String]) -
     );
     let lower = combined.to_ascii_lowercase();
     let mut tags = Vec::<String>::new();
+    if ["国际新闻", "国际大事", "世界新闻", "世界大事", "world news", "international news", "major world events", "world_news"]
+        .iter()
+        .any(|value| lower.contains(&value.to_ascii_lowercase()))
+    {
+        tags.push("world_news".to_string());
+    }
     let topic_rules = [
         ("openai", "openai"),
         ("chatgpt", "openai"),
@@ -9366,7 +9608,7 @@ fn news_source_matches_topics(source: &NewsSourceDefinition, topic_tags: &[Strin
         .topics
         .iter()
         .any(|topic| topic_tags.iter().any(|tag| tag.as_str() == *topic))
-        || source.topics.contains(&"ai_general")
+        || (topic_tags.iter().any(|tag| tag.starts_with("ai_")) && source.topics.contains(&"ai_general"))
 }
 
 fn route_news_sources_for_request(
@@ -9684,7 +9926,21 @@ fn rss_link(block: &str) -> Option<String> {
 }
 
 fn rss_item_matches_topic(title: &str, description: &str, keywords: &[String]) -> bool {
-    if keywords.is_empty() {
+    if keywords.is_empty()
+        || keywords.iter().any(|keyword| {
+            matches!(
+                keyword.to_ascii_lowercase().as_str(),
+                "world_news"
+                    | "world news"
+                    | "international news"
+                    | "major world events"
+                    | "国际新闻"
+                    | "国际大事"
+                    | "世界新闻"
+                    | "世界大事"
+            )
+        })
+    {
         return true;
     }
     let haystack = format!("{title} {description}").to_ascii_lowercase();
@@ -10803,7 +11059,7 @@ fn run_news_clustering_self_check(
     expected_category: &str,
     route: Option<&NewsSourceRoute>,
 ) -> NewsClusteringSelfCheckResult {
-    let enabled = matches!(expected_category, "news_ai" | "news_openai" | "news_anthropic");
+    let enabled = matches!(expected_category, "news_ai" | "news_openai" | "news_anthropic" | "news_world");
     if !enabled {
         return NewsClusteringSelfCheckResult {
             enabled: false,
@@ -10831,6 +11087,13 @@ fn run_news_clustering_self_check(
             NewsClusteringSelfCheckCandidate { id: "a-official", title: "Anthropic announces Claude model update", source_id: "anthropic-news", reliability: "official", official: true, primary_entity: "anthropic", entity_match_strength: "primary", rank: 100 },
             NewsClusteringSelfCheckCandidate { id: "a-media", title: "Anthropic Claude model update coverage from media", source_id: "techcrunch-ai", reliability: "high", official: false, primary_entity: "anthropic", entity_match_strength: "secondary", rank: 86 },
             NewsClusteringSelfCheckCandidate { id: "a-safety", title: "Anthropic publishes Claude safety research", source_id: "anthropic-news", reliability: "official", official: true, primary_entity: "anthropic", entity_match_strength: "primary", rank: 80 },
+        ],
+        "news_world" => vec![
+            NewsClusteringSelfCheckCandidate { id: "w1", title: "Reuters reports ceasefire talks advance", source_id: "reuters-world", reliability: "high", official: false, primary_entity: "world", entity_match_strength: "primary", rank: 100 },
+            NewsClusteringSelfCheckCandidate { id: "w2", title: "BBC World reports election results", source_id: "bbc-world", reliability: "high", official: false, primary_entity: "world", entity_match_strength: "primary", rank: 96 },
+            NewsClusteringSelfCheckCandidate { id: "w3", title: "DW News covers international trade talks", source_id: "dw-world", reliability: "high", official: false, primary_entity: "world", entity_match_strength: "primary", rank: 92 },
+            NewsClusteringSelfCheckCandidate { id: "w4", title: "France 24 covers severe weather response", source_id: "france24-world", reliability: "high", official: false, primary_entity: "world", entity_match_strength: "primary", rank: 88 },
+            NewsClusteringSelfCheckCandidate { id: "w5", title: "OpenAI launches a new model", source_id: "openai-news", reliability: "official", official: true, primary_entity: "openai", entity_match_strength: "primary", rank: 84 },
         ],
         _ => vec![
             NewsClusteringSelfCheckCandidate { id: "g1", title: "Google I/O announces Gemini agents", source_id: "google-ai-blog", reliability: "official", official: true, primary_entity: "google_ai", entity_match_strength: "primary", rank: 96 },
@@ -10872,8 +11135,14 @@ fn run_news_clustering_self_check(
             .or_insert(0) += 1;
     }
 
-    let max_per_cluster = if expected_category == "news_ai" { 1 } else { 2 };
-    let max_selected = if expected_category == "news_ai" { 4 } else { 3 };
+    let max_per_cluster = if matches!(expected_category, "news_ai" | "news_world") { 1 } else { 2 };
+    let max_selected = if expected_category == "news_ai" {
+        4
+    } else if expected_category == "news_world" {
+        8
+    } else {
+        3
+    };
     let mut selected_cluster_counts = BTreeMap::<String, usize>::new();
     let mut selected_representatives = Vec::<String>::new();
     let mut dropped_duplicate_count = 0usize;
@@ -11011,6 +11280,31 @@ fn build_self_check_case(
         failures.push("extractor quality synthetic evidence checks failed".to_string());
     }
     match expected_category {
+        "news_world" => {
+            if search_mode.mode != "news_recent" || !search_mode.allow_news_registry || !search_mode.allow_bing_fallback {
+                failures.push(format!("World news search mode was not news_recent with registry and Bing fallback: {}", search_mode.mode));
+            }
+            if vertical != "world_news" || !news_registry_triggered {
+                failures.push(format!("World news registry routing was missing for vertical={vertical}"));
+            }
+            if company_specific_news || entity_filter_applied {
+                failures.push("World news should not use company-specific entity filter".to_string());
+            }
+            if selected_news_sources.iter().any(|source| source.contains("openai-news") || source.contains("ai-blog")) {
+                failures.push("World news selected AI-specific source".to_string());
+            }
+            if !selected_news_sources.iter().any(|source| source.contains("reuters-world"))
+                || !selected_news_sources.iter().any(|source| source.contains("bbc-world"))
+            {
+                failures.push("World news did not select expected international sources".to_string());
+            }
+            if !clustering.enabled || clustering.cluster_count == 0 {
+                failures.push("World news clustering was not enabled".to_string());
+            }
+            if !bing_fallback_planned {
+                failures.push("World news did not plan Bing News fallback".to_string());
+            }
+        }
         "news_ai" => {
             if search_mode.mode != "news_recent" || !search_mode.allow_news_registry || !search_mode.allow_bing_fallback {
                 failures.push(format!("AI news search mode was not news_recent with registry and Bing fallback: {}", search_mode.mode));
@@ -11366,6 +11660,8 @@ fn classify_news_freshness_status(today: &str, published_at: Option<&str>, expli
         ("fresh_72h", true)
     } else if age_days <= 7 {
         ("recent_week", true)
+    } else if age_days <= 14 {
+        ("recent_fortnight", true)
     } else {
         ("stale", false)
     }
@@ -11377,6 +11673,7 @@ fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
         NewsFreshnessSelfCheckSource { id: "may21", published_at: Some("2026-05-21") },
         NewsFreshnessSelfCheckSource { id: "may20", published_at: Some("2026-05-20") },
         NewsFreshnessSelfCheckSource { id: "may17", published_at: Some("2026-05-17") },
+        NewsFreshnessSelfCheckSource { id: "may09", published_at: Some("2026-05-09") },
         NewsFreshnessSelfCheckSource { id: "apr16", published_at: Some("2026-04-16") },
         NewsFreshnessSelfCheckSource { id: "undated", published_at: None },
     ];
@@ -11394,6 +11691,7 @@ fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
         .collect::<Vec<_>>();
     let stale_rejected = classify_news_freshness_status(today, Some("2026-04-16"), false) == ("stale", false);
     let recent_week_kept = classify_news_freshness_status(today, Some("2026-05-17"), false) == ("recent_week", true);
+    let recent_fortnight_kept = classify_news_freshness_status(today, Some("2026-05-09"), false) == ("recent_fortnight", true);
     let explicit_month_allows_april = classify_news_freshness_status(today, Some("2026-04-16"), true).1;
     let undated_not_primary = !classify_news_freshness_status(today, None, false).1;
     let mut failures = Vec::new();
@@ -11402,6 +11700,9 @@ fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
     }
     if !recent_week_kept {
         failures.push("May 17 source was not retained as recent_week within fallback window".to_string());
+    }
+    if !recent_fortnight_kept {
+        failures.push("May 09 source was not retained as recent_fortnight within fallback window".to_string());
     }
     if !explicit_month_allows_april {
         failures.push("explicit April query did not allow April source".to_string());
@@ -11432,7 +11733,7 @@ fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
         rejected_wrong_entity_count: 0,
         query_diversification: vec!["AI news".to_string()],
         dropped_query_diversification: Vec::new(),
-        selected_news_sources: vec!["may21".to_string(), "may20".to_string(), "may17".to_string()],
+        selected_news_sources: vec!["may21".to_string(), "may20".to_string(), "may17".to_string(), "may09".to_string()],
         bing_fallback_planned: true,
         local_search_triggered: false,
         local_result_count: 0,
@@ -11449,8 +11750,8 @@ fn build_news_freshness_self_check_case() -> NotexSearchSelfCheckCaseResult {
         raw_diagnostics: json!({
             "currentDate": today,
             "strictWindowHours": 72,
-            "fallbackWindowDays": 7,
-            "maxNewsAgeDays": 7,
+            "fallbackWindowDays": 14,
+            "maxNewsAgeDays": 14,
             "defaultRecent": classified,
             "aprilExplicitRangeAllowed": explicit_month_allows_april,
             "undatedPrimaryAllowed": !undated_not_primary,
@@ -11524,6 +11825,22 @@ fn self_check_search_mode_decision(
 
 pub(crate) fn run_notex_search_self_check_core() -> Result<NotexSearchSelfCheckResult, String> {
     let cases = vec![
+        build_self_check_case(
+            "recent world news",
+            "news_world",
+            self_check_request(
+                Some("recent world news"),
+                "world news today international news today major world events",
+                "general_web",
+                Some("world_news"),
+                Some("news"),
+                &["world news", "international news", "major world events"],
+                &[],
+                None,
+            ),
+            None,
+            false,
+        ),
         build_self_check_case(
             "recent AI news",
             "news_ai",
