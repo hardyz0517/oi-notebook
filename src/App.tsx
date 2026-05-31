@@ -9916,6 +9916,18 @@ export default function App() {
                               onChange={(e) => updateFrontmatter({ source: e.target.value })}
                             />
                           </div>
+                          <div className="app-frontmatter-field grid gap-1">
+                            <Label htmlFor="frontmatter-collection">{"\u6587\u96c6"}</Label>
+                            <Input
+                              id="frontmatter-collection"
+                              value={frontmatter.fields.collection}
+                              disabled={!frontmatter.canMerge}
+                              className="h-9 px-2.5 text-xs"
+                              autoComplete="off"
+                              placeholder={"\u4f8b\u5982\uff1a\u9898\u89e3\u3001\u6280\u5de7\u3001\u590d\u76d8\u3001\u6742\u8c08"}
+                              onChange={(e) => updateFrontmatter({ collection: e.target.value })}
+                            />
+                          </div>
                         </div>
                         <div className="app-frontmatter-field app-frontmatter-summary grid gap-1">
                           <Label htmlFor="frontmatter-summary">摘要</Label>

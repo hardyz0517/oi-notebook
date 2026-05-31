@@ -1,6 +1,7 @@
 export interface FrontmatterFields {
   title: string;
   tags: string[];
+  collection: string;
   summary: string;
   draft: boolean;
   difficulty: string;
@@ -33,6 +34,7 @@ type TagParseResult =
 const EMPTY_FIELDS: FrontmatterFields = {
   title: "",
   tags: [],
+  collection: "",
   summary: "",
   draft: false,
   difficulty: "",
@@ -44,6 +46,7 @@ const KNOWN_FIELD_ORDER: Array<keyof FrontmatterFields> = [
   "tags",
   "difficulty",
   "source",
+  "collection",
   "summary",
   "draft",
 ];
@@ -126,6 +129,7 @@ export function parseFrontmatterFields(markdown: string): ParsedFrontmatter {
 
     if (parsed.key === "title") fields.title = parseScalar(parsed.value);
     else if (parsed.key === "summary") fields.summary = parseScalar(parsed.value);
+    else if (parsed.key === "collection") fields.collection = parseScalar(parsed.value);
     else if (parsed.key === "difficulty") fields.difficulty = parseScalar(parsed.value);
     else if (parsed.key === "source") fields.source = parseScalar(parsed.value);
     else if (parsed.key === "draft") fields.draft = parseBoolean(parsed.value);
