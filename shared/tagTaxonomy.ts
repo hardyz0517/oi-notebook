@@ -174,6 +174,7 @@ export type UserTagTaxonomyConfig = {
   hiddenIds?: string[];
   orderOverrides?: Record<string, number>;
   merges?: Record<string, string>;
+  customCollections?: string[];
 };
 
 export type TagTaxonomySelfCheckResult = {

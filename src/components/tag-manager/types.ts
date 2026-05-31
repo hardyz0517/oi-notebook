@@ -10,8 +10,9 @@ export type WorkspaceRect = {
 
 export type ResizeHandle = "left" | "right" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type SortScope = "root" | "group" | "tag";
-export type SaveOperation = "sort" | "visibility" | "alias" | "merge";
+export type SaveOperation = "sort" | "visibility" | "alias" | "merge" | "collection";
 export type TagManagerFilterMode = "all" | "user" | "hidden" | "builtin" | "deprecated";
+export type TagManagerWorkspaceView = "tags" | "collections";
 
 export type RootGroup = TagSuggestionRootGroup;
 export type GroupNode = RootGroup["groups"][number];
@@ -54,5 +55,8 @@ export type TagManagerCloseReason =
 export type TagManagerWorkspaceProps = {
   initialConfig: UserTagTaxonomyConfig;
   initialFilterMode?: TagManagerFilterMode;
+  builtinCollections?: string[];
+  noteCollections?: string[];
+  developerModeEnabled: boolean;
   onRequestClose: (reason: TagManagerCloseReason, finalConfig: UserTagTaxonomyConfig) => void;
 };

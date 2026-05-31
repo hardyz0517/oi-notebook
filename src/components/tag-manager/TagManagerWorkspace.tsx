@@ -1,24 +1,35 @@
 import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { saveTagTaxonomyConfig } from "@/lib/api";
 import { getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { TagManagerCollectionsPanel } from "./TagManagerCollectionsPanel";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { createCustomTagEntry, deleteCustomTagEntry, deleteMergeRule, filterTagRootGroups, filterTagSuggestions, getAliasCompareKey, getBuiltinAliasesForSuggestion, getCustomTagCreateDraft, getCustomTagEditDraft, getMergePreviewInfo, getMergeTargetCandidates, getSaveEventBase, getUserAliasesForSuggestion, isLeafTagSuggestion, normalizeConfig, setMergeRule, updateCustomTagEntry, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
-import { DEBUG_LOG_KEY, debugEvent, isDebugEnabled } from "./tagManagerDebug";
+import { buildCollectionCandidateRows, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, filterTagRootGroups, filterTagSuggestions, getAliasCompareKey, getBuiltinAliasesForSuggestion, getCustomTagCreateDraft, getCustomTagEditDraft, getMergePreviewInfo, getMergeTargetCandidates, getSaveEventBase, getUserAliasesForSuggestion, isLeafTagSuggestion, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows, sortGroupsByOrderOverrides } from "./tagManagerOrdering";
-import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, StatusMessage, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps } from "./types";
+import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
 export type { TagManagerCloseReason };
 
-const STATUS_DURATION_MS = 1800;
+type ConfirmDialogState = {
+  title: string;
+  description?: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+  resolve: (confirmed: boolean) => void;
+};
 
-export default function TagManagerWorkspace({ initialConfig, initialFilterMode = "all", onRequestClose }: TagManagerWorkspaceProps) {
+export default function TagManagerWorkspace({ initialConfig, initialFilterMode = "all", builtinCollections = [], noteCollections = [], developerModeEnabled, onRequestClose }: TagManagerWorkspaceProps) {
   const [workingConfig, setWorkingConfig] = useState(() => normalizeConfig(initialConfig));
+  const [activeView, setActiveView] = useState<TagManagerWorkspaceView>("tags");
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [filterMode, setFilterMode] = useState<TagManagerFilterMode>(initialFilterMode);
@@ -37,14 +48,32 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   const [mergeSearchQuery, setMergeSearchQuery] = useState("");
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
   const [mergeError, setMergeError] = useState<string | null>(null);
-  const [status, setStatus] = useState<StatusMessage>(null);
+  const [collectionCreateInput, setCollectionCreateInput] = useState("");
+  const [collectionCreateError, setCollectionCreateError] = useState<string | null>(null);
+  const [editingCollectionName, setEditingCollectionName] = useState<string | null>(null);
+  const [collectionEditInput, setCollectionEditInput] = useState("");
+  const [collectionEditError, setCollectionEditError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [debugActionMessage, setDebugActionMessage] = useState<string | null>(null);
-  const [isDebugPanelVisible] = useState(isDebugEnabled);
-  const statusTimeoutRef = useRef<number | null>(null);
-  const debugActionTimeoutRef = useRef<number | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const groupRenderDebugKeyRef = useRef<string | null>(null);
   const groupAfterWorkingConfigDebugKeyRef = useRef<string | null>(null);
+  const requestConfirm = useCallback((options: Omit<ConfirmDialogState, "resolve">) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmDialog({ ...options, resolve });
+    });
+  }, []);
+  const handleConfirmDialogCancel = useCallback(() => {
+    setConfirmDialog((current) => {
+      current?.resolve(false);
+      return null;
+    });
+  }, []);
+  const handleConfirmDialogConfirm = useCallback(() => {
+    setConfirmDialog((current) => {
+      current?.resolve(true);
+      return null;
+    });
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const includeHidden = showHidden || filterMode === "hidden";
@@ -75,6 +104,18 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       ?? baseSuggestions.find((candidate) => candidate.id === selectedMergeTargetId)
       ?? null,
     [baseSuggestions, mergeTargetCandidates, selectedMergeTargetId],
+  );
+  const collectionRows = useMemo(
+    () => buildCollectionCandidateRows(builtinCollections, workingConfig.customCollections ?? [], noteCollections),
+    [builtinCollections, noteCollections, workingConfig.customCollections],
+  );
+  const collectionExistingCandidates = useMemo(
+    () => [
+      ...builtinCollections,
+      ...noteCollections,
+      ...(workingConfig.customCollections ?? []),
+    ],
+    [builtinCollections, noteCollections, workingConfig.customCollections],
   );
   const canManageAliases = Boolean(selectedSuggestion && selectedSuggestion.path.length >= 3);
   const isSortDisabled = Boolean(searchQuery.trim()) || filterMode !== "all";
@@ -175,43 +216,20 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     debugEvent("manager.groupOrder.afterWorkingConfig", payload);
   }, [activeRootGroup, activeRootSortableItems, activeRootSortedGroups, workingConfig.orderOverrides]);
 
-  useEffect(() => () => {
-    if (statusTimeoutRef.current !== null) window.clearTimeout(statusTimeoutRef.current);
-    if (debugActionTimeoutRef.current !== null) window.clearTimeout(debugActionTimeoutRef.current);
-  }, []);
-
-  const showStatus = useCallback((nextStatus: Exclude<StatusMessage, null>) => {
-    if (statusTimeoutRef.current !== null) window.clearTimeout(statusTimeoutRef.current);
-    setStatus(nextStatus);
-    statusTimeoutRef.current = window.setTimeout(() => {
-      setStatus(null);
-      statusTimeoutRef.current = null;
-    }, STATUS_DURATION_MS);
-  }, []);
-
-  const showDebugActionMessage = useCallback((message: string) => {
-    if (debugActionTimeoutRef.current !== null) window.clearTimeout(debugActionTimeoutRef.current);
-    setDebugActionMessage(message);
-    debugActionTimeoutRef.current = window.setTimeout(() => {
-      setDebugActionMessage(null);
-      debugActionTimeoutRef.current = null;
-    }, 1600);
-  }, []);
-
   const copyDebugLog = useCallback(async () => {
     const log = window.localStorage.getItem(DEBUG_LOG_KEY) ?? "";
     try {
       await navigator.clipboard.writeText(log);
-      showDebugActionMessage("已复制调试日志");
+      toast.success("已复制调试日志");
     } catch {
-      showDebugActionMessage("复制失败，请从 localStorage 读取调试日志");
+      toast.error("复制失败，请从 localStorage 读取调试日志");
     }
-  }, [showDebugActionMessage]);
+  }, []);
 
   const clearDebugLog = useCallback(() => {
     window.localStorage.removeItem(DEBUG_LOG_KEY);
-    showDebugActionMessage("已清空调试日志");
-  }, [showDebugActionMessage]);
+    toast.success("已清空调试日志");
+  }, []);
 
   const saveWorkingConfig = useCallback(async (
     nextConfig: UserTagTaxonomyConfig,
@@ -230,22 +248,24 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     });
     try {
       await saveTagTaxonomyConfig(normalizedConfig);
+      writeStoredCustomCollections(normalizedConfig.customCollections ?? []);
       debugEvent(`${eventBase}.success`, {
         hiddenIds: normalizedConfig.hiddenIds?.length ?? 0,
         aliases: Object.keys(normalizedConfig.aliases ?? {}).length,
         orderOverrides: Object.keys(normalizedConfig.orderOverrides ?? {}).length,
+        customCollections: normalizedConfig.customCollections?.length ?? 0,
       });
-      showStatus({ kind: "success", message: "修改已保存" });
+      toast.success("修改已保存");
       return true;
     } catch (error) {
       debugEvent(`${eventBase}.error`, error);
       setWorkingConfig(previousConfig);
-      showStatus({ kind: "error", message: failureMessage });
+      toast.error(failureMessage);
       return false;
     } finally {
       setIsSaving(false);
     }
-  }, [showStatus]);
+  }, []);
 
   const saveOrder = useCallback((nextIds: string[], debugContext?: GroupOrderSaveDebugContext) => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -594,7 +614,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
   const deleteCustomTag = useCallback(async () => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;
-    const confirmed = window.confirm(`确认删除自定义标签“${selectedSuggestion.pathText}”？\n\n不会自动修改 notes。`);
+    const confirmed = await requestConfirm({
+      title: `删除自定义标签“${selectedSuggestion.pathText}”？`,
+      description: "不会自动修改 notes。",
+      confirmText: "删除",
+      danger: true,
+    });
     if (!confirmed) return;
 
     const currentConfig = normalizeConfig(workingConfig);
@@ -612,7 +637,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     } else {
       setCustomTagEditError("保存失败，已恢复原自定义标签");
     }
-  }, [saveWorkingConfig, selectedSuggestion, workingConfig]);
+  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
 
   const startMergeEdit = useCallback(() => {
     if (!canEditMergeRule) {
@@ -646,7 +671,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = window.confirm(`确认把“${selectedSuggestion?.pathText ?? ""}”合并到“${selectedMergeTarget?.pathText ?? ""}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`);
+    const confirmed = await requestConfirm({
+      title: "确认合并标签？",
+      description: `确认把“${selectedSuggestion?.pathText ?? ""}”合并到“${selectedMergeTarget?.pathText ?? ""}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`,
+      confirmText: "合并",
+      danger: true,
+    });
     if (!confirmed) {
       return;
     }
@@ -660,7 +690,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     } else {
       setMergeError("保存失败，已恢复原合并规则");
     }
-  }, [saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
+  }, [requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
 
   const removeMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -670,7 +700,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = window.confirm(`确认取消“${selectedSuggestion?.pathText ?? ""}”的合并规则？\n\n不会自动修改 notes。`);
+    const confirmed = await requestConfirm({
+      title: "取消合并规则？",
+      description: `确认取消“${selectedSuggestion?.pathText ?? ""}”的合并规则？\n\n不会自动修改 notes。`,
+      confirmText: "取消合并",
+      danger: true,
+    });
     if (!confirmed) {
       return;
     }
@@ -684,7 +719,91 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     } else {
       setMergeError("保存失败，已恢复原合并规则");
     }
-  }, [saveWorkingConfig, selectedSuggestion, workingConfig]);
+  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
+
+  const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
+    setActiveView(nextView);
+    setCollectionCreateError(null);
+    setCollectionEditError(null);
+  }, []);
+
+  const createCollection = useCallback(async () => {
+    const currentConfig = normalizeConfig(workingConfig);
+    const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
+    if (!result.ok) {
+      setCollectionCreateError(result.error);
+      return;
+    }
+
+    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
+    if (saved) {
+      setCollectionCreateInput("");
+      setCollectionCreateError(null);
+    } else {
+      setCollectionCreateError("保存失败，已恢复原文集候选");
+    }
+  }, [collectionCreateInput, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
+
+  const startCollectionEdit = useCallback((name: string) => {
+    setEditingCollectionName(name);
+    setCollectionEditInput(name);
+    setCollectionEditError(null);
+    setCollectionCreateError(null);
+  }, []);
+
+  const cancelCollectionEdit = useCallback(() => {
+    setEditingCollectionName(null);
+    setCollectionEditInput("");
+    setCollectionEditError(null);
+  }, []);
+
+  const saveCollectionEdit = useCallback(async () => {
+    if (!editingCollectionName) return;
+
+    const nextName = collectionEditInput.trim().replace(/\s+/g, " ");
+    if (nextName === editingCollectionName) {
+      cancelCollectionEdit();
+      return;
+    }
+
+    const currentConfig = normalizeConfig(workingConfig);
+    const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, nextName, collectionExistingCandidates);
+    if (!result.ok) {
+      setCollectionEditError(result.error);
+      return;
+    }
+
+    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
+    if (saved) {
+      cancelCollectionEdit();
+    } else {
+      setCollectionEditError("保存失败，已恢复原文集候选");
+    }
+  }, [cancelCollectionEdit, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
+
+  const deleteCollection = useCallback(async (name: string) => {
+    const confirmed = await requestConfirm({
+      title: `删除自定义文集“${name}”？`,
+      description: "只会删除候选，不会修改已有文章。",
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    const currentConfig = normalizeConfig(workingConfig);
+    const result = deleteCustomCollectionCandidate(currentConfig, name);
+    if (!result.ok) {
+      setCollectionEditError(result.error);
+      return;
+    }
+
+    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
+    if (saved && editingCollectionName === name) {
+      cancelCollectionEdit();
+    } else if (!saved) {
+      setCollectionEditError("保存失败，已恢复原文集候选");
+    }
+  }, [cancelCollectionEdit, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {
@@ -695,14 +814,15 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [onRequestClose, workingConfig]);
 
   return (
+    <>
     <TagManagerShell
+      activeView={activeView}
       searchQuery={searchQuery}
       showHidden={showHidden}
       filterMode={filterMode}
-      status={status}
-      isDebugPanelVisible={isDebugPanelVisible}
-      debugActionMessage={debugActionMessage}
+      isDebugPanelVisible={developerModeEnabled}
       onSearchQueryChange={setSearchQuery}
+      onActiveViewChange={handleActiveViewChange}
       onShowHiddenChange={setShowHidden}
       onFilterModeChange={setFilterMode}
       onCopyDebugLog={() => void copyDebugLog()}
@@ -711,77 +831,115 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       onClearSelection={clearSelectedNode}
       onClose={handleClose}
     >
-      <TagManagerRootColumn
-        rootGroups={rootGroups}
-        activeRootName={activeRootGroup?.root ?? null}
-        isSaving={isSaving}
-        isSortDisabled={isSortDisabled}
-        sensors={sensors}
-        onSelectRoot={selectRoot}
-        onSortStart={handleSortStart}
-        onSortEnd={handleSortEnd}
-      />
-      <TagManagerGroupColumn
-        searchQuery={searchQuery}
-        searchResults={searchResults}
-        activeRootGroup={activeRootGroup}
-        activeRootSortedGroups={activeRootSortedGroups}
-        activeRootSortableItems={activeRootSortableItems}
-        expandedGroups={expandedGroups}
-        selectedGroupOrderKey={selectedGroupOrderKey}
-        selectedSuggestionId={selectedSuggestionId}
-        activeDraggingGroupId={activeDraggingGroupId}
-        isSaving={isSaving}
-        isSortDisabled={isSortDisabled}
-        sensors={sensors}
-        onToggleGroup={toggleGroup}
-        onSelectGroup={selectGroup}
-        onSelectSuggestion={selectSuggestion}
-        onSortStart={handleSortStart}
-        onSortCancel={handleSortCancel}
-        onSortEnd={handleSortEnd}
-      />
-      <TagManagerDetailsPanel
-        selectedSuggestion={selectedSuggestion}
-        selectedUserAliases={selectedUserAliases}
-        selectedBuiltinAliases={selectedBuiltinAliases}
-        mergePreview={mergePreview}
-        canEditMergeRule={canEditMergeRule}
-        isMergeEditorOpen={isMergeEditorOpen}
-        mergeSearchQuery={mergeSearchQuery}
-        mergeTargetCandidates={mergeTargetCandidates}
-        selectedMergeTarget={selectedMergeTarget}
-        mergeError={mergeError}
-        canManageAliases={canManageAliases}
-        aliasInput={aliasInput}
-        aliasError={aliasError}
-        customTagCreateDraft={customTagCreateDraft}
-        customTagCreateError={customTagCreateError}
-        customTagEditDraft={customTagEditDraft}
-        customTagEditError={customTagEditError}
-        isSaving={isSaving}
-        onAliasInputChange={handleAliasInputChange}
-        onAddAlias={() => void addAlias()}
-        onDeleteUserAlias={(alias) => void deleteUserAlias(alias)}
-        onCancelCustomTagCreate={cancelCustomTagCreate}
-        onCustomTagCreateDraftChange={updateCustomTagCreateDraft}
-        onSaveCustomTagCreate={() => void saveCustomTagCreate()}
-        onStartCustomTagEdit={startCustomTagEdit}
-        onDeleteCustomTag={() => void deleteCustomTag()}
-        onCancelCustomTagEdit={cancelCustomTagEdit}
-        onCustomTagEditDraftChange={updateCustomTagEditDraft}
-        onSaveCustomTagEdit={() => void saveCustomTagEdit()}
-        onStartMergeEdit={startMergeEdit}
-        onCancelMergeEdit={cancelMergeEdit}
-        onMergeSearchQueryChange={handleMergeSearchQueryChange}
-        onSelectMergeTarget={(suggestion) => {
-          setSelectedMergeTargetId(suggestion.id);
-          setMergeError(null);
-        }}
-        onSaveMergeRule={() => void saveMergeRule()}
-        onDeleteMergeRule={() => void removeMergeRule()}
-        onSetSuggestionHidden={setSuggestionHidden}
-      />
+      {activeView === "tags" ? (
+        <>
+          <TagManagerRootColumn
+            rootGroups={rootGroups}
+            activeRootName={activeRootGroup?.root ?? null}
+            isSaving={isSaving}
+            isSortDisabled={isSortDisabled}
+            sensors={sensors}
+            onSelectRoot={selectRoot}
+            onSortStart={handleSortStart}
+            onSortEnd={handleSortEnd}
+          />
+          <TagManagerGroupColumn
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            activeRootGroup={activeRootGroup}
+            activeRootSortedGroups={activeRootSortedGroups}
+            activeRootSortableItems={activeRootSortableItems}
+            expandedGroups={expandedGroups}
+            selectedGroupOrderKey={selectedGroupOrderKey}
+            selectedSuggestionId={selectedSuggestionId}
+            activeDraggingGroupId={activeDraggingGroupId}
+            isSaving={isSaving}
+            isSortDisabled={isSortDisabled}
+            sensors={sensors}
+            onToggleGroup={toggleGroup}
+            onSelectGroup={selectGroup}
+            onSelectSuggestion={selectSuggestion}
+            onSortStart={handleSortStart}
+            onSortCancel={handleSortCancel}
+            onSortEnd={handleSortEnd}
+          />
+          <TagManagerDetailsPanel
+            selectedSuggestion={selectedSuggestion}
+            selectedUserAliases={selectedUserAliases}
+            selectedBuiltinAliases={selectedBuiltinAliases}
+            mergePreview={mergePreview}
+            canEditMergeRule={canEditMergeRule}
+            isMergeEditorOpen={isMergeEditorOpen}
+            mergeSearchQuery={mergeSearchQuery}
+            mergeTargetCandidates={mergeTargetCandidates}
+            selectedMergeTarget={selectedMergeTarget}
+            mergeError={mergeError}
+            canManageAliases={canManageAliases}
+            aliasInput={aliasInput}
+            aliasError={aliasError}
+            customTagCreateDraft={customTagCreateDraft}
+            customTagCreateError={customTagCreateError}
+            customTagEditDraft={customTagEditDraft}
+            customTagEditError={customTagEditError}
+            isSaving={isSaving}
+            onAliasInputChange={handleAliasInputChange}
+            onAddAlias={() => void addAlias()}
+            onDeleteUserAlias={(alias) => void deleteUserAlias(alias)}
+            onCancelCustomTagCreate={cancelCustomTagCreate}
+            onCustomTagCreateDraftChange={updateCustomTagCreateDraft}
+            onSaveCustomTagCreate={() => void saveCustomTagCreate()}
+            onStartCustomTagEdit={startCustomTagEdit}
+            onDeleteCustomTag={() => void deleteCustomTag()}
+            onCancelCustomTagEdit={cancelCustomTagEdit}
+            onCustomTagEditDraftChange={updateCustomTagEditDraft}
+            onSaveCustomTagEdit={() => void saveCustomTagEdit()}
+            onStartMergeEdit={startMergeEdit}
+            onCancelMergeEdit={cancelMergeEdit}
+            onMergeSearchQueryChange={handleMergeSearchQueryChange}
+            onSelectMergeTarget={(suggestion) => {
+              setSelectedMergeTargetId(suggestion.id);
+              setMergeError(null);
+            }}
+            onSaveMergeRule={() => void saveMergeRule()}
+            onDeleteMergeRule={() => void removeMergeRule()}
+            onSetSuggestionHidden={setSuggestionHidden}
+          />
+        </>
+      ) : (
+        <TagManagerCollectionsPanel
+          rows={collectionRows}
+          createInput={collectionCreateInput}
+          createError={collectionCreateError}
+          editingName={editingCollectionName}
+          editInput={collectionEditInput}
+          editError={collectionEditError}
+          isSaving={isSaving}
+          onCreateInputChange={(value) => {
+            setCollectionCreateInput(value);
+            setCollectionCreateError(null);
+          }}
+          onCreate={() => void createCollection()}
+          onStartEdit={startCollectionEdit}
+          onEditInputChange={(value) => {
+            setCollectionEditInput(value);
+            setCollectionEditError(null);
+          }}
+          onCancelEdit={cancelCollectionEdit}
+          onSaveEdit={() => void saveCollectionEdit()}
+          onDelete={(name) => void deleteCollection(name)}
+        />
+      )}
     </TagManagerShell>
+    <ConfirmDialog
+      open={Boolean(confirmDialog)}
+      title={confirmDialog?.title ?? ""}
+      description={confirmDialog?.description}
+      confirmText={confirmDialog?.confirmText}
+      cancelText={confirmDialog?.cancelText}
+      danger={confirmDialog?.danger}
+      onConfirm={handleConfirmDialogConfirm}
+      onCancel={handleConfirmDialogCancel}
+    />
+    </>
   );
 }

@@ -34,6 +34,7 @@ export interface SettingsCenterShellProps {
   promptHeaderActions?: ReactNode;
   renderPromptEditor: () => ReactNode;
   renderAiConfigManager?: () => ReactNode;
+  renderLuoguAccountManager?: () => ReactNode;
   renderActivePage: (activePageKey: SettingsSection, activeTarget: SettingsTarget) => ReactNode;
   onOpenChange: (open: boolean) => void;
   onToggleMaximize: () => void;
@@ -62,6 +63,7 @@ export default function SettingsCenterShell({
   promptHeaderActions,
   renderPromptEditor,
   renderAiConfigManager,
+  renderLuoguAccountManager,
   renderActivePage,
   onOpenChange,
   onToggleMaximize,
@@ -72,6 +74,10 @@ export default function SettingsCenterShell({
   onOpenSettingsSection,
 }: SettingsCenterShellProps) {
   if (!open) return null;
+  const isWorkspaceView =
+    settingsView === "prompt-editor" ||
+    settingsView === "ai-config-manager" ||
+    settingsView === "luogu-account-manager";
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -95,8 +101,8 @@ export default function SettingsCenterShell({
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             onClick={onCloseRequest}
-            title={settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "返回设置" : "关闭设置中心"}
-            aria-label={settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "返回设置" : "关闭设置中心"}
+            title={isWorkspaceView ? "返回设置" : "关闭设置中心"}
+            aria-label={isWorkspaceView ? "返回设置" : "关闭设置中心"}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -105,7 +111,7 @@ export default function SettingsCenterShell({
           className={cn(
             "settings-center-drag-handle shrink-0 border-b border-border/80 bg-muted/10 px-5 pr-24 text-left",
             isMaximized ? "cursor-default" : "cursor-grab active:cursor-grabbing",
-            settingsView === "prompt-editor" || settingsView === "ai-config-manager" ? "py-2" : "py-3",
+            isWorkspaceView ? "py-2" : "py-3",
           )}
           onPointerDown={onBeginDrag}
         >
@@ -115,6 +121,8 @@ export default function SettingsCenterShell({
                 promptHeaderContent
               ) : settingsView === "ai-config-manager" ? (
                 <DialogTitle className="text-base">AI 配置组</DialogTitle>
+              ) : settingsView === "luogu-account-manager" ? (
+                <DialogTitle className="text-base">洛谷账号配置</DialogTitle>
               ) : (
                 <>
                   <DialogTitle className="text-base">设置中心</DialogTitle>
@@ -191,18 +199,25 @@ export default function SettingsCenterShell({
               </ScrollArea>
             </aside>
           )}
-          <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background/70">
+          <main
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-hidden",
+              settingsView === "luogu-account-manager" ? "bg-white dark:bg-background" : "bg-background/70",
+            )}
+          >
             {settingsView === "prompt-editor" ? (
               <div className="flex h-full min-h-0 flex-col overflow-hidden">{renderPromptEditor()}</div>
             ) : settingsView === "ai-config-manager" && renderAiConfigManager ? (
               <div className="flex h-full min-h-0 flex-col overflow-hidden">{renderAiConfigManager()}</div>
+            ) : settingsView === "luogu-account-manager" && renderLuoguAccountManager ? (
+              <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-background">{renderLuoguAccountManager()}</div>
             ) : (
               <div ref={contentRef} className="h-full min-h-0 overflow-auto" data-settings-scroll-container="true">
                 <div className="sticky top-0 z-10 border-b border-border/80 bg-background/95 px-6 py-2 backdrop-blur">
                   <div className="text-sm font-semibold text-foreground">{activeSettingsLabel.group}</div>
                   {activeSettingsLabel.section && <div className="text-xs text-muted-foreground">{activeSettingsLabel.section}</div>}
                 </div>
-                <div className="grid min-w-0 gap-0 px-0 py-2">{renderActivePage(activeSettingsPageKey, activeSettingsTarget)}</div>
+                <div className="grid min-w-0 gap-0 px-0 pb-2">{renderActivePage(activeSettingsPageKey, activeSettingsTarget)}</div>
               </div>
             )}
           </main>

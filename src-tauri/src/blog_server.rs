@@ -1,4 +1,9 @@
-use crate::paths;
+use crate::{
+    luogu::{
+        default_blog_subtitle, default_blog_title, read_config, write_config, BlogConfigFields,
+    },
+    paths,
+};
 
 use serde::Serialize;
 use std::{
@@ -14,6 +19,7 @@ use std::{
 const BLOG_ADDR: &str = "127.0.0.1:4321";
 const EXCERPT_LIMIT: usize = 180;
 const API_NOTE_ROUTE: &str = "/api/note";
+const API_BLOG_CONFIG_ROUTE: &str = "/api/blog-config";
 const API_NOTES_ROUTE: &str = "/api/notes";
 const ASSET_ROUTE_PREFIX: &str = "/assets/";
 const LOCAL_BLOG_ROUTE: &str = "/local-blog";
@@ -28,6 +34,7 @@ const KATEX_AUTO_RENDER_JS_URL: &str =
 
 #[derive(Debug, PartialEq, Eq)]
 enum BlogRoute {
+    BlogConfigApi,
     NotesApi,
     NoteApi,
     NotesAsset,
@@ -61,6 +68,12 @@ struct BlogNote {
     date: String,
     sort_key: String,
     draft: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BlogConfigApiResponse {
+    title: String,
+    subtitle: String,
 }
 
 impl BlogNote {
@@ -195,6 +208,13 @@ fn handle_connection(mut stream: TcpStream) {
     let path = target_path(target);
 
     match blog_route_for_path(path) {
+        BlogRoute::BlogConfigApi => match render_blog_config_api_json() {
+            Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
+            Err(message) => {
+                let body = render_json_error(&message);
+                write_json_response(&mut stream, 500, "Internal Server Error", &body);
+            }
+        },
         BlogRoute::NotesApi => match render_notes_api_json() {
             Ok(body) => write_json_response(&mut stream, 200, "OK", &body),
             Err(message) => {
@@ -290,6 +310,10 @@ fn target_path(target: &str) -> &str {
 }
 
 fn blog_route_for_path(path: &str) -> BlogRoute {
+    if path == API_BLOG_CONFIG_ROUTE {
+        return BlogRoute::BlogConfigApi;
+    }
+
     if path == API_NOTES_ROUTE {
         return BlogRoute::NotesApi;
     }
@@ -327,6 +351,47 @@ fn blog_route_for_path(path: &str) -> BlogRoute {
     }
 
     BlogRoute::NotFound
+}
+
+fn effective_blog_config(config: BlogConfigFields) -> BlogConfigApiResponse {
+    let title = config.title.trim();
+    let subtitle = config.subtitle.trim();
+
+    BlogConfigApiResponse {
+        title: if title.is_empty() {
+            default_blog_title()
+        } else {
+            title.to_string()
+        },
+        subtitle: if subtitle.is_empty() {
+            default_blog_subtitle()
+        } else {
+            subtitle.to_string()
+        },
+    }
+}
+
+fn read_effective_blog_config() -> BlogConfigApiResponse {
+    read_config()
+        .map(|config| effective_blog_config(config.blog))
+        .unwrap_or_else(|_| effective_blog_config(BlogConfigFields::default()))
+}
+
+fn render_blog_config_api_json() -> Result<String, String> {
+    serde_json::to_string(&read_effective_blog_config())
+        .map_err(|e| format!("Failed to serialize blog config API response: {e}"))
+}
+
+#[tauri::command]
+pub fn get_blog_config() -> Result<BlogConfigFields, String> {
+    Ok(read_config()?.blog)
+}
+
+#[tauri::command]
+pub fn save_blog_config(config: BlogConfigFields) -> Result<(), String> {
+    let mut app_config = read_config()?;
+    app_config.blog = config;
+    write_config(&app_config)
 }
 
 fn render_index_page() -> String {
@@ -1454,6 +1519,9 @@ fn is_safe_asset_relative_path(path: &str) -> bool {
 
 fn render_notes_page(notes: &[BlogNote], error: Option<&str>) -> String {
     let mut content = String::new();
+    let blog_config = read_effective_blog_config();
+    let title = escape_html(&blog_config.title);
+    let subtitle = escape_html(&blog_config.subtitle);
 
     if let Some(error) = error {
         content.push_str(&format!(
@@ -1480,7 +1548,7 @@ fn render_notes_page(notes: &[BlogNote], error: Option<&str>) -> String {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OI Notebook Blog</title>
+    <title>{title}</title>
     <style>
       :root {{
         color-scheme: light;
@@ -1621,13 +1689,16 @@ fn render_notes_page(notes: &[BlogNote], error: Option<&str>) -> String {
   <body>
     <main>
       <header>
-        <h1>OI Notebook Blog</h1>
-        <p class="subtitle">Local preview from your Markdown notes. Refresh after saving to update this list.</p>
+        <h1>{title}</h1>
+        <p class="subtitle">{subtitle}</p>
       </header>
       {content}
     </main>
   </body>
-</html>"#
+</html>"#,
+        title = title,
+        subtitle = subtitle,
+        content = content
     )
 }
 
@@ -1663,6 +1734,8 @@ fn render_note_card(note: &BlogNote) -> String {
 }
 
 fn render_detail_page(detail: &BlogNoteDetail) -> String {
+    let blog_config = read_effective_blog_config();
+    let site_title = escape_html(&blog_config.title);
     let tags = if detail.note.tags.is_empty() {
         String::from(r#"<span class="tag">No tags</span>"#)
     } else {
@@ -1688,7 +1761,7 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{title} - OI Notebook Blog</title>
+    <title>{title} - {site_title}</title>
     <link rel="stylesheet" href="{katex_css}">
     <style>
       :root {{
@@ -1895,6 +1968,7 @@ fn render_detail_page(detail: &BlogNoteDetail) -> String {
 </html>"#,
         date = escape_html(&detail.note.date),
         title = escape_html(&detail.note.title),
+        site_title = site_title,
         path = escape_html(&detail.note.relative_path),
         tags = tags,
         summary = summary,
@@ -1911,13 +1985,15 @@ fn render_error_page(message: &str) -> String {
 }
 
 fn render_404_page(message: &str) -> String {
+    let blog_config = read_effective_blog_config();
+    let site_title = escape_html(&blog_config.title);
     format!(
         r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Not Found - OI Notebook Blog</title>
+    <title>Not Found - {site_title}</title>
     <style>
       body {{
         margin: 0;
@@ -1954,6 +2030,7 @@ fn render_404_page(message: &str) -> String {
     </main>
   </body>
 </html>"#,
+        site_title = site_title,
         message = escape_html(message)
     )
 }
@@ -2257,7 +2334,10 @@ Inline body excerpt.
         assert_eq!(notes[0]["excerpt"], "Use <unsafe> & quotes");
         assert_eq!(notes[0]["tags"], serde_json::json!(["数学", "图论"]));
         assert_eq!(notes[0]["category"], "tricks");
-        assert_eq!(notes[0]["collections"], serde_json::json!(["review", "diary"]));
+        assert_eq!(
+            notes[0]["collections"],
+            serde_json::json!(["review", "diary"])
+        );
         assert_eq!(notes[0]["created"], "2026-05-01T00:00:00+08:00");
         assert_eq!(notes[0]["updated"], "2026-05-06T00:00:00+08:00");
         assert_eq!(notes[0]["date"], "2026-05-06T00:00:00+08:00");
@@ -2272,6 +2352,10 @@ Inline body excerpt.
 
     #[test]
     fn api_route_does_not_shadow_existing_routes() {
+        assert_eq!(
+            request_route("GET /api/blog-config HTTP/1.1"),
+            Some(BlogRoute::BlogConfigApi)
+        );
         assert_eq!(
             request_route("GET /api/notes HTTP/1.1"),
             Some(BlogRoute::NotesApi)

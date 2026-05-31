@@ -2,6 +2,7 @@ import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, 
 import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode } from "./types";
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
+const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
 
 export type TagTaxonomyConfigImportPreview = {
   entriesCount: number;
@@ -9,6 +10,7 @@ export type TagTaxonomyConfigImportPreview = {
   hiddenIdsCount: number;
   orderOverridesCount: number;
   mergesCount: number;
+  customCollectionsCount: number;
 };
 
 export type TagTaxonomyConfigImportResult = {
@@ -71,6 +73,26 @@ export type MergeRuleUpdateResult =
     error: string;
   };
 
+export type CollectionCandidateSource = "builtin" | "custom" | "article";
+
+export type CollectionCandidateRow = {
+  name: string;
+  sources: CollectionCandidateSource[];
+  isBuiltin: boolean;
+  isCustom: boolean;
+  isFromArticle: boolean;
+};
+
+export type CustomCollectionUpdateResult =
+  | {
+    ok: true;
+    config: UserTagTaxonomyConfig;
+  }
+  | {
+    ok: false;
+    error: string;
+  };
+
 export function normalizeConfig(config: UserTagTaxonomyConfig | null | undefined): UserTagTaxonomyConfig {
   return {
     version: config?.version ?? 1,
@@ -79,6 +101,7 @@ export function normalizeConfig(config: UserTagTaxonomyConfig | null | undefined
     hiddenIds: [...(config?.hiddenIds ?? [])],
     orderOverrides: { ...(config?.orderOverrides ?? {}) },
     merges: { ...(config?.merges ?? {}) },
+    customCollections: normalizeCustomCollections(config?.customCollections),
   };
 }
 
@@ -127,6 +150,69 @@ function parseStringArray(value: unknown, fieldName: string): string[] {
     throw new Error(`${fieldName} 只能包含字符串。`);
   }
   return [...value];
+}
+
+export function normalizeCollectionCandidateValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function getCollectionCandidateKey(value: string): string {
+  return normalizeCollectionCandidateValue(value).toLocaleLowerCase("zh-CN");
+}
+
+export function normalizeCustomCollections(collections: string[] | undefined): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawCollection of collections ?? []) {
+    const collection = normalizeCollectionCandidateValue(rawCollection);
+    if (!collection || collection === "未归档") {
+      continue;
+    }
+    const key = getCollectionCandidateKey(collection);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(collection);
+  }
+
+  return normalized;
+}
+
+export function readStoredCustomCollections(): string[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(CUSTOM_COLLECTIONS_STORAGE_KEY);
+    if (!rawValue) return [];
+    const parsed: unknown = JSON.parse(rawValue);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? normalizeCustomCollections(parsed)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeStoredCustomCollections(collections: string[]): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(CUSTOM_COLLECTIONS_STORAGE_KEY, JSON.stringify(normalizeCustomCollections(collections)));
+}
+
+export function mergeConfigWithStoredCustomCollections(config: UserTagTaxonomyConfig | null | undefined): UserTagTaxonomyConfig {
+  return normalizeConfig({
+    ...(config ?? {}),
+    customCollections: normalizeCustomCollections([
+      ...readStoredCustomCollections(),
+      ...(config?.customCollections ?? []),
+    ]),
+  });
 }
 
 function parseTaxonomyEntries(value: unknown): TagTaxonomyEntry[] {
@@ -187,6 +273,7 @@ export function getTagTaxonomyConfigImportPreview(config: UserTagTaxonomyConfig)
     hiddenIdsCount: config.hiddenIds?.length ?? 0,
     orderOverridesCount: Object.keys(config.orderOverrides ?? {}).length,
     mergesCount: Object.keys(config.merges ?? {}).length,
+    customCollectionsCount: config.customCollections?.length ?? 0,
   };
 }
 
@@ -213,6 +300,7 @@ export function parseUserTagTaxonomyConfigJson(jsonText: string): TagTaxonomyCon
     hiddenIds: parseStringArray(parsed.hiddenIds, "hiddenIds"),
     orderOverrides: parseNumberRecord(parsed.orderOverrides, "orderOverrides"),
     merges: parseStringRecord(parsed.merges, "merges"),
+    customCollections: normalizeCustomCollections(parseStringArray(parsed.customCollections, "customCollections")),
   };
 
   return {
@@ -223,6 +311,159 @@ export function parseUserTagTaxonomyConfigJson(jsonText: string): TagTaxonomyCon
 
 export function getAliasCompareKey(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
+}
+
+function validateCollectionNameInput(value: string): string | null {
+  if (!normalizeCollectionCandidateValue(value)) {
+    return "文集名称不能为空。";
+  }
+  if (/[\r\n]/.test(value)) {
+    return "文集名称不能包含换行。";
+  }
+  return null;
+}
+
+function collectCollectionCandidateKeys(collections: string[], ignoredName?: string): Set<string> {
+  const ignoredKey = ignoredName ? getCollectionCandidateKey(ignoredName) : null;
+  const keys = new Set<string>();
+  for (const collection of collections) {
+    const key = getCollectionCandidateKey(collection);
+    if (!key || key === ignoredKey) continue;
+    keys.add(key);
+  }
+  return keys;
+}
+
+export function buildCollectionCandidateRows(
+  builtinCollections: string[],
+  customCollections: string[],
+  articleCollections: string[],
+): CollectionCandidateRow[] {
+  const rows: CollectionCandidateRow[] = [];
+  const rowMap = new Map<string, CollectionCandidateRow>();
+
+  const addCollection = (rawCollection: string, source: CollectionCandidateSource) => {
+    const collection = normalizeCollectionCandidateValue(rawCollection);
+    if (!collection || collection === "未归档") {
+      return;
+    }
+
+    const key = getCollectionCandidateKey(collection);
+    let row = rowMap.get(key);
+    if (!row) {
+      row = {
+        name: collection,
+        sources: [],
+        isBuiltin: false,
+        isCustom: false,
+        isFromArticle: false,
+      };
+      rowMap.set(key, row);
+      rows.push(row);
+    }
+
+    if (!row.sources.includes(source)) {
+      row.sources.push(source);
+    }
+    if (source === "builtin") row.isBuiltin = true;
+    if (source === "custom") row.isCustom = true;
+    if (source === "article") row.isFromArticle = true;
+  };
+
+  for (const collection of builtinCollections) addCollection(collection, "builtin");
+  for (const collection of customCollections) addCollection(collection, "custom");
+  for (const collection of articleCollections) addCollection(collection, "article");
+
+  return rows;
+}
+
+export function createCustomCollectionCandidate(
+  config: UserTagTaxonomyConfig,
+  name: string,
+  existingCandidates: string[],
+): CustomCollectionUpdateResult {
+  const validationError = validateCollectionNameInput(name);
+  if (validationError) return { ok: false, error: validationError };
+
+  const currentConfig = normalizeConfig(config);
+  const nextName = normalizeCollectionCandidateValue(name);
+  const existingKeys = collectCollectionCandidateKeys([
+    ...(currentConfig.customCollections ?? []),
+    ...existingCandidates,
+  ]);
+  if (existingKeys.has(getCollectionCandidateKey(nextName))) {
+    return { ok: false, error: "这个文集已经存在。" };
+  }
+
+  return {
+    ok: true,
+    config: normalizeConfig({
+      ...currentConfig,
+      customCollections: [...(currentConfig.customCollections ?? []), nextName],
+    }),
+  };
+}
+
+export function renameCustomCollectionCandidate(
+  config: UserTagTaxonomyConfig,
+  oldName: string,
+  nextNameInput: string,
+  existingCandidates: string[],
+): CustomCollectionUpdateResult {
+  const validationError = validateCollectionNameInput(nextNameInput);
+  if (validationError) return { ok: false, error: validationError };
+
+  const currentConfig = normalizeConfig(config);
+  const oldKey = getCollectionCandidateKey(oldName);
+  const customCollections = currentConfig.customCollections ?? [];
+  const currentIndex = customCollections.findIndex((collection) => getCollectionCandidateKey(collection) === oldKey);
+  if (currentIndex < 0) {
+    return { ok: false, error: "只能重命名自定义文集。" };
+  }
+
+  const nextName = normalizeCollectionCandidateValue(nextNameInput);
+  if (getCollectionCandidateKey(nextName) === oldKey) {
+    return { ok: false, error: "文集名称没有变化。" };
+  }
+
+  const existingKeys = collectCollectionCandidateKeys([
+    ...customCollections,
+    ...existingCandidates,
+  ], oldName);
+  if (existingKeys.has(getCollectionCandidateKey(nextName))) {
+    return { ok: false, error: "这个文集已经存在。" };
+  }
+
+  const nextCollections = [...customCollections];
+  nextCollections[currentIndex] = nextName;
+
+  return {
+    ok: true,
+    config: normalizeConfig({
+      ...currentConfig,
+      customCollections: nextCollections,
+    }),
+  };
+}
+
+export function deleteCustomCollectionCandidate(
+  config: UserTagTaxonomyConfig,
+  name: string,
+): CustomCollectionUpdateResult {
+  const currentConfig = normalizeConfig(config);
+  const key = getCollectionCandidateKey(name);
+  const nextCollections = (currentConfig.customCollections ?? []).filter((collection) => getCollectionCandidateKey(collection) !== key);
+  if (nextCollections.length === (currentConfig.customCollections ?? []).length) {
+    return { ok: false, error: "只能删除自定义文集。" };
+  }
+
+  return {
+    ok: true,
+    config: normalizeConfig({
+      ...currentConfig,
+      customCollections: nextCollections,
+    }),
+  };
 }
 
 export function parseTagManagerAliasText(value: string): string[] {
@@ -720,6 +961,7 @@ export function getSaveEventBase(operation: SaveOperation): string {
   if (operation === "visibility") return "manager.visibilitySave";
   if (operation === "alias") return "manager.aliasSave";
   if (operation === "merge") return "manager.mergeSave";
+  if (operation === "collection") return "manager.collectionSave";
   return "manager.sortSave";
 }
 

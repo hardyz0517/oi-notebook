@@ -36,6 +36,12 @@ export interface LuoguConfig {
     last_submission_id: number | null;
   };
   ai: AiConfig;
+  blog: BlogConfig;
+}
+
+export interface BlogConfig {
+  title: string;
+  subtitle: string;
 }
 
 export interface AiConfig {
@@ -736,6 +742,22 @@ export async function getTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
 export async function saveTagTaxonomyConfig(config: UserTagTaxonomyConfig): Promise<void> {
   try {
     await invoke<void>("save_tag_taxonomy_config", { config });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function getBlogConfig(): Promise<BlogConfig> {
+  try {
+    return await invoke<BlogConfig>("get_blog_config");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function saveBlogConfig(config: BlogConfig): Promise<void> {
+  try {
+    await invoke<void>("save_blog_config", { config });
   } catch (e) {
     throw toError(e);
   }

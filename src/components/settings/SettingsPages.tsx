@@ -391,11 +391,27 @@ export function AboutPrivacySettingsPage({ className }: { className: string }) {
 
 export function BlogPreviewSettingsPage({
   className,
+  blogTitle,
+  blogSubtitle,
+  blogConfigError,
+  isLoadingBlogConfig,
+  isSavingBlogConfig,
+  onBlogTitleChange,
+  onBlogSubtitleChange,
+  onSaveBlogInfo,
   isRestartingBlog,
   onOpenBlog,
   onRestartBlog,
 }: {
   className: string;
+  blogTitle: string;
+  blogSubtitle: string;
+  blogConfigError: string | null;
+  isLoadingBlogConfig: boolean;
+  isSavingBlogConfig: boolean;
+  onBlogTitleChange: (value: string) => void;
+  onBlogSubtitleChange: (value: string) => void;
+  onSaveBlogInfo: () => void;
   isRestartingBlog: boolean;
   onOpenBlog: () => void;
   onRestartBlog: () => void;
@@ -403,6 +419,40 @@ export function BlogPreviewSettingsPage({
   return (
     <section className={className}>
       <div className="mb-3 text-base font-semibold text-foreground">本地预览</div>
+      <SettingRow
+        title="博客信息"
+        description="用于 Local Blog 首页顶部、全站 header 和页面标题；留空时使用默认博客名称和简介。"
+        align="start"
+      >
+        <div className="grid gap-3">
+          <label className="grid gap-1.5 text-xs text-muted-foreground">
+            博客名称
+            <Input
+              value={blogTitle}
+              onChange={(event) => onBlogTitleChange(event.target.value)}
+              placeholder="OI Notebook"
+              disabled={isLoadingBlogConfig || isSavingBlogConfig}
+              className="h-9 text-sm text-foreground"
+            />
+          </label>
+          <label className="grid gap-1.5 text-xs text-muted-foreground">
+            博客简介
+            <Input
+              value={blogSubtitle}
+              onChange={(event) => onBlogSubtitleChange(event.target.value)}
+              placeholder="一本地算法笔记与题解博客"
+              disabled={isLoadingBlogConfig || isSavingBlogConfig}
+              className="h-9 text-sm text-foreground"
+            />
+          </label>
+          {blogConfigError ? <div className="text-xs leading-5 text-destructive">{blogConfigError}</div> : null}
+          <div className="flex justify-end">
+            <Button type="button" size="sm" onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>
+              {isSavingBlogConfig ? "保存中..." : "保存博客信息"}
+            </Button>
+          </div>
+        </div>
+      </SettingRow>
       <SettingRow title="博客预览" description="打开或重启本地博客服务。">
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={onOpenBlog}><ExternalLink className="h-3.5 w-3.5" />打开博客</Button>

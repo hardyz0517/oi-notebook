@@ -5,12 +5,13 @@ import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
-import { parseUserTagTaxonomyConfigJson, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import { mergeConfigWithStoredCustomCollections, normalizeCustomCollections, parseUserTagTaxonomyConfigJson, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
@@ -20,6 +21,7 @@ import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/edi
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import AiConfigManager from "@/components/settings/AiConfigManager";
+import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
 import SettingsCenterHost, { type SettingsCenterHostHandle } from "@/components/settings/SettingsCenterHost";
 import {
   AboutMarkdownSettingsPage,
@@ -42,7 +44,7 @@ import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
@@ -79,6 +81,8 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 `;
 
 const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
+const DEFAULT_BLOG_TITLE = "OI Notebook";
+const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
 const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
 const THEME_STORAGE_KEY = "oi-notebook.theme";
@@ -468,6 +472,14 @@ function getResizedSettingsCenterRect(handle: SettingsResizeHandle, startRect: S
 }
 
 type DialogMode = "create" | "rename" | "create-folder";
+type ConfirmDialogState = {
+  title: string;
+  description?: ReactNode;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+  resolve: (confirmed: boolean) => void;
+};
 type NoteLocationOptionId = "root" | "current" | "tricks" | "problems" | "custom";
 type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "manual";
@@ -814,6 +826,7 @@ const SETTINGS_TREE: Array<{
     id: "blog",
     label: "博客",
     children: [
+      { id: "blog-info", label: "博客信息" },
       { id: "blog-preview", label: "本地预览" },
       { id: "blog-tag-taxonomy", label: "标签体系" },
       { id: "blog-tag-manager", label: "标签管理器" },
@@ -836,7 +849,7 @@ const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
   appearance: "appearance-theme",
   ai: "ai-api",
   luogu: "luogu-account",
-  blog: "blog-preview",
+  blog: "blog-info",
   data: "data-storage",
   about: "about-version",
   diagnostics: "diagnostics-search",
@@ -1016,18 +1029,24 @@ function applyLuoguPreparedRules(
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
 const COMMON_COLLECTIONS = ["题解", "技巧", "复盘", "杂谈", "集训日志"];
 const LUOGU_DIFFICULTY_OPTIONS = [
-  { value: "", label: "无", className: "text-[#9ca3af]" },
-  { value: "入门", label: "入门", className: "text-[#f08a9b]" },
-  { value: "普及-", label: "普及-", className: "text-[#f0a35c]" },
-  { value: "普及/提高-", label: "普及/提高-", className: "text-[#e0b85a]" },
-  { value: "普及+/提高", label: "普及+/提高", className: "text-[#76c893]" },
-  { value: "提高+/省选-", label: "提高+/省选-", className: "text-[#74a9d8]" },
-  { value: "省选/NOI-", label: "省选/NOI-", className: "text-[#b79adf]" },
-  { value: "NOI/NOI+/CTSC", label: "NOI/NOI+/CTSC", className: "text-[#c7c9d1]" },
+  { value: "", label: "无", className: "text-muted-foreground", textColor: "var(--muted-foreground)", darkTextColor: "var(--muted-foreground)" },
+  { value: "入门", label: "入门", className: "text-[#fe4c61]", textColor: "#fe4c61", darkTextColor: "#fe4c61" },
+  { value: "普及-", label: "普及-", className: "text-[#f39c11]", textColor: "#f39c11", darkTextColor: "#f39c11" },
+  { value: "普及/提高-", label: "普及/提高-", className: "text-[#d89b00] dark:text-[#ffc116]", textColor: "#ffc116", darkTextColor: "#ffc116" },
+  { value: "普及+/提高", label: "普及+/提高", className: "text-[#52c41a]", textColor: "#52c41a", darkTextColor: "#52c41a" },
+  { value: "提高+/省选-", label: "提高+/省选-", className: "text-[#3498db]", textColor: "#3498db", darkTextColor: "#3498db" },
+  { value: "省选/NOI-", label: "省选/NOI-", className: "text-[#9d3dcf] dark:text-[#c084fc]", textColor: "#9d3dcf", darkTextColor: "#c084fc" },
+  { value: "NOI/NOI+/CTSC", label: "NOI/NOI+/CTSC", className: "text-[#0e1d69] dark:text-[#9aa7ff]", textColor: "#0e1d69", darkTextColor: "#9aa7ff" },
 ] as const;
 
 function getDifficultyOptionClassName(value: string): string {
   return LUOGU_DIFFICULTY_OPTIONS.find((option) => option.value === value)?.className ?? "text-foreground";
+}
+
+function getDifficultyOptionTextColor(value: string, theme: AppTheme): CSSProperties["color"] {
+  const option = LUOGU_DIFFICULTY_OPTIONS.find((difficultyOption) => difficultyOption.value === value);
+  if (!option) return undefined;
+  return theme === "dark" ? option.darkTextColor : option.textColor;
 }
 
 function cloneAiConfig(config: AiConfig): AiConfig {
@@ -1115,6 +1134,14 @@ function createAiModelDraft(modelId: string, source: "manual" | "synced" = "manu
     supports_stream: true,
     source,
     updated_at: Date.now(),
+  };
+}
+
+function normalizeBlogConfigDraft(config: BlogConfig): BlogConfig {
+  const normalizeText = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
+  return {
+    title: normalizeText(config.title),
+    subtitle: normalizeText(config.subtitle),
   };
 }
 
@@ -1293,7 +1320,7 @@ function getEffectiveCollections(fields: FrontmatterFields): string[] {
   return normalizeCollectionValues(collections);
 }
 
-function buildCollectionCandidates(fields: FrontmatterFields, extraCandidates: string[] = []): string[] {
+function buildCollectionCandidates(fields: FrontmatterFields, customCandidates: string[] = [], extraCandidates: string[] = []): string[] {
   const candidates: string[] = [];
   const seen = new Set<string>();
 
@@ -1307,6 +1334,7 @@ function buildCollectionCandidates(fields: FrontmatterFields, extraCandidates: s
   };
 
   for (const collection of COMMON_COLLECTIONS) addCandidate(collection);
+  for (const collection of customCandidates) addCandidate(collection);
   for (const collection of fields.collection) addCandidate(collection);
   addCandidate(fields.category);
   for (const tag of fields.tags) addCandidate(getCollectionFromTag(tag));
@@ -1323,6 +1351,7 @@ function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | null): 
     hiddenIds: [...(config?.hiddenIds ?? [])],
     orderOverrides: { ...(config?.orderOverrides ?? {}) },
     merges: { ...(config?.merges ?? {}) },
+    customCollections: normalizeCustomCollections(config?.customCollections),
   };
 }
 
@@ -2421,6 +2450,13 @@ export default function App() {
   const [isLoadingTagTaxonomyConfig, setIsLoadingTagTaxonomyConfig] = useState(false);
   const [isSavingTagTaxonomyConfig, setIsSavingTagTaxonomyConfig] = useState(false);
   const [tagTaxonomySaveError, setTagTaxonomySaveError] = useState<string | null>(null);
+  const [blogInfoDraft, setBlogInfoDraft] = useState<BlogConfig>({
+    title: DEFAULT_BLOG_TITLE,
+    subtitle: DEFAULT_BLOG_SUBTITLE,
+  });
+  const [blogConfigError, setBlogConfigError] = useState<string | null>(null);
+  const [isLoadingBlogConfig, setIsLoadingBlogConfig] = useState(false);
+  const [isSavingBlogConfig, setIsSavingBlogConfig] = useState(false);
   const [tagTaxonomyEntryPathInput, setTagTaxonomyEntryPathInput] = useState("");
   const [tagTaxonomyEntryAliasesInput, setTagTaxonomyEntryAliasesInput] = useState("");
   const [tagTaxonomyAliasNameInput, setTagTaxonomyAliasNameInput] = useState("");
@@ -2500,12 +2536,12 @@ export default function App() {
     setIsLoadingTagTaxonomyConfig(true);
     try {
       const config = await getTagTaxonomyConfig();
-      setTagTaxonomyConfig(config);
+      setTagTaxonomyConfig(mergeConfigWithStoredCustomCollections(config));
       setTagTaxonomyConfigError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("Failed to load tag taxonomy config; using builtin taxonomy.", message);
-      setTagTaxonomyConfig(null);
+      setTagTaxonomyConfig(mergeConfigWithStoredCustomCollections(null));
       setTagTaxonomyConfigError(message);
     } finally {
       setIsLoadingTagTaxonomyConfig(false);
@@ -2515,6 +2551,32 @@ export default function App() {
   useEffect(() => {
     void loadTagTaxonomyConfig();
   }, [loadTagTaxonomyConfig]);
+
+  const loadBlogConfig = useCallback(async () => {
+    setIsLoadingBlogConfig(true);
+    try {
+      const config = await getBlogConfig();
+      setBlogInfoDraft({
+        title: config.title ?? DEFAULT_BLOG_TITLE,
+        subtitle: config.subtitle ?? DEFAULT_BLOG_SUBTITLE,
+      });
+      setBlogConfigError(null);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.warn("Failed to load blog config; using defaults.", message);
+      setBlogInfoDraft({
+        title: DEFAULT_BLOG_TITLE,
+        subtitle: DEFAULT_BLOG_SUBTITLE,
+      });
+      setBlogConfigError(message);
+    } finally {
+      setIsLoadingBlogConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBlogConfig();
+  }, [loadBlogConfig]);
 
   useEffect(() => {
     setEditorSelectedText("");
@@ -2711,6 +2773,7 @@ export default function App() {
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [pendingFileSelection, setPendingFileSelection] = useState<{ path: string; closeSearchOnSuccess: boolean } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
   const [hasLoadedAiConfigStatus, setHasLoadedAiConfigStatus] = useState(false);
   const [hasLoadedLuoguConfigStatus, setHasLoadedLuoguConfigStatus] = useState(false);
@@ -2744,6 +2807,23 @@ export default function App() {
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
   const isMountedRef = useRef(true);
   const pendingAutoSaveDraftRef = useRef<AiConfig | null>(null);
+  const requestConfirm = useCallback((options: Omit<ConfirmDialogState, "resolve">) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmDialog({ ...options, resolve });
+    });
+  }, []);
+  const handleConfirmDialogCancel = useCallback(() => {
+    setConfirmDialog((current) => {
+      current?.resolve(false);
+      return null;
+    });
+  }, []);
+  const handleConfirmDialogConfirm = useCallback(() => {
+    setConfirmDialog((current) => {
+      current?.resolve(true);
+      return null;
+    });
+  }, []);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingAiConfigRef = useRef(false);
   const aiConfigRef = useRef<AiConfig | null>(null);
@@ -2876,8 +2956,8 @@ export default function App() {
   const frontmatterDisplayTags = useMemo(() => getDisplayTags(frontmatter.fields.tags), [frontmatter.fields.tags]);
   const effectiveCollections = useMemo(() => getEffectiveCollections(frontmatter.fields), [frontmatter.fields]);
   const collectionCandidates = useMemo(
-    () => buildCollectionCandidates(frontmatter.fields, collectionCandidatesFromNotes),
-    [collectionCandidatesFromNotes, frontmatter.fields],
+    () => buildCollectionCandidates(frontmatter.fields, tagTaxonomyConfig?.customCollections ?? [], collectionCandidatesFromNotes),
+    [collectionCandidatesFromNotes, frontmatter.fields, tagTaxonomyConfig?.customCollections],
   );
   const tagNormalizationPlan = useMemo(
     () => analyzeTagListNormalization(frontmatterDisplayTags, { userConfig: tagTaxonomyUserConfig }),
@@ -3114,7 +3194,8 @@ export default function App() {
     const hiddenIdsCount = tagTaxonomyConfig?.hiddenIds?.length ?? 0;
     const orderOverridesCount = Object.keys(tagTaxonomyConfig?.orderOverrides ?? {}).length;
     const mergesCount = Object.keys(tagTaxonomyConfig?.merges ?? {}).length;
-    const userConfigItemCount = entriesCount + aliasesCount + hiddenIdsCount + orderOverridesCount + mergesCount;
+    const customCollectionsCount = tagTaxonomyConfig?.customCollections?.length ?? 0;
+    const userConfigItemCount = entriesCount + aliasesCount + hiddenIdsCount + orderOverridesCount + mergesCount + customCollectionsCount;
     const availableCandidateCount = getTagSuggestionList(tagTaxonomyUserConfig)
       .filter((suggestion) => !suggestion.hidden && !suggestion.deprecated)
       .length;
@@ -3133,6 +3214,7 @@ export default function App() {
       hiddenIdsCount,
       orderOverridesCount,
       mergesCount,
+      customCollectionsCount,
       availableCandidateCount,
       userConfigItemCount,
     };
@@ -3144,6 +3226,7 @@ export default function App() {
       { label: "隐藏默认标签", value: tagTaxonomyStats.hiddenIdsCount },
       { label: "排序覆盖", value: tagTaxonomyStats.orderOverridesCount },
       { label: "合并规则", value: tagTaxonomyStats.mergesCount },
+      { label: "自定义文集", value: tagTaxonomyStats.customCollectionsCount },
     ],
     [tagTaxonomyStats],
   );
@@ -3265,6 +3348,7 @@ export default function App() {
     setTagTaxonomySaveError(null);
     try {
       await saveTagTaxonomyConfig(normalizedConfig);
+      writeStoredCustomCollections(normalizedConfig.customCollections ?? []);
       setTagTaxonomyConfig(normalizedConfig);
       setTagTaxonomyConfigError(null);
       return true;
@@ -3350,17 +3434,20 @@ export default function App() {
     const result = previewTagTaxonomyImport(tagTaxonomyImportJsonInput);
     if (!result) return;
 
-    const ok = window.confirm(
-      [
-        "确定导入这份标签配置吗？",
+    const ok = await requestConfirm({
+      title: "导入标签配置？",
+      description: [
         `自定义标签：${result.preview.entriesCount}`,
         `自定义别名：${result.preview.aliasesCount}`,
         `隐藏标签：${result.preview.hiddenIdsCount}`,
         `排序覆盖：${result.preview.orderOverridesCount}`,
         `合并规则：${result.preview.mergesCount}`,
+        `自定义文集：${result.preview.customCollectionsCount}`,
         "导入会覆盖当前用户标签配置，但不会修改 notes/**。",
       ].join("\n"),
-    );
+      confirmText: "导入",
+      danger: true,
+    });
     if (!ok) return;
 
     const saved = await saveUserTagTaxonomyConfig(result.config);
@@ -3373,7 +3460,7 @@ export default function App() {
     setTagTaxonomyImportPreview(null);
     setTagTaxonomyImportError(null);
     setTagTaxonomyImportMessage("已导入标签配置");
-  }, [previewTagTaxonomyImport, saveUserTagTaxonomyConfig, tagTaxonomyImportJsonInput]);
+  }, [previewTagTaxonomyImport, requestConfirm, saveUserTagTaxonomyConfig, tagTaxonomyImportJsonInput]);
   const handleAddTagTaxonomyEntry = useCallback(async () => {
     const path = parseTagPathInput(tagTaxonomyEntryPathInput);
     if (path.length === 0) {
@@ -3470,7 +3557,7 @@ export default function App() {
         : luoguConnectionError
           ? "最近一次测试连接失败，请检查 Cookie 后重试。"
           : luoguConnectionResult
-            ? `最近测试正常，拉到 ${luoguConnectionResult.fetchedCount} 条提交。`
+            ? "最近测试正常。"
             : "账号 Cookie 已保存，可手动测试连接。";
   const isLuoguRuleControlDisabled =
     isLoadingLuoguConfig ||
@@ -4116,7 +4203,12 @@ export default function App() {
     if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
 
     if (isDirty) {
-      const ok = window.confirm("当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。确定吗？");
+      const ok = await requestConfirm({
+        title: "放弃未保存更改？",
+        description: "当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。",
+        confirmText: "继续新建",
+        danger: true,
+      });
       if (!ok) return;
     }
 
@@ -4226,7 +4318,12 @@ export default function App() {
   };
 
   const handleDelete = async (path: string, isDirectory = false) => {
-    const ok = window.confirm(`确定删除"${path}"吗？此操作不可撤销。`);
+    const ok = await requestConfirm({
+      title: `删除${isDirectory ? "文件夹" : "笔记"}？`,
+      description: `确定删除“${path}”吗？此操作不可撤销。`,
+      confirmText: "删除",
+      danger: true,
+    });
     if (!ok) return;
     try {
       if (isDirectory) {
@@ -4283,6 +4380,23 @@ export default function App() {
     }
   };
 
+  const handleSaveBlogInfo = async () => {
+    const normalizedConfig = normalizeBlogConfigDraft(blogInfoDraft);
+    setIsSavingBlogConfig(true);
+    setBlogConfigError(null);
+    try {
+      await saveBlogConfig(normalizedConfig);
+      setBlogInfoDraft(normalizedConfig);
+      toast.success("博客信息已保存");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setBlogConfigError(message);
+      toast.error(`博客信息保存失败：${message}`);
+    } finally {
+      setIsSavingBlogConfig(false);
+    }
+  };
+
   const handlePushGit = async () => {
     setIsPushingGit(true);
     try {
@@ -4295,8 +4409,7 @@ export default function App() {
     }
   };
 
-  const openLuoguSettings = async () => {
-    setIsLuoguSettingsOpen(true);
+  const loadLuoguSettingsConfig = async () => {
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
@@ -4317,9 +4430,26 @@ export default function App() {
     }
   };
 
+  const openLuoguSettings = async () => {
+    setIsLuoguSettingsOpen(true);
+    await loadLuoguSettingsConfig();
+  };
+
+  const openLuoguAccountManager = async () => {
+    settingsCenterHostRef.current?.openLuoguAccountManager();
+    await loadLuoguSettingsConfig();
+  };
+
+  const returnFromLuoguSettings = () => {
+    setIsLuoguSettingsOpen(false);
+    if (settingsCenterViewRef.current === "luogu-account-manager") {
+      settingsCenterHostRef.current?.closeLuoguAccountManager();
+    }
+  };
+
   const closeLuoguSettings = () => {
     if (isSavingLuoguConfig || isUpdatingLuoguLastSubmissionId) return;
-    setIsLuoguSettingsOpen(false);
+    returnFromLuoguSettings();
   };
 
   const handleSaveLuoguConfig = async () => {
@@ -4345,7 +4475,7 @@ export default function App() {
       });
       setLuoguConnectionError(null);
       toast.success("洛谷配置已保存");
-      setIsLuoguSettingsOpen(false);
+      returnFromLuoguSettings();
     } catch (e) {
       toast.error(`洛谷配置保存失败：${e}`);
     } finally {
@@ -4360,11 +4490,11 @@ export default function App() {
     try {
       const result = await testLuoguConnection();
       setLuoguConnectionResult(result);
-      toast.success(`洛谷连接正常，拉到 ${result.fetchedCount} 条提交`);
+      toast.success("连接成功");
     } catch (e) {
       const message = getErrorMessage(e);
       setLuoguConnectionError(message);
-      toast.error(`洛谷连接测试失败：${message}`);
+      toast.error(`连接失败：${message}`);
     } finally {
       setIsTestingLuoguConnection(false);
     }
@@ -5406,7 +5536,15 @@ export default function App() {
   const handleDeleteAiProvider = async (providerId: string, options?: { skipConfirm?: boolean }) => {
     const provider = aiConfigDraft?.providers.find((item) => item.id === providerId);
     if (!provider) return;
-    if (!options?.skipConfirm && !window.confirm(`删除供应商「${provider.name || provider.id}」？此操作会立即生效。`)) return;
+    if (!options?.skipConfirm) {
+      const ok = await requestConfirm({
+        title: `删除供应商「${provider.name || provider.id}」？`,
+        description: "此操作会立即生效。",
+        confirmText: "删除",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     updateAiConfigDraft((config) => {
       const providers = config.providers.filter((item) => item.id !== providerId);
       const nextSelected = providers.find((item) => item.id === config.default_provider_id) ?? providers[0] ?? null;
@@ -5774,10 +5912,17 @@ export default function App() {
           if (
             luoguImportRules.writeStrategy === "askOnConflict" &&
             result.skipped &&
-            result.relativePath &&
-            window.confirm(`目标文件已存在：${result.relativePath}\n是否覆盖写入？`)
+            result.relativePath
           ) {
-            result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, true, "overwrite");
+            const shouldOverwrite = await requestConfirm({
+              title: "覆盖已有文件？",
+              description: `目标文件已存在：${result.relativePath}\n是否覆盖写入？`,
+              confirmText: "覆盖写入",
+              danger: true,
+            });
+            if (shouldOverwrite) {
+              result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, true, "overwrite");
+            }
           }
           setLuoguWriteResultsById((current) => ({
             ...current,
@@ -5884,7 +6029,12 @@ export default function App() {
       return;
     }
     if (isDirty) {
-      const ok = window.confirm("当前笔记有未保存的改动，导入后会切换到新笔记。确定继续吗？未保存的改动将丢失。");
+      const ok = await requestConfirm({
+        title: "放弃未保存更改并导入？",
+        description: "当前笔记有未保存的改动，导入后会切换到新笔记。未保存的改动将丢失。",
+        confirmText: "继续导入",
+        danger: true,
+      });
       if (!ok) return;
     }
 
@@ -6143,7 +6293,13 @@ export default function App() {
       "确认应用所选规范化？",
     ].join("\n");
 
-    if (!window.confirm(confirmMessage)) return;
+    const confirmed = await requestConfirm({
+      title: "应用标签规范化？",
+      description: confirmMessage,
+      confirmText: "应用",
+      danger: true,
+    });
+    if (!confirmed) return;
 
     setIsApplyingTagNormalizationScan(true);
     const failures: TagNormalizationApplyFailure[] = [];
@@ -6219,6 +6375,7 @@ export default function App() {
     handleScanLegacyTags,
     isApplyingTagNormalizationScan,
     isDirty,
+    requestConfirm,
     selectedTagNormalizationScanPaths,
     selectedTagNormalizationScanStats.noteCount,
     selectedTagNormalizationScanStats.duplicateCount,
@@ -6452,7 +6609,7 @@ export default function App() {
     handleSelectFile(tab.path);
   };
 
-  const handleCloseOpenTab = (tab: OpenTab) => {
+  const handleCloseOpenTab = async (tab: OpenTab) => {
     if (tab.kind === "review") {
       setOpenReviewTabs((current) => current.filter((item) => item.id !== tab.id));
       if (activeWorkspaceTabId === tab.id) {
@@ -6467,7 +6624,12 @@ export default function App() {
 
     const isClosingActiveTab = path === currentFilePath;
     if (isClosingActiveTab && isDirty) {
-      const ok = window.confirm("该笔记有未保存更改，确定关闭吗？");
+      const ok = await requestConfirm({
+        title: "关闭未保存笔记？",
+        description: "该笔记有未保存更改，关闭后更改将丢失。",
+        confirmText: "关闭",
+        danger: true,
+      });
       if (!ok) return;
     }
 
@@ -6900,7 +7062,7 @@ export default function App() {
     });
   };
 
-  const closeSettingsCenter = () => {
+  const closeSettingsCenter = async () => {
     debugTagManager("settings.close", {
       hasTagManagerSession: Boolean(tagManagerSession),
       activeSettingsPage: settingsCenterActivePageRef.current,
@@ -6914,7 +7076,13 @@ export default function App() {
     flushChatResponseStyleAutoSave();
     if (hasAiConfigDraftChanges) {
       if (hasNonProviderAiChanges) {
-        if (!window.confirm("AI/API 管理有未保存更改，是否放弃并关闭设置中心？")) {
+        const ok = await requestConfirm({
+          title: "放弃 AI/API 管理更改？",
+          description: "AI/API 管理有未保存更改，关闭设置中心后这些更改将丢失。",
+          confirmText: "放弃并关闭",
+          danger: true,
+        });
+        if (!ok) {
           return;
         }
       } else {
@@ -6960,6 +7128,10 @@ export default function App() {
     }
     if (settingsCenterViewRef.current === "ai-config-manager") {
       settingsCenterHostRef.current?.closeAiConfigManager();
+      return;
+    }
+    if (settingsCenterViewRef.current === "luogu-account-manager") {
+      settingsCenterHostRef.current?.closeLuoguAccountManager();
       return;
     }
     closeSettingsCenter();
@@ -7461,7 +7633,17 @@ export default function App() {
 
   return (
     <>
-    <Toaster theme={appTheme} position={isLuoguDialogOpen ? "top-right" : "bottom-right"} />
+    <Toaster theme={appTheme} position="bottom-right" />
+    <ConfirmDialog
+      open={Boolean(confirmDialog)}
+      title={confirmDialog?.title ?? ""}
+      description={confirmDialog?.description}
+      confirmText={confirmDialog?.confirmText}
+      cancelText={confirmDialog?.cancelText}
+      danger={confirmDialog?.danger}
+      onConfirm={handleConfirmDialogConfirm}
+      onCancel={handleConfirmDialogCancel}
+    />
     <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
       <DialogContent className="flex h-[min(72vh,680px)] w-[min(760px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
@@ -7826,7 +8008,11 @@ export default function App() {
               value={luoguConfigUid}
               disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
               placeholder="洛谷 _uid"
-              onChange={(e) => setLuoguConfigUid(e.target.value)}
+              onChange={(e) => {
+                setLuoguConfigUid(e.target.value);
+                setLuoguConnectionResult(null);
+                setLuoguConnectionError(null);
+              }}
             />
           </div>
           <div className="grid gap-2">
@@ -7837,7 +8023,11 @@ export default function App() {
               disabled={isLoadingLuoguConfig || isSavingLuoguConfig}
               placeholder="洛谷 __client_id"
               type="password"
-              onChange={(e) => setLuoguConfigClientId(e.target.value)}
+              onChange={(e) => {
+                setLuoguConfigClientId(e.target.value);
+                setLuoguConnectionResult(null);
+                setLuoguConnectionError(null);
+              }}
             />
           </div>
           <div className="grid gap-2">
@@ -7851,24 +8041,6 @@ export default function App() {
               onChange={(e) => setLuoguConfigLastSubmissionId(e.target.value)}
             />
           </div>
-          {luoguConnectionResult && (
-            <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
-              <div className="font-medium text-foreground">
-                本次测试拉到 {luoguConnectionResult.fetchedCount} 条提交
-              </div>
-              <div className="grid gap-1 text-muted-foreground">
-                {luoguConnectionResult.submissions.length === 0 ? (
-                  <div>暂无提交预览</div>
-                ) : (
-                  luoguConnectionResult.submissions.map((submission) => (
-                    <div key={submission.submissionId} className="font-mono">
-                      #{submission.submissionId} {submission.problemId} {submission.problemTitle} 路 {submission.status} 路 {submission.submitTime}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
           {luoguSyncResult && (
             <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
               <div className="font-medium text-foreground">
@@ -7907,16 +8079,6 @@ export default function App() {
             disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
           >
             测试连接
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setIsLuoguSettingsOpen(false);
-              void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-account" } });
-            }}
-            disabled={isLoadingLuoguConfig || isSavingLuoguConfig || isTestingLuoguConnection || isSyncingLuogu}
-          >
-            打开导入中心
           </Button>
           <Button
             onClick={handleSaveLuoguConfig}
@@ -8846,6 +9008,33 @@ export default function App() {
           onReorderProviders={handleReorderAiProviders}
         />
       )}
+      renderLuoguAccountManager={() => (
+        <LuoguAccountManager
+          mode="page"
+          uid={luoguConfigUid}
+          clientId={luoguConfigClientId}
+          lastSubmissionId={luoguConfigLastSubmissionId}
+          isLoading={isLoadingLuoguConfig}
+          isSaving={isSavingLuoguConfig}
+          isTestingConnection={isTestingLuoguConnection}
+          isSyncing={isSyncingLuogu}
+          syncResult={luoguSyncResult}
+          onUidChange={(value) => {
+            setLuoguConfigUid(value);
+            setLuoguConnectionResult(null);
+            setLuoguConnectionError(null);
+          }}
+          onClientIdChange={(value) => {
+            setLuoguConfigClientId(value);
+            setLuoguConnectionResult(null);
+            setLuoguConnectionError(null);
+          }}
+          onLastSubmissionIdChange={setLuoguConfigLastSubmissionId}
+          onClose={closeLuoguSettings}
+          onTestConnection={() => void handleTestLuoguConnection()}
+          onSave={() => void handleSaveLuoguConfig()}
+        />
+      )}
       renderActivePage={(activePageKey, activeTarget) => (
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
@@ -8992,7 +9181,6 @@ export default function App() {
                           </Button>
                         </div>
                       </SettingRow>
-                      <SettingRow title="检索使用方式" description="聊天中按需读取相关片段；普通模式只显示回答正文实际引用的 N# 本地来源。"><span className="text-sm text-muted-foreground">无需额外配置</span></SettingRow>
                     </section>
                   )}
 
@@ -9173,8 +9361,7 @@ export default function App() {
                       isLoadingConfig={isLoadingLuoguConfig}
                       isSavingConfig={isSavingLuoguConfig}
                       isTestingConnection={isTestingLuoguConnection}
-                      onOpenSettings={() => void openLuoguSettings()}
-                      onOpenImportCenter={() => void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-account" } })}
+                      onOpenSettings={() => void openLuoguAccountManager()}
                     />
                   )}
 
@@ -9276,9 +9463,17 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget) && (
+                  {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
                     <BlogPreviewSettingsPage
                       className={settingsPageSectionClass}
+                      blogTitle={blogInfoDraft.title}
+                      blogSubtitle={blogInfoDraft.subtitle}
+                      blogConfigError={blogConfigError}
+                      isLoadingBlogConfig={isLoadingBlogConfig}
+                      isSavingBlogConfig={isSavingBlogConfig}
+                      onBlogTitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, title: value }))}
+                      onBlogSubtitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, subtitle: value }))}
+                      onSaveBlogInfo={() => void handleSaveBlogInfo()}
                       isRestartingBlog={isRestartingBlog}
                       onOpenBlog={handleOpenBlog}
                       onRestartBlog={handleRestartBlog}
@@ -9332,6 +9527,9 @@ export default function App() {
       <TagManagerWorkspace
         initialConfig={tagManagerSession.initialConfig}
         initialFilterMode={tagManagerSession.initialFilterMode}
+        builtinCollections={COMMON_COLLECTIONS}
+        noteCollections={collectionCandidatesFromNotes}
+        developerModeEnabled={developerModeEnabled}
         onRequestClose={requestCloseTagManager}
       />
     )}
@@ -9969,7 +10167,10 @@ export default function App() {
                                   setIsDifficultyMenuOpen((open) => !open);
                                 }}
                               >
-                                <span className="min-w-0 truncate">
+                                <span
+                                  className="min-w-0 truncate"
+                                  style={{ color: getDifficultyOptionTextColor(frontmatter.fields.difficulty, appTheme) }}
+                                >
                                   {frontmatter.fields.difficulty.trim() || "无"}
                                 </span>
                                 <ChevronDown
@@ -9984,14 +10185,14 @@ export default function App() {
                                 <div
                                   role="listbox"
                                   aria-labelledby="frontmatter-difficulty"
-                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-border/70 bg-popover py-1 text-xs text-popover-foreground shadow-lg shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
+                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-border/70 bg-popover py-0 text-xs text-popover-foreground shadow-lg shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
                                 >
                                   {!LUOGU_DIFFICULTY_OPTIONS.some((option) => option.value === frontmatter.fields.difficulty) && frontmatter.fields.difficulty.trim() && (
                                     <button
                                       type="button"
                                       role="option"
                                       aria-selected
-                                      className="flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
+                                      className="flex h-[34px] w-full items-center justify-between gap-2 px-2.5 text-left text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
                                       onClick={() => setIsDifficultyMenuOpen(false)}
                                     >
                                       <span className="min-w-0 truncate">当前：{frontmatter.fields.difficulty}</span>
@@ -10007,7 +10208,7 @@ export default function App() {
                                         role="option"
                                         aria-selected={selected}
                                         className={cn(
-                                          "flex h-9 w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.06]",
+                                          "flex h-[34px] w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.06]",
                                           selected && "bg-accent/70 text-accent-foreground dark:bg-white/[0.08]",
                                           option.className,
                                         )}
@@ -10016,7 +10217,12 @@ export default function App() {
                                           setIsDifficultyMenuOpen(false);
                                         }}
                                       >
-                                        <span>{option.label}</span>
+                                        <span
+                                          className="min-w-0 truncate"
+                                          style={{ color: getDifficultyOptionTextColor(option.value, appTheme) }}
+                                        >
+                                          {option.label}
+                                        </span>
                                         {selected && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                                       </button>
                                     );

@@ -90,6 +90,11 @@ type NotesResponse = {
   notes: RawNoteSummary[];
 };
 
+type BlogConfig = {
+  title: string;
+  subtitle: string;
+};
+
 type Route =
   | { name: "home"; page: number }
   | { name: "articles"; page: number; year: string | null }
@@ -142,6 +147,11 @@ const collectionDescriptions: Record<string, string> = {
   "\u6280\u5de7": "\u53ef\u590d\u7528\u7684\u7b97\u6cd5\u6280\u5de7\u3001\u6a21\u578b\u548c\u5957\u8def\u6574\u7406\u3002",
   "\u590d\u76d8": "\u8bad\u7ec3\u3001\u6bd4\u8d5b\u4e0e\u9636\u6bb5\u6027\u603b\u7ed3\u3002",
   "\u6742\u8c08": "\u548c\u5b66\u4e60\u3001\u5de5\u5177\u3001\u751f\u6d3b\u6709\u5173\u7684\u968f\u7b14\u3002",
+};
+
+const defaultBlogConfig: BlogConfig = {
+  title: "OI Notebook",
+  subtitle: "一本地算法笔记与题解博客",
 };
 
 const articleClassWords = ["\u9898\u89e3", "\u590d\u76d8", "\u5fc3\u5f97", "\u6280\u5de7", "\u6a21\u677f", "\u6742\u8c08"] as const;
@@ -1196,9 +1206,20 @@ function sortNotesByRecent(notes: NoteSummary[]) {
     .map((item) => item.note);
 }
 
+function normalizeBlogConfig(value: Partial<BlogConfig> | null | undefined): BlogConfig {
+  const title = typeof value?.title === "string" ? value.title.trim() : "";
+  const subtitle = typeof value?.subtitle === "string" ? value.subtitle.trim() : "";
+
+  return {
+    title: title || defaultBlogConfig.title,
+    subtitle: subtitle || defaultBlogConfig.subtitle,
+  };
+}
+
 export default function App() {
   const [route, setRoute] = useState<Route>(() => getRouteFromHash());
   const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [blogConfig, setBlogConfig] = useState<BlogConfig>(defaultBlogConfig);
   const [isLoadingNotes, setIsLoadingNotes] = useState(true);
   const [notesError, setNotesError] = useState<string | null>(null);
 
@@ -1254,6 +1275,41 @@ export default function App() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadBlogConfig = async () => {
+      try {
+        const response = await fetch("/api/blog-config", {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        const data = (await response.json()) as Partial<BlogConfig>;
+        setBlogConfig(normalizeBlogConfig(data));
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        console.warn("Failed to load local blog config; using defaults.", err);
+        setBlogConfig(defaultBlogConfig);
+      }
+    };
+
+    void loadBlogConfig();
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (route.name !== "note") {
+      document.title = blogConfig.title;
+    }
+  }, [blogConfig.title, route.name]);
+
   const tagTree = useMemo(() => buildTagTree(notes), [notes]);
   const collections = useMemo(() => buildCollections(notes), [notes]);
 
@@ -1261,16 +1317,16 @@ export default function App() {
     <main className="site-shell">
         <header className="site-header">
           <div className="masthead-title">
-            <a className="brand" href="#/" aria-label={"OI Notebook \u9996\u9875"}>
-              OI Notebook
+            <a className="brand" href="#/" aria-label={blogConfig.title + " \u9996\u9875"}>
+              {blogConfig.title}
             </a>
-            <p>{"\u4e00\u4e2a\u672c\u5730\u7b97\u6cd5\u7b14\u8bb0\u4e0e\u9898\u89e3\u535a\u5ba2"}</p>
+            <p>{blogConfig.subtitle}</p>
           </div>
           <SiteNav route={route} />
         </header>
 
         {route.name === "note" ? (
-          <NoteDetailView relativePath={route.relativePath} notes={notes} />
+          <NoteDetailView relativePath={route.relativePath} notes={notes} siteTitle={blogConfig.title} />
         ) : (
           <IndexView
             route={route}
@@ -2188,7 +2244,7 @@ function getPaginationItems(currentPage: number, totalPages: number) {
   return items;
 }
 
-function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: NoteSummary[] }) {
+function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: string; notes: NoteSummary[]; siteTitle: string }) {
   const [note, setNote] = useState<NoteDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2244,6 +2300,10 @@ function NoteDetailView({ relativePath, notes }: { relativePath: string; notes: 
 
     return () => controller.abort();
   }, [relativePath]);
+
+  useEffect(() => {
+    document.title = note ? `${note.title} - ${siteTitle}` : siteTitle;
+  }, [note, siteTitle]);
 
   const tocItems = useMemo(
     () => (note ? extractMarkdownHeadings(note.body, note.title) : []),

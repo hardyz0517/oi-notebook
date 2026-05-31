@@ -261,7 +261,6 @@ export function LuoguAccountSettingsPage({
   isSavingConfig,
   isTestingConnection,
   onOpenSettings,
-  onOpenImportCenter,
 }: {
   className: string;
   configured: boolean;
@@ -274,13 +273,11 @@ export function LuoguAccountSettingsPage({
   isSavingConfig: boolean;
   isTestingConnection: boolean;
   onOpenSettings: () => void;
-  onOpenImportCenter: () => void;
 }) {
   return (
     <section className={className}>
-      <div className="mb-3 grid gap-1">
+      <div className="mb-3">
         <div className="text-base font-semibold text-foreground">账号配置</div>
-        <div className="text-xs leading-5 text-muted-foreground">复用现有洛谷 Cookie 配置窗口，保存 UID、__client_id 和最后同步提交 ID。</div>
       </div>
       <SettingRow title="连接状态" description={statusDescription}>
         <span className={cn("inline-flex rounded-sm border px-2 py-0.5 text-xs", configured ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" : "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200")}>
@@ -299,10 +296,6 @@ export function LuoguAccountSettingsPage({
           <Button variant="outline" size="sm" onClick={onOpenSettings} disabled={isLoadingConfig || isSavingConfig || isTestingConnection}>
             {isLoadingConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
             打开账号配置
-          </Button>
-          <Button variant="outline" size="sm" onClick={onOpenImportCenter} disabled={isLoadingConfig}>
-            <ExternalLink className="h-3.5 w-3.5" />
-            打开导入中心
           </Button>
         </div>
       </SettingRow>

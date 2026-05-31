@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { debugEvent } from "./tagManagerDebug";
-import type { ResizeHandle, StatusMessage, TagManagerFilterMode, WorkspaceRect } from "./types";
+import type { ResizeHandle, TagManagerFilterMode, TagManagerWorkspaceView, WorkspaceRect } from "./types";
 
 const MIN_WIDTH = 960;
 const MIN_HEIGHT = 600;
@@ -101,13 +101,13 @@ function getResizeCursor(handle: ResizeHandle): string {
 }
 
 export function TagManagerShell({
+  activeView,
   searchQuery,
   showHidden,
   filterMode,
-  status,
   isDebugPanelVisible,
-  debugActionMessage,
   onSearchQueryChange,
+  onActiveViewChange,
   onShowHiddenChange,
   onFilterModeChange,
   onCopyDebugLog,
@@ -117,13 +117,13 @@ export function TagManagerShell({
   onClose,
   children,
 }: {
+  activeView: TagManagerWorkspaceView;
   searchQuery: string;
   showHidden: boolean;
   filterMode: TagManagerFilterMode;
-  status: StatusMessage;
   isDebugPanelVisible: boolean;
-  debugActionMessage: string | null;
   onSearchQueryChange: (value: string) => void;
+  onActiveViewChange: (view: TagManagerWorkspaceView) => void;
   onShowHiddenChange: (value: boolean) => void;
   onFilterModeChange: (value: TagManagerFilterMode) => void;
   onCopyDebugLog: () => void;
@@ -235,55 +235,81 @@ export function TagManagerShell({
 
         <div data-tag-manager-clear-scope="true" className="flex min-h-0 flex-1 flex-col overflow-hidden" onPointerDownCapture={handleClearScopePointerDown}>
         <div className="relative z-20 flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 px-5 py-3">
-          <div className="relative min-w-[240px] flex-[1_1_320px]" data-tag-manager-interactive="true">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input name="tag-manager-taxonomy-search" value={searchQuery} autoComplete="new-password" placeholder="搜索标签、路径或别名" onChange={(event) => onSearchQueryChange(event.target.value)} className="h-9 pl-9 text-sm" />
+          <div className="flex shrink-0 rounded-sm border border-border/80 bg-muted/10 p-0.5" data-tag-manager-interactive="true">
+            {(["tags", "collections"] as TagManagerWorkspaceView[]).map((view) => (
+              <button
+                key={view}
+                type="button"
+                className={cn(
+                  "h-7 rounded-[3px] px-3 text-xs font-medium transition-colors",
+                  activeView === view ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => {
+                  onActiveViewChange(view);
+                  setIsFilterMenuOpen(false);
+                }}
+              >
+                {view === "tags" ? "标签" : "文集"}
+              </button>
+            ))}
           </div>
-          <div className="relative shrink-0" data-no-window-drag="true" data-tag-manager-interactive="true">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 w-44 justify-between gap-2 border-border/80 bg-muted/10 px-2 text-xs text-foreground hover:bg-muted/25"
-              aria-haspopup="listbox"
-              aria-expanded={isFilterMenuOpen}
-              onClick={() => setIsFilterMenuOpen((current) => !current)}
-            >
-              <span className="truncate">{activeFilterOption.label}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </Button>
-            {isFilterMenuOpen && (
-              <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-48 rounded-sm border border-white/10 bg-[#161616]/95 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.42)] backdrop-blur" role="listbox">
-                {FILTER_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-selected={option.value === filterMode}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors",
-                      option.value === filterMode ? "bg-primary/15 text-foreground" : "text-foreground/80 hover:bg-white/[0.07] hover:text-foreground",
-                    )}
-                    onClick={() => {
-                      onFilterModeChange(option.value);
-                      setIsFilterMenuOpen(false);
-                    }}
-                  >
-                    <span>{option.label}</span>
-                    {option.value === filterMode && <Check className="h-3.5 w-3.5 text-primary" />}
-                  </button>
-                ))}
+          {activeView === "tags" ? (
+            <>
+              <div className="relative min-w-[240px] flex-[1_1_320px]" data-tag-manager-interactive="true">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input name="tag-manager-taxonomy-search" value={searchQuery} autoComplete="new-password" placeholder="搜索标签、路径或别名" onChange={(event) => onSearchQueryChange(event.target.value)} className="h-9 pl-9 text-sm" />
               </div>
-            )}
-          </div>
-          <Button data-tag-manager-interactive="true" type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={onCreateCustomTag}>
-            <Plus className="h-3.5 w-3.5" />
-            新建自定义标签
-          </Button>
-          <label data-tag-manager-interactive="true" className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={showHidden} onChange={(event) => onShowHiddenChange(event.target.checked)} />
-            显示隐藏标签
-          </label>
+              <div className="relative shrink-0" data-no-window-drag="true" data-tag-manager-interactive="true">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-44 justify-between gap-2 border-border/80 bg-muted/10 px-2 text-xs text-foreground hover:bg-muted/25"
+                  aria-haspopup="listbox"
+                  aria-expanded={isFilterMenuOpen}
+                  onClick={() => setIsFilterMenuOpen((current) => !current)}
+                >
+                  <span className="truncate">{activeFilterOption.label}</span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </Button>
+                {isFilterMenuOpen && (
+                  <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-48 rounded-sm border border-white/10 bg-[#161616]/95 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.42)] backdrop-blur" role="listbox">
+                    {FILTER_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="option"
+                        aria-selected={option.value === filterMode}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors",
+                          option.value === filterMode ? "bg-primary/15 text-foreground" : "text-foreground/80 hover:bg-white/[0.07] hover:text-foreground",
+                        )}
+                        onClick={() => {
+                          onFilterModeChange(option.value);
+                          setIsFilterMenuOpen(false);
+                        }}
+                      >
+                        <span>{option.label}</span>
+                        {option.value === filterMode && <Check className="h-3.5 w-3.5 text-primary" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Button data-tag-manager-interactive="true" type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={onCreateCustomTag}>
+                <Plus className="h-3.5 w-3.5" />
+                新建自定义标签
+              </Button>
+              <label data-tag-manager-interactive="true" className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" className="h-4 w-4 accent-primary" checked={showHidden} onChange={(event) => onShowHiddenChange(event.target.checked)} />
+                显示隐藏标签
+              </label>
+            </>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3 text-xs text-muted-foreground">
+              <span>管理文集候选：新增、重命名、删除都不会批量改 notes。</span>
+            </div>
+          )}
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(360px,1fr)_minmax(360px,1fr)] overflow-hidden">
@@ -291,12 +317,10 @@ export function TagManagerShell({
         </div>
         </div>
 
-        {status && <div className={cn("pointer-events-none absolute bottom-3 left-3 z-20 rounded-sm border px-3 py-1.5 text-xs shadow-lg", status.kind === "success" ? "border-border/70 bg-background/95 text-foreground" : "border-destructive/40 bg-destructive/10 text-destructive")}>{status.message}</div>}
         {isDebugPanelVisible && (
           <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-sm border border-border/70 bg-background/95 px-2 py-1.5 text-[11px] text-muted-foreground shadow-lg">
             <button type="button" className="rounded-sm px-1.5 py-0.5 hover:bg-muted/60 hover:text-foreground" onClick={onCopyDebugLog}>复制调试日志</button>
             <button type="button" className="rounded-sm px-1.5 py-0.5 hover:bg-muted/60 hover:text-foreground" onClick={onClearDebugLog}>清空调试日志</button>
-            {debugActionMessage && <span className="pl-1 text-foreground">{debugActionMessage}</span>}
           </div>
         )}
 

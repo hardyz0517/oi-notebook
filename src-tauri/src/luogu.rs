@@ -31,6 +31,8 @@ pub struct LuoguConfig {
     pub luogu: LuoguConfigFields,
     #[serde(default)]
     pub ai: AiConfigFields,
+    #[serde(default)]
+    pub blog: BlogConfigFields,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -38,6 +40,31 @@ pub struct LuoguConfigFields {
     pub uid: String,
     pub client_id: String,
     pub last_submission_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BlogConfigFields {
+    #[serde(default = "default_blog_title")]
+    pub title: String,
+    #[serde(default = "default_blog_subtitle")]
+    pub subtitle: String,
+}
+
+impl Default for BlogConfigFields {
+    fn default() -> Self {
+        Self {
+            title: default_blog_title(),
+            subtitle: default_blog_subtitle(),
+        }
+    }
+}
+
+pub fn default_blog_title() -> String {
+    "OI Notebook".to_string()
+}
+
+pub fn default_blog_subtitle() -> String {
+    "一本地算法笔记与题解博客".to_string()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -325,6 +352,7 @@ impl Default for LuoguConfig {
                 last_submission_id: None,
             },
             ai: AiConfigFields::default(),
+            blog: BlogConfigFields::default(),
         }
     }
 }
@@ -2616,6 +2644,10 @@ Keep one sentinel item to avoid special casing.
                 model: "example-model".to_string(),
                 ..AiConfigFields::default()
             },
+            blog: BlogConfigFields {
+                title: "Hardy's OI Notes".to_string(),
+                subtitle: "算法、题解与训练复盘".to_string(),
+            },
         };
 
         write_luogu_config_to_path(&config_path, &config).unwrap();
@@ -2627,6 +2659,9 @@ Keep one sentinel item to avoid special casing.
         assert!(raw.contains("\"base_url\""));
         assert!(raw.contains("\"api_key\""));
         assert!(raw.contains("\"model\""));
+        assert!(raw.contains("\"blog\""));
+        assert!(raw.contains("\"title\""));
+        assert!(raw.contains("\"subtitle\""));
         assert_eq!(parsed, config);
     }
 
@@ -2651,6 +2686,7 @@ Keep one sentinel item to avoid special casing.
         let parsed = read_luogu_config_from_path(&config_path).unwrap();
 
         assert_eq!(parsed.ai, AiConfigFields::default());
+        assert_eq!(parsed.blog, BlogConfigFields::default());
         assert_eq!(parsed.luogu.uid, "12345");
     }
 

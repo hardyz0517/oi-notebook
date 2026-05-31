@@ -13,6 +13,7 @@ export type SettingsSection =
   | "luogu-import-center"
   | "blog-tag-taxonomy"
   | "blog-tag-manager"
+  | "blog-info"
   | "blog-preview"
   | "data-storage"
   | "about-version"
@@ -27,7 +28,7 @@ export type SettingsTarget =
   | { type: "category"; category: SettingsGroupId }
   | { type: "page"; page: SettingsSection };
 
-export type SettingsView = "main" | "prompt-editor" | "ai-config-manager";
+export type SettingsView = "main" | "prompt-editor" | "ai-config-manager" | "luogu-account-manager";
 
 export type SettingsResizeHandle = "left" | "right" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
 

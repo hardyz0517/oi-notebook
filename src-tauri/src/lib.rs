@@ -266,6 +266,8 @@ pub fn run() {
             tag_taxonomy::get_tag_taxonomy_config,
             tag_taxonomy::save_tag_taxonomy_config,
             tag_taxonomy::reset_tag_taxonomy_config,
+            blog_server::get_blog_config,
+            blog_server::save_blog_config,
             open_blog,
             restart_blog_server,
             open_notes_folder,

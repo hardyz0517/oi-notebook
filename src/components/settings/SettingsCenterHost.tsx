@@ -20,6 +20,8 @@ export interface SettingsCenterHostHandle {
   closePromptEditor: () => SettingsSection;
   openAiConfigManager: () => void;
   closeAiConfigManager: () => void;
+  openLuoguAccountManager: () => void;
+  closeLuoguAccountManager: () => void;
   close: () => void;
   resetUiAfterClose: () => void;
   isOpen: () => boolean;
@@ -197,6 +199,17 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       setHostView("main");
     }, [sectionFallback.ai, setActivePage, setHostView]);
 
+    const openLuoguAccountManager = useCallback(() => {
+      setHostView("luogu-account-manager");
+      ensureOpen();
+    }, [ensureOpen, setHostView]);
+
+    const closeLuoguAccountManager = useCallback(() => {
+      const nextPage = setActivePage(sectionFallback.luogu ?? "luogu-account");
+      setActiveSettingsTarget({ type: "page", page: nextPage });
+      setHostView("main");
+    }, [sectionFallback.luogu, setActivePage, setHostView]);
+
     const closeSettingsCenter = useCallback(() => {
       setHostOpen(false);
     }, [setHostOpen]);
@@ -227,6 +240,8 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       closePromptEditor,
       openAiConfigManager,
       closeAiConfigManager,
+      openLuoguAccountManager,
+      closeLuoguAccountManager,
       close: closeSettingsCenter,
       resetUiAfterClose,
       isOpen: () => openRef.current,
@@ -234,9 +249,11 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       getView: () => settingsViewRef.current,
     }), [
       closePromptEditor,
+      closeLuoguAccountManager,
       closeSettingsCenter,
       openAiConfigManager,
       closeAiConfigManager,
+      openLuoguAccountManager,
       openPageInternal,
       openPromptEditor,
       openSection,
