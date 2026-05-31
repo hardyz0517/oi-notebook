@@ -80,21 +80,77 @@ Required JSON schema:
   "body": string
 }
 
-Rules:
-- Only organize the insight, idea, trick, pitfall, or lesson explicitly written in the user's comment.
-- Do not invent a complete solution, proof, or missing algorithm details.
-- If the comment has no clear reusable value, return should_import=false.
+Task:
+Turn the candidate comment into a reusable OI learning note.
+The note is mainly for recording tricks, insights, pitfalls, implementation reminders, debugging lessons, or useful function / template / API usage patterns.
+
+This is NOT a full solution writer.
+The output should usually be a short technique card, insight card, pitfall card, or usage note.
+
+Import policy:
+- Return should_import=true if the comment contains a reusable trick, insight, pitfall, implementation detail, debugging lesson, function usage pattern, or technique that can help future training.
+- Return should_import=false if the comment is too vague, purely emotional, only says it passed/failed, only records meaningless progress, or has no reusable learning value.
+- Do not import overly broad remarks such as "注意 long long" unless the comment clearly explains where, why, or under what condition it matters.
+
+Content policy:
+- Only organize and clarify information supported by the candidate comment and the given problem metadata.
+- Do not invent missing algorithms, proofs, transitions, complete solutions, code details, or complexity analysis.
+- You may make light, reasonable generalizations directly implied by the comment, such as turning a specific pitfall into a future self-check point.
+- Focus on making clear:
+  1. what the trick / pitfall / insight is;
+  2. when it applies;
+  3. how it can be used;
+  4. what to check next time.
+- If the comment contains multiple independent points, separate them with Markdown level-2 headings (`##`).
+- If one point has internal subpoints, use level-3 headings (`###`).
+- If the comment contains both tricks and pitfalls, separate them clearly.
+- If the comment is about a function, template, library API, or coding pattern, explain its usage scenario and common mistakes.
+
+Body style:
 - body must be Markdown.
+- Use clear headings freely, such as:
+  - ## 技巧
+  - ## 启发
+  - ## 坑点
+  - ## 用法
+  - ## 自查
+- Do not force the same headings every time; choose headings that fit the comment.
+- Keep it concise and useful. Usually 80-300 Chinese characters.
+- If the comment contains several meaningful independent points, it may be longer, but avoid padding.
+- Do not write report-like language.
+- Do not say "本文介绍了", "本题主要考察", or similar filler.
+- Do not write a complete editorial unless the comment itself already contains enough details.
+
+Title:
+- title should be professional, concise, and clear.
+- If the comment contains only one main point, summarize that point as the title.
+- If the comment contains multiple independent points, use a title like "{{problem_title}} 的若干体会" or "{{problem_id}} 的若干技巧与坑点".
+- For techniques or algorithms with standard names, use their standard names, such as "点分树", "李超线段树", "倍增", "树状数组", "离散化", "换根 DP", "单调栈".
+- Avoid vague or overly casual titles.
+- Do not simply copy the problem title unless it is genuinely the best title.
+
+Tags:
 - tags must contain 2-5 concise items when should_import=true.
-- tags describe knowledge points, training use, source, stage, project, and related dimensions.
-- Prefer canonical taxonomy paths when they fit, and use path-style tags when confident.
-- Normalize common aliases to canonical paths, for example 拓展 KMP / exKMP -> 算法/字符串/Z 函数, and 李超树 -> 算法/数据结构/李超线段树.
-- If no canonical tag is clearly supported by the comment, use fewer conservative tags instead of inventing many labels.
+- Tags should include both:
+  1. algorithm / technique tags, such as "线段树", "点分树", "离散化", "DP";
+  2. type / purpose tags, such as "技巧", "坑点", "实现细节", "调试", "函数用法".
+- Prefer specific tags over broad tags.
+- Avoid overly broad tags such as "学习", "算法", "题解" unless no better tag exists.
+- Do not include duplicate or near-duplicate tags.
+
+Other fields:
+- difficulty should use Problem difficulty if provided; otherwise use an empty string.
+- summary should be one concise Chinese sentence describing the note value.
 - draft should default to true unless the comment clearly says it is publish-ready.
 
 Problem ID: {{problem_id}}
 Problem title: {{problem_title}}
+Problem difficulty: {{problem_difficulty}}
+Problem tags: {{problem_tags}}
 Submission ID: {{submission_id}}
+
+Problem statement excerpt, if available:
+{{problem_statement_excerpt}}
 
 Candidate comment:
 {{candidate_comment}}

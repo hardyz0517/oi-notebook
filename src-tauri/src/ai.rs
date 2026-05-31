@@ -3471,14 +3471,20 @@ pub(crate) fn organize_luogu_insight(
         &[
             ("problem_id", input.problem_id.trim()),
             ("problem_title", input.problem_title.trim()),
+            ("problem_difficulty", ""),
+            ("problem_tags", ""),
             ("submission_id", input.submission_id.trim()),
+            ("problem_statement_excerpt", ""),
             ("candidate_comment", input.candidate_comment.trim()),
         ],
     )?;
     let cache_context = json!({
         "problem_id": input.problem_id.trim(),
         "problem_title": input.problem_title.trim(),
+        "problem_difficulty": "",
+        "problem_tags": "",
         "submission_id": input.submission_id.trim(),
+        "problem_statement_excerpt": "",
         "candidate_comment": input.candidate_comment.trim(),
     });
     let cache_path = ai_cache_path(

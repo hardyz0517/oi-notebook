@@ -2121,7 +2121,10 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
       variables: [
         { name: "{{problem_id}}", meaning: "识别到的洛谷题号。", usage: "在模板中写入该变量，执行整理时会替换成题号。" },
         { name: "{{problem_title}}", meaning: "识别到的题目标题。", usage: "适合放在题目背景或输出格式要求里。" },
+        { name: "{{problem_difficulty}}", meaning: "洛谷题目难度。", usage: "可选变量；当前导入流程拿不到时为空。" },
+        { name: "{{problem_tags}}", meaning: "洛谷题目标签。", usage: "可选变量；当前导入流程拿不到时为空。" },
         { name: "{{submission_id}}", meaning: "当前洛谷提交记录 ID。", usage: "用于让 AI 知道这次整理来自哪条提交。" },
+        { name: "{{problem_statement_excerpt}}", meaning: "题面摘要。", usage: "可选变量；当前导入流程拿不到时为空。" },
         { name: "{{candidate_comment}}", meaning: "从提交备注或上下文里提取出的候选心得。", usage: "通常应保留在正文输入区，AI 会基于它判断是否值得导入。" },
       ],
       editable: true,
