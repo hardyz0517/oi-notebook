@@ -8,10 +8,12 @@ interface FileTreeProps {
   activeFilePath: string | null;
   activeDirectoryPath: string | null;
   rootCollapsed: boolean;
+  createFileRequest: { parentPath: string; requestId: number } | null;
   createFolderRequest: { parentPath: string; requestId: number } | null;
   onSelectFile: (path: string) => void;
   onSelectDirectory: (path: string) => void;
   onClearSelection: () => void;
+  onCreateFile: (parentPath: string, name: string) => Promise<string>;
   onCreateFolder: (parentPath: string, name: string) => Promise<string>;
   onDeleteItem: (path: string, isDirectory: boolean) => void;
   onRenameItem: (path: string, isDirectory: boolean) => void;
@@ -147,10 +149,12 @@ export default function FileTree({
   activeFilePath,
   activeDirectoryPath,
   rootCollapsed,
+  createFileRequest,
   createFolderRequest,
   onSelectFile,
   onSelectDirectory,
   onClearSelection,
+  onCreateFile,
   onCreateFolder,
   onDeleteItem,
   onRenameItem,
@@ -158,10 +162,14 @@ export default function FileTree({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     () => new Set(readStoredStringArray(COLLAPSED_FOLDERS_STORAGE_KEY)),
   );
+  const [inlineFileParent, setInlineFileParent] = useState<string | null>(null);
+  const [inlineFileName, setInlineFileName] = useState("");
+  const [inlineFileError, setInlineFileError] = useState<string | null>(null);
   const [inlineFolderParent, setInlineFolderParent] = useState<string | null>(null);
   const [inlineFolderName, setInlineFolderName] = useState("");
   const [inlineFolderError, setInlineFolderError] = useState<string | null>(null);
-  const inlineInputRef = useRef<HTMLInputElement | null>(null);
+  const inlineFileInputRef = useRef<HTMLInputElement | null>(null);
+  const inlineFolderInputRef = useRef<HTMLInputElement | null>(null);
   const tree = useMemo(() => buildTree(files), [files]);
 
   useEffect(() => {
@@ -172,8 +180,33 @@ export default function FileTree({
   }, [collapsedFolders]);
 
   useEffect(() => {
+    if (!createFileRequest) return;
+    const parentPath = createFileRequest.parentPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    setInlineFileParent(parentPath);
+    setInlineFileName("");
+    setInlineFileError(null);
+    setInlineFolderParent(null);
+    setInlineFolderName("");
+    setInlineFolderError(null);
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (parentPath) {
+        const parts = parentPath.split("/");
+        for (let index = 0; index < parts.length; index += 1) {
+          next.delete(parts.slice(0, index + 1).join("/"));
+        }
+      }
+      return next;
+    });
+    onSelectDirectory(parentPath);
+  }, [createFileRequest, onSelectDirectory]);
+
+  useEffect(() => {
     if (!createFolderRequest) return;
     const parentPath = createFolderRequest.parentPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    setInlineFileParent(null);
+    setInlineFileName("");
+    setInlineFileError(null);
     setInlineFolderParent(parentPath);
     setInlineFolderName("");
     setInlineFolderError(null);
@@ -195,10 +228,18 @@ export default function FileTree({
   }, [createFolderRequest, onSelectDirectory]);
 
   useEffect(() => {
+    if (inlineFileParent === null) return;
+    window.setTimeout(() => {
+      inlineFileInputRef.current?.focus();
+      inlineFileInputRef.current?.select();
+    }, 0);
+  }, [inlineFileParent]);
+
+  useEffect(() => {
     if (inlineFolderParent === null) return;
     window.setTimeout(() => {
-      inlineInputRef.current?.focus();
-      inlineInputRef.current?.select();
+      inlineFolderInputRef.current?.focus();
+      inlineFolderInputRef.current?.select();
     }, 0);
   }, [inlineFolderParent]);
 
@@ -212,6 +253,30 @@ export default function FileTree({
       }
       return next;
     });
+  };
+
+  const cancelInlineFile = () => {
+    setInlineFileParent(null);
+    setInlineFileName("");
+    setInlineFileError(null);
+  };
+
+  const commitInlineFile = async () => {
+    if (inlineFileParent === null) return;
+    const name = inlineFileName.trim();
+    if (!name) {
+      setInlineFileError("File name is required");
+      return;
+    }
+
+    try {
+      await onCreateFile(inlineFileParent, name);
+      setInlineFileParent(null);
+      setInlineFileName("");
+      setInlineFileError(null);
+    } catch (error) {
+      setInlineFileError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const cancelInlineFolder = () => {
@@ -239,6 +304,53 @@ export default function FileTree({
     }
   };
 
+  const renderInlineFileInput = (parentPath: string, depth: number) => {
+    if (inlineFileParent !== parentPath) return null;
+    return (
+      <li key={`inline-file:${parentPath || "root"}`} className="onb-tree-node">
+        <div
+          className="onb-tree-row onb-tree-inline-row"
+          style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
+        >
+          <span className="onb-tree-twistie" aria-hidden="true" />
+          <span className="onb-tree-icon" aria-hidden="true">
+            <FileText size={16} strokeWidth={1.7} />
+          </span>
+          <input
+            ref={inlineFileInputRef}
+            value={inlineFileName}
+            onChange={(event) => {
+              setInlineFileName(event.target.value);
+              setInlineFileError(null);
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void commitInlineFile();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelInlineFile();
+              }
+            }}
+            onBlur={cancelInlineFile}
+            className="onb-tree-inline-input"
+            placeholder="New file"
+          />
+        </div>
+        {inlineFileError && (
+          <p
+            className="onb-tree-error"
+            style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET + depth * TREE_DEPTH_INDENT}px` }}
+          >
+            {inlineFileError}
+          </p>
+        )}
+      </li>
+    );
+  };
+
   const renderInlineFolderInput = (parentPath: string, depth: number) => {
     if (inlineFolderParent !== parentPath) return null;
     return (
@@ -252,7 +364,7 @@ export default function FileTree({
             <Folder size={16} strokeWidth={1.8} />
           </span>
           <input
-            ref={inlineInputRef}
+            ref={inlineFolderInputRef}
             value={inlineFolderName}
             onChange={(event) => {
               setInlineFolderName(event.target.value);
@@ -300,6 +412,8 @@ export default function FileTree({
             style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
             data-active={isActive ? "true" : "false"}
             data-descendant-active={hasActive ? "true" : "false"}
+            data-app-context-menu="file-tree-folder"
+            data-app-context-path={node.path}
           >
             <button
               type="button"
@@ -354,11 +468,14 @@ export default function FileTree({
           </div>
           {isCollapsed ? null : (
             <ul className="w-full space-y-px">
+              {renderInlineFileInput(node.path, depth + 1)}
               {renderInlineFolderInput(node.path, depth + 1)}
-              {node.children.length === 0 && inlineFolderParent !== node.path ? (
+              {node.children.length === 0 && inlineFileParent !== node.path && inlineFolderParent !== node.path ? (
                 <li
                   className="onb-tree-empty"
                   style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET + (depth + 1) * TREE_DEPTH_INDENT}px` }}
+                  data-app-context-menu="file-tree-folder"
+                  data-app-context-path={node.path}
                 >
                   空文件夹
                 </li>
@@ -376,6 +493,8 @@ export default function FileTree({
           className="onb-tree-row"
           style={{ paddingLeft: `${TREE_ROW_LEFT + depth * TREE_DEPTH_INDENT}px` }}
           data-active={isActive ? "true" : "false"}
+          data-app-context-menu="file-tree-file"
+          data-app-context-path={node.path}
         >
           <button
             type="button"
@@ -425,6 +544,7 @@ export default function FileTree({
   return (
     <div
       className="onb-tree-scroll h-full min-h-0 w-full overflow-y-auto overflow-x-hidden"
+      data-app-context-menu="file-tree-blank"
       onMouseDown={(event) => {
         const target = event.target as HTMLElement;
         if (target.closest(".onb-tree-row, .onb-tree-actions, input")) return;
@@ -434,8 +554,9 @@ export default function FileTree({
       <div className="onb-tree w-full px-1 py-1">
         {rootCollapsed ? null : (
           <ul className="w-full space-y-px">
+            {renderInlineFileInput("", 0)}
             {renderInlineFolderInput("", 0)}
-            {tree.length === 0 && inlineFolderParent !== "" ? (
+            {tree.length === 0 && inlineFileParent !== "" && inlineFolderParent !== "" ? (
               <li
                 className="onb-tree-empty"
                 style={{ paddingLeft: `${TREE_ROW_LEFT + TREE_LABEL_LEFT_OFFSET}px` }}

@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode, RefObject, PointerEvent as ReactPointerEvent } from "react";
+import { useRef, type CSSProperties, type ReactNode, type RefObject, type PointerEvent as ReactPointerEvent, type UIEvent } from "react";
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -43,6 +43,7 @@ export interface SettingsCenterShellProps {
   onBeginResize: BeginSettingsCenterResize;
   onToggleGroup: (groupId: string) => void;
   onOpenSettingsSection: (target: SettingsSection | SettingsCategory) => void;
+  onActiveSettingsSectionChange: (section: SettingsSection) => void;
 }
 
 export default function SettingsCenterShell({
@@ -72,12 +73,38 @@ export default function SettingsCenterShell({
   onBeginResize,
   onToggleGroup,
   onOpenSettingsSection,
+  onActiveSettingsSectionChange,
 }: SettingsCenterShellProps) {
+  const scrollSpyEnabledRef = useRef(false);
+  if (activeSettingsTarget.type === "category") scrollSpyEnabledRef.current = false;
   if (!open) return null;
   const isWorkspaceView =
     settingsView === "prompt-editor" ||
     settingsView === "ai-config-manager" ||
     settingsView === "luogu-account-manager";
+  const enableScrollSpy = () => {
+    scrollSpyEnabledRef.current = true;
+  };
+  const handleSettingsScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (!scrollSpyEnabledRef.current) return;
+    const container = event.currentTarget;
+    const sections = Array.from(container.querySelectorAll<HTMLElement>("[data-settings-section]"));
+    if (sections.length === 0) return;
+    const headerHeight = container.querySelector<HTMLElement>("[data-settings-scroll-header]")?.offsetHeight ?? 0;
+    const containerTop = container.getBoundingClientRect().top + headerHeight;
+    const activeSection = container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+      ? sections[sections.length - 1]
+      : sections.reduce((closest, section) => (
+          Math.abs(section.getBoundingClientRect().top - containerTop) <
+          Math.abs(closest.getBoundingClientRect().top - containerTop)
+            ? section
+            : closest
+        ));
+    const sectionId = activeSection.dataset.settingsSection as SettingsSection | undefined;
+    if (sectionId && (activeSettingsTarget.type !== "page" || activeSettingsPageKey !== sectionId)) {
+      onActiveSettingsSectionChange(sectionId);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -126,7 +153,6 @@ export default function SettingsCenterShell({
               ) : (
                 <>
                   <DialogTitle className="text-base">设置中心</DialogTitle>
-                  <div className="text-xs leading-5 text-muted-foreground">左侧选择设置页，右侧只显示当前页。</div>
                 </>
               )}
             </div>
@@ -165,7 +191,10 @@ export default function SettingsCenterShell({
                           <button
                             type="button"
                             className="min-w-0 flex-1 truncate text-left"
-                            onClick={() => onOpenSettingsSection(group.id)}
+                            onClick={() => {
+                              scrollSpyEnabledRef.current = false;
+                              onOpenSettingsSection(group.id);
+                            }}
                           >
                             {group.label}
                           </button>
@@ -184,7 +213,10 @@ export default function SettingsCenterShell({
                                       ? "bg-accent text-accent-foreground"
                                       : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                                   )}
-                                  onClick={() => onOpenSettingsSection(child.id)}
+                                  onClick={() => {
+                                    enableScrollSpy();
+                                    onOpenSettingsSection(child.id);
+                                  }}
                                 >
                                   {child.label}
                                 </button>
@@ -212,10 +244,17 @@ export default function SettingsCenterShell({
             ) : settingsView === "luogu-account-manager" && renderLuoguAccountManager ? (
               <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-background">{renderLuoguAccountManager()}</div>
             ) : (
-              <div ref={contentRef} className="h-full min-h-0 overflow-auto" data-settings-scroll-container="true">
-                <div className="sticky top-0 z-10 border-b border-border/80 bg-background/95 px-6 py-2 backdrop-blur">
+              <div
+                ref={contentRef}
+                className="h-full min-h-0 overflow-auto"
+                data-settings-scroll-container="true"
+                onPointerDown={enableScrollSpy}
+                onTouchMove={enableScrollSpy}
+                onWheel={enableScrollSpy}
+                onScroll={handleSettingsScroll}
+              >
+                <div className="sticky top-0 z-10 border-b border-border/80 bg-background/95 px-6 py-2 backdrop-blur" data-settings-scroll-header>
                   <div className="text-sm font-semibold text-foreground">{activeSettingsLabel.group}</div>
-                  {activeSettingsLabel.section && <div className="text-xs text-muted-foreground">{activeSettingsLabel.section}</div>}
                 </div>
                 <div className="grid min-w-0 gap-0 px-0 pb-2">{renderActivePage(activeSettingsPageKey, activeSettingsTarget)}</div>
               </div>

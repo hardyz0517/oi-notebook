@@ -64,7 +64,7 @@ interface AiConfigManagerProps {
 
 const getProviderName = (provider: AiProvider | null | undefined) => provider?.name.trim() || provider?.id || "";
 
-const getModelCountLabel = (count: number) => `${count} ${count === 1 ? "model" : "models"}`;
+const getModelCountLabel = (count: number) => `${count} 个模型`;
 
 const createBlankProviderDraft = (): CreateProviderDraft => ({
   presetId: "custom",
@@ -81,10 +81,10 @@ const CREATE_PRESETS: Array<{ id: CreatePresetId; label: string; draft: Omit<Cre
   { id: "custom", label: "自定义配置", draft: { name: "", note: "", website: "", baseUrl: "", defaultModel: "" } },
   { id: "openai", label: "OpenAI Official", draft: { name: "OpenAI Official", note: "OpenAI 官方 API", website: "https://platform.openai.com", baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o" } },
   { id: "deepseek", label: "DeepSeek", draft: { name: "DeepSeek", note: "DeepSeek 官方 API", website: "https://platform.deepseek.com", baseUrl: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash" } },
-  { id: "soyo", label: "Soyo", draft: { name: "Soyo", note: "OpenAI-compatible API", website: "https://api.soyo.ai", baseUrl: "https://api.soyo.ai/v1", defaultModel: "" } },
+  { id: "soyo", label: "Soyo", draft: { name: "Soyo", note: "兼容 OpenAI 的 API", website: "https://api.soyo.ai", baseUrl: "https://api.soyo.ai/v1", defaultModel: "" } },
   { id: "siliconflow", label: "硅基流动", draft: { name: "硅基流动", note: "SiliconFlow API", website: "https://siliconflow.cn", baseUrl: "https://api.siliconflow.cn/v1", defaultModel: "deepseek-ai/DeepSeek-V3" } },
   { id: "openrouter", label: "OpenRouter", draft: { name: "OpenRouter", note: "OpenRouter API", website: "https://openrouter.ai", baseUrl: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-4o" } },
-  { id: "azure", label: "Azure OpenAI", draft: { name: "Azure OpenAI", note: "Azure OpenAI endpoint", website: "https://azure.microsoft.com/products/ai-services/openai-service", baseUrl: "https://<resource-name>.openai.azure.com/openai/v1", defaultModel: "" } },
+  { id: "azure", label: "Azure OpenAI", draft: { name: "Azure OpenAI", note: "Azure OpenAI API 地址", website: "https://azure.microsoft.com/products/ai-services/openai-service", baseUrl: "https://<resource-name>.openai.azure.com/openai/v1", defaultModel: "" } },
 ];
 
 function FieldLabel({ label, hint }: { label: string; hint?: string }) {
@@ -249,7 +249,7 @@ export default function AiConfigManager({
 
   const testCreateProvider = async () => {
     if (!createDraft.baseUrl.trim()) {
-      setCreateFeedback({ tone: "error", message: "请先填写 API 请求地址。" });
+      setCreateFeedback({ tone: "error", message: "请先填写 API 地址。" });
       return;
     }
     if (!createDraft.apiKey.trim()) {
@@ -268,7 +268,7 @@ export default function AiConfigManager({
 
   const syncCreateProviderModels = async () => {
     if (!createDraft.baseUrl.trim()) {
-      setCreateFeedback({ tone: "error", message: "请先填写 API 请求地址。" });
+      setCreateFeedback({ tone: "error", message: "请先填写 API 地址。" });
       return;
     }
     if (!createDraft.apiKey.trim()) {
@@ -340,7 +340,7 @@ export default function AiConfigManager({
         <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <div className="text-base font-semibold text-foreground">AI 供应商</div>
-            <div className="mt-1 text-xs leading-5 text-muted-foreground">管理 NoteX 使用的模型与 API 配置。</div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">管理 NoteX 使用的模型、供应商和 API 配置。</div>
           </div>
           <Button type="button" size="sm" onClick={onOpenManager} disabled={isLoading}>
             <Server className="h-3.5 w-3.5" />
@@ -357,7 +357,7 @@ export default function AiConfigManager({
         ) : (
           <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
             <div className="font-medium text-foreground">还没有 AI 供应商</div>
-            <div>添加 OpenAI-compatible API 配置后即可在 NoteX 中使用。</div>
+            <div>添加兼容 OpenAI 的 API 配置后即可在 NoteX 中使用。</div>
           </div>
         )}
       </div>
@@ -393,7 +393,7 @@ export default function AiConfigManager({
                     <Server className="h-5 w-5" />
                   </div>
                   <div className="text-base font-semibold text-foreground">还没有 AI 供应商</div>
-                  <div className="text-sm leading-6 text-muted-foreground">添加 OpenAI-compatible API 配置后即可在 NoteX 中使用。</div>
+                  <div className="text-sm leading-6 text-muted-foreground">添加兼容 OpenAI 的 API 配置后即可在 NoteX 中使用。</div>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     <Button type="button" size="sm" onClick={() => openCreatePage()}>
                       <Plus className="h-3.5 w-3.5" />
@@ -549,13 +549,13 @@ export default function AiConfigManager({
                 </div>
 
                 <div className="grid gap-1.5">
-                  <FieldLabel label="API Key" hint="密钥保存方式沿用现有配置逻辑。" />
+                  <FieldLabel label="API Key" hint="API Key 保存在本机配置中。" />
                   <Input value={createDraft.apiKey} type="password" placeholder="sk-..." onChange={(event) => updateCreateDraft({ apiKey: event.target.value })} />
                 </div>
 
                 <div className="grid gap-1.5">
                   <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                    <FieldLabel label="API 请求地址" hint="OpenAI-compatible endpoint，例如 https://api.example.com/v1。" />
+                    <FieldLabel label="API 地址" hint="兼容 OpenAI 的 API 地址，例如 https://api.example.com/v1。" />
                     <Button type="button" variant="outline" size="sm" onClick={() => void testCreateProvider()} disabled={createBusyAction !== null}>
                       {createBusyAction === "test" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
                       测试连接
@@ -722,11 +722,11 @@ export default function AiConfigManager({
                 <Section title="连接配置">
                   <div className="grid w-full min-w-0 gap-3">
                     <div className="grid gap-1.5">
-                      <FieldLabel label="Base URL" hint="OpenAI-compatible endpoint，例如 https://api.example.com/v1。" />
+                      <FieldLabel label="API 地址" hint="兼容 OpenAI 的 API 地址，例如 https://api.example.com/v1。" />
                       <Input value={activeProvider.base_url} placeholder="https://api.example.com/v1" onChange={(event) => onUpdateProvider(activeProvider.id, { base_url: event.target.value, updated_at: Date.now() })} />
                     </div>
                     <div className="grid gap-1.5">
-                      <FieldLabel label="API Key" hint="密钥只在输入框内显示；保存方式沿用现有配置逻辑。" />
+                      <FieldLabel label="API Key" hint="密钥只在输入框内显示；API Key 保存在本机配置中。" />
                       <Input value={activeProvider.api_key} type="password" placeholder="sk-..." onChange={(event) => onUpdateProvider(activeProvider.id, { api_key: event.target.value, updated_at: Date.now() })} />
                     </div>
                   </div>
@@ -744,7 +744,7 @@ export default function AiConfigManager({
                       disabled={isBusy}
                     >
                       {activeProviderBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      同步模型
+                      获取模型列表
                     </Button>
                   }
                 >

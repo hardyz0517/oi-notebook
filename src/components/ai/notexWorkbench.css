@@ -1587,27 +1587,43 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
 
 .notex-command-item[aria-disabled="true"],
 .notex-command-item:disabled {
-  opacity: 0.45 !important;
+  cursor: default;
+  opacity: 1 !important;
 }
 
+.notex-command-item[aria-disabled="true"]:hover,
+.notex-command-item[aria-disabled="true"][data-active="true"],
+.notex-command-item:disabled:hover,
+.notex-command-item:disabled[data-active="true"] {
+  background: color-mix(in oklch, var(--notex-command-hover) 78%, transparent) !important;
+}
+
+.notex-command-item[aria-disabled="true"] .notex-command-name,
 .notex-command-item[aria-disabled="true"]:hover .notex-command-name,
 .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-name,
+.notex-command-item:disabled .notex-command-name,
 .notex-command-item:disabled:hover .notex-command-name,
 .notex-command-item:disabled[data-active="true"] .notex-command-name {
   color: var(--notex-text-muted) !important;
 }
 
+.notex-command-item[aria-disabled="true"] .notex-command-description,
 .notex-command-item[aria-disabled="true"]:hover .notex-command-description,
 .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-description,
+.notex-command-item:disabled .notex-command-description,
 .notex-command-item:disabled:hover .notex-command-description,
 .notex-command-item:disabled[data-active="true"] .notex-command-description {
   color: var(--notex-text-subtle) !important;
 }
 
+.notex-command-item[aria-disabled="true"] .notex-command-icon,
+.notex-command-item[aria-disabled="true"] .notex-command-icon svg,
 .notex-command-item[aria-disabled="true"]:hover .notex-command-icon,
 .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon,
 .notex-command-item[aria-disabled="true"]:hover .notex-command-icon svg,
 .notex-command-item[aria-disabled="true"][data-active="true"] .notex-command-icon svg,
+.notex-command-item:disabled .notex-command-icon,
+.notex-command-item:disabled .notex-command-icon svg,
 .notex-command-item:disabled:hover .notex-command-icon,
 .notex-command-item:disabled[data-active="true"] .notex-command-icon,
 .notex-command-item:disabled:hover .notex-command-icon svg,

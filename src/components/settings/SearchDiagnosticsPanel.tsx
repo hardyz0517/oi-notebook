@@ -54,22 +54,22 @@ const STATUS_LABELS: Record<DiagnosticStatus, string> = {
 const STATUS_ORDER: DiagnosticStatus[] = ["pass", "warn", "fail", "skipped", "running"];
 
 const emptyCategories = (): DiagnosticCategory[] => [
-  { id: "decision", title: "Search Mode / 搜索模式", items: [] },
+  { id: "decision", title: "搜索模式（Search Mode）", items: [] },
   { id: "query-planner", title: "AI 搜索规划", items: [] },
-  { id: "direct-discovery", title: "Direct Discovery / 直接发现", items: [] },
-  { id: "url-reading", title: "URL Reader / 网页读取", items: [] },
-  { id: "provider-config", title: "Provider 配置", items: [] },
+  { id: "direct-discovery", title: "直接发现（Direct Discovery）", items: [] },
+  { id: "url-reading", title: "网页读取（URL Reader）", items: [] },
+  { id: "provider-config", title: "搜索服务配置（Provider）", items: [] },
   {
     id: "provider-test",
-    title: "当前 Provider 测试",
-    items: [{ id: "provider-test-skipped", title: "在线连通性测试", status: "skipped", summary: "不会自动发起公网请求；点击“测试当前 Provider”后才运行。" }],
+    title: "当前搜索服务测试（Provider）",
+    items: [{ id: "provider-test-skipped", title: "在线连通性测试", status: "skipped", summary: "不会自动发起公网请求；点击“测试当前搜索服务”后才运行。" }],
   },
-  { id: "web-cache", title: "Web Cache / 网页缓存", items: [] },
-  { id: "local-index", title: "Local Index / 本地索引", items: [] },
-  { id: "local-search", title: "Local Search / 本地检索", items: [] },
-  { id: "notex-self-check", title: "Self Check / 自检", items: [] },
+  { id: "web-cache", title: "网页缓存（Web Cache）", items: [] },
+  { id: "local-index", title: "本地索引（Local Index）", items: [] },
+  { id: "local-search", title: "本地检索（Local Search）", items: [] },
+  { id: "notex-self-check", title: "自检（Self Check）", items: [] },
   { id: "citations", title: "引用渲染", items: [] },
-  { id: "prompt-contract", title: "Prompt 合约", items: [] },
+  { id: "prompt-contract", title: "提示词合约（Prompt Contract）", items: [] },
 ];
 
 const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> =>
@@ -112,15 +112,15 @@ const safeDomain = (value: string): string => {
 const classifyError = (error: unknown): string => {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
-  if (lower.includes("timeout") || message.includes("超时")) return "搜索 Provider 测试超时。";
+  if (lower.includes("timeout") || message.includes("超时")) return "搜索服务测试超时。";
   if (lower.includes("captcha") || lower.includes("verify") || lower.includes("blocked") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) return "Bing 公开搜索遇到验证页或访问限制，可以稍后重试或改用 Bocha / Brave。";
   if (lower.includes("rate_limited") || lower.includes("errorkind=rate_limited")) return "Bing 公开搜索被限流，可以稍后重试或改用 Bocha / Brave。";
   if (lower.includes("parse_failed")) return "Bing 公开搜索结果结构解析失败，可能是页面结构变化。";
   if (lower.includes("no_results")) return "Bing 公开搜索没有返回可用自然结果。";
   if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "Bing 公开搜索网络连接失败，可以稍后重试或改用 Bocha / Brave。";
-  if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) return "Provider 返回 429 或限流，可以稍后重试。";
-  if (message.includes("401") || message.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) return "Provider 返回 401/403，API Key 或权限可能有问题。";
-  if (lower.includes("json") || message.includes("JSON")) return "Provider 返回格式不符合预期，请检查 Endpoint 是否为 API 地址。";
+  if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) return "搜索服务返回 429 或限流，可以稍后重试。";
+  if (message.includes("401") || message.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) return "搜索服务返回 401/403，API Key 或权限可能有问题。";
+  if (lower.includes("json") || message.includes("JSON")) return "搜索服务返回格式不符合预期，请检查 API 地址。";
   if (lower.includes("dns") || lower.includes("connect") || lower.includes("tls") || lower.includes("network") || message.includes("网络")) return "网络、DNS、连接或 TLS 可能不可用。";
   return truncate(message, 220);
 };
@@ -214,7 +214,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
     (aiNewsDecision.topicKeywords?.length ?? 0) > 0;
   items.push({
     id: "direct-request-fields-clean",
-    title: "Direct Discovery request fields",
+    title: "直接发现请求字段（Direct Discovery）",
     status: requestCarriesDirectFields ? "pass" : "fail",
     summary: `intent=${aiNewsDecision.intent}; freshness=${ruleFreshness}; query=${queryPreview(aiNewsDecision)}; topicKeywords=${aiNewsDecision.topicKeywords?.join(", ") || "none"}`,
     detail: "When Direct Discovery is scheduled for news freshness, the Rust request must receive non-empty intent/freshness/query/topic keywords from the rule fallback.",
@@ -223,14 +223,14 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   const unwrapped = unwrapOfflineBingNewsApiclickUrl(rawApiclick);
   items.push({
     id: "bing-news-apiclick-unwrap-clean",
-    title: "Bing news apiclick unwrap",
+    title: "Bing 新闻链接还原（apiclick）",
     status: unwrapped?.startsWith("https://www.cnet.com/") ? "pass" : "fail",
     summary: `unwrapped=${unwrapped ?? "none"}`,
     detail: "Bing RSS apiclick links should be unwrapped before URL Reader and Evidence Gate classify the source host.",
   });
   items.push({
     id: "fetched-content-status-clean",
-    title: "Fetched excerpt contentStatus mapping",
+    title: "已读取摘要状态映射（contentStatus）",
     status: "pass",
     summary: "URL Reader fetched result now clears candidate not_fetched status before Evidence Gate recomputes fetched/partial.",
     detail: "A fetched excerpt must not keep candidate contentStatus=not_fetched, otherwise Evidence Gate reports search-summary-only incorrectly.",
@@ -239,7 +239,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   const translationDecision = buildSearchDecision("\u6700\u8fd1\u8fd9\u4e2a\u8bcd\u82f1\u8bed\u600e\u4e48\u8bf4\uff1f");
   items.push({
     id: "news-query-diversification-clean",
-    title: "AI news query diversification",
+    title: "AI 新闻查询扩展",
     status: diversifiedQueries.length >= 3 && diversifiedQueries.length <= 5 && !translationDecision.newsIntent ? "pass" : "fail",
     summary: `aiNewsQueries=${diversifiedQueries.join(" | ") || "none"}; translationNewsIntent=${translationDecision.newsIntent === true}`,
     detail: "Broad AI news should use a limited 3-5 query set across directions, while word-translation questions must not trigger news diversification.",
@@ -254,7 +254,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   ].join(";");
   items.push({
     id: "direct-report-fields-not-empty-clean",
-    title: "Direct report fields are not empty",
+    title: "直接发现报告字段非空（Direct Discovery）",
     status: !/directDiscoveryIntent=unknown|directDiscoveryFreshness=none|directDiscoveryQuery=none|directDiscoverySourcesTried=0/.test(directReportDebug) ? "pass" : "fail",
     summary: directReportDebug,
     detail: "Developer Mode must render the backend Direct Discovery report, not Search Preparation's similarly named attempted flag.",
@@ -277,7 +277,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   ].join(";");
   items.push({
     id: "news-source-registry-router-clean",
-    title: "News Source Registry router diagnostics",
+    title: "新闻来源注册表路由诊断（Source Registry）",
     status: /newsRegistryEnabled=yes/.test(registryDebug) &&
       /sourceRouterTriggered=yes/.test(registryDebug) &&
       /selectedSources=.*openai-news/.test(registryDebug) &&
@@ -287,14 +287,14 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   });
   items.push({
     id: "news-roundup-mode-clean",
-    title: "News roundup synthesis mode",
+    title: "新闻汇总生成模式（Roundup）",
     status: "pass",
     summary: "usableEvidence>=3 => news roundup prompt mode; rejected candidates remain excluded from prompt.",
     detail: "The synthesis contract now asks for a Chinese roundup with event grouping when at least three usable news sources are injected.",
   });
   items.push({
     id: "non-news-queries-unaffected-clean",
-    title: "Non-news routes unaffected",
+    title: "非新闻路径不受影响",
     status: !translationDecision.newsIntent && buildSearchDecision("React useEffect \u662f\u4ec0\u4e48\uff1f").vertical === "docs" && buildSearchDecision("\u70b9\u5206\u6811\u5e38\u89c1\u5b9e\u73b0\u5751").vertical !== "news" ? "pass" : "fail",
     summary: `translationNews=${translationDecision.newsIntent === true}; reactVertical=${buildSearchDecision("React useEffect \u662f\u4ec0\u4e48\uff1f").vertical}; oiVertical=${buildSearchDecision("\u70b9\u5206\u6811\u5e38\u89c1\u5b9e\u73b0\u5751").vertical}`,
     detail: "Docs/OI/translation cases should not enter the news roundup route.",
@@ -310,7 +310,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   ].filter(Boolean).length;
   items.push({
     id: "broad-ai-news-query-directions-clean",
-    title: "Broad AI news query directions",
+    title: "宽泛 AI 新闻查询方向",
     status: broadStrategy.queries.length >= 3 && broadStrategy.queries.length <= 5 && queryDirections >= 4 ? "pass" : "fail",
     summary: `count=${broadStrategy.queries.length}; directions=${queryDirections}; queries=${broadStrategy.queries.join(" | ")}`,
     detail: "Broad AI news should diversify across model, agent, funding, regulation, and infrastructure without exceeding the no-key budget.",
@@ -319,7 +319,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   const googleClusterB = classifyNewsEventCluster({ title: "Google adds Gmail Live and Genie at I/O", url: "https://example.com/google-gmail-genie", snippet: "Google I/O product details from the same launch event." });
   items.push({
     id: "google-io-cluster-clean",
-    title: "Google I/O titles share one cluster",
+    title: "Google I/O 标题归入同一聚类",
     status: googleClusterA.eventCluster === googleClusterB.eventCluster ? "pass" : "fail",
     summary: `${googleClusterA.eventCluster} / ${googleClusterB.eventCluster}`,
     detail: "Gemini, Gmail, Workspace, Genie, and Google I/O details should merge into one event cluster instead of becoming separate main news items.",
@@ -338,7 +338,7 @@ const buildDirectDiscoveryOfflineDiagnostics = (): DiagnosticItem[] => {
   const droppedDuplicates = rankedSample.filter((source) => source.droppedAsDuplicateCluster).length;
   items.push({
     id: "event-cluster-selection-clean",
-    title: "Event cluster source selection",
+    title: "事件聚类来源选择",
     status: selectedClusters.size >= 3 && googleSelected <= 2 && droppedDuplicates >= 1 ? "pass" : "fail",
     summary: `selectedClusters=${Array.from(selectedClusters).join(",")}; googleSelected=${googleSelected}; droppedDuplicates=${droppedDuplicates}`,
     detail: "Roundup source selection should prefer distinct clusters and cap repeated Google I/O evidence.",
@@ -879,7 +879,7 @@ const buildUrlReadingDiagnostics = (config: WebSearchConfig | null): DiagnosticI
     },
     {
       id: "url-no-provider",
-      title: "显式 URL 不依赖 Provider",
+      title: "显式 URL 不依赖搜索服务（Provider）",
       status: noProviderPlan.shouldRead && noProviderPlan.sources.length === 1 ? "pass" : "fail",
       summary: hasProviderKey
         ? "Provider key present; direct URL reading remains independent."
@@ -894,26 +894,26 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
   if (rawProvider?.trim().toLocaleLowerCase() === "searxng") {
     items.push({
       id: "provider-legacy-searxng",
-      title: "历史 Provider",
+      title: "历史搜索服务（Provider）",
       status: "warn",
-      summary: config.bochaApiKey ? "历史 Provider 已移除；当前会按 Bocha 归一。" : config.braveApiKey ? "历史 Provider 已移除；当前会按 Brave 归一。" : "历史 Provider 已移除；未配置 API Key 时会按 Bing 公开搜索归一。",
+      summary: config.bochaApiKey ? "历史搜索服务已移除；当前会按 Bocha 归一。" : config.braveApiKey ? "历史搜索服务已移除；当前会按 Brave 归一。" : "历史搜索服务已移除；未配置 API Key 时会按 Bing 公开搜索归一。",
     });
   }
   items.push({
     id: "provider-selected",
-    title: "当前 Provider",
+    title: "当前搜索服务（Provider）",
     status: config.provider === "bing" || config.provider === "bocha" || config.provider === "brave" ? "pass" : "fail",
     summary: `provider=${config.provider}`,
   });
   items.push({
     id: "provider-list",
-    title: "Provider 列表",
+    title: "搜索服务列表（Provider）",
     status: "pass",
     summary: "包含 bing / bocha / brave；Bing 不需要 API Key。",
   });
   items.push({
     id: "provider-dispatch",
-    title: "Dispatch",
+    title: "分发（Dispatch）",
     status: "pass",
     summary: config.provider === "bing"
       ? "provider=bing -> Bing public search branch"
@@ -923,7 +923,7 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
   });
   items.push({
     id: "provider-source-card",
-    title: "Source card provider",
+    title: "来源卡片搜索服务（Provider）",
     status: "pass",
     summary: config.provider === "bing"
       ? "Bing search results should show Provider: Bing in Developer Mode."
@@ -939,7 +939,7 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
     id: "provider-consent",
     title: "公开网页授权",
     status: config.publicSearchConsent ? "pass" : "warn",
-    summary: config.publicSearchConsent ? "publicSearchConsent=enabled" : "publicSearchConsent=disabled；在线 Provider 测试前应明确知道会发起外部请求。",
+    summary: config.publicSearchConsent ? "publicSearchConsent=enabled" : "publicSearchConsent=disabled；在线搜索服务测试前应明确知道会发起外部请求。",
   });
   items.push({
     id: "provider-keys",
@@ -948,12 +948,12 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
     summary: config.provider === "bing"
       ? "Bing 公开搜索无需 API Key。"
       : !config.bochaApiKey && !config.braveApiKey
-      ? "Bocha / Brave 未配置 API Key；Bing 公开搜索仍可作为无 Key Provider。"
+      ? "Bocha / Brave 未配置 API Key；Bing 公开搜索仍可作为无 Key 搜索服务。"
       : `Bocha=${config.bochaApiKey ? "present" : "missing"}; Brave=${config.braveApiKey ? "present" : "missing"}`,
   });
   items.push({
     id: "provider-endpoints",
-    title: "Endpoint 状态",
+    title: "API 地址状态（Endpoint）",
     status: "pass",
     summary: `Bing=built-in; Bocha=${config.bochaEndpoint ? safeDomain(config.bochaEndpoint) : "default"}; Brave=built-in`,
   });
@@ -962,7 +962,7 @@ const buildProviderConfigDiagnostics = (config: WebSearchConfig, rawProvider?: s
 
 const buildWebCacheItem = (status: WebCacheStatusResult): DiagnosticItem => ({
   id: "web-cache-status",
-  title: "Web cache 目录",
+  title: "网页缓存目录（Web Cache）",
   status: !status.exists ? "warn" : status.readable && status.writable ? "pass" : status.readable ? "warn" : "fail",
   summary: status.exists
     ? `${status.pathLabel} search=${status.searchCacheCount}, excerpts=${status.excerptCacheCount}, size=${status.approxSizeBytes} bytes`
@@ -1016,7 +1016,7 @@ const buildCitationDiagnostics = (): DiagnosticItem[] => {
   const cases = [
     {
       id: "standard",
-      title: "标准 token 识别",
+      title: "标准标记识别（Token）",
       text: "测试 [[S1]] 和 [[N1]]",
       validIds: ["S1", "N1"],
       check: (ids: string[], raw: ReturnType<typeof findCitationMarkerMatches>) => ids.includes("S1") && ids.includes("N1") && raw.length === 2,
@@ -1094,10 +1094,10 @@ const buildPromptContractItems = async (): Promise<DiagnosticItem[]> => {
   ];
   return [durationItem(startedAt, {
     id: "prompt-contract-static",
-    title: "Prompt citation contract 静态检查",
+    title: "提示词引用合约静态检查（Prompt Contract）",
     status: checks.every(Boolean) ? "pass" : checks.some(Boolean) ? "warn" : "fail",
     summary: `webIds=${status.webAvailableIds}; webMarker=${status.webMarkerInstruction}; localIds=${status.localAvailableIds}; localMarker=${status.localMarkerInstruction}; bareIdWarning=${status.bareIdWarning}`,
-    detail: "只检查关键约束字符串是否仍存在，不返回 Prompt 全文。",
+    detail: "只检查关键约束字符串是否仍存在，不返回提示词全文。",
   })];
 };
 
@@ -1209,7 +1209,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       if (current.some((category) => category.id === categoryId)) {
         return current.map((category) => category.id === categoryId ? { ...category, items } : category);
       }
-      return [...current, { id: categoryId, title: categoryId === "direct-discovery" ? "No-Key Direct Discovery" : categoryId, items }];
+      return [...current, { id: categoryId, title: categoryId === "direct-discovery" ? "无 Key 直接发现（Direct Discovery）" : categoryId, items }];
     });
   };
 
@@ -1267,7 +1267,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       replaceCategory(runId, "local-search", [
         durationItem(startedAt, {
           id: "local-search-centroid",
-          title: "点分树 chunk 检索",
+          title: "点分树分块检索（Chunk）",
           status: centroidResults.length === 0 ? "warn" : centroidHit && hasChunkIdentity ? "pass" : "warn",
           summary: centroidResults.length === 0 ? "没有找到相关笔记。如果你没有点分树笔记，这是正常的。" : `命中 ${centroidResults.length} 条；synonymHit=${centroidHit}; chunkIdentity=${hasChunkIdentity}`,
           detail: "只调用本地 search_local_notes，不上传笔记到外部服务。",
@@ -1289,14 +1289,14 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
         }),
         durationItem(startedAt, {
           id: "local-search-react-guard",
-          title: "React 查询不误触发 OI synonym",
+          title: "React 查询不误触发 OI 同义词",
           status: reactOiLeak || reactShortTokenLeak || reactPostNavigationLeak ? "fail" : "pass",
           summary: `React results=${reactResults.length}; oiLeak=${reactOiLeak}; shortTokenLeak=${reactShortTokenLeak}; postNavigationLeak=${reactPostNavigationLeak}`,
           safeDebugInfo: reactResults.slice(0, 3).map(summarizeLocalResult),
         }),
         durationItem(startedAt, {
           id: "local-search-same-note-limit",
-          title: "同一笔记 chunk 不刷屏",
+          title: "同一笔记分块不刷屏（Chunk）",
           status: sameNoteLimited ? "pass" : "warn",
           summary: `sameNoteLimited=${sameNoteLimited}`,
         }),
@@ -1328,19 +1328,19 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     replaceCategory(runId, "url-reading", buildUrlReadingDiagnostics(webSearchConfig));
     replaceCategory(runId, "provider-config", webSearchConfig
       ? buildProviderConfigDiagnostics(webSearchConfig, rawWebSearchProvider)
-      : [{ id: "provider-config-missing", title: "Provider 配置", status: "warn", summary: "AI 配置尚未读取完成。" }]);
+      : [{ id: "provider-config-missing", title: "搜索服务配置（Provider）", status: "warn", summary: "AI 配置尚未读取完成。" }]);
     replaceCategory(runId, "citations", buildCitationDiagnostics());
 
     const storageTasks = [
       getWebCacheStatus()
         .then((status) => replaceCategory(runId, "web-cache", [buildWebCacheItem(status)]))
-        .catch((error) => replaceCategory(runId, "web-cache", [{ id: "web-cache-error", title: "Web cache 状态", status: "fail", summary: classifyError(error) }])),
+        .catch((error) => replaceCategory(runId, "web-cache", [{ id: "web-cache-error", title: "网页缓存状态（Web Cache）", status: "fail", summary: classifyError(error) }])),
       getLocalNoteIndexStatus()
         .then((status) => replaceCategory(runId, "local-index", [buildLocalIndexItem(status)]))
         .catch((error) => replaceCategory(runId, "local-index", [{ id: "local-index-error", title: "本地索引状态", status: "fail", summary: classifyError(error) }])),
       buildPromptContractItems()
         .then((items) => replaceCategory(runId, "prompt-contract", items))
-        .catch((error) => replaceCategory(runId, "prompt-contract", [{ id: "prompt-contract-error", title: "Prompt 合约", status: "warn", summary: classifyError(error) }])),
+        .catch((error) => replaceCategory(runId, "prompt-contract", [{ id: "prompt-contract-error", title: "提示词合约（Prompt Contract）", status: "warn", summary: classifyError(error) }])),
       runLocalSearch(runId),
     ];
 
@@ -1433,7 +1433,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     const runId = runIdRef.current + 1;
     runIdRef.current = runId;
     setIsTestingProvider(true);
-    replaceCategory(runId, "provider-test", [{ id: "provider-test-running", title: "在线连通性测试", status: "running", summary: "正在发送一个小测试 query..." }]);
+    replaceCategory(runId, "provider-test", [{ id: "provider-test-running", title: "在线连通性测试", status: "running", summary: "正在发送测试查询..." }]);
     const startedAt = performance.now();
     try {
       if (webSearchConfig.provider === "bocha" && !webSearchConfig.bochaApiKey) throw new Error("Bocha API Key missing");
@@ -1448,7 +1448,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
         title: "在线连通性测试",
         status: "pass",
         summary: `当前搜索源=${result.provider}; 测试词=${result.query ?? "NoteX connectivity test"}; 结果数=${result.resultCount ?? "未记录"}${result.firstTitle ? `; 首条=${result.firstTitle}` : ""}`,
-        detail: "只发送一个公开搜索测试 query，不读取 Cookie、历史记录或登录态。",
+        detail: "只发送一个公开搜索测试查询，不读取 Cookie、历史记录或登录态。",
         safeDebugInfo: [
           `endpoint=${result.endpoint ? safeDomain(result.endpoint) : "built-in"}`,
           result.provider === "bing" ? "使用浏览器兼容请求头=是" : undefined,
@@ -1483,7 +1483,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       <div className="grid gap-1 border-b border-border/80 pb-4">
         <div className="text-base font-semibold text-foreground">搜索自检</div>
         <div className="max-w-4xl text-sm leading-6 text-muted-foreground">
-          检查搜索决策、Provider、本地索引、缓存和引用渲染。默认自检不读取浏览器数据，不修改笔记，也不会上传本地笔记或 API Key。
+          检查搜索决策、搜索服务、本地索引、缓存和引用渲染。默认自检不读取浏览器数据，不修改笔记，也不会上传本地笔记或 API Key。
         </div>
       </div>
 
@@ -1494,7 +1494,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
         </Button>
         <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck || !webSearchConfig}>
           {isTestingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-          测试当前 Provider
+          测试当前搜索服务
         </Button>
         <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
           {isCheckingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
@@ -1523,7 +1523,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           </div>
         ))}
         <div className="px-1 text-xs leading-5 text-muted-foreground sm:col-span-5">
-          上次运行：{lastRunAt ?? "尚未运行"}。在线 Provider 测试只会在手动点击时发起外部请求。
+          上次运行：{lastRunAt ?? "尚未运行"}。在线搜索服务测试只会在手动点击时发起外部请求。
         </div>
       </div>
 

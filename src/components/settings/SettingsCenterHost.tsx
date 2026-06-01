@@ -39,7 +39,8 @@ type ShellControlledProps =
   | "activeSettingsPageKey"
   | "activeSettingsLabel"
   | "onToggleGroup"
-  | "onOpenSettingsSection";
+  | "onOpenSettingsSection"
+  | "onActiveSettingsSectionChange";
 
 interface SettingsCenterHostProps extends Omit<SettingsCenterShellProps, ShellControlledProps> {
   disabled?: boolean;
@@ -71,7 +72,8 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
   ) => {
     const [open, setOpen] = useState(false);
     const [activePageKey, setActivePageKey] = useState<SettingsSection>(defaultPage);
-    const [activeSettingsTarget, setActiveSettingsTarget] = useState<SettingsTarget>({ type: "page", page: defaultPage });
+    const defaultGroupId = sectionLabels[defaultPage]?.groupId ?? "appearance";
+    const [activeSettingsTarget, setActiveSettingsTarget] = useState<SettingsTarget>({ type: "category", category: defaultGroupId });
     const [settingsView, setSettingsView] = useState<SettingsView>("main");
     const [expandedSettingsGroups, setExpandedSettingsGroups] = useState<Record<string, boolean>>({});
 
@@ -149,12 +151,15 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       setHostView("main");
       expandActiveGroup(nextPage, options?.resetExpanded ?? !wasOpen);
       ensureOpen();
+      window.requestAnimationFrame(() => {
+        const settingsContent = contentRef.current;
+        const section = settingsContent?.querySelector<HTMLElement>(`[data-settings-section="${nextPage}"]`);
+        if (!settingsContent || !section) return;
+        const headerHeight = settingsContent.querySelector<HTMLElement>("[data-settings-scroll-header]")?.offsetHeight ?? 0;
+        settingsContent.scrollTop += section.getBoundingClientRect().top - settingsContent.getBoundingClientRect().top - headerHeight;
+      });
       return nextPage;
-    }, [ensureOpen, expandActiveGroup, setActivePage, setHostView]);
-
-    const openSettingsCenter = useCallback(() => {
-      return openPageInternal(defaultPage, { resetExpanded: true });
-    }, [defaultPage, openPageInternal]);
+    }, [contentRef, ensureOpen, expandActiveGroup, setActivePage, setHostView]);
 
     const openSection = useCallback((category: SettingsCategory) => {
       const fallbackPage = sectionFallback[category] ?? defaultPage;
@@ -171,8 +176,21 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       setHostView("main");
       expandGroup(targetCategory, !openRef.current);
       ensureOpen();
+      window.requestAnimationFrame(() => {
+        const settingsContent = contentRef.current;
+        if (settingsContent) settingsContent.scrollTop = 0;
+      });
       return nextPage;
-    }, [defaultPage, ensureOpen, expandGroup, sectionFallback, sectionLabels, setActivePage, setHostView, visibleGroupIds, visiblePageIds]);
+    }, [contentRef, defaultPage, ensureOpen, expandGroup, sectionFallback, sectionLabels, setActivePage, setHostView, visibleGroupIds, visiblePageIds]);
+
+    const setActiveSectionFromScroll = useCallback((page: SettingsSection) => {
+      const nextPage = setActivePage(page);
+      setActiveSettingsTarget({ type: "page", page: nextPage });
+    }, [setActivePage]);
+
+    const openSettingsCenter = useCallback(() => {
+      return openSection(defaultGroupId);
+    }, [defaultGroupId, openSection]);
 
     const openTarget = useCallback((target: SettingsTarget) => {
       return target.type === "category" ? openSection(target.category) : openPageInternal(target.page);
@@ -288,12 +306,6 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
       setHostView("main");
     }, [activePageKey, activeSettingsTarget, defaultPage, sectionFallback, setActivePage, setHostView, visibleGroupIds, visiblePageIds, visibleSettingsTree]);
 
-    useEffect(() => {
-      if (settingsView !== "main") return;
-      const settingsContent = contentRef.current;
-      if (settingsContent) settingsContent.scrollTop = 0;
-    }, [activePageKey, activeSettingsTarget, contentRef, settingsView]);
-
     const activeSettingsGroupId =
       activeSettingsTarget.type === "category"
         ? activeSettingsTarget.category
@@ -318,6 +330,7 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
         activeSettingsLabel={activeSettingsLabel}
         onToggleGroup={toggleGroup}
         onOpenSettingsSection={openSettingsSection}
+        onActiveSettingsSectionChange={setActiveSectionFromScroll}
         onOpenChange={(nextOpen) => {
           if (nextOpen) {
             openSettingsCenter();

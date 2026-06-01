@@ -2185,7 +2185,7 @@ function AiMarkdownMessage({
   }, [onCitationClick, renderedHtml]);
 
   if (!renderedHtml) {
-    return <div className="notex-assistant-markdown whitespace-pre-wrap break-words">{markdown}</div>;
+    return <div data-ai-markdown-message="true" className="notex-assistant-markdown whitespace-pre-wrap break-words">{markdown}</div>;
   }
 
   return (
@@ -7732,7 +7732,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               if (message.role === "user") {
                 return (
                   <div key={message.id} className="notex-message notex-message-user notex-user-message ml-auto">
-                    <div className="notex-user-bubble whitespace-pre-wrap break-words">
+                    <div data-app-context-menu-text="true" className="notex-user-bubble whitespace-pre-wrap break-words">
                       {message.text}
                     </div>
                   </div>
@@ -7745,7 +7745,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   className="notex-message notex-message-system mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-muted-foreground"
                 >
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
+                  <div data-app-context-menu-text="true" className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
                 </div>
               );
               })}
@@ -7847,7 +7847,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             className={cn(
                               "notex-command-item ai-command-item flex h-10 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1 text-left transition-[background-color,color,opacity]",
                               isDisabled
-                                ? "cursor-not-allowed opacity-50"
+                                ? "cursor-default"
                                 : "text-foreground hover:bg-accent/18 hover:text-foreground dark:hover:bg-white/[0.04]",
                               isActive && !isDisabled
                                 ? "bg-accent/28 text-foreground dark:bg-white/[0.06]"
@@ -7858,8 +7858,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             onMouseEnter={() => setActiveCommandIndex(itemIndex)}
                             onClick={() => selectCommand(command)}
                             data-active={isActive ? "true" : undefined}
-                            disabled={isDisabled}
                             aria-disabled={isDisabled}
+                            tabIndex={isDisabled ? -1 : 0}
                           >
                             <span className="notex-command-icon flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-sm text-muted-foreground">
                               <Icon className="h-4 w-4" />

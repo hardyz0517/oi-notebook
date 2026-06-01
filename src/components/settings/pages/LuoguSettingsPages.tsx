@@ -298,7 +298,7 @@ export function LuoguAccountSettingsPage({
           {statusLabel}
         </span>
       </SettingRow>
-      <SettingRow title="当前配置" description="未读取配置前可能显示为空；打开配置窗口会读取后端保存值。">
+      <SettingRow title="当前配置" description="查看或更新洛谷 Cookie 配置。">
         <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
           <span>UID：{uid || "未读取"}</span>
           <span>最后同步提交 ID：{lastSubmissionId || "未设置"}</span>
@@ -389,7 +389,7 @@ export function LuoguImportCenterSettingsPage({
     <section className={className}>
       <div className="mb-3 grid gap-1">
         <div className="text-base font-semibold text-foreground">导入中心</div>
-        <div className="text-xs leading-5 text-muted-foreground">复用现有洛谷导入中心窗口，负责扫描、预览、手动导入和写入笔记。</div>
+        <div className="text-xs leading-5 text-muted-foreground">扫描洛谷提交，预览后写入本地笔记。</div>
       </div>
       <SettingRow title="导入前置状态" description="导入中心打开时会读取最新洛谷和 AI 配置。">
         <div className="grid gap-1 text-xs leading-5 text-muted-foreground">

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
+import AppContextMenu from "@/components/common/AppContextMenu";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -861,15 +862,14 @@ const SETTINGS_SECTION_LABELS = SETTINGS_TREE.reduce((labels, group) => {
   for (const child of group.children) labels[child.id] = { group: group.label, groupId: group.id, section: child.label };
   return labels;
 }, {} as Record<SettingsSection, { group: string; groupId: SettingsGroupId; section: string }>);
+const SettingsSectionAnchor = ({ id, children }: { id: SettingsSection; children: ReactNode }) => (
+  <div data-settings-section={id}>{children}</div>
+);
 const MARKDOWN_CAPABILITIES = [
-  "KaTeX",
-  "代码高亮",
-  "行高亮",
-  "可选行号",
-  "callout",
-  "align / epigraph",
-  "cute-table",
-  "表格 ^ / > 合并",
+  "数学公式",
+  "代码高亮与行号",
+  "表格与合并单元格",
+  "引用块与常用排版组件",
 ];
 
 interface LuoguScanProgress {
@@ -1243,7 +1243,7 @@ function formatWebSearchTestError(error: unknown): string {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) {
-    return "搜索服务返回限流。可以稍后重试，或检查当前 Provider 的额度。";
+    return "搜索服务返回限流。可以稍后重试，或检查当前搜索服务的额度。";
   }
   if (lower.includes("captcha") || lower.includes("blocked") || lower.includes("verify") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) {
     return "Bing 公开搜索遇到验证页或访问限制。可以稍后重试，或改用 Bocha / Brave。";
@@ -2121,10 +2121,10 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
       variables: [
         { name: "{{problem_id}}", meaning: "识别到的洛谷题号。", usage: "在模板中写入该变量，执行整理时会替换成题号。" },
         { name: "{{problem_title}}", meaning: "识别到的题目标题。", usage: "适合放在题目背景或输出格式要求里。" },
-        { name: "{{problem_difficulty}}", meaning: "洛谷题目难度。", usage: "可选变量；当前导入流程拿不到时为空。" },
-        { name: "{{problem_tags}}", meaning: "洛谷题目标签。", usage: "可选变量；当前导入流程拿不到时为空。" },
+        { name: "{{problem_difficulty}}", meaning: "洛谷题目难度。", usage: "可选变量；未获取到对应信息时为空。" },
+        { name: "{{problem_tags}}", meaning: "洛谷题目标签。", usage: "可选变量；未获取到对应信息时为空。" },
         { name: "{{submission_id}}", meaning: "当前洛谷提交记录 ID。", usage: "用于让 AI 知道这次整理来自哪条提交。" },
-        { name: "{{problem_statement_excerpt}}", meaning: "题面摘要。", usage: "可选变量；当前导入流程拿不到时为空。" },
+        { name: "{{problem_statement_excerpt}}", meaning: "题面摘要。", usage: "可选变量；未获取到对应信息时为空。" },
         { name: "{{candidate_comment}}", meaning: "从提交备注或上下文里提取出的候选心得。", usage: "通常应保留在正文输入区，AI 会基于它判断是否值得导入。" },
       ],
       editable: true,
@@ -2138,8 +2138,8 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
       purpose: "用于根据当前笔记正文生成标题、标签、摘要等元信息建议。",
       variables: [
         { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "在模板中写入该变量，执行时会替换为 notes 内的相对路径。" },
-        { name: "{{content}}", meaning: "当前笔记完整 Markdown 内容。", usage: "用于让 AI 根据正文生成标题、标签和摘要。" },
-        { name: "{{tag_context}}", meaning: "根据当前标题、正文和已有 tags 本地筛选出的预设标签规则与少量候选。", usage: "用于约束 AI 优先输出 taxonomy canonical path，避免乱造标签。" },
+        { name: "{{content}}", meaning: "当前笔记的完整内容。", usage: "用于让 AI 根据正文生成标题、标签和摘要。" },
+        { name: "{{tag_context}}", meaning: "根据当前笔记筛选出的标签规则和候选项。", usage: "用于引导 AI 优先使用标签体系中的规范名称。" },
       ],
       editable: true,
     };
@@ -2149,10 +2149,10 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
     return {
       title: "当前笔记全文润色",
       scope: "AI 润色正文、题解格式化审核",
-      purpose: "用于润色当前笔记正文 body，并先生成可预览的润色结果。",
+      purpose: "用于润色当前笔记正文，并先生成可预览的结果。",
       variables: [
         { name: "{{note_path}}", meaning: "当前笔记的相对路径。", usage: "可用于提示 AI 保持与当前文件主题一致。" },
-        { name: "{{body}}", meaning: "去掉 frontmatter 后的正文 Markdown。", usage: "用于让 AI 只润色正文，不改动 frontmatter。" },
+        { name: "{{body}}", meaning: "不含笔记元信息的正文内容。", usage: "用于让 AI 只润色正文，不修改笔记元信息。" },
       ],
       editable: true,
     };
@@ -2675,6 +2675,7 @@ export default function App() {
   const [activeTreeDirectoryPath, setActiveTreeDirectoryPath] = useState<string | null>(null);
   const [activeTreeFilePath, setActiveTreeFilePath] = useState<string | null>(null);
   const [isTreeRootCollapsed, setIsTreeRootCollapsed] = useState(false);
+  const [createFileRequest, setCreateFileRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
   const [createFolderRequest, setCreateFolderRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
   const [displayTitleByPath, setDisplayTitleByPath] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -3678,10 +3679,11 @@ export default function App() {
     [developerModeEnabled],
   );
   const shouldRenderSettingsPage = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
-    if (activeTarget.type === "category") {
-      return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeTarget.category;
-    }
-    return activePageKey === pageKey;
+    const activeGroupId =
+      activeTarget.type === "category"
+        ? activeTarget.category
+        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
+    return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeGroupId;
   };
   const settingsPageSectionClass = "grid min-w-0 gap-0 px-6 py-5";
   const promptTemplateRows = useMemo(
@@ -4123,14 +4125,17 @@ export default function App() {
     return "";
   };
 
-  const openCreateDialog = () => {
-    const parentPath = getDefaultTreeCreateParent();
+  const openCreateDialogAt = (parentPath: string) => {
     setDialogMode("create");
     setDialogValue("");
     setNewNoteLocationOption(parentPath ? "custom" : "root");
     setNewNoteCustomDirectory(parentPath);
     setNewNoteTags([]);
     setFolderParentDirectory(parentPath);
+  };
+
+  const openCreateDialog = () => {
+    openCreateDialogAt(getDefaultTreeCreateParent());
   };
 
   const openCreateFolderDialog = () => {
@@ -4144,11 +4149,20 @@ export default function App() {
     return getDefaultTreeCreateParent();
   };
 
-  const requestInlineCreateFolder = () => {
+  const requestInlineCreateFolderAt = (parentPath: string) => {
     closeDialog();
-    const parentPath = getDefaultFolderCreateParent();
     setIsTreeRootCollapsed(false);
     setCreateFolderRequest({ parentPath, requestId: Date.now() });
+  };
+
+  const requestInlineCreateFileAt = (parentPath: string) => {
+    closeDialog();
+    setIsTreeRootCollapsed(false);
+    setCreateFileRequest({ parentPath, requestId: Date.now() });
+  };
+
+  const requestInlineCreateFolder = () => {
+    requestInlineCreateFolderAt(getDefaultFolderCreateParent());
   };
 
   const handleSelectTreeDirectory = useCallback((path: string) => {
@@ -4272,6 +4286,39 @@ export default function App() {
     toast.success("已创建文件夹");
     return newPath;
   }, [files]);
+
+  const handleCreateFileAt = useCallback(async (parentPath: string, name: string) => {
+    const nameErr = validateNamePart(name, "file");
+    if (nameErr) throw new Error(nameErr);
+    const parentErr = validateDirectoryPathInput(parentPath);
+    if (parentErr) throw new Error(parentErr);
+
+    const filename = normalizeFileName(name);
+    const newPath = joinNotePath(parentPath, filename);
+    if (findEntryCaseInsensitive(newPath, false)) throw new Error("同目录已存在同名笔记");
+
+    if (isDirty) {
+      const ok = await requestConfirm({
+        title: "放弃未保存更改？",
+        description: "当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。",
+        confirmText: "继续新建",
+        danger: true,
+      });
+      if (!ok) throw new Error("已取消新建");
+    }
+
+    await writeNote(newPath, buildNewNoteMarkdown(name.trim().replace(/\.md$/i, ""), []));
+    const updated = await listNotes();
+    setFiles(updated);
+    setDisplayTitleForPath(newPath, name.trim().replace(/\.md$/i, ""));
+    setCurrentFilePath(newPath);
+    setActiveWorkspaceTabId(newPath);
+    setActiveTreeDirectoryPath(null);
+    setActiveTreeFilePath(newPath);
+    setIsDirty(false);
+    toast.success("已创建空白笔记");
+    return newPath;
+  }, [files, isDirty, requestConfirm]);
 
   const handleRename = async () => {
     if (!renameTarget) return;
@@ -6776,6 +6823,22 @@ export default function App() {
     }
   };
 
+  const handleMaximizeWindow = async () => {
+    try {
+      await getCurrentWindow().maximize();
+    } catch (e) {
+      toast.error(`最大化窗口失败：${getErrorMessage(e)}`);
+    }
+  };
+
+  const handleRestoreWindow = async () => {
+    try {
+      await getCurrentWindow().unmaximize();
+    } catch (e) {
+      toast.error(`还原窗口失败：${getErrorMessage(e)}`);
+    }
+  };
+
   const handleToggleSettingsCenterMaximize = () => {
     if (isSettingsCenterMaximized) {
       const restoreRect = settingsCenterRestoreRectRef.current;
@@ -7630,6 +7693,24 @@ export default function App() {
   return (
     <>
     <Toaster theme={appTheme} position="bottom-right" />
+    <AppContextMenu
+      developerModeEnabled={developerModeEnabled}
+      actions={{
+        createNote: (parentPath) => parentPath === undefined ? openCreateDialog() : requestInlineCreateFileAt(parentPath),
+        createFolder: (parentPath) => parentPath === undefined ? requestInlineCreateFolder() : requestInlineCreateFolderAt(parentPath),
+        openFile: (path) => { handleSelectFile(path); },
+        renameTreeItem: openRenameDialog,
+        deleteTreeItem: (path, isDirectory) => { void handleDelete(path, isDirectory); },
+        openLuoguImport: () => { void openLuoguDialog(); },
+        openBlog: () => { void handleOpenBlog(); },
+        openSettings: openSettingsCenter,
+        minimizeWindow: handleMinimizeWindow,
+        maximizeWindow: handleMaximizeWindow,
+        restoreWindow: handleRestoreWindow,
+        closeWindow: handleCloseWindow,
+        isWindowMaximized: () => getCurrentWindow().isMaximized(),
+      }}
+    />
     <ConfirmDialog
       open={Boolean(confirmDialog)}
       title={confirmDialog?.title ?? ""}
@@ -8968,7 +9049,7 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="text-xs leading-5 text-muted-foreground">这个模板没有登记可替换变量。</div>
+              <div className="text-xs leading-5 text-muted-foreground">暂无可用变量。</div>
             )}
           </aside>
         </div>
@@ -9033,6 +9114,7 @@ export default function App() {
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
                   {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="appearance-theme">
                     <AppearanceSettingsPage
                       className={settingsPageSectionClass}
                       appTheme={appTheme}
@@ -9073,13 +9155,14 @@ export default function App() {
                       activeReadingDensityDescription={activeReadingDensity.description}
                       onReadingDensityChange={(value) => updateReadingDensity(value as ReadingDensity)}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-api", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="ai-api">
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">AI 供应商</div>
-                        <div className="text-xs leading-5 text-muted-foreground">从独立管理中心维护 NoteX 使用的模型与 API 配置。</div>
                       </div>
                       <AiConfigManager
                         mode="entry"
@@ -9110,9 +9193,11 @@ export default function App() {
                         onReorderProviders={handleReorderAiProviders}
                       />
                     </section>
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="ai-local-notes">
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记索引</div><div className="text-xs leading-5 text-muted-foreground">用于让 NoteX 更快、更准确地从你的 Markdown 笔记中检索相关段落，只保存在本机。</div></div>
                       <SettingRow title="本地索引状态" description="显示本地笔记是否已经建立索引；读取状态不会触发重建。" align="start">
@@ -9176,13 +9261,15 @@ export default function App() {
                         </div>
                       </SettingRow>
                     </section>
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-web-search", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="ai-web-search">
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">联网搜索</div>
-                        <div className="text-xs leading-5 text-muted-foreground">配置 NoteX 使用公开网页检索时的 provider、授权和缓存诊断。</div>
+                        <div className="text-xs leading-5 text-muted-foreground">配置 NoteX 的搜索服务、网页读取授权和缓存。</div>
                       </div>
                       <SettingRow title="启用联网搜索" description="关闭后 NoteX 不会主动发起公开网页检索。">
                         <button
@@ -9197,7 +9284,7 @@ export default function App() {
                           <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", webSearchDraft.enabled && "translate-x-5")} />
                         </button>
                       </SettingRow>
-                      <SettingRow title="搜索 Provider" description="Bing 使用公开搜索；Bocha / Brave 需要填写对应 API Key。" layout="stacked">
+                      <SettingRow title="搜索服务" description="Bing 使用公开搜索；Bocha / Brave 需要填写对应 API Key。" layout="stacked">
                         <SettingsInlineSelect
                           id="web-search-provider"
                           value={webSearchDraft.provider}
@@ -9208,7 +9295,7 @@ export default function App() {
                           ]}
                           onChange={(provider) => updateWebSearchDraft({ provider: provider as WebSearchConfig["provider"] })}
                           disabled={isSavingAiConfig || isLoadingAiConfig}
-                          ariaLabel="搜索 Provider"
+                          ariaLabel="搜索服务"
                           expandedRuleId={expandedWebSearchSelectId}
                           onExpandedRuleChange={setExpandedWebSearchSelectId}
                           themed
@@ -9262,7 +9349,7 @@ export default function App() {
                           <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", webSearchDraft.publicSearchConsent && "translate-x-5")} />
                         </button>
                       </SettingRow>
-                      <SettingRow title="测试与缓存" description="测试当前 provider 连通性，或清理联网搜索缓存。">
+                      <SettingRow title="测试与缓存" description="测试当前搜索服务，或删除已保存的搜索结果和网页摘要缓存。">
                         <div className="grid gap-2">
                           <div className="flex flex-wrap gap-2">
                             <Button variant="outline" size="sm" onClick={() => void handleTestWebSearchConnection()} disabled={isTestingWebSearchConnection || isSavingAiConfig || isLoadingAiConfig}>
@@ -9271,7 +9358,7 @@ export default function App() {
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => void handleClearWebCache()} disabled={isClearingWebCache}>
                               {isClearingWebCache ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                              {isClearingWebCache ? "清理中..." : "清理联网缓存"}
+                              {isClearingWebCache ? "清理中..." : "清理搜索缓存"}
                             </Button>
                           </div>
                           {(webSearchConnectionMessage || webCacheMessage) && (
@@ -9282,9 +9369,11 @@ export default function App() {
                         </div>
                       </SettingRow>
                     </section>
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="ai-prompts">
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 grid gap-1">
                         <div className="text-base font-semibold text-foreground">提示词模板</div>
@@ -9311,7 +9400,7 @@ export default function App() {
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <h3 className="text-sm font-medium text-foreground">模板列表</h3>
-                            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">模板内容从本地配置读取，只有进入本页时才加载。</p>
+                            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">编辑 NoteX 和笔记整理使用的默认提示词。</p>
                           </div>
                           <Button
                             variant="outline"
@@ -9351,9 +9440,11 @@ export default function App() {
                         )}
                       </div>
                     </section>
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("luogu-account", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="luogu-account">
                     <LuoguAccountSettingsPage
                       className={settingsPageSectionClass}
                       configured={luoguConfigured}
@@ -9367,9 +9458,11 @@ export default function App() {
                       isTestingConnection={isTestingLuoguConnection}
                       onOpenSettings={() => void openLuoguAccountManager()}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("luogu-rules", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="luogu-rules">
                     <LuoguRulesSettingsPage
                       className={settingsPageSectionClass}
                       rows={luoguRuleSettingRows}
@@ -9380,9 +9473,11 @@ export default function App() {
                       customSaveDirectory={luoguImportRules.customSaveDirectory}
                       onCustomSaveDirectoryChange={(value) => updateLuoguImportRules({ customSaveDirectory: value })}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("luogu-import-center", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="luogu-import-center">
                     <LuoguImportCenterSettingsPage
                       className={settingsPageSectionClass}
                       accountLabel={luoguImportCenterAccountLabel}
@@ -9391,9 +9486,28 @@ export default function App() {
                       disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu}
                       onOpenImportCenter={() => void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-import-center" } })}
                     />
+                    </SettingsSectionAnchor>
+                  )}
+
+                  {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
+                    <BlogPreviewSettingsPage
+                      className={settingsPageSectionClass}
+                      blogTitle={blogInfoDraft.title}
+                      blogSubtitle={blogInfoDraft.subtitle}
+                      blogConfigError={blogConfigError}
+                      isLoadingBlogConfig={isLoadingBlogConfig}
+                      isSavingBlogConfig={isSavingBlogConfig}
+                      onBlogTitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, title: value }))}
+                      onBlogSubtitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, subtitle: value }))}
+                      onSaveBlogInfo={() => void handleSaveBlogInfo()}
+                      isRestartingBlog={isRestartingBlog}
+                      onOpenBlog={handleOpenBlog}
+                      onRestartBlog={handleRestartBlog}
+                    />
                   )}
 
                   {shouldRenderSettingsPage("blog-tag-taxonomy", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="blog-tag-taxonomy">
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
                       isLoadingTagTaxonomyConfig={isLoadingTagTaxonomyConfig}
@@ -9454,9 +9568,11 @@ export default function App() {
                       toggleTagNormalizationScanSelection={toggleTagNormalizationScanSelection}
                       formatTagNormalizationReason={formatTagNormalizationReason}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("blog-tag-manager", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="blog-tag-manager">
                     <BlogTagManagerSettingsPage
                       className={settingsPageSectionClass}
                       availableCandidateCount={tagManagerAvailableCandidateCount}
@@ -9465,64 +9581,60 @@ export default function App() {
                       hiddenIdsCount={tagTaxonomyStats.hiddenIdsCount}
                       onOpenTagManager={() => openTagManagerWorkspace()}
                     />
-                  )}
-
-                  {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
-                    <BlogPreviewSettingsPage
-                      className={settingsPageSectionClass}
-                      blogTitle={blogInfoDraft.title}
-                      blogSubtitle={blogInfoDraft.subtitle}
-                      blogConfigError={blogConfigError}
-                      isLoadingBlogConfig={isLoadingBlogConfig}
-                      isSavingBlogConfig={isSavingBlogConfig}
-                      onBlogTitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, title: value }))}
-                      onBlogSubtitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, subtitle: value }))}
-                      onSaveBlogInfo={() => void handleSaveBlogInfo()}
-                      isRestartingBlog={isRestartingBlog}
-                      onOpenBlog={handleOpenBlog}
-                      onRestartBlog={handleRestartBlog}
-                    />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("data-storage", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="data-storage">
                     <DataStorageSettingsPage
                       className={settingsPageSectionClass}
                       isClearingWebCache={isClearingWebCache}
                       onOpenNotesFolder={handleOpenNotesFolder}
                       onClearWebCache={() => void handleClearWebCache()}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="about-version">
                     <AboutVersionSettingsPage
                       className={settingsPageSectionClass}
                       developerModeEnabled={developerModeEnabled}
                       onToggleDeveloperMode={() => setDeveloperModeEnabled((enabled) => !enabled)}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("about-markdown", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="about-markdown">
                     <AboutMarkdownSettingsPage
                       className={settingsPageSectionClass}
                       capabilities={MARKDOWN_CAPABILITIES}
                     />
+                    </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("about-privacy", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="about-privacy">
                     <AboutPrivacySettingsPage className={settingsPageSectionClass} />
+                    </SettingsSectionAnchor>
                   )}
 
                   {developerModeEnabled && shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="diagnostics-search">
                     <section className={settingsPageSectionClass}>
                       <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
                     </section>
+                    </SettingsSectionAnchor>
                   )}
 
                   {developerModeEnabled && shouldRenderSettingsPage("git-sync", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="git-sync">
                     <section className={settingsPageSectionClass}>
                       <div className="mb-3 text-base font-semibold text-foreground">进阶同步入口</div>
                       <SettingRow title="Git 同步" description="整理完本地改动后再使用。"><Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}><Upload className="h-3.5 w-3.5" />{isPushingGit ? "同步中..." : "同步 Git"}</Button></SettingRow>
                     </section>
+                    </SettingsSectionAnchor>
                   )}
         </>
       )}
@@ -9539,7 +9651,7 @@ export default function App() {
     )}
     <div className="app-shell flex h-screen max-h-screen flex-col overflow-hidden bg-background text-foreground" style={appearanceStyle}>
       {/* Header */}
-      <header className="app-top-toolbar flex min-h-8 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-0.5">
+      <header data-app-context-menu="titlebar" className="app-top-toolbar flex min-h-8 shrink-0 select-none items-center gap-2.5 border-b border-border bg-background px-2.5 py-0.5">
         <div className="flex min-w-0 items-center gap-2.5" data-tauri-drag-region>
           <div className="flex h-8 min-w-0 items-center">
             <span className="app-brand-mark grid h-8 w-8 shrink-0 place-items-center">
@@ -9673,6 +9785,8 @@ export default function App() {
                   )}
                   style={{ paddingLeft: "1px" }}
                   data-active={activeTreeDirectoryPath === "" ? "true" : "false"}
+                  data-app-context-menu="file-tree-folder"
+                  data-app-context-path=""
                   onClick={() => {
                     setActiveTreeDirectoryPath("");
                     setActiveTreeFilePath(null);
@@ -9718,10 +9832,12 @@ export default function App() {
                   activeFilePath={activeTreeFilePath}
                   activeDirectoryPath={activeTreeDirectoryPath}
                   rootCollapsed={isTreeRootCollapsed}
+                  createFileRequest={createFileRequest}
                   createFolderRequest={createFolderRequest}
                   onSelectFile={handleSelectFile}
                   onSelectDirectory={handleSelectTreeDirectory}
                   onClearSelection={handleClearTreeSelection}
+                  onCreateFile={handleCreateFileAt}
                   onCreateFolder={handleCreateFolderAt}
                   onDeleteItem={handleDelete}
                   onRenameItem={openRenameDialog}
@@ -9773,118 +9889,53 @@ export default function App() {
               })}
             />
           ) : !currentFilePath ? (
-            <div className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
-              <div className="grid w-full max-w-6xl gap-5">
-                <section className="rounded-lg border border-border bg-background/90 p-6 shadow-sm">
-                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.95fr)]">
-                    <div className="grid gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-2xl font-semibold tracking-wide">欢迎回来</div>
-                        <span className="rounded-sm border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground">
-                          OI Notebook
-                        </span>
-                      </div>
-                      <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                        本地 OI 笔记、题解复盘、洛谷导入与 AI 辅助整理工作台。第一屏先帮你继续写，而不是重新读一遍说明书。
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button className="gap-2" onClick={openCreateDialog}>
-                          <Plus className="h-4 w-4" />
-                          新建笔记
-                        </Button>
-                        <Button variant="outline" className="gap-2" onClick={() => void openLuoguDialog()}>
-                          <Download className="h-4 w-4" />
-                          从洛谷导入
-                        </Button>
-                        <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
-                          <ExternalLink className="h-4 w-4" />
-                          打开本地博客
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="gap-2"
-                          onClick={() => void openAiSettings()}
-                          disabled={isLoadingAiConfig || isSavingAiConfig}
-                        >
-                          <Bot className="h-4 w-4" />
-                          配置 AI
-                        </Button>
-                        <Button variant="ghost" className="gap-2 text-muted-foreground hover:text-foreground" onClick={openSettingsCenter}>
-                          <Settings className="h-4 w-4" />
-                          打开设置
-                        </Button>
-                      </div>
+            <div data-app-context-menu="welcome" className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
+              <div className="grid w-full max-w-6xl content-start gap-5">
+                <section className="rounded-xl border border-border/70 bg-background/90 px-6 py-7 shadow-sm">
+                  <div className="max-w-3xl">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-3xl font-semibold tracking-tight text-foreground">欢迎回来</h1>
+                      <span className="rounded-md border border-border/70 bg-muted/35 px-2 py-1 text-xs font-medium text-muted-foreground">
+                        OI Notebook
+                      </span>
                     </div>
-
-                    <section className="grid gap-3 rounded-lg border border-border bg-muted/15 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                            当前状态
-                          </div>
-                          <div className="mt-1 text-sm font-medium text-foreground">桌面工作台已就绪</div>
-                        </div>
-                        <span className="rounded-sm border border-border bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
-                          {dashboardNotes.length} 篇可用笔记
-                        </span>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
-                          onClick={() => openSettingsSection("blog")}
-                        >
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Blog</div>
-                          <div className="mt-1 text-sm font-medium text-foreground">{blogStatusLabel}</div>
-                          <div className="mt-1 text-xs leading-5 text-muted-foreground">本地博客入口和服务管理在这里汇总。</div>
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
-                          onClick={() => openSettingsSection("ai")}
-                        >
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">AI</div>
-                          <div className="mt-1 text-sm font-medium text-foreground">{aiStatusLabel}</div>
-                          <div className="mt-1 text-xs leading-5 text-muted-foreground">API Key 和提示词都走本地配置，不会帮你编造连接状态。</div>
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-md border border-border bg-background/70 px-3 py-3 text-left transition-colors hover:bg-accent/40"
-                          onClick={() => openSettingsSection("luogu")}
-                        >
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">洛谷</div>
-                          <div className="mt-1 text-sm font-medium text-foreground">{luoguStatusLabel}</div>
-                          <div className="mt-1 text-xs leading-5 text-muted-foreground">Cookie、扫描规则和导入入口都继续复用现有流程。</div>
-                        </button>
-                        <div className="rounded-md border border-border bg-background/70 px-3 py-3">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">数据与存储</div>
-                          <div className="mt-1 text-sm font-medium text-foreground">notes 本地目录</div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
-                            <span>笔记保存在本机目录里，备份或同步前可以先打开目录确认内容。</span>
-                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={openNotesFolder}>
-                              打开目录
-                            </Button>
-                            {developerModeEnabled && (
-                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void handlePushGit()}>
-                                {gitStatusLabel}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </section>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      继续整理 OI 笔记、复盘题解，或从洛谷导入新的训练记录。
+                    </p>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <Button className="gap-2" onClick={openCreateDialog}>
+                        <Plus className="h-4 w-4" />
+                        新建笔记
+                      </Button>
+                      <Button variant="outline" className="gap-2" onClick={() => void openLuoguDialog()}>
+                        <Download className="h-4 w-4" />
+                        从洛谷导入
+                      </Button>
+                      <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
+                        <ExternalLink className="h-4 w-4" />
+                        打开本地博客
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => void openAiSettings()}
+                        disabled={isLoadingAiConfig || isSavingAiConfig}
+                      >
+                        <Bot className="h-4 w-4" />
+                        配置 AI
+                      </Button>
+                      <Button variant="outline" className="gap-2" onClick={openSettingsCenter}>
+                        <Settings className="h-4 w-4" />
+                        打开设置
+                      </Button>
+                    </div>
                   </div>
                 </section>
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
-                  <section className="grid gap-3 rounded-lg border border-border bg-background/80 p-5">
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <section className="grid content-start gap-3 rounded-xl border border-border/70 bg-background/80 p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                          继续编辑
-                        </div>
-                        <div className="mt-1 text-base font-medium text-foreground">从现有笔记继续推进</div>
-                      </div>
+                      <div className="text-lg font-semibold text-foreground">最近笔记</div>
                       <span className="text-xs text-muted-foreground">按最近修改排序</span>
                     </div>
                     {dashboardNotes.length > 0 ? (
@@ -9893,14 +9944,14 @@ export default function App() {
                           <button
                             key={file.path}
                             type="button"
-                            className="grid min-w-0 gap-2 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
+                            className="grid min-w-0 gap-1.5 rounded-md border border-border/65 bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
                             onClick={() => handleSelectFile(file.path)}
                           >
                             <div className="flex min-w-0 items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="truncate text-sm font-medium text-foreground">{file.name.replace(/\.md$/i, "")}</div>
                                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <span className="rounded-sm border border-border bg-background/60 px-1.5 py-0.5">
+                                  <span className="rounded-sm border border-border/65 bg-background/55 px-1.5 py-0.5">
                                     {getDashboardNoteCategory(file.path)}
                                   </span>
                                   <span className="truncate">{file.path}</span>
@@ -9912,124 +9963,81 @@ export default function App() {
                         ))}
                       </div>
                     ) : (
-                      <div className="rounded-md border border-dashed border-border bg-muted/10 px-4 py-6 text-sm text-muted-foreground">
-                        还没有可继续的笔记。可以从左侧 Sidebar 或这里的新建入口先写第一篇。
+                      <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-sm leading-6 text-muted-foreground">
+                        暂无笔记。新建一篇笔记，或从洛谷导入训练记录。
                       </div>
                     )}
                   </section>
 
-                  <div className="grid gap-5">
-                    <section className="grid gap-3 rounded-lg border border-border bg-background/80 p-5">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        快速操作
+                  <aside className="grid content-start gap-5">
+                    <section className="rounded-xl border border-border/70 bg-background/80 p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-base font-semibold text-foreground">当前状态</div>
+                        <span className="text-xs text-muted-foreground">{dashboardNotes.length} 篇笔记</span>
                       </div>
-                      <div className="grid gap-2">
+                      <div className="mt-3 divide-y divide-border/60">
                         <button
                           type="button"
-                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={openCreateDialog}
+                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
+                          onClick={() => openSettingsSection("blog")}
                         >
-                          <div className="flex items-center gap-3">
-                            <Plus className="h-4 w-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">新建笔记</div>
-                              <div className="text-xs text-muted-foreground">从 trick 或 problem 模板开始。</div>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">本地博客</span>
+                          <span className="text-xs text-muted-foreground">{blogStatusLabel}</span>
                         </button>
                         <button
                           type="button"
-                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={() => void openLuoguDialog()}
+                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
+                          onClick={() => openSettingsSection("ai")}
                         >
-                          <div className="flex items-center gap-3">
-                            <Download className="h-4 w-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">从洛谷导入</div>
-                              <div className="text-xs text-muted-foreground">扫描、预览、确认后再写入笔记。</div>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">AI</span>
+                          <span className={cn("text-xs", aiConfigured ? "text-muted-foreground" : "text-amber-600 dark:text-amber-300")}>
+                            {aiStatusLabel}
+                          </span>
                         </button>
                         <button
                           type="button"
-                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={handleOpenBlog}
+                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
+                          onClick={() => openSettingsSection("luogu")}
                         >
-                          <div className="flex items-center gap-3">
-                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">打开本地博客</div>
-                              <div className="text-xs text-muted-foreground">用阅读视图回看文章效果。</div>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">洛谷</span>
+                          <span className={cn(
+                            "text-xs",
+                            luoguConnectionError
+                              ? "text-red-600 dark:text-red-300"
+                              : luoguConfigured
+                                ? "text-muted-foreground"
+                                : "text-amber-600 dark:text-amber-300",
+                          )}>
+                            {luoguStatusLabel}
+                          </span>
                         </button>
-                        <button
-                          type="button"
-                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={() => void openAiSettings()}
-                          disabled={isLoadingAiConfig || isSavingAiConfig}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Bot className="h-4 w-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">配置 AI</div>
-                              <div className="text-xs text-muted-foreground">管理模型配置和提示词入口。</div>
-                            </div>
+                        <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                          <span className="text-muted-foreground">数据目录</span>
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={openNotesFolder}>
+                            打开本地目录
+                          </Button>
+                        </div>
+                        {developerModeEnabled && (
+                          <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                            <span className="text-muted-foreground">版本同步</span>
+                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => void handlePushGit()}>
+                              {gitStatusLabel}
+                            </Button>
                           </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        </button>
-                        <button
-                          type="button"
-                          className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                          onClick={openSettingsCenter}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Settings className="h-4 w-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">打开设置</div>
-                              <div className="text-xs text-muted-foreground">外观、AI、Blog、数据目录都在这里。</div>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        </button>
+                        )}
                       </div>
                     </section>
 
-                    <section className="grid gap-3 rounded-lg border border-border bg-muted/15 p-5">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        能力速览
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
-                          <div className="text-sm font-medium text-foreground">Markdown</div>
-                          <div className="text-xs leading-5 text-muted-foreground">
-                            KaTeX、代码高亮、callout、cute-table、表格合并。
-                          </div>
-                        </div>
-                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
-                          <div className="text-sm font-medium text-foreground">洛谷导入</div>
-                          <div className="text-xs leading-5 text-muted-foreground">
-                            扫描、规则、预览、确认写入，仍是可控工作流。
-                          </div>
-                        </div>
-                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
-                          <div className="text-sm font-medium text-foreground">AI</div>
-                          <div className="text-xs leading-5 text-muted-foreground">
-                            提示词可编辑，API Key 只保存在本地配置。
-                          </div>
-                        </div>
-                        <div className="grid gap-1 rounded-md border border-border bg-background/70 p-3">
-                          <div className="text-sm font-medium text-foreground">本地博客</div>
-                          <div className="text-xs leading-5 text-muted-foreground">
-                            用本地博客预览文章列表、搜索、分类和阅读效果。
-                          </div>
-                        </div>
+                    <section className="rounded-xl border border-border/60 bg-muted/10 p-5">
+                      <div className="text-base font-semibold text-foreground">核心功能</div>
+                      <div className="mt-3 grid gap-2 text-xs leading-5 text-muted-foreground">
+                        <div><span className="font-medium text-foreground">Markdown：</span>数学公式、代码高亮、表格与 callout</div>
+                        <div><span className="font-medium text-foreground">洛谷导入：</span>扫描提交并整理训练记录</div>
+                        <div><span className="font-medium text-foreground">AI：</span>润色、总结、检索本地笔记</div>
+                        <div><span className="font-medium text-foreground">本地博客：</span>预览与浏览笔记文章</div>
                       </div>
                     </section>
-                  </div>
+                  </aside>
                 </div>
               </div>
             </div>

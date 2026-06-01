@@ -174,16 +174,13 @@ function NumericSettingInput({
 export function AppearanceSettingsPage({
   className,
   appTheme,
-  appThemeLabel,
   themeOptions,
   onThemeChange,
   uiScale,
-  uiScaleLabel,
   uiScaleMin,
   uiScaleMax,
   onUiScaleChange,
   appZoom,
-  appZoomLabel,
   appZoomMin,
   appZoomMax,
   onAppZoomChange,
@@ -192,7 +189,6 @@ export function AppearanceSettingsPage({
   settingsFontSizeMax,
   onSettingsFontSizeChange,
   contentZoom,
-  contentZoomLabel,
   contentZoomMin,
   contentZoomMax,
   onContentZoomChange,
@@ -216,7 +212,7 @@ export function AppearanceSettingsPage({
       <div className="mb-3 grid gap-1">
         <div className="text-base font-semibold text-foreground">主题与字号</div>
       </div>
-      <SettingRow title="主题" description={`当前使用 ${appThemeLabel}。`}>
+      <SettingRow title="主题">
         <div className="flex flex-wrap gap-2">
           {themeOptions.map((option) => (
             <Button key={option.id} type="button" variant={appTheme === option.id ? "default" : "outline"} size="sm" onClick={() => onThemeChange(option.id)}>
@@ -225,7 +221,7 @@ export function AppearanceSettingsPage({
           ))}
         </div>
       </SettingRow>
-      <SettingRow title="界面密度" description={`当前 ${uiScaleLabel}。`}>
+      <SettingRow title="界面密度" description="调整整体控件和文字密度。">
         <NumericSettingInput
           value={Math.round(uiScale * 100)}
           min={Math.round(uiScaleMin * 100)}
@@ -236,7 +232,7 @@ export function AppearanceSettingsPage({
           onCommit={(value) => onUiScaleChange(value / 100)}
         />
       </SettingRow>
-      <SettingRow title="全局界面缩放" description={`当前 ${appZoomLabel}。`}>
+      <SettingRow title="全局界面缩放" description="缩放整个应用界面。">
         <NumericSettingInput
           value={Math.round(appZoom * 100)}
           min={Math.round(appZoomMin * 100)}
@@ -247,7 +243,7 @@ export function AppearanceSettingsPage({
           onCommit={(value) => onAppZoomChange(value / 100)}
         />
       </SettingRow>
-      <SettingRow title="设置中心文字大小" description={`${settingsFontSize}px。`}>
+      <SettingRow title="设置中心文字大小" description="仅影响设置中心文字。">
         <NumericSettingInput
           value={settingsFontSize}
           min={settingsFontSizeMin}
@@ -258,7 +254,7 @@ export function AppearanceSettingsPage({
           onCommit={onSettingsFontSizeChange}
         />
       </SettingRow>
-      <SettingRow title="Markdown 内容缩放" description={`当前 ${contentZoomLabel}。`}>
+      <SettingRow title="Markdown 内容缩放" description="调整 Markdown 内容显示比例。">
         <NumericSettingInput
           value={Math.round(contentZoom * 100)}
           min={Math.round(contentZoomMin * 100)}
@@ -269,7 +265,7 @@ export function AppearanceSettingsPage({
           onCommit={(value) => onContentZoomChange(value / 100)}
         />
       </SettingRow>
-      <SettingRow title="工具栏文字大小" description={`${toolbarFontSize}px。`}>
+      <SettingRow title="工具栏文字大小" description="仅影响编辑工具栏文字。">
         <NumericSettingInput
           value={toolbarFontSize}
           min={toolbarFontSizeMin}
@@ -280,7 +276,7 @@ export function AppearanceSettingsPage({
           onCommit={onToolbarFontSizeChange}
         />
       </SettingRow>
-      <SettingRow title="编辑区字体大小" description={`${editorFontSize}px。`}>
+      <SettingRow title="编辑区字体大小" description="仅影响编辑区正文显示，不改变文件内容。">
         <NumericSettingInput
           value={editorFontSize}
           min={fontSizeMin}
@@ -291,7 +287,7 @@ export function AppearanceSettingsPage({
           onCommit={onEditorFontSizeChange}
         />
       </SettingRow>
-      <SettingRow title="预览区字体大小" description={`${previewFontSize}px。`}>
+      <SettingRow title="预览区字体大小" description="仅影响预览区正文显示。">
         <NumericSettingInput
           value={previewFontSize}
           min={fontSizeMin}
@@ -332,9 +328,9 @@ export function DataStorageSettingsPage({
       <SettingRow title="打开笔记文件夹" description="查看当前笔记目录。">
         <Button variant="outline" onClick={onOpenNotesFolder}><FolderOpen className="h-3.5 w-3.5" />打开笔记文件夹</Button>
       </SettingRow>
-      <SettingRow title="清理联网缓存" description="同联网搜索页的缓存操作。">
+      <SettingRow title="清理搜索缓存" description="删除已保存的搜索结果和网页摘要缓存。">
         <Button type="button" variant="outline" size="sm" onClick={onClearWebCache} disabled={isClearingWebCache}>
-          {isClearingWebCache ? "清理中..." : "清理联网缓存"}
+          {isClearingWebCache ? "清理中..." : "清理搜索缓存"}
         </Button>
       </SettingRow>
     </section>
@@ -369,7 +365,7 @@ export function AboutMarkdownSettingsPage({ className, capabilities }: { classNa
   return (
     <section className={className}>
       <div className="mb-3 text-base font-semibold text-foreground">Markdown 支持</div>
-      <SettingRow title="预览能力" description="主工作台负责编辑和预览。">
+      <SettingRow title="支持内容" description="支持数学公式、代码高亮、表格、引用块和常用排版组件。">
         <div className="flex flex-wrap gap-2">
           {capabilities.map((feature) => (
             <span key={feature} className="inline-flex items-center border border-border/70 bg-muted/20 px-2 py-1 text-xs text-foreground">{feature}</span>
@@ -386,8 +382,8 @@ export function AboutPrivacySettingsPage({ className }: { className: string }) {
       <div className="mb-3 text-base font-semibold text-foreground">数据与隐私</div>
       <SettingRow title="本机配置" description="配置保存在本机；API Key 不显示明文，不写入前端 localStorage。" />
       <SettingRow title="缓存与索引" description="本地笔记索引和联网缓存保存在 .oinb/。" />
-      <SettingRow title="联网搜索" description="只向所选 Provider 发送必要查询词；网页摘录只读取公开 http/https 页面。" />
-      <SettingRow title="本地笔记" description="不会上传到搜索 Provider；不读取 Cookie、历史记录、密码或登录态。" />
+      <SettingRow title="联网搜索" description="只向所选搜索服务发送必要查询词；网页摘录只读取公开 http/https 页面。" />
+      <SettingRow title="本地笔记" description="不会上传到搜索服务；不读取 Cookie、历史记录、密码或登录态。" />
     </section>
   );
 }
@@ -420,52 +416,61 @@ export function BlogPreviewSettingsPage({
   onRestartBlog: () => void;
 }) {
   return (
-    <section className={className}>
-      <div className="mb-3 text-base font-semibold text-foreground">本地预览</div>
-      <SettingRow
-        title="博客信息"
-        description="用于 Local Blog 首页顶部、全站 header 和页面标题；留空时使用默认博客名称和简介。"
-        align="start"
-      >
-        <div className="grid gap-3">
-          <label className="grid gap-1.5 text-xs text-muted-foreground">
-            博客名称
-            <Input
-              value={blogTitle}
-              onChange={(event) => onBlogTitleChange(event.target.value)}
-              placeholder="OI Notebook"
-              disabled={isLoadingBlogConfig || isSavingBlogConfig}
-              className="h-9 text-sm text-foreground"
-            />
-          </label>
-          <label className="grid gap-1.5 text-xs text-muted-foreground">
-            博客简介
-            <Input
-              value={blogSubtitle}
-              onChange={(event) => onBlogSubtitleChange(event.target.value)}
-              placeholder="一本地算法笔记与题解博客"
-              disabled={isLoadingBlogConfig || isSavingBlogConfig}
-              className="h-9 text-sm text-foreground"
-            />
-          </label>
-          {blogConfigError ? <div className="text-xs leading-5 text-destructive">{blogConfigError}</div> : null}
-          <div className="flex justify-end">
-            <Button type="button" size="sm" onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>
-              {isSavingBlogConfig ? "保存中..." : "保存博客信息"}
+    <>
+      <div data-settings-section="blog-info">
+        <section className={className}>
+          <div className="mb-3 grid gap-1">
+            <div className="text-base font-semibold text-foreground">博客信息</div>
+            <div className="text-xs leading-5 text-muted-foreground">用于本地博客首页、页头和页面标题；留空时使用默认博客名称和简介。</div>
+          </div>
+          <SettingRow title="博客名称与简介" align="start">
+            <div className="grid gap-3">
+              <label className="grid gap-1.5 text-xs text-muted-foreground">
+                博客名称
+                <Input
+                  value={blogTitle}
+                  onChange={(event) => onBlogTitleChange(event.target.value)}
+                  placeholder="OI Notebook"
+                  disabled={isLoadingBlogConfig || isSavingBlogConfig}
+                  className="h-9 text-sm text-foreground"
+                />
+              </label>
+              <label className="grid gap-1.5 text-xs text-muted-foreground">
+                博客简介
+                <Input
+                  value={blogSubtitle}
+                  onChange={(event) => onBlogSubtitleChange(event.target.value)}
+                  placeholder="一本地算法笔记与题解博客"
+                  disabled={isLoadingBlogConfig || isSavingBlogConfig}
+                  className="h-9 text-sm text-foreground"
+                />
+              </label>
+              {blogConfigError ? <div className="text-xs leading-5 text-destructive">{blogConfigError}</div> : null}
+              <div className="flex justify-end">
+                <Button type="button" size="sm" onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>
+                  {isSavingBlogConfig ? "保存中..." : "保存博客信息"}
+                </Button>
+              </div>
+            </div>
+          </SettingRow>
+        </section>
+      </div>
+      <div data-settings-section="blog-preview">
+        <section className={className}>
+          <div className="mb-3 grid gap-1">
+            <div className="text-base font-semibold text-foreground">本地预览</div>
+            <div className="text-xs leading-5 text-muted-foreground">打开或重启本地博客服务。</div>
+          </div>
+          <div className="flex flex-wrap gap-2 border-b border-border/60 py-3">
+            <Button variant="outline" onClick={onOpenBlog}><ExternalLink className="h-3.5 w-3.5" />打开博客</Button>
+            <Button variant="outline" onClick={onRestartBlog} disabled={isRestartingBlog}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              {isRestartingBlog ? "重启中..." : "重启博客"}
             </Button>
           </div>
-        </div>
-      </SettingRow>
-      <SettingRow title="博客预览" description="打开或重启本地博客服务。">
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={onOpenBlog}><ExternalLink className="h-3.5 w-3.5" />打开博客</Button>
-          <Button variant="outline" onClick={onRestartBlog} disabled={isRestartingBlog}>
-            <RotateCcw className="h-3.5 w-3.5" />
-            {isRestartingBlog ? "重启中..." : "重启博客"}
-          </Button>
-        </div>
-      </SettingRow>
-    </section>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -490,7 +495,7 @@ export function BlogTagManagerSettingsPage({
         <div className="grid gap-1">
           <div className="text-base font-semibold text-foreground">标签管理器</div>
           <div className="text-xs leading-5 text-muted-foreground">
-            浏览当前合并后的标签体系，并管理标签可见性。
+            管理推荐标签、文集候选和标签显示方式。
           </div>
         </div>
         <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/10 p-4">
@@ -502,9 +507,6 @@ export function BlogTagManagerSettingsPage({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Button type="button" onClick={onOpenTagManager}>打开标签管理器</Button>
-            <span className="text-xs leading-5 text-muted-foreground">
-              打开独立管理面板后可浏览、搜索并调整标签可见性。
-            </span>
           </div>
         </div>
       </div>

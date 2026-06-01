@@ -173,7 +173,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
       <div className="mb-3 grid gap-1">
         <div className="text-base font-semibold text-foreground">标签体系</div>
         <div className="text-xs leading-5 text-muted-foreground">
-          用于组织博客文章、桌面端标签建议和 AI 元数据补全；当前仍保留自由输入标签。
+          用于组织博客文章、桌面端标签建议和 AI 元数据补全；除推荐标签外，也可以输入自定义标签。
         </div>
       </div>
 
