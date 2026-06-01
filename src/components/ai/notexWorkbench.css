@@ -756,7 +756,7 @@ html[data-theme="light"] .notex-workbench {
   --notex-session-item-height: 45px;
   --notex-session-visible-count: 8;
   --notex-session-search-height: 48px;
-  --notex-session-list-max-height: calc(var(--notex-session-item-height) * var(--notex-session-visible-count));
+  --notex-session-list-max-height: calc((var(--notex-session-item-height) * var(--notex-session-visible-count)) + 17px);
   --notex-session-panel-max-height: calc(var(--notex-session-search-height) + var(--notex-session-list-max-height) + 1px);
   top: calc(var(--notex-header-height) + 82px);
   right: 15px;

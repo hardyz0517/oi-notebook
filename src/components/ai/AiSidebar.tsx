@@ -3939,9 +3939,9 @@ export default function AiSidebar({
   const [isConversationHydrated, setIsConversationHydrated] = useState(false);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [isCommandPanelDismissed, setIsCommandPanelDismissed] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"chat" | "conversations">("chat");
   const [isAllConversationsOpen, setIsAllConversationsOpen] = useState(false);
+  const [showConversationPopoverFade, setShowConversationPopoverFade] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
   const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
@@ -3977,6 +3977,7 @@ export default function AiSidebar({
   const streamPendingTextRef = useRef<Map<string, string>>(new Map());
   const streamVisibleTextRef = useRef<Map<string, string>>(new Map());
   const streamRevealTimerRef = useRef<Map<string, number>>(new Map());
+  const conversationPopoverListRef = useRef<HTMLDivElement | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
   const hydrationTaskRef = useRef<DeferredHydrationTask | null>(null);
@@ -5127,7 +5128,7 @@ export default function AiSidebar({
 
   const createNewConversation = () => {
     if (viewMode === "conversations") {
-      setIsHistoryOpen(false);
+      setIsAllConversationsOpen(false);
       setIsProviderPickerOpen(false);
       setIsModelPickerOpen(false);
       return;
@@ -5135,7 +5136,7 @@ export default function AiSidebar({
 
     if (activeConversation && !hasConversationContent(activeConversation)) {
       setActiveConversationId(activeConversation.id);
-      setIsHistoryOpen(false);
+      setIsAllConversationsOpen(false);
       setViewMode("chat");
       setIsProviderPickerOpen(false);
       setIsModelPickerOpen(false);
@@ -5155,7 +5156,7 @@ export default function AiSidebar({
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     cancelRenameConversation();
-    setIsHistoryOpen(false);
+    setIsAllConversationsOpen(false);
     setIsProviderPickerOpen(false);
     setIsModelPickerOpen(false);
     setInputValue("");
@@ -5195,7 +5196,6 @@ export default function AiSidebar({
     setViewMode("chat");
     setIsAllConversationsOpen(false);
     setConversationSearch("");
-    setIsHistoryOpen(false);
     setIsProviderPickerOpen(false);
     setIsModelPickerOpen(false);
     setModelSearch("");
@@ -7002,6 +7002,27 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     );
   }, [allConversations, conversationSearch]);
   const shouldShowViewAllConversations = allConversations.length > recentConversations.length;
+  const updateConversationPopoverFade = useCallback(() => {
+    const list = conversationPopoverListRef.current;
+    if (!list) {
+      setShowConversationPopoverFade(false);
+      return;
+    }
+    const distanceToBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    setShowConversationPopoverFade(distanceToBottom > 1);
+  }, []);
+  useEffect(() => {
+    if (!isAllConversationsOpen) {
+      setShowConversationPopoverFade(false);
+      return;
+    }
+    const list = conversationPopoverListRef.current;
+    if (!list) return;
+    updateConversationPopoverFade();
+    const observer = new ResizeObserver(updateConversationPopoverFade);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [filteredConversations, isAllConversationsOpen, updateConversationPopoverFade]);
   const activeConversationTitle = getConversationDisplayTitle(activeConversation);
   const pendingDeleteConversation =
     conversations.find((conversation) => conversation.id === pendingDeleteConversationId) ?? null;
@@ -7147,7 +7168,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             onClick={() => {
               setIsProviderPickerOpen((open) => !open);
               setIsAllConversationsOpen(false);
-              setIsHistoryOpen(false);
               setIsModelPickerOpen(false);
             }}
           title={selectedProviderLabel}
@@ -7206,7 +7226,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   setViewMode("conversations");
                   setIsAllConversationsOpen(false);
                   setConversationSearch("");
-                  setIsHistoryOpen(false);
                   setIsProviderPickerOpen(false);
                   setIsModelPickerOpen(false);
                 }}
@@ -7228,17 +7247,17 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             type="button"
             className={cn(
               "notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              isHistoryOpen && "bg-accent/35 text-foreground",
+              isAllConversationsOpen && "bg-accent/35 text-foreground",
             )}
             onClick={() => {
-              setIsHistoryOpen((open) => !open);
-              setIsAllConversationsOpen(false);
+              setConversationSearch("");
+              setIsAllConversationsOpen((open) => !open);
               setIsProviderPickerOpen(false);
               setIsModelPickerOpen(false);
             }}
             title="Chat history"
             aria-label="Chat history"
-            aria-pressed={isHistoryOpen}
+            aria-pressed={isAllConversationsOpen}
           >
             <History className="h-4 w-4" />
           </button>
@@ -7255,7 +7274,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             type="button"
             className="notex-icon-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => {
-              setIsHistoryOpen(false);
               setIsAllConversationsOpen(false);
               setIsProviderPickerOpen(false);
               setIsModelPickerOpen(false);
@@ -7401,7 +7419,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         )}
 
-        {isHistoryOpen && (
+        {false && (
           <div className="absolute right-3 top-[4.75rem] z-30 w-[340px] max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
               <span className="text-xs font-medium text-foreground">会话</span>
@@ -7521,7 +7539,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   onClick={() => {
                     setConversationSearch("");
                     setIsAllConversationsOpen((open) => !open);
-                    setIsHistoryOpen(false);
                     setIsProviderPickerOpen(false);
                     setIsModelPickerOpen(false);
                   }}
@@ -7685,26 +7702,24 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           {canCopyAssistantMessage && (
                             <button
                               type="button"
-                              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                               onClick={() => void copyAssistantMessage(message)}
-                              title="复制这条 AI 回复"
-                              aria-label="复制这条 AI 回复"
+                              title={copyFeedback === "copied" ? "已复制" : copyFeedback === "failed" ? "复制失败" : "复制"}
+                              aria-label={copyFeedback === "copied" ? "已复制回答" : copyFeedback === "failed" ? "复制回答失败" : "复制回答"}
                             >
                               <Copy className="h-3.5 w-3.5" />
-                              <span>{copyFeedback === "copied" ? "已复制" : copyFeedback === "failed" ? "复制失败" : "复制"}</span>
                             </button>
                           )}
                           {canRetryMessage && (
                             <button
                               type="button"
-                              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                               onClick={() => retryAssistantMessage(message)}
                               disabled={isResponding}
-                              title="重新生成这条 AI 回复"
-                              aria-label="重新生成这条 AI 回复"
+                              title="重试"
+                              aria-label="重试回答"
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
-                              <span>重试</span>
                             </button>
                           )}
                         </div>
@@ -7780,7 +7795,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 className="notex-session-search"
               />
             </div>
-            <div className="notex-session-popover-list min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
+            <div
+              ref={conversationPopoverListRef}
+              className="notex-session-popover-list min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]"
+              onScroll={updateConversationPopoverFade}
+            >
               {filteredConversations.length > 0 ? (
                 <div className="notex-session-list grid">
                   {filteredConversations.map((conversation) => renderConversationItem(conversation, "overlay"))}
@@ -7791,7 +7810,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 </div>
               )}
             </div>
-            <div className="notex-session-popover-fade" aria-hidden="true" />
+            {showConversationPopoverFade && <div className="notex-session-popover-fade" aria-hidden="true" />}
           </div>
         </div>
       )}
@@ -7897,7 +7916,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             }}
             onKeyDown={handleInputKeyDown}
             rows={1}
-            placeholder="Ask a question, or type /"
+            placeholder="输入问题，或输入 /"
             className="notex-composer-input w-full resize-none outline-none"
           />
           <div className="notex-composer-toolbar flex min-w-0 items-center gap-1 overflow-hidden">
@@ -7911,7 +7930,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 onClick={() => {
                   setIsModelPickerOpen((open) => !open);
                   setIsProviderPickerOpen(false);
-                  setIsHistoryOpen(false);
+                  setIsAllConversationsOpen(false);
                 }}
                 title={`选择模型：${selectedModelLabel}`}
                 aria-label={`选择模型：${selectedModelLabel}`}

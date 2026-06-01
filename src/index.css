@@ -625,14 +625,15 @@ html[data-theme="light"] [data-markdown-preview-content] a:focus-visible {
 
 html[data-theme="dark"] [data-markdown-preview-content] a,
 html[data-theme="dark"] [data-markdown-preview-content] a:visited {
-  color: #04395E !important;
-  text-decoration-color: color-mix(in oklch, #04395E 68%, transparent);
+  color: #3B82F6 !important;
+  text-decoration-color: color-mix(in oklch, #3B82F6 68%, transparent);
 }
 
 html[data-theme="dark"] [data-markdown-preview-content] a:hover,
 html[data-theme="dark"] [data-markdown-preview-content] a:focus-visible {
-  color: #2899f5 !important;
-  text-decoration-color: #2899f5;
+  color: #60A5FA !important;
+  text-decoration: underline;
+  text-decoration-color: #60A5FA;
 }
 
 [data-markdown-preview-content] pre a,
