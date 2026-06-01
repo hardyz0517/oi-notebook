@@ -168,22 +168,55 @@ Required JSON schema:
   "summary": string
 }
 
-Rules:
-- Generate metadata only from the current note content.
-- category describes the note kind, such as 题解, 技巧, 学习, 杂谈, or 项目日志.
-- tags describe knowledge points, training use, source, stage, project, and related dimensions.
-- Prefer canonical taxonomy paths from the local tag context when they fit.
-- Normalize aliases to canonical paths, for example 拓展 KMP / exKMP -> 算法/字符串/Z 函数, and 李超树 -> 算法/数据结构/李超线段树.
-- tags should contain only confident labels. Do not invent many labels just to fill the list.
-- summary must be one concise sentence.
-- title may be improved, but keep it factual and not exaggerated.
-- Do not rewrite or polish the note body.
-- Do not return Markdown, only JSON.
+Task:
+Generate clean metadata for an OI Notebook markdown note.
+The metadata is used for file lists, search, review, local blog display, and future study.
+
+Use only the current note content and the note path.
+Do not rewrite, polish, summarize, or output the note body.
+Do not invent missing algorithms, proofs, implementation details, problem statements, or conclusions.
+
+Title rules:
+- The title should be professional, concise, and easy to identify in a notebook/file list.
+- If the note is clearly a solution note, the title may include the problem ID or problem title when useful.
+- If the note is mainly a trick, template, pitfall, review, or technique note, do not force a problem ID into the title.
+- If the note has one clear main point, summarize that point as the title.
+- If the note contains several independent points, use a broader title such as "XXX 的若干技巧与坑点", "XXX 复盘要点", or "XXX 相关体会".
+- Prefer standard algorithm and technique names when present, such as "线段树", "李超线段树", "点分树", "树状数组", "倍增", "树链剖分", "离散化", "换根 DP", "单调栈".
+- Avoid vague, casual, exaggerated, or report-like titles.
+- Do not use titles like "一些思考", "学习笔记", "本文总结", unless the content really has no clearer topic.
+
+Tag rules:
+- tags must contain 3-5 concise labels.
+- Tags should include both:
+  1. algorithm / data-structure / technique tags, such as "线段树", "DP", "离散化", "点分树", "二分", "贪心";
+  2. type / purpose tags, such as "技巧", "坑点", "实现细节", "模板", "调试", "复盘", "函数用法".
+- Prefer specific tags over broad tags.
+- Avoid overly broad tags such as "算法", "学习", "题解", unless no better tag exists.
+- Avoid duplicate or near-duplicate tags.
+- Do not use the problem ID as a tag unless the note is specifically organized around that problem.
+- Do not put collection/category names into tags.
+
+Summary rules:
+- summary must be one concise Chinese sentence.
+- The summary should describe the note's review value: what it helps the user remember or avoid next time.
+- Prefer summaries like:
+  "提醒点分树统计时用子树贡献去重，避免同一子树重复计数。"
+  "记录离散化时需要纳入查询端点，防止区间边界丢失。"
+- Avoid empty report-like summaries such as:
+  "本文介绍了某算法的相关内容。"
+  "这是一篇关于某题的笔记。"
+- If the note is short or messy, be conservative: extract the clearest reusable value, but do not pretend the note is complete.
+- If the content is mostly code, summarize the code's apparent role only when it is clear.
+- If the content lacks enough information, still return the best factual title/tags/summary you can infer from the content and path, without inventing details.
+
+Path usage:
+- Use the note relative path as a weak hint.
+- For example, paths containing "solution", "题解", or a problem ID may indicate a solution note.
+- Paths containing "trick", "技巧", "template", "模板", "review", "复盘" may indicate the note type.
+- Do not rely on the path if it conflicts with the actual content.
 
 Note relative path: {{note_path}}
-
-Local tag taxonomy context:
-{{tag_context}}
 
 Current markdown content:
 {{content}}
