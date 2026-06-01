@@ -382,6 +382,19 @@ fn save_prompt_template_to_dir(
         .map_err(|e| format!("Prompt failed: cannot save prompt: {e}"))
 }
 
+fn reset_prompt_template_to_default_in_dir(
+    prompts_dir: &Path,
+    file_name: &str,
+) -> Result<PromptTemplateContent, String> {
+    let kind = prompt_kind_from_file_name(file_name)?;
+    let content = kind.default_content().to_string();
+    save_prompt_template_to_dir(prompts_dir, kind.file_name(), &content)?;
+    Ok(PromptTemplateContent {
+        file_name: kind.file_name().to_string(),
+        content,
+    })
+}
+
 #[tauri::command]
 pub fn list_ai_prompts() -> Result<Vec<PromptTemplateSummary>, String> {
     list_prompt_templates_from_dir(&prompts_dir()?)
@@ -400,6 +413,11 @@ pub fn read_ai_prompt(file_name: String) -> Result<PromptTemplateContent, String
 #[tauri::command]
 pub fn save_ai_prompt(file_name: String, content: String) -> Result<(), String> {
     save_prompt_template_to_dir(&prompts_dir()?, &file_name, &content)
+}
+
+#[tauri::command]
+pub fn reset_ai_prompt_to_default(file_name: String) -> Result<PromptTemplateContent, String> {
+    reset_prompt_template_to_default_in_dir(&prompts_dir()?, &file_name)
 }
 
 #[cfg(test)]
@@ -426,7 +444,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let prompts_dir = dir.path().join("prompts");
         fs::create_dir_all(&prompts_dir).unwrap();
-        fs::write(prompts_dir.join(NOTE_METADATA_PROMPT), "custom metadata prompt").unwrap();
+        fs::write(
+            prompts_dir.join(NOTE_METADATA_PROMPT),
+            "custom metadata prompt",
+        )
+        .unwrap();
 
         ensure_prompt_file(&prompts_dir, PromptTemplateKind::NoteMetadata).unwrap();
 
@@ -474,6 +496,23 @@ mod tests {
         assert_eq!(
             fs::read_to_string(prompts_dir.join(NOTE_POLISH_PROMPT)).unwrap(),
             "custom"
+        );
+    }
+
+    #[test]
+    fn resets_known_prompt_file_to_default() {
+        let dir = tempdir().unwrap();
+        let prompts_dir = dir.path().join("prompts");
+        save_prompt_template_to_dir(&prompts_dir, NOTE_POLISH_PROMPT, "custom").unwrap();
+
+        let prompt =
+            reset_prompt_template_to_default_in_dir(&prompts_dir, NOTE_POLISH_PROMPT).unwrap();
+
+        assert_eq!(prompt.file_name, NOTE_POLISH_PROMPT);
+        assert_eq!(prompt.content, DEFAULT_NOTE_POLISH_PROMPT);
+        assert_eq!(
+            fs::read_to_string(prompts_dir.join(NOTE_POLISH_PROMPT)).unwrap(),
+            DEFAULT_NOTE_POLISH_PROMPT
         );
     }
 

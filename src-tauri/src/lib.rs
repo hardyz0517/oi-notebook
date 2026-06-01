@@ -263,6 +263,7 @@ pub fn run() {
             prompts::list_ai_prompts,
             prompts::read_ai_prompt,
             prompts::save_ai_prompt,
+            prompts::reset_ai_prompt_to_default,
             tag_taxonomy::get_tag_taxonomy_config,
             tag_taxonomy::save_tag_taxonomy_config,
             tag_taxonomy::reset_tag_taxonomy_config,

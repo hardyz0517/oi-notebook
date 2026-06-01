@@ -45,7 +45,7 @@ import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
@@ -5287,6 +5287,35 @@ export default function App() {
     }
   };
 
+  const handleResetPromptToDefault = async () => {
+    if (!selectedPromptFileName) {
+      toast.error("请先选择一个提示词");
+      return;
+    }
+
+    const confirmed = await requestConfirm({
+      title: "重置为默认模板？",
+      description: "这会用内置默认模板覆盖当前编辑内容。已经保存的自定义内容也会在确认后被替换。",
+      confirmText: "重置",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    setIsSavingPrompt(true);
+    try {
+      const prompt = await resetAiPromptToDefault(selectedPromptFileName);
+      setSelectedPromptFileName(prompt.fileName);
+      setPromptContent(prompt.content);
+      setPromptPolishMessage(null);
+      toast.success("已重置为默认模板");
+    } catch (e) {
+      toast.error(`提示词重置失败：${getErrorMessage(e)}`);
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  };
+
   const handlePolishPrompt = async () => {
     if (!selectedPromptFileName) {
       toast.error("请先选择一个提示词");
@@ -8860,6 +8889,17 @@ export default function App() {
       )}
       promptHeaderActions={
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 pr-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() => void handleResetPromptToDefault()}
+              disabled={!selectedPromptFileName || isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              重置为默认模板
+            </Button>
             <Button
               type="button"
               variant="outline"

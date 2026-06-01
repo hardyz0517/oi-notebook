@@ -1087,6 +1087,14 @@ export async function saveAiPrompt(fileName: string, content: string): Promise<v
   }
 }
 
+export async function resetAiPromptToDefault(fileName: string): Promise<PromptTemplateContent> {
+  try {
+    return await invoke<PromptTemplateContent>("reset_ai_prompt_to_default", { fileName });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
 export async function polishAiPromptTemplate(
   fileName: string,
   content: string,
