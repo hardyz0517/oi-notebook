@@ -2,7 +2,7 @@
 title: searchprd
 tags: []
 createdAt: 2026-06-03T12:02:38.887Z
-updated: 2026-06-03T20:03:14.758779500+08:00
+updated: 2026-06-03T20:03:16.518047900+08:00
 ---
 # OI Notebook / NoteX 联网搜索系统重构背景交接
 
