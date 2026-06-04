@@ -1,4 +1,25 @@
 export type {
+  ExcerptBuildInput,
+  ExcerptBuildResult,
+  ExcerptBudget,
+  ExcerptWarning,
+  ExtractedContentBlock,
+  ExtractedContentBlockType,
+  ExtractedDocument,
+  ExtractedDocumentMetadata,
+  MockReaderScenario,
+  PassageSelectionInput,
+  PassageSelectionResult,
+  ReaderQualityEvaluation,
+  ReaderQualityLevel,
+  ReaderQualitySignal,
+  SelectedPassage,
+  UrlReaderErrorKind,
+  UrlReaderRequest,
+  UrlReaderResult,
+  UrlReaderStatus,
+} from "./readerTypes";
+export type {
   ExpectedSourceType,
   AbortReason,
   CandidateEvidenceState,
@@ -117,4 +138,11 @@ export {
   createEventBuffer,
   flushEventBuffer,
 } from "./eventBuffer";
+export {
+  readMockCandidates,
+  readMockUrl,
+} from "./mockUrlReader";
+export { evaluateReaderQuality } from "./readerQuality";
+export { selectPassages } from "./passageSelector";
+export { buildExcerpt } from "./excerptBuilder";
 export { runResearchEngineSelfCheck } from "./selfCheck";

@@ -1,10 +1,14 @@
 import { appendPipelineEvents, createEventBuffer } from "./eventBuffer";
+import { buildExcerpt } from "./excerptBuilder";
 import { buildCandidatePool } from "./candidatePool";
 import { canonicalizeUrl, normalizeDiscoveryResult } from "./candidateNormalizer";
 import { executeDiscoveryProvider } from "./discoveryProvider";
 import { createMockOiProvider } from "./mockDiscoveryProvider";
+import { readMockUrl } from "./mockUrlReader";
+import { selectPassages } from "./passageSelector";
 import { runDiscoveryPipelineOffline } from "./discoveryPipeline";
 import { buildQueryPlan } from "./queryPlanner";
+import { evaluateReaderQuality } from "./readerQuality";
 import { evaluateReadinessGate } from "./readinessGate";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import { createSchedulerSnapshot, scheduleCandidates, simulateSchedulerStep } from "./scheduler";
@@ -434,11 +438,197 @@ const phase4Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const phase5Fixture = (
+  id: string,
+  question: string,
+  source: Partial<CandidateSource>,
+  options: {
+    scenario?: Parameters<typeof readMockUrl>[0]["scenario"];
+    budget?: { maxChars: number; maxBlocks?: number; reserveForMetadata?: number };
+  } = {},
+) => {
+  const context = phase3Context(id, question);
+  const sourceCandidate = candidate(`${id}-source`, {
+    url: "https://example.com/article",
+    title: id,
+    host: "example.com",
+    sourceType: "official",
+    queryPurpose: "official",
+    language: "en",
+    ...source,
+  });
+  const readerResult = readMockUrl({
+    request: context.request,
+    policy: context.policy,
+    queryPlan: context.queryPlan,
+    candidate: sourceCandidate,
+    scenario: options.scenario,
+  });
+  const quality = evaluateReaderQuality(readerResult);
+  const selection = selectPassages({
+    request: context.request,
+    policy: context.policy,
+    queryPlan: context.queryPlan,
+    readerResult,
+    quality,
+    budget: options.budget,
+  });
+  const excerpt = buildExcerpt({
+    readerResult,
+    quality,
+    selection,
+    budget: options.budget,
+  });
+  return { ...context, readerResult, quality, selection, excerpt };
+};
+
+const phase5Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("reader-react-docs-excerpt", "React useEffect what is it", (failures) => {
+    const fixture = phase5Fixture("reader-react-docs-excerpt", "React useEffect what is it", {
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+    });
+    assertEqual(failures, "status", fixture.readerResult.status, "fetched");
+    assertTrue(failures, "quality_not_none", fixture.quality.quality !== "none");
+    assertTrue(failures, "heading_missing", fixture.excerpt.excerptMarkdown.includes("useEffect"));
+    assertTrue(failures, "code_fence_missing", fixture.excerpt.excerptMarkdown.includes("```tsx"));
+  }),
+  phase2Result("reader-oi-wiki-math-intact", "P3379 LCA implementation pitfalls", (failures) => {
+    const fixture = phase5Fixture("reader-oi-wiki-math-intact", "P3379 LCA implementation pitfalls", {
+      url: "https://oi-wiki.org/graph/lca/",
+      host: "oi-wiki.org",
+      title: "Lowest Common Ancestor - OI Wiki",
+      sourceType: "documentation",
+    });
+    assertTrue(failures, "math_missing", fixture.excerpt.excerptMarkdown.includes("$$up[v][k]"));
+    assertEqual(failures, "math_not_truncated", fixture.excerpt.hasTruncatedMathBlock, false);
+  }),
+  phase2Result("reader-luogu-p3379-excerpt", "P3379 LCA implementation pitfalls", (failures) => {
+    const fixture = phase5Fixture("reader-luogu-p3379-excerpt", "P3379 LCA implementation pitfalls", {
+      url: "https://www.luogu.com.cn/problem/P3379",
+      host: "luogu.com.cn",
+      title: "P3379 LCA",
+      sourceType: "problem_statement",
+      language: "zh",
+      queryPurpose: "exact_problem",
+    });
+    assertTrue(failures, "problem_id_missing", fixture.excerpt.excerptMarkdown.includes("P3379"));
+    assertTrue(failures, "formula_missing", fixture.excerpt.excerptMarkdown.includes("dist(u,v)"));
+    assertTrue(failures, "code_missing", fixture.excerpt.excerptMarkdown.includes("int lca"));
+  }),
+  phase2Result("reader-code-block-over-budget", "React useEffect code example", (failures) => {
+    const url = "https://react.dev/reference/react/useEffect";
+    const fixture = phase5Fixture("reader-code-block-over-budget", "React useEffect code example", {
+      url,
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+    }, {
+      scenario: { oversizedCodeUrls: [url] },
+      budget: { maxChars: 360, maxBlocks: 4, reserveForMetadata: 120 },
+    });
+    assertTrue(failures, "large_code_warning_missing", fixture.excerpt.warnings.includes("omitted_large_code_block"));
+    assertEqual(failures, "code_not_truncated", fixture.excerpt.hasTruncatedCodeBlock, false);
+  }),
+  phase2Result("reader-math-block-over-budget", "LCA formula implementation", (failures) => {
+    const url = "https://oi-wiki.org/graph/lca/";
+    const fixture = phase5Fixture("reader-math-block-over-budget", "LCA formula implementation", {
+      url,
+      host: "oi-wiki.org",
+      title: "Lowest Common Ancestor - OI Wiki",
+      sourceType: "documentation",
+    }, {
+      scenario: { oversizedMathUrls: [url] },
+      budget: { maxChars: 360, maxBlocks: 4, reserveForMetadata: 120 },
+    });
+    assertTrue(failures, "large_math_warning_missing", fixture.excerpt.warnings.includes("omitted_large_math_block"));
+    assertEqual(failures, "math_not_truncated", fixture.excerpt.hasTruncatedMathBlock, false);
+  }),
+  phase2Result("reader-homepage-weak", "company latest version", (failures) => {
+    const fixture = phase5Fixture("reader-homepage-weak", "company latest version", {
+      url: "https://example.com/",
+      host: "example.com",
+      title: "Example home",
+    });
+    assertEqual(failures, "status", fixture.readerResult.status, "homepage");
+    assertTrue(failures, "homepage_not_strong", fixture.quality.quality !== "strong");
+    assertEqual(failures, "homepage_strong_claim", fixture.quality.canSupportStrongClaim, false);
+  }),
+  phase2Result("reader-needs-js-warning", "React useEffect interactive docs", (failures) => {
+    const fixture = phase5Fixture("reader-needs-js-warning", "React useEffect interactive docs", {
+      url: "https://example.com/needs-js",
+      host: "example.com",
+      title: "Needs JS",
+    });
+    assertTrue(failures, "quality_none_or_weak", fixture.quality.quality === "none" || fixture.quality.quality === "weak");
+    assertTrue(failures, "needs_js_warning_missing", fixture.excerpt.warnings.includes("needs_js"));
+  }),
+  phase2Result("reader-blocked-warning", "blocked source", (failures) => {
+    const fixture = phase5Fixture("reader-blocked-warning", "blocked source", {
+      url: "https://example.com/blocked",
+      host: "example.com",
+      title: "Blocked source",
+    });
+    assertTrue(failures, "quality_none_or_weak", fixture.quality.quality === "none" || fixture.quality.quality === "weak");
+    assertTrue(failures, "blocked_warning_missing", fixture.excerpt.warnings.includes("blocked_or_unreadable"));
+  }),
+  phase2Result("reader-news-published-context", "recent OpenAI news", (failures) => {
+    const fixture = phase5Fixture("reader-news-published-context", "recent OpenAI news", {
+      url: "https://www.reuters.com/news/openai-research-product-updates",
+      host: "www.reuters.com",
+      title: "OpenAI announces research and product updates",
+      sourceType: "mainstream_news",
+      queryPurpose: "news",
+    });
+    assertEqual(failures, "publishedAt", fixture.readerResult.document?.metadata.publishedAt ?? "", "2026-06-04");
+    assertTrue(failures, "published_line_missing", fixture.excerpt.excerptMarkdown.includes("Published: 2026-06-04"));
+    assertTrue(failures, "key_paragraph_missing", fixture.excerpt.excerptMarkdown.includes("confirmed announcements"));
+  }),
+  phase2Result("reader-too-short-and-parse-failed", "short or broken article", (failures) => {
+    const tooShort = phase5Fixture("reader-too-short-case", "short article", {
+      url: "https://example.com/too-short",
+      host: "example.com",
+      title: "Short page",
+    });
+    const parseFailed = phase5Fixture("reader-parse-failed-case", "broken article", {
+      url: "https://example.com/parse-failed",
+      host: "example.com",
+      title: "Broken page",
+    });
+    assertEqual(failures, "tooShortCanSupportAnswer", tooShort.quality.canSupportAnswer, false);
+    assertEqual(failures, "parseFailedCanSupportAnswer", parseFailed.quality.canSupportAnswer, false);
+  }),
+  phase2Result("reader-high-risk-weak-not-strong", "Zhang Xuefeng died rumor", (failures) => {
+    const fixture = phase5Fixture("reader-high-risk-weak-not-strong", "Zhang Xuefeng died rumor", {
+      url: "https://forum.example.com/rumor",
+      host: "forum.example.com",
+      title: "Rumor forum thread",
+      sourceType: "forum",
+      queryPurpose: "rebuttal",
+    });
+    assertEqual(failures, "highRisk", fixture.policy.risk, "high");
+    assertEqual(failures, "canSupportStrongClaim", fixture.quality.canSupportStrongClaim, false);
+  }),
+  phase2Result("reader-markdown-code-fence-closed", "React useEffect code example", (failures) => {
+    const fixture = phase5Fixture("reader-markdown-code-fence-closed", "React useEffect code example", {
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+    });
+    const fenceCount = (fixture.excerpt.excerptMarkdown.match(/```/g) ?? []).length;
+    assertEqual(failures, "codeFenceParity", fenceCount % 2, 0);
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
   ...phase3Cases(),
   ...phase4Cases(),
+  ...phase5Cases(),
 ];
 
 export type {
