@@ -41,6 +41,18 @@ export type ExpectedSourceType =
   | "public_activity"
   | "explicit_url";
 
+export type SourceType =
+  | "official"
+  | "docs"
+  | "mainstream_news"
+  | "tech_media"
+  | "community"
+  | "forum"
+  | "seo_aggregator"
+  | "unknown";
+
+export type SourceReliability = "very_high" | "high" | "medium" | "low" | "unknown";
+
 export type SearchJobStatus = "created" | "running" | "completed" | "aborted" | "failed";
 
 export type SearchJobPhase =
@@ -196,6 +208,179 @@ export type CandidateSource = {
   score?: number;
   rejectionReason?: string;
   extensions?: Record<string, unknown>;
+};
+
+export type DiscoveryProviderName = "mock" | "bing" | "google" | "brave" | "serpapi" | "manual" | "unknown";
+
+export type DiscoveryRawResult = {
+  id?: string;
+  provider: DiscoveryProviderName;
+  providerPriority?: number;
+  query: string;
+  queryPurpose: QueryPurpose;
+  queryLanguage?: ResearchLanguage;
+  resultIndex: number;
+  url: string;
+  title: string;
+  snippet?: string;
+  publishedAt?: string;
+  discoveredAt?: number;
+  sourceTypeHint?: SourceType;
+  extensions?: Record<string, unknown>;
+};
+
+export type CandidateCanonicalInfo = {
+  canonicalUrl: string;
+  originalUrl: string;
+  host: string;
+  normalizedHost: string;
+  path: string;
+  title: string;
+  normalizedTitle: string;
+  language: ResearchLanguage;
+  sourceType: SourceType;
+  reliability: SourceReliability;
+  dateHint?: string;
+  queryPurpose: QueryPurpose;
+  redirectUnwrapped: boolean;
+  unsupportedReason?: string;
+};
+
+export type CandidateDedupeKey = {
+  canonicalUrl: string;
+  titleHost: string;
+  titleHostSnippet: string;
+  normalizedHost: string;
+  normalizedTitle: string;
+};
+
+export type NormalizedCandidate = {
+  id: string;
+  raw: DiscoveryRawResult;
+  canonical: CandidateCanonicalInfo;
+  dedupeKey: CandidateDedupeKey;
+  url: string;
+  canonicalUrl: string;
+  title: string;
+  normalizedTitle: string;
+  snippet?: string;
+  provider: DiscoveryProviderName;
+  providerPriority: number;
+  query: string;
+  queryPurpose: QueryPurpose;
+  language: ResearchLanguage;
+  sourceType: SourceType;
+  reliability: SourceReliability;
+  reliabilityScore: number;
+  discoveredAt: number;
+  originalIndex: number;
+  rank?: CandidateRankScore;
+  clusterId?: string;
+  rejectedReason?: CandidateRejectReason;
+  extensions?: Record<string, unknown>;
+};
+
+export type CandidateRejectReason =
+  | "duplicate_url"
+  | "duplicate_title_host"
+  | "low_relevance"
+  | "unsupported_url"
+  | "internal_search_page"
+  | "excessive_same_host"
+  | "diversity_limit";
+
+export type CandidatePoolInput = {
+  request: ResearchSearchRequest;
+  policy: SearchPolicyDecision;
+  queryPlan: QueryPlan;
+  rawResults: DiscoveryRawResult[];
+  config?: Partial<CandidatePoolConfig>;
+};
+
+export type CandidatePoolConfig = {
+  maxCandidates: number;
+  maxSelected: number;
+  perHostLimit: number;
+  minScore: number;
+  diversity: DiversitySelectionConfig;
+};
+
+export type CandidateRankFeature =
+  | "lexicalRelevance"
+  | "titleMatch"
+  | "snippetMatch"
+  | "sourceReliability"
+  | "freshnessHint"
+  | "queryPurposeMatch"
+  | "sourceTypeMatch"
+  | "officialBoost"
+  | "seoPenalty"
+  | "duplicatePenalty";
+
+export type CandidateRankBreakdown = {
+  feature: CandidateRankFeature;
+  raw: number;
+  weight: number;
+  weighted: number;
+  reason: string;
+};
+
+export type CandidateRankScore = {
+  candidateId: string;
+  total: number;
+  breakdown: CandidateRankBreakdown[];
+};
+
+export type CandidateCluster = {
+  id: string;
+  key: string;
+  candidateIds: string[];
+  representativeId: string;
+  hosts: string[];
+  sourceTypes: SourceType[];
+};
+
+export type DiversitySelectionConfig = {
+  maxSelected: number;
+  perHostLimit: number;
+  preferredSourceTypes: SourceType[];
+  minClusterRepresentatives: number;
+};
+
+export type DiversitySelectionResult = {
+  selected: NormalizedCandidate[];
+  rejected: Array<{
+    candidate: NormalizedCandidate;
+    reason: CandidateRejectReason;
+  }>;
+  clusters: CandidateCluster[];
+  decisions: Array<{
+    candidateId: string;
+    selected: boolean;
+    reason: string;
+  }>;
+};
+
+export type CandidatePoolSnapshot = {
+  requestId?: string;
+  rawCount: number;
+  normalizedCount: number;
+  dedupedCount: number;
+  selectedCount: number;
+  rejectedCount: number;
+  normalizedCandidates: NormalizedCandidate[];
+  dedupedCandidates: NormalizedCandidate[];
+  selectedCandidates: CandidateSource[];
+  selectedNormalizedCandidates: NormalizedCandidate[];
+  rejectedCandidates: Array<{
+    candidate: NormalizedCandidate;
+    reason: CandidateRejectReason;
+  }>;
+  hostDistribution: Record<string, number>;
+  sourceTypeDistribution: Record<SourceType, number>;
+  rankBreakdowns: Record<string, CandidateRankScore>;
+  clusters: CandidateCluster[];
+  diversity: DiversitySelectionResult;
 };
 
 export type PipelineEvent = {
