@@ -210,7 +210,147 @@ export type CandidateSource = {
   extensions?: Record<string, unknown>;
 };
 
-export type DiscoveryProviderName = "mock" | "bing" | "google" | "brave" | "serpapi" | "manual" | "unknown";
+export type DiscoveryProviderName =
+  | "mock"
+  | "mock_web"
+  | "mock_news"
+  | "mock_official_docs"
+  | "mock_oi"
+  | "mock_exact_url"
+  | "bing"
+  | "google"
+  | "brave"
+  | "serpapi"
+  | "manual"
+  | "unknown";
+
+export type DiscoveryProviderKind = "mock" | "external" | "manual";
+
+export type DiscoveryProviderStatus = "available" | "disabled" | "failed" | "timeout" | "partial";
+
+export type DiscoveryProviderCapability =
+  | "web_search"
+  | "news_search"
+  | "official_docs"
+  | "oi_sources"
+  | "exact_url";
+
+export type DiscoveryProviderErrorKind =
+  | "timeout"
+  | "rate_limited"
+  | "unauthorized"
+  | "malformed_response"
+  | "empty_result"
+  | "provider_disabled"
+  | "unsupported_vertical"
+  | "unknown";
+
+export type DiscoveryProviderTiming = {
+  startedAt: number;
+  finishedAt: number;
+  elapsedMs: number;
+  timedOut: boolean;
+};
+
+export type DiscoveryProviderError = {
+  kind: DiscoveryProviderErrorKind;
+  message: string;
+  providerName: DiscoveryProviderName;
+  query?: string;
+  recoverable: boolean;
+};
+
+export type MockDiscoveryScenario = {
+  disabledProviders?: DiscoveryProviderName[];
+  timeoutProviders?: DiscoveryProviderName[];
+  partialProviders?: DiscoveryProviderName[];
+  emptyProviders?: DiscoveryProviderName[];
+  unsupportedProviders?: DiscoveryProviderName[];
+  duplicateResults?: boolean;
+};
+
+export type DiscoveryProviderRequest = {
+  request: ResearchSearchRequest;
+  policy: SearchPolicyDecision;
+  queryPlan: QueryPlan;
+  query: PlannedQuery;
+  scenario?: MockDiscoveryScenario;
+  nowMs?: number;
+  extensions?: Record<string, unknown>;
+};
+
+export type DiscoveryProviderResponse = {
+  providerName: DiscoveryProviderName;
+  query: string;
+  queryPurpose: QueryPurpose;
+  rawResults: DiscoveryRawResult[];
+  status: DiscoveryProviderStatus;
+  error?: DiscoveryProviderError;
+  timing?: DiscoveryProviderTiming;
+  diagnostics?: Record<string, unknown>;
+};
+
+export type DiscoveryProvider = {
+  name: DiscoveryProviderName;
+  kind: DiscoveryProviderKind;
+  capabilities: DiscoveryProviderCapability[];
+  enabled: boolean;
+  priority: number;
+  execute: (request: DiscoveryProviderRequest) => DiscoveryProviderResponse;
+};
+
+export type DiscoveryExecutionConfig = {
+  maxRawResults: number;
+  providerTimeoutMs: number;
+  scenario?: MockDiscoveryScenario;
+};
+
+export type DiscoveryMergeConfig = {
+  maxRawResults: number;
+};
+
+export type DiscoveryMergeResult = {
+  mergedRawResults: DiscoveryRawResult[];
+  providerStatusSummary: Record<string, DiscoveryProviderStatus>;
+  errorSummary: Partial<Record<DiscoveryProviderErrorKind, number>>;
+  errors: DiscoveryProviderError[];
+  partial: boolean;
+  diagnostics: {
+    rawResultCount: number;
+    responseCount: number;
+    compressedDuplicateCount: number;
+  };
+};
+
+export type DiscoveryProviderRegistryEntry = {
+  provider: DiscoveryProvider;
+  selected: boolean;
+  reason: string;
+};
+
+export type DiscoverySelectionResult = {
+  entries: DiscoveryProviderRegistryEntry[];
+  selectedProviders: DiscoveryProvider[];
+  diagnostics: {
+    policyMode: SearchMode;
+    vertical: SearchVertical;
+    selectedProviderNames: DiscoveryProviderName[];
+    skippedProviderNames: DiscoveryProviderName[];
+    reasons: Record<string, string>;
+  };
+};
+
+export type DiscoveryExecutionSnapshot = {
+  request: ResearchSearchRequest;
+  policy: SearchPolicyDecision;
+  queryPlan: QueryPlan;
+  providerResponses: DiscoveryProviderResponse[];
+  mergedRawResults: DiscoveryRawResult[];
+  errors: DiscoveryProviderError[];
+  partial: boolean;
+  diagnostics: Record<string, unknown>;
+  candidatePool?: CandidatePoolSnapshot;
+};
 
 export type DiscoveryRawResult = {
   id?: string;

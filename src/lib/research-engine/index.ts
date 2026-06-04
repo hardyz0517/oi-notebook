@@ -17,6 +17,21 @@ export type {
   CandidateSource,
   CandidateStatus,
   DiscoveryProviderName,
+  DiscoveryProvider,
+  DiscoveryProviderCapability,
+  DiscoveryProviderError,
+  DiscoveryProviderErrorKind,
+  DiscoveryProviderKind,
+  DiscoveryProviderRegistryEntry,
+  DiscoveryProviderRequest,
+  DiscoveryProviderResponse,
+  DiscoveryProviderStatus,
+  DiscoveryProviderTiming,
+  DiscoveryExecutionConfig,
+  DiscoveryExecutionSnapshot,
+  DiscoveryMergeConfig,
+  DiscoveryMergeResult,
+  DiscoverySelectionResult,
   DiscoveryRawResult,
   DiversitySelectionConfig,
   DiversitySelectionResult,
@@ -35,6 +50,7 @@ export type {
   ResearchLanguage,
   ResearchSearchRequest,
   ResearchSearchJob,
+  MockDiscoveryScenario,
   SchedulerConfig,
   SchedulerSnapshot,
   SearchMode,
@@ -65,6 +81,29 @@ export {
   DEFAULT_CANDIDATE_POOL_CONFIG,
   buildCandidatePool,
 } from "./candidatePool";
+export {
+  createDiscoveryProvider,
+  executeDiscoveryProvider,
+  executeDiscoveryProvidersOffline,
+} from "./discoveryProvider";
+export {
+  createDefaultDiscoveryRegistry,
+  getProviderCapabilities,
+  selectProvidersForPolicy,
+} from "./discoveryRegistry";
+export {
+  buildDiscoveryExecutionSnapshot,
+  mergeDiscoveryResponses,
+} from "./discoveryMerge";
+export {
+  createMockDiscoveryProviders,
+  createMockExactUrlProvider,
+  createMockNewsProvider,
+  createMockOfficialDocsProvider,
+  createMockOiProvider,
+  createMockWebProvider,
+} from "./mockDiscoveryProvider";
+export { runDiscoveryPipelineOffline } from "./discoveryPipeline";
 export { evaluateReadinessGate } from "./readinessGate";
 export {
   DEFAULT_SCHEDULER_CONFIG,

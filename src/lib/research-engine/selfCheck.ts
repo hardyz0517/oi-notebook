@@ -1,6 +1,9 @@
 import { appendPipelineEvents, createEventBuffer } from "./eventBuffer";
 import { buildCandidatePool } from "./candidatePool";
 import { canonicalizeUrl, normalizeDiscoveryResult } from "./candidateNormalizer";
+import { executeDiscoveryProvider } from "./discoveryProvider";
+import { createMockOiProvider } from "./mockDiscoveryProvider";
+import { runDiscoveryPipelineOffline } from "./discoveryPipeline";
 import { buildQueryPlan } from "./queryPlanner";
 import { evaluateReadinessGate } from "./readinessGate";
 import { buildSearchPolicyDecision } from "./searchPolicy";
@@ -334,10 +337,108 @@ const phase3Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const phase4Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("discovery-no-search-no-provider", "explain Euler formula offline", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-no-search", userQuestion: "explain Euler formula", locale: "auto" },
+    });
+    assertEqual(failures, "providerResponses", snapshot.providerResponses.length, 0);
+    assertEqual(failures, "rawResults", snapshot.mergedRawResults.length, 0);
+    assertTrue(failures, "candidate_pool_absent", !snapshot.candidatePool);
+  }),
+  phase2Result("discovery-docs-selects-official", "React useEffect what is it", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-react-docs", userQuestion: "React useEffect what is it", locale: "auto" },
+    });
+    const providerNames = snapshot.providerResponses.map((response) => response.providerName);
+    assertTrue(failures, "official_docs_provider_missing", providerNames.includes("mock_official_docs"));
+    assertTrue(failures, "react_dev_raw_missing", snapshot.mergedRawResults.some((result) => result.url.includes("react.dev")));
+    assertTrue(failures, "react_dev_candidate_missing", Boolean(snapshot.candidatePool?.selectedNormalizedCandidates.some((candidate) => candidate.canonical.normalizedHost === "react.dev")));
+  }),
+  phase2Result("discovery-oi-selects-oi-provider", "P3379 LCA implementation pitfalls", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-oi", userQuestion: "P3379 LCA implementation pitfalls", locale: "auto" },
+    });
+    const providerNames = snapshot.providerResponses.map((response) => response.providerName);
+    assertTrue(failures, "oi_provider_missing", providerNames.includes("mock_oi"));
+    assertTrue(failures, "oi_authority_raw_missing", snapshot.mergedRawResults.some((result) => result.url.includes("luogu.com.cn") || result.url.includes("oi-wiki.org")));
+  }),
+  phase2Result("discovery-news-selects-news-provider", "recent OpenAI news", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-openai-news", userQuestion: "recent OpenAI news", locale: "auto" },
+    });
+    const providerNames = snapshot.providerResponses.map((response) => response.providerName);
+    assertTrue(failures, "news_provider_missing", providerNames.includes("mock_news"));
+    assertTrue(failures, "news_or_official_source_missing", snapshot.mergedRawResults.some((result) => result.url.includes("openai.com") || result.url.includes("reuters.com")));
+  }),
+  phase2Result("discovery-high-risk-rumor-authority-first", "Zhang Xuefeng died rumor", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-rumor", userQuestion: "Zhang Xuefeng died rumor", locale: "auto" },
+    });
+    const providerNames = snapshot.providerResponses.map((response) => response.providerName);
+    const first = snapshot.candidatePool?.selectedNormalizedCandidates[0];
+    assertTrue(failures, "rumor_provider_mix_missing", providerNames.includes("mock_news") && providerNames.includes("mock_web"));
+    assertTrue(failures, "forum_should_not_rank_first", first?.sourceType !== "forum");
+    assertTrue(failures, "authority_or_news_should_rank_first", first?.sourceType === "official" || first?.sourceType === "mainstream_news");
+  }),
+  phase2Result("discovery-provider-timeout-partial", "recent OpenAI news with provider timeout", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-timeout", userQuestion: "recent OpenAI news", locale: "auto" },
+      config: { scenario: { timeoutProviders: ["mock_news"] } },
+    });
+    assertEqual(failures, "partial", snapshot.partial, true);
+    assertTrue(failures, "timeout_error_missing", snapshot.errors.some((error) => error.kind === "timeout"));
+    assertTrue(failures, "web_results_should_survive", snapshot.mergedRawResults.some((result) => result.provider === "mock_web"));
+  }),
+  phase2Result("discovery-unsupported-provider-is-diagnostic", "React useEffect unsupported provider", (failures) => {
+    const request = { requestId: "phase4-unsupported", userQuestion: "React useEffect what is it", locale: "auto" as const };
+    const policy = buildSearchPolicyDecision(request);
+    const plan = buildQueryPlan(request, policy);
+    const provider = createMockOiProvider();
+    const response = executeDiscoveryProvider(provider, {
+      request,
+      policy,
+      queryPlan: plan,
+      query: plan.queries[0],
+      nowMs: 0,
+    });
+    assertEqual(failures, "status", response.status, "failed");
+    assertEqual(failures, "errorKind", response.error?.kind ?? "unknown", "unsupported_vertical");
+    assertEqual(failures, "rawResults", response.rawResults.length, 0);
+  }),
+  phase2Result("discovery-explicit-url-enters-pool", "https://react.dev/reference/react/useEffect summarize", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-explicit-url", userQuestion: "https://react.dev/reference/react/useEffect summarize", locale: "auto" },
+    });
+    assertTrue(failures, "exact_url_provider_missing", snapshot.providerResponses.some((response) => response.providerName === "mock_exact_url"));
+    assertTrue(failures, "explicit_raw_missing", snapshot.mergedRawResults.some((result) => result.url === "https://react.dev/reference/react/useEffect"));
+    assertTrue(failures, "explicit_candidate_missing", Boolean(snapshot.candidatePool?.selectedCandidates.some((candidate) => candidate.url === "https://react.dev/reference/react/useEffect")));
+  }),
+  phase2Result("discovery-duplicate-feeds-candidate-dedupe", "React useEffect duplicate provider results", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-duplicates", userQuestion: "React useEffect what is it", locale: "auto" },
+      config: { scenario: { duplicateResults: true } },
+    });
+    assertTrue(failures, "raw_results_expected", snapshot.mergedRawResults.length > 1);
+    assertTrue(failures, "candidate_dedupe_expected", Boolean(snapshot.candidatePool && snapshot.candidatePool.rejectedCandidates.some((item) => item.reason === "duplicate_url")));
+  }),
+  phase2Result("discovery-provider-priority-preserved", "React useEffect provider priority", (failures) => {
+    const snapshot = runDiscoveryPipelineOffline({
+      request: { requestId: "phase4-priority", userQuestion: "React useEffect what is it", locale: "auto" },
+    });
+    const official = snapshot.mergedRawResults.find((result) => result.provider === "mock_official_docs");
+    const web = snapshot.mergedRawResults.find((result) => result.provider === "mock_web");
+    assertTrue(failures, "official_priority_missing", Boolean(official?.providerPriority));
+    assertTrue(failures, "web_priority_missing", Boolean(web?.providerPriority));
+    assertTrue(failures, "official_priority_should_be_higher", (official?.providerPriority ?? 0) > (web?.providerPriority ?? 0));
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
   ...phase3Cases(),
+  ...phase4Cases(),
 ];
 
 export type {
