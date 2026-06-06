@@ -1,4 +1,30 @@
 export type {
+  AllowedClaim,
+  AnswerConstraint,
+  AnswerContract,
+  AnswerMode,
+  CitationRequirement,
+  EvidenceClaimType,
+  EvidenceConflict,
+  EvidenceConflictSeverity,
+  EvidenceEvaluationInput,
+  EvidenceEvaluationResult,
+  EvidenceItem,
+  EvidenceItemBuildInput,
+  EvidenceItemStatus,
+  EvidencePacket,
+  EvidencePacketBuildInput,
+  EvidencePacketStatus,
+  EvidenceRelation,
+  EvidenceRequirement,
+  EvidenceStrength,
+  ForbiddenClaim,
+  PostGenerationVerificationInput,
+  PostGenerationVerificationResult,
+  PostGenerationViolation,
+  PostGenerationViolationKind,
+} from "./evidenceTypes";
+export type {
   ExcerptBuildInput,
   ExcerptBuildResult,
   ExcerptBudget,
@@ -145,4 +171,11 @@ export {
 export { evaluateReaderQuality } from "./readerQuality";
 export { selectPassages } from "./passageSelector";
 export { buildExcerpt } from "./excerptBuilder";
+export {
+  buildEvidenceItems,
+  buildEvidencePacket,
+} from "./evidencePacket";
+export { evaluateEvidencePacket } from "./evidenceEvaluator";
+export { buildAnswerContract } from "./answerContract";
+export { verifyGeneratedAnswer } from "./postGenerationVerifier";
 export { runResearchEngineSelfCheck } from "./selfCheck";

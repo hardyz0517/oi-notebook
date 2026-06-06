@@ -1,5 +1,7 @@
 import { appendPipelineEvents, createEventBuffer } from "./eventBuffer";
+import { buildAnswerContract } from "./answerContract";
 import { buildExcerpt } from "./excerptBuilder";
+import { buildEvidencePacket } from "./evidencePacket";
 import { buildCandidatePool } from "./candidatePool";
 import { canonicalizeUrl, normalizeDiscoveryResult } from "./candidateNormalizer";
 import { executeDiscoveryProvider } from "./discoveryProvider";
@@ -8,9 +10,11 @@ import { readMockUrl } from "./mockUrlReader";
 import { selectPassages } from "./passageSelector";
 import { runDiscoveryPipelineOffline } from "./discoveryPipeline";
 import { buildQueryPlan } from "./queryPlanner";
+import { evaluateEvidencePacket } from "./evidenceEvaluator";
 import { evaluateReaderQuality } from "./readerQuality";
 import { evaluateReadinessGate } from "./readinessGate";
 import { buildSearchPolicyDecision } from "./searchPolicy";
+import { verifyGeneratedAnswer } from "./postGenerationVerifier";
 import { createSchedulerSnapshot, scheduleCandidates, simulateSchedulerStep } from "./scheduler";
 import type {
   CandidatePriority,
@@ -623,12 +627,246 @@ const phase5Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const phase6Fixture = (
+  id: string,
+  question: string,
+  sources: Array<Parameters<typeof phase5Fixture>[2] & {
+    relation?: "supports" | "refutes" | "mentions" | "background" | "unknown";
+    claimType?: "current_fact" | "technical_doc" | "oi_algorithm" | "rumor_check" | "news_summary" | "stable_knowledge";
+    scenario?: Parameters<typeof readMockUrl>[0]["scenario"];
+    budget?: { maxChars: number; maxBlocks?: number; reserveForMetadata?: number };
+  }>,
+) => {
+  const context = phase3Context(id, question);
+  const items = sources.map((source, index) => {
+    const fixture = phase5Fixture(`${id}-${index + 1}`, question, source, {
+      scenario: source.scenario,
+      budget: source.budget,
+    });
+    return {
+      readerResult: fixture.readerResult,
+      readerQuality: fixture.quality,
+      excerpt: fixture.excerpt,
+      relation: source.relation,
+      claimType: source.claimType,
+    };
+  });
+  const packet = buildEvidencePacket({
+    request: context.request,
+    policy: context.policy,
+    queryPlan: context.queryPlan,
+    items,
+  });
+  const evaluation = evaluateEvidencePacket({ packet });
+  const contract = buildAnswerContract(evaluation);
+  return { ...context, packet, evaluation, contract };
+};
+
+const phase6Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("evidence-react-docs-direct-contract", "React useEffect what is it", (failures) => {
+    const fixture = phase6Fixture("evidence-react-docs-direct-contract", "React useEffect what is it", [{
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+      relation: "supports",
+      claimType: "technical_doc",
+    }]);
+    assertTrue(failures, "expected_medium_or_strong", fixture.packet.evidenceItems[0]?.evidenceStrength === "strong" || fixture.packet.evidenceItems[0]?.evidenceStrength === "medium");
+    assertEqual(failures, "answerMode", fixture.contract.answerMode, "direct");
+    assertEqual(failures, "mustCite", fixture.contract.mustCite, true);
+  }),
+  phase2Result("evidence-oi-lca-technical-support", "P3379 LCA implementation pitfalls", (failures) => {
+    const fixture = phase6Fixture("evidence-oi-lca-technical-support", "P3379 LCA implementation pitfalls", [
+      {
+        url: "https://oi-wiki.org/graph/lca/",
+        host: "oi-wiki.org",
+        title: "Lowest Common Ancestor - OI Wiki",
+        sourceType: "documentation",
+        relation: "supports",
+        claimType: "oi_algorithm",
+      },
+      {
+        url: "https://www.luogu.com.cn/problem/P3379",
+        host: "luogu.com.cn",
+        title: "P3379 LCA",
+        sourceType: "problem_statement",
+        language: "zh",
+        queryPurpose: "exact_problem",
+        relation: "supports",
+        claimType: "oi_algorithm",
+      },
+    ]);
+    assertTrue(failures, "oi_answer_not_supported", fixture.evaluation.sufficient);
+    assertTrue(failures, "formula_or_code_missing", fixture.packet.evidenceItems.some((item) => item.excerptMarkdown.includes("dist(u,v)") || item.excerptMarkdown.includes("up[v][k]")));
+  }),
+  phase2Result("evidence-homepage-not-strong", "company latest version", (failures) => {
+    const fixture = phase6Fixture("evidence-homepage-not-strong", "company latest version", [{
+      url: "https://example.com/",
+      host: "example.com",
+      title: "Example home",
+      relation: "mentions",
+      claimType: "current_fact",
+    }]);
+    assertTrue(failures, "homepage_strong_evidence", fixture.packet.evidenceItems[0]?.evidenceStrength !== "strong");
+  }),
+  phase2Result("evidence-needs-js-blocked-none", "React useEffect interactive docs", (failures) => {
+    const fixture = phase6Fixture("evidence-needs-js-blocked-none", "React useEffect interactive docs", [
+      { url: "https://example.com/needs-js", host: "example.com", title: "Needs JS", relation: "mentions" },
+      { url: "https://example.com/blocked", host: "example.com", title: "Blocked", relation: "mentions" },
+    ]);
+    assertTrue(failures, "unreadable_should_not_support_strong", fixture.packet.evidenceItems.every((item) => item.evidenceStrength === "none"));
+    assertEqual(failures, "citeableCount", fixture.packet.evidenceSummary.citeableCount, 0);
+  }),
+  phase2Result("evidence-high-risk-weak-refuse", "Zhang Xuefeng died rumor", (failures) => {
+    const fixture = phase6Fixture("evidence-high-risk-weak-refuse", "Zhang Xuefeng died rumor", [{
+      url: "https://forum.example.com/rumor",
+      host: "forum.example.com",
+      title: "Rumor forum thread",
+      sourceType: "forum",
+      queryPurpose: "rebuttal",
+      relation: "mentions",
+      claimType: "rumor_check",
+    }]);
+    assertEqual(failures, "answerMode", fixture.contract.answerMode, "refuse_current_claim");
+    assertTrue(failures, "forbidden_missing", fixture.contract.forbiddenClaims.length > 0);
+  }),
+  phase2Result("evidence-high-risk-reliable-refute", "Zhang Xuefeng died rumor", (failures) => {
+    const fixture = phase6Fixture("evidence-high-risk-reliable-refute", "Zhang Xuefeng died rumor", [{
+      url: "https://openai.com/news/refute-rumor",
+      host: "openai.com",
+      title: "Fact check no reliable support",
+      sourceType: "official",
+      queryPurpose: "rebuttal",
+      relation: "refutes",
+      claimType: "rumor_check",
+    }]);
+    assertTrue(failures, "refute_not_citeable", fixture.packet.evidenceItems[0]?.canCite ?? false);
+    assertTrue(failures, "should_allow_cautious_refute", fixture.contract.answerMode === "cautious" || fixture.contract.answerMode === "direct");
+    assertTrue(failures, "should_not_allow_overclaim", fixture.contract.forbiddenClaims.length > 0);
+  }),
+  phase2Result("evidence-conflict-detection", "Zhang Xuefeng died rumor", (failures) => {
+    const fixture = phase6Fixture("evidence-conflict-detection", "Zhang Xuefeng died rumor", [
+      {
+        url: "https://www.reuters.com/news/openai-research-product-updates",
+        host: "www.reuters.com",
+        title: "Claim support article",
+        sourceType: "mainstream_news",
+        queryPurpose: "news",
+        relation: "supports",
+        claimType: "rumor_check",
+      },
+      {
+        url: "https://openai.com/news/refute-rumor",
+        host: "openai.com",
+        title: "Official refute article",
+        sourceType: "official",
+        queryPurpose: "rebuttal",
+        relation: "refutes",
+        claimType: "rumor_check",
+      },
+    ]);
+    assertTrue(failures, "conflict_missing", fixture.packet.conflicts.length > 0);
+    assertTrue(failures, "should_not_direct_conflict", fixture.contract.answerMode !== "direct");
+  }),
+  phase2Result("evidence-news-freshness-missing", "recent OpenAI news", (failures) => {
+    const fixture = phase6Fixture("evidence-news-freshness-missing", "recent OpenAI news", [{
+      url: "https://example.com/article",
+      host: "example.com",
+      title: "OpenAI news without date",
+      sourceType: "mainstream_news",
+      queryPurpose: "news",
+      relation: "supports",
+      claimType: "news_summary",
+    }]);
+    assertTrue(failures, "freshness_missing_reason", fixture.evaluation.missingEvidenceReasons.includes("current_or_news_answer_requires_date_hint") || fixture.evaluation.missingEvidenceReasons.includes("freshness_required_but_no_timestamp"));
+    assertTrue(failures, "news_should_not_direct_without_date", fixture.contract.answerMode !== "direct");
+  }),
+  phase2Result("verifier-unknown-citation", "React useEffect what is it", (failures) => {
+    const fixture = phase6Fixture("verifier-unknown-citation", "React useEffect what is it", [{
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+      relation: "supports",
+      claimType: "technical_doc",
+    }]);
+    const verified = verifyGeneratedAnswer({ contract: fixture.contract, generatedText: "useEffect synchronizes with external systems. [[E99]]" });
+    assertEqual(failures, "passed", verified.passed, false);
+    assertTrue(failures, "unknown_missing", verified.unknownCitationIds.includes("E99"));
+  }),
+  phase2Result("verifier-must-cite", "React useEffect what is it", (failures) => {
+    const fixture = phase6Fixture("verifier-must-cite", "React useEffect what is it", [{
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+      relation: "supports",
+      claimType: "technical_doc",
+    }]);
+    const verified = verifyGeneratedAnswer({ contract: fixture.contract, generatedText: "useEffect synchronizes with external systems." });
+    assertEqual(failures, "passed", verified.passed, false);
+    assertTrue(failures, "missing_citation", verified.violations.some((item) => item.kind === "missing_required_citation"));
+  }),
+  phase2Result("verifier-forbidden-high-risk-claim", "Zhang Xuefeng died rumor", (failures) => {
+    const fixture = phase6Fixture("verifier-forbidden-high-risk-claim", "Zhang Xuefeng died rumor", [{
+      url: "https://forum.example.com/rumor",
+      host: "forum.example.com",
+      title: "Rumor forum thread",
+      sourceType: "forum",
+      relation: "mentions",
+      claimType: "rumor_check",
+    }]);
+    const verified = verifyGeneratedAnswer({ contract: fixture.contract, generatedText: "It is confirmed dead." });
+    assertEqual(failures, "passed", verified.passed, false);
+    assertTrue(failures, "fallback_missing", Boolean(verified.safeFallback));
+    assertTrue(failures, "forbidden_missing", verified.violations.some((item) => item.kind === "forbidden_claim"));
+  }),
+  phase2Result("verifier-valid-citation", "React useEffect what is it", (failures) => {
+    const fixture = phase6Fixture("verifier-valid-citation", "React useEffect what is it", [{
+      url: "https://react.dev/reference/react/useEffect",
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+      relation: "supports",
+      claimType: "technical_doc",
+    }]);
+    const verified = verifyGeneratedAnswer({ contract: fixture.contract, generatedText: "useEffect synchronizes with external systems. [[E1]]" });
+    assertEqual(failures, "passed", verified.passed, true);
+    assertTrue(failures, "citation_missing", verified.citedEvidenceIds.includes("E1"));
+  }),
+  phase2Result("evidence-truncated-technical-not-strong", "React useEffect code example", (failures) => {
+    const url = "https://react.dev/reference/react/useEffect";
+    const fixture = phase6Fixture("evidence-truncated-technical-not-strong", "React useEffect code example", [{
+      url,
+      host: "react.dev",
+      title: "useEffect - React",
+      sourceType: "documentation",
+      relation: "supports",
+      claimType: "technical_doc",
+      scenario: { oversizedCodeUrls: [url] },
+      budget: { maxChars: 360, maxBlocks: 4, reserveForMetadata: 120 },
+    }]);
+    assertTrue(failures, "warning_missing", fixture.packet.evidenceItems[0]?.warnings.includes("omitted_large_code_block") ?? false);
+    assertTrue(failures, "should_not_be_strong", fixture.packet.evidenceItems[0]?.evidenceStrength !== "strong");
+  }),
+  phase2Result("evidence-no-evidence-insufficient", "recent OpenAI news", (failures) => {
+    const context = phase3Context("evidence-no-evidence-insufficient", "recent OpenAI news");
+    const packet = buildEvidencePacket({ request: context.request, policy: context.policy, queryPlan: context.queryPlan, items: [] });
+    const evaluation = evaluateEvidencePacket({ packet });
+    const contract = buildAnswerContract(evaluation);
+    assertEqual(failures, "packetStatus", packet.status, "no_evidence");
+    assertEqual(failures, "answerMode", contract.answerMode, "insufficient_evidence");
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
   ...phase3Cases(),
   ...phase4Cases(),
   ...phase5Cases(),
+  ...phase6Cases(),
 ];
 
 export type {
