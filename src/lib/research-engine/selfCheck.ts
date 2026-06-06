@@ -13,6 +13,7 @@ import { buildQueryPlan } from "./queryPlanner";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
 import { evaluateReaderQuality } from "./readerQuality";
 import { evaluateReadinessGate } from "./readinessGate";
+import { runResearchEngineOffline } from "./offlineOrchestrator";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import { verifyGeneratedAnswer } from "./postGenerationVerifier";
 import { createSchedulerSnapshot, scheduleCandidates, simulateSchedulerStep } from "./scheduler";
@@ -860,6 +861,113 @@ const phase6Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const phase7Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("offline-no-search-stable-knowledge", "\u6b27\u62c9\u516c\u5f0f\u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-no-search-stable-knowledge",
+      request: { requestId: "offline-no-search-stable-knowledge", userQuestion: "\u6b27\u62c9\u516c\u5f0f\u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    assertEqual(failures, "status", run.status, "no_search");
+    assertEqual(failures, "needSearch", run.policy.needSearch, false);
+    assertEqual(failures, "readerCount", run.readerResults.length, 0);
+    assertTrue(failures, "discovery_should_be_skipped", run.stageSummaries.some((item) => item.stage === "discovery" && item.status === "skipped"));
+  }),
+  phase2Result("offline-react-docs-e2e", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-react-docs-e2e",
+      request: { requestId: "offline-react-docs-e2e", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    assertTrue(failures, "docs_provider_missing", Boolean(run.diagnostics.providerStatusSummary.mock_official_docs));
+    assertTrue(failures, "candidate_pool_missing", Boolean(run.candidatePool && run.candidatePool.selectedCount > 0));
+    assertTrue(failures, "reader_missing", run.readerResults.length > 0);
+    assertTrue(failures, "evidence_missing", Boolean(run.evidencePacket && run.evidencePacket.evidenceItems.length > 0));
+    assertTrue(failures, "answer_mode_unexpected", run.answerContract?.answerMode === "direct" || run.answerContract?.answerMode === "cautious");
+    assertEqual(failures, "mustCite", run.answerContract?.mustCite ?? false, true);
+  }),
+  phase2Result("offline-oi-lca-e2e", "P3379 LCA \u5b9e\u73b0\u5751", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-oi-lca-e2e",
+      request: { requestId: "offline-oi-lca-e2e", userQuestion: "P3379 LCA \u5b9e\u73b0\u5751", locale: "auto" },
+    });
+    const selectedHosts = run.candidatePool?.selectedCandidates.map((candidate) => candidate.host) ?? [];
+    assertTrue(failures, "oi_source_missing", selectedHosts.some((host) => host.includes("oi-wiki.org") || host.includes("luogu.com.cn")));
+    assertTrue(failures, "oi_evidence_not_sufficient", Boolean(run.evidenceEvaluation?.sufficient));
+    assertTrue(failures, "status_unexpected", run.status === "ready" || run.status === "cautious");
+  }),
+  phase2Result("offline-openai-news-e2e", "\u6700\u8fd1 OpenAI \u6709\u4ec0\u4e48\u65b0\u95fb", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-openai-news-e2e",
+      request: { requestId: "offline-openai-news-e2e", userQuestion: "\u6700\u8fd1 OpenAI \u6709\u4ec0\u4e48\u65b0\u95fb", locale: "auto" },
+    });
+    assertTrue(failures, "news_or_web_provider_missing", Boolean(run.diagnostics.providerStatusSummary.mock_news || run.diagnostics.providerStatusSummary.mock_web));
+    assertTrue(failures, "news_reader_missing", run.readerResults.length > 0);
+    assertTrue(failures, "news_answer_mode_unexpected", run.answerContract?.answerMode === "summarize_sources" || run.answerContract?.answerMode === "cautious");
+  }),
+  phase2Result("offline-high-risk-rumor-not-direct", "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-high-risk-rumor-not-direct",
+      request: { requestId: "offline-high-risk-rumor-not-direct", userQuestion: "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417", locale: "auto" },
+      config: {
+        mockDiscoveryScenario: {
+          disabledProviders: ["mock_news", "mock_official_docs"],
+        },
+      },
+    });
+    assertEqual(failures, "risk", run.policy.risk, "high");
+    assertTrue(failures, "should_not_direct", run.answerContract?.answerMode !== "direct");
+    assertTrue(failures, "status_should_be_conservative", run.status === "refused" || run.status === "insufficient_evidence" || run.status === "cautious");
+  }),
+  phase2Result("offline-explicit-url-e2e", "https://react.dev/reference/react/useEffect \u5e2e\u6211\u603b\u7ed3", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-explicit-url-e2e",
+      request: { requestId: "offline-explicit-url-e2e", userQuestion: "https://react.dev/reference/react/useEffect \u5e2e\u6211\u603b\u7ed3", locale: "auto" },
+    });
+    assertEqual(failures, "mode", run.policy.mode, "explicit_url");
+    assertTrue(failures, "exact_provider_missing", Boolean(run.diagnostics.providerStatusSummary.mock_exact_url));
+    assertTrue(failures, "web_provider_should_not_run", !run.diagnostics.providerStatusSummary.mock_web);
+    assertTrue(failures, "reader_or_evidence_missing", run.readerResults.length > 0 && Boolean(run.evidencePacket));
+  }),
+  phase2Result("offline-all-unreadable-insufficient", "https://example.com/needs-js \u5e2e\u6211\u603b\u7ed3", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-all-unreadable-insufficient",
+      request: { requestId: "offline-all-unreadable-insufficient", userQuestion: "https://example.com/needs-js \u5e2e\u6211\u603b\u7ed3", locale: "auto" },
+    });
+    assertTrue(failures, "expected_unreadable_warning", run.warnings.includes("all_reader_results_unreadable"));
+    assertTrue(failures, "should_not_be_ready", run.status !== "ready");
+    assertEqual(failures, "answerMode", run.answerContract?.answerMode ?? "direct", "insufficient_evidence");
+  }),
+  phase2Result("offline-verifier-valid-citation", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-verifier-valid-citation",
+      request: { requestId: "offline-verifier-valid-citation", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+      sampleGeneratedAnswer: "useEffect synchronizes a component with an external system. [[E1]]",
+    });
+    assertEqual(failures, "verifierPassed", run.verifierResult?.passed ?? false, true);
+    assertEqual(failures, "diagnosticVerifierPassed", run.diagnostics.verifierPassed ?? false, true);
+  }),
+  phase2Result("offline-verifier-unknown-citation", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-verifier-unknown-citation",
+      request: { requestId: "offline-verifier-unknown-citation", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+      sampleGeneratedAnswer: "useEffect synchronizes a component with an external system. [[E99]]",
+    });
+    assertEqual(failures, "verifierPassed", run.verifierResult?.passed ?? true, false);
+    assertTrue(failures, "safeFallback_missing", Boolean(run.verifierResult?.safeFallback));
+    assertTrue(failures, "warning_missing", run.warnings.includes("verification_failed"));
+  }),
+  phase2Result("offline-diagnostics-stage-sanity", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "offline-diagnostics-stage-sanity",
+      request: { requestId: "offline-diagnostics-stage-sanity", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    const stages = new Set(run.diagnostics.stageSummaries.map((item) => item.stage));
+    for (const stageName of ["policy", "query", "discovery", "candidate", "scheduler", "reader", "evidence", "contract"] as const) {
+      assertTrue(failures, `stage_missing_${stageName}`, stages.has(stageName));
+    }
+    assertTrue(failures, "selected_ids_missing", run.diagnostics.selectedCandidateIds.length > 0);
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
@@ -867,6 +975,7 @@ export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] =>
   ...phase4Cases(),
   ...phase5Cases(),
   ...phase6Cases(),
+  ...phase7Cases(),
 ];
 
 export type {

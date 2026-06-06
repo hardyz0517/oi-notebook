@@ -194,7 +194,18 @@ const itemsForWeb = (request: DiscoveryProviderRequest): MockItem[] => {
   if (includesAny(text, ["react", "useeffect", "vite", "tauri", "command"])) return reactDocsItems().slice(1);
   if (includesAny(text, ["p3379", "lca", "centroid", "oi wiki"])) return oiItems().slice(1);
   if (includesAny(text, ["openai", "news"])) return openAiNewsItems();
-  if (includesAny(text, ["zhang", "xuefeng", "died", "death", "rumor"])) return rumorItems();
+  if (includesAny(text, [
+    "zhang",
+    "xuefeng",
+    "died",
+    "death",
+    "rumor",
+    "\u5f20\u96ea\u5cf0",
+    "\u6b7b\u4e86",
+    "\u6b7b\u4ea1",
+    "\u53bb\u4e16",
+    "\u8c23\u8a00",
+  ])) return rumorItems();
   return generalWebItems();
 };
 
@@ -246,7 +257,18 @@ export const createMockNewsProvider = (): DiscoveryProvider =>
     priority: 70,
     execute: (request) => {
       const text = `${request.request.userQuestion} ${request.query.query}`;
-      const items = includesAny(text, ["zhang", "xuefeng", "died", "death", "rumor"])
+      const items = includesAny(text, [
+        "zhang",
+        "xuefeng",
+        "died",
+        "death",
+        "rumor",
+        "\u5f20\u96ea\u5cf0",
+        "\u6b7b\u4e86",
+        "\u6b7b\u4ea1",
+        "\u53bb\u4e16",
+        "\u8c23\u8a00",
+      ])
         ? rumorItems()
         : openAiNewsItems();
       return response("mock_news", 70, request, duplicateItems(request, items));

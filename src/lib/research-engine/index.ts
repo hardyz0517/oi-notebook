@@ -1,4 +1,15 @@
 export type {
+  ResearchOfflineRunConfig,
+  ResearchOfflineRunDiagnostics,
+  ResearchOfflineRunInput,
+  ResearchOfflineRunResult,
+  ResearchOfflineRunStage,
+  ResearchOfflineRunStatus,
+  ResearchOfflineRunWarning,
+  ResearchOfflineStageSummary,
+  ResearchOfflineVerificationSample,
+} from "./offlineTypes";
+export type {
   AllowedClaim,
   AnswerConstraint,
   AnswerContract,
@@ -178,4 +189,8 @@ export {
 export { evaluateEvidencePacket } from "./evidenceEvaluator";
 export { buildAnswerContract } from "./answerContract";
 export { verifyGeneratedAnswer } from "./postGenerationVerifier";
+export {
+  createDefaultOfflineRunConfig,
+  runResearchEngineOffline,
+} from "./offlineOrchestrator";
 export { runResearchEngineSelfCheck } from "./selfCheck";
