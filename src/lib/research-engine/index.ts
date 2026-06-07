@@ -1,4 +1,11 @@
 export type {
+  ResearchEngineDeveloperDiagnosticSummary,
+  ResearchEngineDeveloperSample,
+  ResearchEngineDeveloperSampleId,
+  ResearchEngineDeveloperSampleResult,
+  ResearchEngineDeveloperSelfCheckResult,
+} from "./devDiagnosticsBridge";
+export type {
   ResearchEngineDiagnostics,
   ResearchEngineDiagnosticExportOptions,
   ResearchEngineDiagnosticMarkdownReport,
@@ -255,6 +262,11 @@ export {
   formatDiagnosticsFromSelfCheckAsMarkdown,
   formatSelfCheckSummaryAsMarkdown,
 } from "./diagnosticsFormatter";
+export {
+  getResearchEngineDeveloperSamples,
+  runResearchEngineDeveloperSample,
+  runResearchEngineDeveloperSelfCheck,
+} from "./devDiagnosticsBridge";
 export {
   formatResearchEngineSelfCheckReport,
   groupSelfCheckResultsByPhase,

@@ -18,6 +18,14 @@ import {
 } from "@/lib/api";
 import { applySourceStrategyPlan, buildExplicitUrlReadPlan, buildOfflineAiQueryPlannerPreview, buildSearchDecision, classifyNewsCandidateForVertical, classifyNewsEventCluster, extractExplicitUrls, getFrontendWebReadBlockReason, getWebReadBudgetPlan, normalizeWebSearchConfig, rankPreparedWebSources, shouldUseAiQueryPlanner, SOURCE_REGISTRY, validateAiSearchQueryPlan, type SearchDecision, type WebSearchConfig, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsForCitationScan } from "@/lib/citations";
+import {
+  getResearchEngineDeveloperSamples,
+  runResearchEngineDeveloperSample,
+  runResearchEngineDeveloperSelfCheck,
+  type ResearchEngineDeveloperSampleId,
+  type ResearchEngineDeveloperSampleResult,
+  type ResearchEngineDeveloperSelfCheckResult,
+} from "@/lib/research-engine";
 import { cn } from "@/lib/utils";
 
 type DiagnosticStatus = "pass" | "warn" | "fail" | "skipped" | "running";
@@ -1180,6 +1188,8 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
   ],
 });
 
+const researchEngineSamples = getResearchEngineDeveloperSamples();
+
 export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnosticsPanelProps) {
   const [categories, setCategories] = useState<DiagnosticCategory[]>(emptyCategories);
   const [isRunningCore, setIsRunningCore] = useState(false);
@@ -1187,6 +1197,13 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isCheckingLocalIndex, setIsCheckingLocalIndex] = useState(false);
   const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
   const [isRunningNotexSelfCheck, setIsRunningNotexSelfCheck] = useState(false);
+  const [isRunningResearchEngineSelfCheck, setIsRunningResearchEngineSelfCheck] = useState(false);
+  const [isRunningResearchEngineSample, setIsRunningResearchEngineSample] = useState(false);
+  const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
+  const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
+  const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
+  const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
+  const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1478,6 +1495,60 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runResearchEngineSelfCheck = () => {
+    setIsRunningResearchEngineSelfCheck(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    try {
+      const result = runResearchEngineDeveloperSelfCheck();
+      setResearchEngineSelfCheck(result);
+      toast.success(`Research Engine SelfCheck ${result.summary.passed}/${result.summary.total} passed`);
+    } catch (error) {
+      const message = `Research Engine SelfCheck failed: ${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      setIsRunningResearchEngineSelfCheck(false);
+    }
+  };
+
+  const runResearchEngineSample = () => {
+    setIsRunningResearchEngineSample(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    try {
+      const result = runResearchEngineDeveloperSample(researchEngineSampleId);
+      setResearchEngineSample(result);
+      toast.success(`Research Engine sample ready: ${result.summary.status}`);
+    } catch (error) {
+      const message = `Research Engine sample failed: ${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      setIsRunningResearchEngineSample(false);
+    }
+  };
+
+  const copyResearchEngineReport = async () => {
+    const markdown = researchEngineSample?.markdownReport ?? researchEngineSelfCheck?.markdownReport;
+    if (!markdown) {
+      setResearchEngineCopyMessage("Run SelfCheck or a sample first.");
+      return;
+    }
+    if (!navigator.clipboard) {
+      setResearchEngineCopyMessage("Clipboard API is unavailable; use the visible Markdown report.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setResearchEngineCopyMessage("Research Engine report copied.");
+      toast.success("Research Engine report copied.");
+    } catch (error) {
+      setResearchEngineCopyMessage(`Copy failed: ${getErrorMessage(error)}`);
+      toast.error(`Copy failed: ${getErrorMessage(error)}`);
+    }
+  };
+
   return (
     <section className="grid min-w-0 gap-5">
       <div className="grid gap-1 border-b border-border/80 pb-4">
@@ -1526,6 +1597,126 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           上次运行：{lastRunAt ?? "尚未运行"}。在线搜索服务测试只会在手动点击时发起外部请求。
         </div>
       </div>
+
+      <section className="grid min-w-0 gap-3 border-b border-border/70 pb-4">
+        <div className="grid gap-1">
+          <div className="text-sm font-semibold text-foreground">Research Engine Core</div>
+          <div className="max-w-4xl text-xs leading-5 text-muted-foreground">
+            Offline diagnostics only. These checks use deterministic mock discovery, mock reader, evidence contracts, verifier, and diagnostics export. They do not call real providers or the legacy search flow.
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={runResearchEngineSelfCheck} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+            {isRunningResearchEngineSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            Run SelfCheck
+          </Button>
+          <select
+            className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            value={researchEngineSampleId}
+            onChange={(event) => setResearchEngineSampleId(event.target.value as ResearchEngineDeveloperSampleId)}
+            disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
+          >
+            {researchEngineSamples.map((sample) => (
+              <option key={sample.id} value={sample.id}>{sample.label}: {sample.question}</option>
+            ))}
+          </select>
+          <Button variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+            {isRunningResearchEngineSample ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            Run offline sample
+          </Button>
+          <Button variant="outline" onClick={() => void copyResearchEngineReport()}>
+            <Clipboard className="h-3.5 w-3.5" />
+            Copy Markdown
+          </Button>
+          {researchEngineCopyMessage && <span className="text-xs text-muted-foreground">{researchEngineCopyMessage}</span>}
+        </div>
+        {researchEngineError && (
+          <div className="rounded-sm border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-300">
+            {researchEngineError}
+          </div>
+        )}
+        {researchEngineSelfCheck && (
+          <details className="grid min-w-0 gap-2 border-l border-border/80 pl-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-foreground">
+              SelfCheck: {researchEngineSelfCheck.summary.passed}/{researchEngineSelfCheck.summary.total} passed ({(researchEngineSelfCheck.summary.passRate * 100).toFixed(2)}%)
+            </summary>
+            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
+              <div>total={researchEngineSelfCheck.summary.total}</div>
+              <div>passed={researchEngineSelfCheck.summary.passed}</div>
+              <div>failed={researchEngineSelfCheck.summary.failed}</div>
+            </div>
+            <div className="grid gap-1 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
+              {researchEngineSelfCheck.summary.byPhase.map((phase) => (
+                <div key={phase.phase} className="rounded-sm border border-border/70 px-2 py-1">
+                  {phase.phase}: {phase.passed}/{phase.total}
+                </div>
+              ))}
+            </div>
+            {researchEngineSelfCheck.summary.failedCases.length > 0 ? (
+              <div className="grid gap-1 text-xs text-red-300">
+                {researchEngineSelfCheck.summary.failedCases.map((failure) => (
+                  <div key={failure.id}>{failure.phase}/{failure.id}: {failure.failures.join("; ")}</div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-emerald-300">All Research Engine self checks passed.</div>
+            )}
+          </details>
+        )}
+        {researchEngineSample && (
+          <details className="grid min-w-0 gap-2 border-l border-border/80 pl-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-foreground">
+              Offline sample: {researchEngineSample.summary.sampleLabel} ({researchEngineSample.summary.status})
+            </summary>
+            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+              <div>answerMode={researchEngineSample.summary.answerMode ?? "n/a"}</div>
+              <div>vertical={researchEngineSample.summary.policy.vertical}</div>
+              <div>risk={researchEngineSample.summary.policy.risk}</div>
+              <div>freshness={researchEngineSample.summary.policy.freshness}</div>
+              <div>queries={researchEngineSample.summary.queryCount}</div>
+              <div>selected={researchEngineSample.summary.selectedCandidateCount}</div>
+              <div>unreadable={researchEngineSample.summary.unreadableReaderCount}</div>
+              <div>warnings={researchEngineSample.summary.warnings.length}; errors={researchEngineSample.summary.errors.length}</div>
+            </div>
+            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
+              <div className="min-w-0 rounded-sm border border-border/70 p-2">
+                <div className="mb-1 font-medium text-foreground">Providers</div>
+                {Object.entries(researchEngineSample.summary.providerStatusSummary).length > 0
+                  ? Object.entries(researchEngineSample.summary.providerStatusSummary).map(([provider, status]) => (
+                    <div key={provider} className="truncate">{provider}: {status}</div>
+                  ))
+                  : <div>none</div>}
+              </div>
+              <div className="min-w-0 rounded-sm border border-border/70 p-2">
+                <div className="mb-1 font-medium text-foreground">Evidence</div>
+                <div className="break-words">{JSON.stringify(researchEngineSample.summary.evidenceSummary ?? {})}</div>
+              </div>
+            </div>
+            <details className="text-xs leading-5 text-muted-foreground">
+              <summary className="cursor-pointer">Stage summaries</summary>
+              <div className="mt-1 grid gap-1">
+                {researchEngineSample.summary.stageSummaries.map((stage) => (
+                  <div key={`${stage.stage}-${stage.message}`} className="font-mono">
+                    {stage.stage}: {stage.status}; out={stage.outputCount ?? "n/a"}; warnings={stage.warningCount ?? 0}; {stage.message}
+                  </div>
+                ))}
+              </div>
+            </details>
+            {(researchEngineSample.summary.warnings.length > 0 || researchEngineSample.summary.errors.length > 0) && (
+              <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
+                {researchEngineSample.summary.warnings.map((warning) => <div key={`warning-${warning}`}>warning: {warning}</div>)}
+                {researchEngineSample.summary.errors.map((error) => <div key={`error-${error}`}>error: {error}</div>)}
+              </div>
+            )}
+            <details className="text-xs leading-5 text-muted-foreground">
+              <summary className="cursor-pointer">Markdown report</summary>
+              <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5">
+                {researchEngineSample.markdownReport}
+              </pre>
+            </details>
+          </details>
+        )}
+      </section>
 
       <div className="grid min-w-0 gap-3">
         {categories.map((category) => (
