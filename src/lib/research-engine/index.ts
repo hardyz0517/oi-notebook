@@ -1,4 +1,25 @@
 export type {
+  RealDiscoveryAbortState,
+  RealDiscoveryCredentialPolicy,
+  RealDiscoveryProviderAdapter,
+  RealDiscoveryProviderConfig,
+  RealDiscoveryProviderName,
+  RealDiscoveryTimeoutPolicy,
+  RealDiscoveryTransport,
+  RealDiscoveryTransportError,
+  RealDiscoveryTransportErrorKind,
+  RealDiscoveryTransportRequest,
+  RealDiscoveryTransportResponse,
+  RealDiscoveryTransportResult,
+  RealProviderAdapterSmokeCase,
+  RealProviderAdapterSmokeResult,
+  RealProviderFixture,
+  RealProviderFixtureKind,
+  RealProviderNormalizeInput,
+  RealProviderNormalizeResult,
+  RealProviderPayloadKind,
+} from "./realProviderTypes";
+export type {
   ResearchOfflineRunConfig,
   ResearchOfflineRunDiagnostics,
   ResearchOfflineRunInput,
@@ -193,4 +214,17 @@ export {
   createDefaultOfflineRunConfig,
   runResearchEngineOffline,
 } from "./offlineOrchestrator";
+export {
+  createRealDiscoveryProviderAdapter,
+  executeRealDiscoveryProviderAdapter,
+  redactRealProviderConfig,
+  runRealProviderAdapterSmokeCheck,
+  validateRealProviderConfig,
+} from "./realProviderAdapter";
+export { normalizeRealProviderPayload } from "./providerResponseNormalizer";
+export {
+  createFixtureTransport,
+  getRealProviderFixture,
+  realProviderConfigs,
+} from "./providerFixtures";
 export { runResearchEngineSelfCheck } from "./selfCheck";

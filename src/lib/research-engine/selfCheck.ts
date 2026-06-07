@@ -13,6 +13,13 @@ import { buildQueryPlan } from "./queryPlanner";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
 import { evaluateReaderQuality } from "./readerQuality";
 import { evaluateReadinessGate } from "./readinessGate";
+import {
+  createRealDiscoveryProviderAdapter,
+  executeRealDiscoveryProviderAdapter,
+  redactRealProviderConfig,
+  runRealProviderAdapterSmokeCheck,
+} from "./realProviderAdapter";
+import { createFixtureTransport, realProviderConfigs } from "./providerFixtures";
 import { runResearchEngineOffline } from "./offlineOrchestrator";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import { verifyGeneratedAnswer } from "./postGenerationVerifier";
@@ -968,6 +975,165 @@ const phase7Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const phase8Request = (id: string, question: string) => {
+  const context = phase3Context(id, question);
+  return {
+    ...context,
+    providerRequest: {
+      request: context.request,
+      policy: context.policy,
+      queryPlan: context.queryPlan,
+      query: context.queryPlan.queries[0] ?? {
+        query: question,
+        language: "mixed" as const,
+        purpose: "recall" as const,
+        priority: 100,
+        expectedSourceTypes: ["official" as const],
+      },
+      nowMs: 0,
+    },
+  };
+};
+
+const phase8Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("real-provider-disabled-no-transport", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-disabled-no-transport", "React useEffect what is it");
+    let transportCalled = false;
+    const config = { ...realProviderConfigs.bing(), enabled: false };
+    const adapter = createRealDiscoveryProviderAdapter(config, () => {
+      transportCalled = true;
+      return { ok: true, response: { statusCode: 200, headers: {}, bodyText: "{}", fromFixture: true } };
+    });
+    const response = executeRealDiscoveryProviderAdapter(adapter, context.providerRequest);
+    assertEqual(failures, "status", response.status, "disabled");
+    assertEqual(failures, "errorKind", response.error?.kind ?? "unknown", "provider_disabled");
+    assertEqual(failures, "transportCalled", transportCalled, false);
+  }),
+  phase2Result("real-provider-missing-credential", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-missing-credential", "React useEffect what is it");
+    let transportCalled = false;
+    const config = { ...realProviderConfigs.bing(), apiKeyRedacted: undefined, credentialAvailable: false };
+    const adapter = createRealDiscoveryProviderAdapter(config, () => {
+      transportCalled = true;
+      return { ok: true, response: { statusCode: 200, headers: {}, bodyText: "{}", fromFixture: true } };
+    });
+    const response = executeRealDiscoveryProviderAdapter(adapter, context.providerRequest);
+    assertEqual(failures, "errorKind", response.error?.kind ?? "unknown", "unauthorized");
+    assertEqual(failures, "transportCalled", transportCalled, false);
+  }),
+  phase2Result("real-provider-no-transport", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-no-transport", "React useEffect what is it");
+    const response = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing()),
+      context.providerRequest,
+    );
+    assertEqual(failures, "errorKind", response.error?.kind ?? "unknown", "transport_unavailable");
+    assertEqual(failures, "rawCount", response.rawResults.length, 0);
+  }),
+  phase2Result("real-provider-bing-fixture-candidate-pool", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-bing-fixture-candidate-pool", "React useEffect what is it");
+    const smoke = runRealProviderAdapterSmokeCheck({
+      id: "real-provider-bing-fixture-candidate-pool",
+      config: realProviderConfigs.bing(),
+      request: context.providerRequest,
+      transport: createFixtureTransport("bing_react_docs"),
+      buildCandidatePool: true,
+    });
+    assertEqual(failures, "status", smoke.response.status, "available");
+    assertTrue(failures, "react_result_missing", smoke.response.rawResults.some((item) => item.url.includes("react.dev/reference/react/useEffect")));
+    assertTrue(failures, "candidate_pool_empty", (smoke.candidatePool?.selectedCount ?? 0) > 0);
+  }),
+  phase2Result("real-provider-brave-news-fixture", "recent OpenAI news", (failures) => {
+    const context = phase8Request("real-provider-brave-news-fixture", "recent OpenAI news");
+    const response = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.brave(), createFixtureTransport("brave_openai_news")),
+      context.providerRequest,
+    );
+    assertEqual(failures, "status", response.status, "available");
+    assertTrue(failures, "openai_news_missing", response.rawResults.some((item) => item.url.includes("openai.com/news")));
+    assertTrue(failures, "published_at_missing", response.rawResults.every((item) => Boolean(item.publishedAt)));
+  }),
+  phase2Result("real-provider-bocha-rumor-fixture", "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417", (failures) => {
+    const context = phase8Request("real-provider-bocha-rumor-fixture", "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417");
+    const response = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bocha(), createFixtureTransport("bocha_zh_rumor")),
+      context.providerRequest,
+    );
+    assertEqual(failures, "status", response.status, "available");
+    assertTrue(failures, "rumor_refute_missing", response.rawResults.some((item) => item.sourceTypeHint === "mainstream_news"));
+    assertTrue(failures, "forum_context_missing", response.rawResults.some((item) => item.sourceTypeHint === "forum"));
+  }),
+  phase2Result("real-provider-malformed-empty-errors", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-malformed-empty-errors", "React useEffect what is it");
+    const malformed = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), createFixtureTransport("malformed")),
+      context.providerRequest,
+    );
+    const empty = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), createFixtureTransport("empty")),
+      context.providerRequest,
+    );
+    const emptyBody = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), () => ({
+        ok: true,
+        response: { statusCode: 200, headers: {}, bodyText: "", elapsedMs: 1, fromFixture: true },
+      })),
+      context.providerRequest,
+    );
+    assertEqual(failures, "malformedKind", malformed.error?.kind ?? "unknown", "malformed_response");
+    assertEqual(failures, "emptyKind", empty.error?.kind ?? "unknown", "empty_result");
+    assertEqual(failures, "emptyBodyKind", emptyBody.error?.kind ?? "unknown", "empty_result");
+  }),
+  phase2Result("real-provider-http-status-errors", "recent OpenAI news", (failures) => {
+    const context = phase8Request("real-provider-http-status-errors", "recent OpenAI news");
+    const rateLimited = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.brave(), createFixtureTransport("rate_limited")),
+      context.providerRequest,
+    );
+    const unauthorized = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), createFixtureTransport("unauthorized")),
+      context.providerRequest,
+    );
+    assertEqual(failures, "rateLimitedKind", rateLimited.error?.kind ?? "unknown", "rate_limited");
+    assertEqual(failures, "unauthorizedKind", unauthorized.error?.kind ?? "unknown", "unauthorized");
+  }),
+  phase2Result("real-provider-timeout-aborted-errors", "React useEffect what is it", (failures) => {
+    const context = phase8Request("real-provider-timeout-aborted-errors", "React useEffect what is it");
+    const timeout = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), createFixtureTransport("timeout")),
+      context.providerRequest,
+    );
+    const aborted = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), createFixtureTransport("aborted")),
+      context.providerRequest,
+    );
+    const thrown = executeRealDiscoveryProviderAdapter(
+      createRealDiscoveryProviderAdapter(realProviderConfigs.bing(), () => {
+        throw new Error("fixture transport throw");
+      }),
+      context.providerRequest,
+    );
+    assertEqual(failures, "timeoutKind", timeout.error?.kind ?? "unknown", "timeout");
+    assertEqual(failures, "abortedKind", aborted.error?.kind ?? "unknown", "aborted");
+    assertEqual(failures, "thrownKind", thrown.error?.kind ?? "none", "unknown");
+  }),
+  phase2Result("real-provider-config-redaction", "React useEffect what is it", (failures) => {
+    const secret = "sk-real-secret-should-not-leak";
+    const redacted = redactRealProviderConfig({ ...realProviderConfigs.bing(), apiKeyRedacted: secret });
+    const serialized = JSON.stringify(redacted);
+    assertTrue(failures, "secret_leaked", !serialized.includes(secret));
+    assertEqual(failures, "redacted_marker", redacted.apiKeyRedacted ?? "", "<redacted>");
+  }),
+  phase2Result("real-provider-no-global-fetch-guard", "Phase 8 no global fetch", (failures) => {
+    const phase8Sources = [
+      createRealDiscoveryProviderAdapter.toString(),
+      executeRealDiscoveryProviderAdapter.toString(),
+      runRealProviderAdapterSmokeCheck.toString(),
+    ].join("\n");
+    assertTrue(failures, "fetch_call_found", !/fetch\s*\(/.test(phase8Sources));
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
@@ -976,6 +1142,7 @@ export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] =>
   ...phase5Cases(),
   ...phase6Cases(),
   ...phase7Cases(),
+  ...phase8Cases(),
 ];
 
 export type {

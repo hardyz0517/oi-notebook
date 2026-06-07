@@ -218,9 +218,12 @@ export type DiscoveryProviderName =
   | "mock_oi"
   | "mock_exact_url"
   | "bing"
+  | "bocha"
   | "google"
   | "brave"
+  | "searxng"
   | "serpapi"
+  | "custom"
   | "manual"
   | "unknown";
 
@@ -237,11 +240,14 @@ export type DiscoveryProviderCapability =
 
 export type DiscoveryProviderErrorKind =
   | "timeout"
+  | "aborted"
   | "rate_limited"
   | "unauthorized"
   | "malformed_response"
   | "empty_result"
   | "provider_disabled"
+  | "unsupported_provider"
+  | "transport_unavailable"
   | "unsupported_vertical"
   | "unknown";
 
