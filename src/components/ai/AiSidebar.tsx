@@ -326,12 +326,7 @@ const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 24;
-const AI_STREAM_REVEAL_INTERVAL_MS = 28;
-const AI_STREAM_REVEAL_FAST_INTERVAL_MS = 16;
-const AI_STREAM_REVEAL_BACKLOG_INTERVAL_MS = 12;
-const AI_STREAM_REVEAL_BACKLOG_THRESHOLD = 160;
-const AI_STREAM_REVEAL_PUNCTUATION_PATTERN = /[\s,.;:!?，。；：！？、]/;
-const AI_STREAM_REVEAL_FAST_END_PATTERN = /[\r\n,.;:!?，。；：！？、]$/;
+const AI_CONVERSATION_PERSIST_DEBOUNCE_MS = 500;
 const AI_HYDRATION_CHUNK_BUDGET_MS = 7;
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
@@ -466,45 +461,6 @@ const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
   "blank_lines_around_lists",
   "normalize_code_fence_lang",
 ]);
-
-const isStreamRevealCjk = (value: string) => /[\u3400-\u9fff\uf900-\ufaff]/.test(value);
-
-const isInsideStreamRevealFence = (visibleText: string) => {
-  const fenceLines = visibleText.match(/(?:^|\n)[ \t]*(?:`{3,}|~{3,})/g) ?? [];
-  return fenceLines.length % 2 === 1;
-};
-
-const takeStreamRevealChunk = (pendingText: string, visibleText: string) => {
-  if (!pendingText) return "";
-  if (pendingText.startsWith("\r\n")) return "\r\n";
-  if (pendingText[0] === "\r" || pendingText[0] === "\n") return pendingText[0];
-
-  const isInsideFence = isInsideStreamRevealFence(visibleText);
-  const startsWithCjk = isStreamRevealCjk(pendingText[0]);
-  const chunkLimit = isInsideFence
-    ? pendingText.length > AI_STREAM_REVEAL_BACKLOG_THRESHOLD ? 16 : 10
-    : pendingText.length > AI_STREAM_REVEAL_BACKLOG_THRESHOLD
-      ? startsWithCjk ? 6 : 10
-      : startsWithCjk ? 3 : 6;
-
-  let length = 1;
-  while (length < chunkLimit && length < pendingText.length) {
-    const nextChar = pendingText[length];
-    if (nextChar === "\r" || nextChar === "\n") break;
-    length += 1;
-    if (AI_STREAM_REVEAL_PUNCTUATION_PATTERN.test(nextChar)) break;
-    if (!isInsideFence && startsWithCjk !== isStreamRevealCjk(nextChar) && length >= 3) break;
-  }
-  return pendingText.slice(0, length);
-};
-
-const getStreamRevealDelay = (chunk: string, pendingLength: number, visibleText: string) => {
-  if (pendingLength > AI_STREAM_REVEAL_BACKLOG_THRESHOLD) return AI_STREAM_REVEAL_BACKLOG_INTERVAL_MS;
-  if (isInsideStreamRevealFence(visibleText)) return AI_STREAM_REVEAL_FAST_INTERVAL_MS;
-  return AI_STREAM_REVEAL_FAST_END_PATTERN.test(chunk)
-    ? AI_STREAM_REVEAL_FAST_INTERVAL_MS
-    : AI_STREAM_REVEAL_INTERVAL_MS;
-};
 
 const readIncludeCurrentNoteContextPreference = (): boolean => {
   try {
@@ -2217,7 +2173,6 @@ function AiMarkdownMessage({
 
   useEffect(() => {
     let cancelled = false;
-    let timeoutId: number | null = null;
     const theme = getTheme();
     const cacheKey = getMarkdownRenderCacheKey({
       messageId,
@@ -2225,6 +2180,13 @@ function AiMarkdownMessage({
       theme,
       citationSignature,
     });
+    if (isStreaming) {
+      setRenderedHtml("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const cachedHtml = readMarkdownRenderCache(cacheKey);
     if (cachedHtml !== null) {
       setRenderedHtml(cachedHtml);
@@ -2247,15 +2209,10 @@ function AiMarkdownMessage({
         });
     };
 
-    if (isStreaming) {
-      timeoutId = window.setTimeout(render, 100);
-    } else {
-      render();
-    }
+    render();
 
     return () => {
       cancelled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [citationMap, citationSignature, isStreaming, messageId, normalizedMarkdown]);
 
@@ -3363,8 +3320,7 @@ export default function AiSidebar({
   const streamTargetsRef = useRef<Map<string, StreamTarget>>(new Map());
   const streamTextBufferRef = useRef<Map<string, string>>(new Map());
   const streamPendingTextRef = useRef<Map<string, string>>(new Map());
-  const streamVisibleTextRef = useRef<Map<string, string>>(new Map());
-  const streamRevealTimerRef = useRef<Map<string, number>>(new Map());
+  const streamFlushFrameRef = useRef<Map<string, number>>(new Map());
   const conversationPopoverListRef = useRef<HTMLDivElement | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const webSearchPrepTokensRef = useRef<Map<string, number>>(new Map());
@@ -3373,6 +3329,7 @@ export default function AiSidebar({
   const hasLoadedConversationStateRef = useRef(false);
   const hydrationGenerationRef = useRef(0);
   const conversationMutationVersionRef = useRef(0);
+  const conversationPersistTimerRef = useRef<number | null>(null);
   const messageCopyFeedbackTimerRef = useRef<number | null>(null);
   const citationHighlightTimerRef = useRef<number | null>(null);
   const localCitationHighlightTimerRef = useRef<number | null>(null);
@@ -3851,28 +3808,42 @@ export default function AiSidebar({
   }, [webSearchMode]);
 
   useEffect(() => {
-    if (!hasPersistableConversationStateRef.current) return;
-    const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
-      ...conversation,
-      messages: sanitizeMessagesForStorage(conversation.messages),
-    }));
-    const nextActiveConversationId = persistedConversations.some((conversation) => conversation.id === activeConversationId)
-      ? activeConversationId
-      : persistedConversations[0]?.id;
+    if (!hasPersistableConversationStateRef.current) return undefined;
 
-    if (!nextActiveConversationId) return;
-
-    try {
-      window.localStorage.setItem(
-        AI_CONVERSATIONS_STORAGE_KEY,
-        JSON.stringify({
-          conversations: persistedConversations,
-          activeConversationId: nextActiveConversationId,
-        }),
-      );
-    } catch (error) {
-      console.warn("Persist AI conversations failed:", error);
+    if (conversationPersistTimerRef.current !== null) {
+      window.clearTimeout(conversationPersistTimerRef.current);
     }
+
+    conversationPersistTimerRef.current = window.setTimeout(() => {
+      conversationPersistTimerRef.current = null;
+      const persistedConversations = limitConversations(pruneBlankConversations(conversations, activeConversationId)).map((conversation) => ({
+        ...conversation,
+        messages: sanitizeMessagesForStorage(conversation.messages),
+      }));
+      const nextActiveConversationId = persistedConversations.some((conversation) => conversation.id === activeConversationId)
+        ? activeConversationId
+        : persistedConversations[0]?.id;
+
+      if (!nextActiveConversationId) return;
+
+      try {
+        window.localStorage.setItem(
+          AI_CONVERSATIONS_STORAGE_KEY,
+          JSON.stringify({
+            conversations: persistedConversations,
+            activeConversationId: nextActiveConversationId,
+          }),
+        );
+      } catch (error) {
+        console.warn("Persist AI conversations failed:", error);
+      }
+    }, AI_CONVERSATION_PERSIST_DEBOUNCE_MS);
+
+    return () => {
+      if (conversationPersistTimerRef.current === null) return;
+      window.clearTimeout(conversationPersistTimerRef.current);
+      conversationPersistTimerRef.current = null;
+    };
   }, [activeConversationId, conversations]);
 
   useEffect(() => {
@@ -4719,76 +4690,56 @@ export default function AiSidebar({
     }));
   };
 
-  const clearStreamRevealTimer = (streamId: string) => {
-    const timerId = streamRevealTimerRef.current.get(streamId);
-    if (timerId === undefined) return;
-    window.clearTimeout(timerId);
-    streamRevealTimerRef.current.delete(streamId);
+  const clearStreamFlushFrame = (streamId: string) => {
+    const frameId = streamFlushFrameRef.current.get(streamId);
+    if (frameId === undefined) return;
+    window.cancelAnimationFrame(frameId);
+    streamFlushFrameRef.current.delete(streamId);
   };
 
-  const appendStreamRevealChunk = (streamId: string, chunk: string) => {
+  const appendStreamText = (streamId: string, chunk: string) => {
     const target = streamTargetsRef.current.get(streamId);
     if (!target || !chunk) return;
-    streamVisibleTextRef.current.set(streamId, `${streamVisibleTextRef.current.get(streamId) ?? ""}${chunk}`);
     replaceMessage(target.conversationId, target.messageId, (message) => ({
       ...message,
       text: message.state === "streaming" ? `${message.text}${chunk}` : message.text,
     }));
   };
 
-  const revealNextStreamChunk = (streamId: string) => {
-    streamRevealTimerRef.current.delete(streamId);
+  const flushQueuedStreamText = (streamId: string) => {
+    streamFlushFrameRef.current.delete(streamId);
     if (!streamTargetsRef.current.has(streamId)) return;
     const pendingText = streamPendingTextRef.current.get(streamId) ?? "";
     if (!pendingText) return;
-
-    const visibleText = streamVisibleTextRef.current.get(streamId) ?? "";
-    const chunk = takeStreamRevealChunk(pendingText, visibleText);
-    const remainingText = pendingText.slice(chunk.length);
-    if (remainingText) {
-      streamPendingTextRef.current.set(streamId, remainingText);
-    } else {
-      streamPendingTextRef.current.delete(streamId);
-    }
-    appendStreamRevealChunk(streamId, chunk);
-    if (!remainingText || !streamTargetsRef.current.has(streamId)) return;
-
-    const timerId = window.setTimeout(
-      () => revealNextStreamChunk(streamId),
-      getStreamRevealDelay(chunk, remainingText.length, `${visibleText}${chunk}`),
-    );
-    streamRevealTimerRef.current.set(streamId, timerId);
+    streamPendingTextRef.current.delete(streamId);
+    appendStreamText(streamId, pendingText);
   };
 
-  const startStreamRevealLoop = (streamId: string) => {
-    if (streamRevealTimerRef.current.has(streamId)) return;
-    const timerId = window.setTimeout(() => revealNextStreamChunk(streamId), AI_STREAM_REVEAL_INTERVAL_MS);
-    streamRevealTimerRef.current.set(streamId, timerId);
+  const scheduleStreamTextFlush = (streamId: string) => {
+    if (streamFlushFrameRef.current.has(streamId)) return;
+    const frameId = window.requestAnimationFrame(() => flushQueuedStreamText(streamId));
+    streamFlushFrameRef.current.set(streamId, frameId);
   };
 
   const queueStreamRevealText = (streamId: string, delta: string) => {
     if (!streamTargetsRef.current.has(streamId) || !delta) return;
     streamPendingTextRef.current.set(streamId, `${streamPendingTextRef.current.get(streamId) ?? ""}${delta}`);
-    startStreamRevealLoop(streamId);
+    scheduleStreamTextFlush(streamId);
   };
 
   const flushStreamRevealText = (streamId: string) => {
-    clearStreamRevealTimer(streamId);
-    const pendingText = streamPendingTextRef.current.get(streamId) ?? "";
-    streamPendingTextRef.current.delete(streamId);
-    appendStreamRevealChunk(streamId, pendingText);
+    clearStreamFlushFrame(streamId);
+    flushQueuedStreamText(streamId);
   };
 
   const initializeStreamRevealState = (streamId: string) => {
-    clearStreamRevealTimer(streamId);
+    clearStreamFlushFrame(streamId);
     streamPendingTextRef.current.set(streamId, "");
-    streamVisibleTextRef.current.set(streamId, "");
   };
 
   const clearStreamRuntime = (streamId: string) => {
-    clearStreamRevealTimer(streamId);
+    clearStreamFlushFrame(streamId);
     streamPendingTextRef.current.delete(streamId);
-    streamVisibleTextRef.current.delete(streamId);
     streamTextBufferRef.current.delete(streamId);
     streamTargetsRef.current.delete(streamId);
     activeStreamsRef.current.delete(streamId);
@@ -5096,8 +5047,8 @@ export default function AiSidebar({
     return () => {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
-      streamRevealTimerRef.current.forEach((timerId) => window.clearTimeout(timerId));
-      streamRevealTimerRef.current.clear();
+      streamFlushFrameRef.current.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      streamFlushFrameRef.current.clear();
     };
   }, []);
 
@@ -6824,6 +6775,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           "notex-session-item notex-session-row group flex w-full min-w-0 items-center transition-colors",
           variant === "overlay" && "notex-session-popover-row",
         )}
+        style={{ "--notex-hover": "#2A2D2E" } as CSSProperties}
         data-selected={isSelected ? "true" : undefined}
       >
         <button
@@ -6840,10 +6792,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         <span className="notex-session-time notex-session-row-meta shrink-0 text-right tabular-nums group-hover:hidden">
           {timeLabel}
         </span>
-        <div className="hidden shrink-0 items-center gap-1 group-hover:flex">
+        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[7px] border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               startRenameConversation(conversation);
@@ -6851,11 +6803,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             title="重命名会话"
             aria-label="重命名会话"
           >
-            <PenLine className="h-[17px] w-[17px]" />
+            <PenLine className="h-[15px] w-[15px]" />
           </button>
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[7px] border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               requestDeleteConversation(conversation.id);
@@ -6863,7 +6815,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             title="删除会话"
             aria-label="删除会话"
           >
-            <Trash2 className="h-[17px] w-[17px]" />
+            <Trash2 className="h-[15px] w-[15px]" />
           </button>
         </div>
       </div>
