@@ -1,4 +1,20 @@
 export type {
+  ResearchEngineDiagnostics,
+  ResearchEngineDiagnosticExportOptions,
+  ResearchEngineDiagnosticMarkdownReport,
+  ResearchEngineDiagnosticMessage,
+  ResearchEngineDiagnosticSection,
+  ResearchEngineDiagnosticSeverity,
+  ResearchEngineDiagnosticSnapshot,
+  ResearchEngineDiagnosticStage,
+  ResearchEngineDiagnosticSummary,
+  ResearchEngineJsonSafeValue,
+  ResearchEngineSelfCheckDiagnosticsInput,
+  ResearchEngineSelfCheckFailureSummary,
+  ResearchEngineSelfCheckPhaseSummary,
+  ResearchEngineSelfCheckSummary,
+} from "./diagnosticsTypes";
+export type {
   RealDiscoveryAbortState,
   RealDiscoveryCredentialPolicy,
   RealDiscoveryProviderAdapter,
@@ -227,4 +243,21 @@ export {
   getRealProviderFixture,
   realProviderConfigs,
 } from "./providerFixtures";
+export {
+  buildDiagnosticsFromOfflineRun,
+  buildDiagnosticsFromSelfCheck,
+  buildResearchEngineDiagnostics,
+  toJsonSafeDiagnostics,
+} from "./diagnosticsExporter";
+export {
+  formatDiagnosticSectionAsMarkdown,
+  formatDiagnosticsAsMarkdown,
+  formatDiagnosticsFromSelfCheckAsMarkdown,
+  formatSelfCheckSummaryAsMarkdown,
+} from "./diagnosticsFormatter";
+export {
+  formatResearchEngineSelfCheckReport,
+  groupSelfCheckResultsByPhase,
+  summarizeResearchEngineSelfCheck,
+} from "./selfCheckReporter";
 export { runResearchEngineSelfCheck } from "./selfCheck";

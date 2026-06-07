@@ -4,6 +4,12 @@ import { buildExcerpt } from "./excerptBuilder";
 import { buildEvidencePacket } from "./evidencePacket";
 import { buildCandidatePool } from "./candidatePool";
 import { canonicalizeUrl, normalizeDiscoveryResult } from "./candidateNormalizer";
+import {
+  buildDiagnosticsFromOfflineRun,
+  buildDiagnosticsFromSelfCheck,
+  toJsonSafeDiagnostics,
+} from "./diagnosticsExporter";
+import { formatDiagnosticsAsMarkdown } from "./diagnosticsFormatter";
 import { executeDiscoveryProvider } from "./discoveryProvider";
 import { createMockOiProvider } from "./mockDiscoveryProvider";
 import { readMockUrl } from "./mockUrlReader";
@@ -22,6 +28,7 @@ import {
 import { createFixtureTransport, realProviderConfigs } from "./providerFixtures";
 import { runResearchEngineOffline } from "./offlineOrchestrator";
 import { buildSearchPolicyDecision } from "./searchPolicy";
+import { summarizeResearchEngineSelfCheck } from "./selfCheckReporter";
 import { verifyGeneratedAnswer } from "./postGenerationVerifier";
 import { createSchedulerSnapshot, scheduleCandidates, simulateSchedulerStep } from "./scheduler";
 import type {
@@ -1134,6 +1141,124 @@ const phase8Cases = (): ResearchEngineSelfCheckResult[] => [
   }),
 ];
 
+const hasUnsafeJsonValue = (value: unknown, seen = new WeakSet<object>()): boolean => {
+  if (value === undefined || typeof value === "function" || typeof value === "symbol") return true;
+  if (!value || typeof value !== "object") return false;
+  if (value instanceof Error) return true;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  const children = Array.isArray(value) ? value : Object.values(value);
+  return children.some((child) => hasUnsafeJsonValue(child, seen));
+};
+
+const phase9Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("diagnostics-offline-run-stages", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-offline-run-stages",
+      request: { requestId: "diagnostics-offline-run-stages", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run, { exportedAtLabel: "self-check" });
+    for (const stageName of ["policy", "query", "discovery", "candidate", "reader", "evidence", "contract"] as const) {
+      assertTrue(failures, `stage_missing_${stageName}`, diagnostics.stageSummaries.some((item) => item.stage === stageName));
+    }
+    assertEqual(failures, "answerMode", diagnostics.snapshot.contract?.answerMode ?? "missing", run.answerContract?.answerMode ?? "missing");
+  }),
+  phase2Result("diagnostics-no-search-no-fake-reader", "\u6b27\u62c9\u516c\u5f0f\u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-no-search-no-fake-reader",
+      request: { requestId: "diagnostics-no-search-no-fake-reader", userQuestion: "\u6b27\u62c9\u516c\u5f0f\u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run);
+    assertEqual(failures, "status", diagnostics.summary.status, "no_search");
+    assertEqual(failures, "readerResultCount", diagnostics.snapshot.reader?.resultCount ?? -1, 0);
+    assertEqual(failures, "evidenceItemCount", diagnostics.snapshot.evidence?.itemCount ?? -1, 0);
+  }),
+  phase2Result("diagnostics-high-risk-rumor-conservative", "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-high-risk-rumor-conservative",
+      request: { requestId: "diagnostics-high-risk-rumor-conservative", userQuestion: "\u5f20\u96ea\u5cf0\u6b7b\u4e86\u5417", locale: "auto" },
+      config: { mockDiscoveryScenario: { disabledProviders: ["mock_news", "mock_official_docs"] } },
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run);
+    assertEqual(failures, "risk", diagnostics.snapshot.policy?.risk ?? "low", "high");
+    assertTrue(failures, "answer_mode_should_not_direct", diagnostics.snapshot.contract?.answerMode !== "direct");
+    assertTrue(failures, "forbidden_or_missing_missing", (diagnostics.snapshot.contract?.forbiddenClaimCount ?? 0) > 0 || (diagnostics.snapshot.evidence?.missingEvidenceReasons.length ?? 0) > 0);
+  }),
+  phase2Result("diagnostics-provider-error-summary", "React useEffect what is it", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-provider-error-summary",
+      request: { requestId: "diagnostics-provider-error-summary", userQuestion: "React useEffect what is it", locale: "auto" },
+      config: { mockDiscoveryScenario: { timeoutProviders: ["mock_official_docs"] } },
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run);
+    assertTrue(failures, "timeout_error_missing", (diagnostics.snapshot.discovery?.errorSummary.timeout ?? 0) > 0);
+    assertTrue(failures, "provider_status_missing", Boolean(diagnostics.snapshot.discovery?.providerStatusSummary.mock_official_docs));
+  }),
+  phase2Result("diagnostics-json-safe-redaction", "React useEffect what is it", (failures) => {
+    const circular: Record<string, unknown> = { apiKey: "sk-fake-secret" };
+    circular.self = circular;
+    circular.fn = () => "bad";
+    circular.err = new Error("boom");
+    const safe = toJsonSafeDiagnostics(circular);
+    const serialized = JSON.stringify(safe);
+    assertTrue(failures, "unsafe_json_value", !hasUnsafeJsonValue(safe));
+    assertTrue(failures, "secret_leaked", !serialized.includes("sk-fake-secret"));
+    assertTrue(failures, "circular_marker_missing", serialized.includes("[Circular]"));
+  }),
+  phase2Result("diagnostics-markdown-report-preview", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-markdown-report-preview",
+      request: { requestId: "diagnostics-markdown-report-preview", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run, { maxPreviewChars: 80 });
+    const report = formatDiagnosticsAsMarkdown(diagnostics);
+    assertTrue(failures, "overview_missing", report.markdown.includes("## Overview"));
+    assertTrue(failures, "stage_status_missing", report.markdown.includes("## Stage Status"));
+    assertTrue(failures, "warnings_errors_missing", report.markdown.includes("Warnings"));
+    assertTrue(failures, "full_excerpt_should_not_appear", !report.markdown.includes(run.excerpts[0]?.excerptMarkdown ?? "not-present"));
+  }),
+  phase2Result("selfcheck-summary-by-phase", "selfCheck summary", (failures) => {
+    const sample = [
+      phase2Result("diagnostics-sample-pass", "pass", () => undefined),
+      { ...phase2Result("real-provider-sample-fail", "fail", () => undefined), passed: false, failures: ["forced"] },
+    ];
+    const summary = summarizeResearchEngineSelfCheck(sample);
+    const diagnostics = buildDiagnosticsFromSelfCheck(sample);
+    assertEqual(failures, "total", summary.total, 2);
+    assertEqual(failures, "failed", summary.failed, 1);
+    assertTrue(failures, "phase9_missing", summary.byPhase.some((item) => item.phase === "phase_9"));
+    assertTrue(failures, "selfcheck_snapshot_missing", Boolean(diagnostics.snapshot.selfCheck));
+  }),
+  phase2Result("diagnostics-verifier-unknown-citation", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-verifier-unknown-citation",
+      request: { requestId: "diagnostics-verifier-unknown-citation", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+      sampleGeneratedAnswer: "useEffect synchronizes with external systems. [[E99]]",
+    });
+    const diagnostics = buildDiagnosticsFromOfflineRun(run);
+    assertEqual(failures, "verifierPassed", diagnostics.snapshot.verifier?.passed ?? true, false);
+    assertTrue(failures, "violation_missing", diagnostics.snapshot.verifier?.violationKinds.includes("unknown_citation") ?? false);
+    assertTrue(failures, "fallback_missing", Boolean(diagnostics.snapshot.verifier?.safeFallbackPreview));
+  }),
+  phase2Result("diagnostics-long-text-truncation", "React useEffect \u662f\u4ec0\u4e48", (failures) => {
+    const run = runResearchEngineOffline({
+      runId: "diagnostics-long-text-truncation",
+      request: { requestId: "diagnostics-long-text-truncation", userQuestion: "React useEffect \u662f\u4ec0\u4e48", locale: "auto" },
+    });
+    if (run.evidencePacket?.evidenceItems[0]) {
+      run.evidencePacket.evidenceItems[0].title = "T".repeat(500);
+      run.evidencePacket.evidenceItems[0].excerptMarkdown = "E".repeat(1200);
+    }
+    const diagnostics = buildDiagnosticsFromOfflineRun(run, { maxPreviewChars: 60 });
+    const evidenceRows = diagnostics.sections.find((section) => section.id === "evidence")?.rows ?? [];
+    const title = String(evidenceRows[0]?.title ?? "");
+    const excerptPreview = String(evidenceRows[0]?.excerptPreview ?? "");
+    assertTrue(failures, "title_not_truncated", title.length <= 120);
+    assertTrue(failures, "excerpt_not_truncated", excerptPreview.length <= 160);
+    assertTrue(failures, "full_excerpt_leaked", !JSON.stringify(diagnostics).includes("E".repeat(500)));
+  }),
+];
+
 export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] => [
   ...PHASE_1_CASES.map(phase1Result),
   ...phase2Cases(),
@@ -1143,6 +1268,7 @@ export const runResearchEngineSelfCheck = (): ResearchEngineSelfCheckResult[] =>
   ...phase6Cases(),
   ...phase7Cases(),
   ...phase8Cases(),
+  ...phase9Cases(),
 ];
 
 export type {
