@@ -43,6 +43,11 @@ export type {
   RealProviderPayloadKind,
 } from "./realProviderTypes";
 export type {
+  ResearchEngineRealProviderSmokeOptions,
+  ResearchEngineRealProviderSmokeResult,
+  ResearchEngineRealProviderSmokeStatus,
+} from "./realProviderSmoke";
+export type {
   ResearchOfflineRunConfig,
   ResearchOfflineRunDiagnostics,
   ResearchOfflineRunInput,
@@ -250,6 +255,7 @@ export {
   getRealProviderFixture,
   realProviderConfigs,
 } from "./providerFixtures";
+export { runResearchEngineRealProviderSmoke } from "./realProviderSmoke";
 export {
   buildDiagnosticsFromOfflineRun,
   buildDiagnosticsFromSelfCheck,

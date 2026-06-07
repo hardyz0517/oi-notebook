@@ -20,11 +20,13 @@ import { applySourceStrategyPlan, buildExplicitUrlReadPlan, buildOfflineAiQueryP
 import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsForCitationScan } from "@/lib/citations";
 import {
   getResearchEngineDeveloperSamples,
+  runResearchEngineRealProviderSmoke as runResearchEngineRealProviderSmokeBridge,
   runResearchEngineDeveloperSample,
   runResearchEngineDeveloperSelfCheck,
   type ResearchEngineDeveloperSampleId,
   type ResearchEngineDeveloperSampleResult,
   type ResearchEngineDeveloperSelfCheckResult,
+  type ResearchEngineRealProviderSmokeResult,
 } from "@/lib/research-engine";
 import { cn } from "@/lib/utils";
 
@@ -1189,6 +1191,7 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
 });
 
 const researchEngineSamples = getResearchEngineDeveloperSamples();
+const DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY = "React useEffect docs";
 const SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 const isSearchDiagnosticsPerfDebugEnabled = (): boolean => {
@@ -1225,13 +1228,17 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningNotexSelfCheck, setIsRunningNotexSelfCheck] = useState(false);
   const [isRunningResearchEngineSelfCheck, setIsRunningResearchEngineSelfCheck] = useState(false);
   const [isRunningResearchEngineSample, setIsRunningResearchEngineSample] = useState(false);
+  const [isRunningResearchEngineRealProviderSmoke, setIsRunningResearchEngineRealProviderSmoke] = useState(false);
   const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
+  const [researchEngineRealProviderSmokeQuery, setResearchEngineRealProviderSmokeQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY);
   const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
+  const [researchEngineRealProviderSmoke, setResearchEngineRealProviderSmoke] = useState<ResearchEngineRealProviderSmokeResult | null>(null);
   const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
   const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
   const [isResearchEngineReportExpanded, setIsResearchEngineReportExpanded] = useState(false);
+  const [isResearchEngineRealProviderSmokeReportExpanded, setIsResearchEngineRealProviderSmokeReportExpanded] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1562,6 +1569,33 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runResearchEngineRealProviderSmoke = async () => {
+    setIsRunningResearchEngineRealProviderSmoke(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    setIsResearchEngineRealProviderSmokeReportExpanded(false);
+    try {
+      const result = await runResearchEngineRealProviderSmokeBridge({
+        query: researchEngineRealProviderSmokeQuery,
+        webSearchConfig,
+      });
+      setResearchEngineRealProviderSmoke(result);
+      if (result.ok) {
+        toast.success(`真实 Provider Smoke 完成：${result.providerName}`);
+      } else if (result.status === "not_configured") {
+        setResearchEngineError("真实 Provider Smoke 未运行：当前未配置可用的 Bocha / Brave provider。");
+      } else {
+        setResearchEngineError(`真实 Provider Smoke 失败：${result.errors.join("; ") || result.status}`);
+      }
+    } catch (error) {
+      const message = `真实 Provider Smoke 失败：${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      setIsRunningResearchEngineRealProviderSmoke(false);
+    }
+  };
+
   const copyResearchEngineReport = async () => {
     const markdown = researchEngineSample?.markdownReport ?? researchEngineSelfCheck?.markdownReport;
     if (!markdown) {
@@ -1576,6 +1610,26 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       await navigator.clipboard.writeText(markdown);
       setResearchEngineCopyMessage("Markdown 报告已复制。");
       toast.success("Markdown 报告已复制");
+    } catch (error) {
+      setResearchEngineCopyMessage(`复制失败：${getErrorMessage(error)}`);
+      toast.error(`复制失败：${getErrorMessage(error)}`);
+    }
+  };
+
+  const copyResearchEngineRealProviderSmokeReport = async () => {
+    const markdown = researchEngineRealProviderSmoke?.markdownReport;
+    if (!markdown) {
+      setResearchEngineCopyMessage("请先运行真实 Provider Smoke。");
+      return;
+    }
+    if (!navigator.clipboard) {
+      setResearchEngineCopyMessage("当前环境不可直接复制，请手动选择下方 Smoke Markdown 报告。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setResearchEngineCopyMessage("Smoke Markdown 报告已复制。");
+      toast.success("Smoke Markdown 报告已复制");
     } catch (error) {
       setResearchEngineCopyMessage(`复制失败：${getErrorMessage(error)}`);
       toast.error(`复制失败：${getErrorMessage(error)}`);
@@ -1684,6 +1738,85 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
             复制 Markdown 报告
           </Button>
           {researchEngineCopyMessage && <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground lg:self-center">{researchEngineCopyMessage}</span>}
+        </div>
+        <div className="grid min-w-0 max-w-full gap-2 rounded-sm border border-border/70 bg-muted/10 p-3">
+          <div className="grid min-w-0 gap-1">
+            <div className="text-sm font-medium text-foreground">真实 Provider Smoke</div>
+            <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
+              手动验证 Research Engine provider boundary 的最小真实搜索闭环；只会访问当前配置的 Bocha / Brave，不会替换普通 NoteX 搜索，也不会写入会话。
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <input
+              className="min-h-9 min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineRealProviderSmokeQuery}
+              onChange={(event) => setResearchEngineRealProviderSmokeQuery(event.target.value)}
+              placeholder={DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY}
+            />
+            <Button
+              className="w-full justify-center whitespace-normal lg:w-auto"
+              variant="outline"
+              onClick={() => void runResearchEngineRealProviderSmoke()}
+              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample || isRunningResearchEngineRealProviderSmoke}
+            >
+              {isRunningResearchEngineRealProviderSmoke ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              运行真实 Smoke
+            </Button>
+            <Button
+              className="w-full justify-center whitespace-normal lg:w-auto"
+              variant="outline"
+              onClick={() => void copyResearchEngineRealProviderSmokeReport()}
+              disabled={!researchEngineRealProviderSmoke?.markdownReport}
+            >
+              <Clipboard className="h-3.5 w-3.5" />
+              复制 Smoke 报告
+            </Button>
+          </div>
+          {researchEngineRealProviderSmoke && (
+            <div className="grid min-w-0 max-w-full gap-3 border-l border-border/80 pl-3 text-xs leading-5">
+              <div className={cn("min-w-0 break-words", researchEngineRealProviderSmoke.ok ? "text-emerald-300" : "text-amber-300")}>
+                {researchEngineRealProviderSmoke.ok ? "Smoke 已完成。" : researchEngineRealProviderSmoke.status === "not_configured" ? "未配置真实 provider，Smoke 未发起。" : "Smoke 失败或部分失败。"}
+              </div>
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ["Provider", researchEngineRealProviderSmoke.providerName],
+                  ["Status", researchEngineRealProviderSmoke.status],
+                  ["Raw results", researchEngineRealProviderSmoke.rawResultCount],
+                  ["Normalized", researchEngineRealProviderSmoke.normalizedResultCount],
+                  ["Candidates", researchEngineRealProviderSmoke.candidateCount],
+                  ["Selected", researchEngineRealProviderSmoke.selectedCandidateCount],
+                  ["Endpoint", researchEngineRealProviderSmoke.redactedConfigSummary.endpointHost ?? "none"],
+                  ["Credential", researchEngineRealProviderSmoke.redactedConfigSummary.credentialAvailable ? "present(redacted)" : "missing"],
+                ].map(([label, value]) => (
+                  <div key={label} className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-background/40 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 min-w-0 whitespace-normal break-words text-sm text-foreground">{value}</div>
+                  </div>
+                ))}
+              </div>
+              {(researchEngineRealProviderSmoke.warnings.length > 0 || researchEngineRealProviderSmoke.errors.length > 0) && (
+                <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                  {researchEngineRealProviderSmoke.warnings.map((warning) => <div key={`real-smoke-warning-${warning}`} className="min-w-0 break-words">警告：{warning}</div>)}
+                  {researchEngineRealProviderSmoke.errors.map((error) => <div key={`real-smoke-error-${error}`} className="min-w-0 break-words text-red-300">错误：{error}</div>)}
+                </div>
+              )}
+              <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
+                <button
+                  type="button"
+                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  onClick={() => setIsResearchEngineRealProviderSmokeReportExpanded((expanded) => !expanded)}
+                >
+                  {isResearchEngineRealProviderSmokeReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
+                </button>
+                {isResearchEngineRealProviderSmokeReportExpanded && (
+                  <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                    {researchEngineRealProviderSmoke.markdownReport}
+                  </pre>
+                )}
+              </details>
+            </div>
+          )}
         </div>
         {researchEngineError && (
           <div className="min-w-0 max-w-full break-words rounded-sm border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-300">
