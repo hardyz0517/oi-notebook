@@ -310,6 +310,125 @@ const AI_STREAM_REVEAL_BACKLOG_THRESHOLD = 160;
 const AI_STREAM_REVEAL_PUNCTUATION_PATTERN = /[\s,.;:!?，。；：！？、]/;
 const AI_STREAM_REVEAL_FAST_END_PATTERN = /[\r\n,.;:!?，。；：！？、]$/;
 const AI_HYDRATION_CHUNK_BUDGET_MS = 7;
+const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
+
+function isAiPerfDebugEnabled(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const AI_SIDEBAR_PERF_DEBUG = isAiPerfDebugEnabled();
+
+type NoteXAiPerfGlobal = {
+  counters: Record<string, number>;
+  lastEvents: Record<string, unknown>;
+  dump: () => void;
+  reset: () => void;
+  getSnapshot: () => {
+    counters: Record<string, number>;
+    lastEvents: Record<string, unknown>;
+  };
+};
+
+const NOTEX_AI_PERF_COUNTER_NAMES = [
+  "appResizePointerDown",
+  "appResizePointerMove",
+  "appResizeRafCommit",
+  "appResizeStateCommit",
+  "appResizeLocalStorageWrite",
+  "appResizePointerUp",
+  "aiSidebarRender",
+  "selectConversation",
+  "activeConversationChange",
+  "viewModeChange",
+  "prepareHit",
+  "messageListRender",
+  "messageResizeObserver",
+  "composerResizeObserver",
+  "scrollEvent",
+  "setShowScrollToBottom",
+  "scheduleScrollToBottom",
+  "scrollToBottom",
+  "composerInputChange",
+  "parentInputStateCommit",
+  "aiSidebarMount",
+  "aiSidebarHydrateStart",
+  "aiSidebarHydrateEnd",
+  "aiSidebarHydrateDuration",
+  "conversationsLocalStorageRead",
+  "conversationsJsonParse",
+  "conversationsSanitize",
+  "conversationsSetState",
+  "aiSidebarInitialEffectsRun",
+  "aiSidebarInitialScrollToBottom",
+  "aiSidebarPrepareHit",
+  "developerModeEnabled",
+  "aiSidebarDeveloperDiagnosticsRender",
+  "webSearchPlanCardRender",
+  "webSearchSourcesCardRender",
+  "diagnosticsMarkdownFormatCount",
+  "directSourceCardRender",
+  "duplicateKeyGuardCount",
+];
+
+const createNoteXAiPerfCounters = () => (
+  NOTEX_AI_PERF_COUNTER_NAMES.reduce<Record<string, number>>((counters, name) => {
+    counters[name] = 0;
+    return counters;
+  }, {})
+);
+
+const getNoteXAiPerfGlobal = (): NoteXAiPerfGlobal | null => {
+  if (!AI_SIDEBAR_PERF_DEBUG || typeof window === "undefined") return null;
+  const perfWindow = window as typeof window & {
+    __OINB_AI_PERF__?: NoteXAiPerfGlobal;
+    __OINB_AI_PERF_ENABLED_LOGGED__?: boolean;
+  };
+  if (!perfWindow.__OINB_AI_PERF__) {
+    const perf: NoteXAiPerfGlobal = {
+      counters: createNoteXAiPerfCounters(),
+      lastEvents: {},
+      dump: () => {
+        console.info("[NoteX Perf] snapshot", perf.getSnapshot());
+        console.table(perf.counters);
+      },
+      reset: () => {
+        perf.counters = createNoteXAiPerfCounters();
+        perf.lastEvents = {};
+        console.info("[NoteX Perf] reset");
+      },
+      getSnapshot: () => ({
+        counters: { ...perf.counters },
+        lastEvents: { ...perf.lastEvents },
+      }),
+    };
+    perfWindow.__OINB_AI_PERF__ = perf;
+  }
+  if (!perfWindow.__OINB_AI_PERF_ENABLED_LOGGED__) {
+    perfWindow.__OINB_AI_PERF_ENABLED_LOGGED__ = true;
+    console.info("[NoteX Perf] enabled", {
+      dump: "window.__OINB_AI_PERF__.dump()",
+      reset: "window.__OINB_AI_PERF__.reset()",
+      getSnapshot: "window.__OINB_AI_PERF__.getSnapshot()",
+    });
+  }
+  return perfWindow.__OINB_AI_PERF__;
+};
+
+const incrementNoteXAiPerfCounter = (name: string, amount = 1) => {
+  const perf = getNoteXAiPerfGlobal();
+  if (!perf) return;
+  perf.counters[name] = (perf.counters[name] ?? 0) + amount;
+};
+
+const setNoteXAiPerfEvent = (name: string, value: unknown) => {
+  const perf = getNoteXAiPerfGlobal();
+  if (!perf) return;
+  perf.lastEvents[name] = value;
+};
 const LEGACY_UNTITLED_CONVERSATION_TITLE = "New chat";
 const UNTITLED_CONVERSATION_TITLE = "新对话";
 const SOLUTION_RULE_IDS = new Set<SolutionFormatChange["ruleId"]>([
@@ -1442,6 +1561,9 @@ const hydrateConversationStateInChunks = ({
 
   const processChunk = () => {
     if (cancelled) return;
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      incrementNoteXAiPerfCounter("conversationsSanitize");
+    }
     const startedAt = performance.now();
     while (cursor < parsedConversations.length && performance.now() - startedAt < AI_HYDRATION_CHUNK_BUDGET_MS) {
       const conversation = sanitizeConversation(parsedConversations[cursor]);
@@ -1459,11 +1581,17 @@ const hydrateConversationStateInChunks = ({
   schedule(() => {
     if (cancelled) return;
     try {
+      if (AI_SIDEBAR_PERF_DEBUG) {
+        incrementNoteXAiPerfCounter("conversationsLocalStorageRead");
+      }
       const raw = window.localStorage.getItem(AI_CONVERSATIONS_STORAGE_KEY);
       if (!raw) {
         onPhase("hydrated");
         onHydrated({ conversations: [fallback], activeConversationId: fallback.id });
         return;
+      }
+      if (AI_SIDEBAR_PERF_DEBUG) {
+        incrementNoteXAiPerfCounter("conversationsJsonParse");
       }
       const parsed = JSON.parse(raw) as Partial<AiConversationStorage>;
       parsedConversations = Array.isArray(parsed.conversations) ? parsed.conversations : [];
@@ -2419,7 +2547,31 @@ function WebSearchPlanCard({
   filteredCount?: number;
   filterReason?: string;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   if (!decision.shouldSearch) return null;
+
+  if (AI_SIDEBAR_PERF_DEBUG) {
+    incrementNoteXAiPerfCounter("webSearchPlanCardRender");
+  }
+  if (!isExpanded) {
+    return (
+      <div className="notex-debug-card notex-diagnostics-card mb-2 grid gap-2 rounded-xl border border-sky-200/70 bg-sky-50/65 px-3.5 py-2.5 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-sky-400/20 dark:bg-sky-400/[0.08] dark:text-slate-200">
+        <button
+          type="button"
+          className="flex min-w-0 items-center justify-between gap-3 text-left"
+          onClick={() => setIsExpanded(true)}
+        >
+          <span className="min-w-0 truncate font-medium text-foreground">联网搜索计划</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">展开诊断</span>
+        </button>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>queries={decision.queries.length}</span>
+          <span>intent={decision.intent}</span>
+          <span>provider={getWebSearchProviderLabel(provider)}</span>
+        </div>
+      </div>
+    );
+  }
 
   const chips = getSearchPlanChips(decision);
   const visibleQueries = decision.queries.slice(0, SEARCH_PLAN_QUERY_LIMIT);
@@ -3171,6 +3323,34 @@ function WebSearchSourcesCard({
 }) {
   const visibleSources = (sources ?? []).slice(0, SEARCH_SOURCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, (sources?.length ?? 0) - visibleSources.length);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  if (visibleSources.length === 0 && !error && !searchDebug) return null;
+  if (AI_SIDEBAR_PERF_DEBUG) {
+    incrementNoteXAiPerfCounter("webSearchSourcesCardRender");
+  }
+  if (!isExpanded) {
+    const sourceCount = sources?.length ?? 0;
+    return (
+      <div className="notex-debug-card notex-web-source-card mb-2 grid gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-3.5 py-2.5 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-emerald-400/20 dark:bg-emerald-400/[0.07] dark:text-slate-200">
+        <button
+          type="button"
+          className="flex min-w-0 items-center justify-between gap-3 text-left"
+          onClick={() => setIsExpanded(true)}
+        >
+          <span className="min-w-0 truncate font-medium text-foreground">搜索来源诊断</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">展开来源</span>
+        </button>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>sources={sourceCount}</span>
+          {hiddenCount > 0 && <span>hidden={hiddenCount}</span>}
+          {error && <span>hasError</span>}
+          {searchDebug && <span>hasDiagnostics</span>}
+        </div>
+      </div>
+    );
+  }
+
   const strongCount = (sources ?? []).filter((source) => source.relevance !== "candidate").length;
   const candidateCount = (sources ?? []).filter((source) => source.relevance === "candidate").length;
   const usableCount = (sources ?? []).filter((source) => source.usableEvidence === true && source.evidenceStatus === "usable").length;
@@ -3181,14 +3361,19 @@ function WebSearchSourcesCard({
     source.discoveryMethod === "constructed_source",
   );
 
-  if (visibleSources.length === 0 && !error && !searchDebug) return null;
   const diagnosticsText = searchDebug ?? visibleSources.find((source) => source.searchDiagnostics)?.searchDiagnostics;
+  if (AI_SIDEBAR_PERF_DEBUG && diagnosticsText) {
+    incrementNoteXAiPerfCounter("diagnosticsMarkdownFormatCount");
+  }
   const bingDiagnosticsLines = diagnosticsText && (diagnosticsText.includes("provider=bing") || diagnosticsText.includes("attemptedStages="))
     ? formatBingDiagnostics(diagnosticsText)
     : [];
   const preparationDiagnosticsLines = diagnosticsText ? formatSearchPreparationDiagnosticsForDisplay(diagnosticsText) : [];
   const directDiagnosticsLines = diagnosticsText ? formatDirectDiscoveryDiagnostics(diagnosticsText) : [];
   const newsReadDiagnosticsLines = diagnosticsText ? formatNewsReadDiagnostics(diagnosticsText) : [];
+  if (AI_SIDEBAR_PERF_DEBUG && directSources.length > 0) {
+    incrementNoteXAiPerfCounter("directSourceCardRender", Math.min(directSources.length, 6));
+  }
 
   return (
     <div className="notex-debug-card notex-web-source-card mb-2 grid gap-2.5 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-3.5 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_8px_20px_rgb(15_23_42/0.05)] dark:border-emerald-400/20 dark:bg-emerald-400/[0.07] dark:text-slate-200">
@@ -3208,7 +3393,7 @@ function WebSearchSourcesCard({
             )}
           </div>
           <div className="grid gap-2">
-            {visibleSources.map((source) => {
+            {visibleSources.map((source, index) => {
               const description = getSourceCardDescription(source);
               const clusterDebugItems = [
                 source.eventCluster ? `Event cluster：${source.eventCluster}` : undefined,
@@ -3267,7 +3452,15 @@ function WebSearchSourcesCard({
               ].filter((item): item is string => Boolean(item));
               return (
               <div
-                key={source.id || source.url}
+                key={[
+                  "source-card",
+                  source.id || "no-id",
+                  source.url || "no-url",
+                  source.sourceType || "no-type",
+                  source.sourceKind || "no-kind",
+                  source.evidenceStatus || "no-status",
+                  index,
+                ].join(":")}
                 data-source-message-id={messageId}
                 data-source-citation-id={source.citationId}
                 className={cn(
@@ -3336,10 +3529,10 @@ function WebSearchSourcesCard({
                   {source.url}
                 </div>
                 <div className="notex-source-detail-grid min-w-0 text-[12px] leading-5 text-muted-foreground/80">
-                  {debugItems.map((item) => {
+                  {debugItems.map((item, debugIndex) => {
                     const debugItem = splitDebugItem(item);
                     return (
-                      <span key={item} className="notex-source-detail-row">
+                      <span key={`source-debug:${index}:${debugIndex}:${item}`} className="notex-source-detail-row">
                         {debugItem.key && <span className="notex-source-detail-key">{debugItem.key}</span>}
                         <span className="notex-source-detail-value">{debugItem.value}</span>
                       </span>
@@ -3359,40 +3552,49 @@ function WebSearchSourcesCard({
           {bingDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-amber-200/60 bg-amber-50/70 px-2.5 py-2 text-[12px] leading-5 text-amber-900 dark:border-amber-300/20 dark:bg-amber-400/[0.08] dark:text-amber-100">
               <div className="font-medium">Bing 阶段诊断</div>
-              {bingDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {bingDiagnosticsLines.map((line, index) => (
+                <div key={`success-bing-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {preparationDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 text-[12px] leading-5 text-slate-800 dark:border-slate-300/20 dark:bg-white/[0.06] dark:text-slate-100">
               <div className="font-medium">搜索准备诊断</div>
-              {preparationDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {preparationDiagnosticsLines.map((line, index) => (
+                <div key={`success-preparation-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {directDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-cyan-200/60 bg-cyan-50/70 px-2.5 py-2 text-[12px] leading-5 text-cyan-950 dark:border-cyan-300/20 dark:bg-cyan-400/[0.08] dark:text-cyan-100">
               <div className="font-medium">Direct Discovery 诊断</div>
-              {directDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {directDiagnosticsLines.map((line, index) => (
+                <div key={`success-direct-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {newsReadDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-emerald-200/70 bg-emerald-50/70 px-2.5 py-2 text-[12px] leading-5 text-emerald-950 dark:border-emerald-300/20 dark:bg-emerald-400/[0.08] dark:text-emerald-100">
               <div className="font-medium">News Read Budget</div>
-              {newsReadDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {newsReadDiagnosticsLines.map((line, index) => (
+                <div key={`success-news-read-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {directSources.length > 0 && (
             <div className="grid gap-1 rounded-md border border-cyan-200/60 bg-cyan-50/70 px-2.5 py-2 text-[12px] leading-5 text-cyan-950 dark:border-cyan-300/20 dark:bg-cyan-400/[0.08] dark:text-cyan-100">
               <div className="font-medium">Direct Discovery</div>
-              {directSources.slice(0, 6).map((source) => (
-                <div key={`direct-${source.id || source.url}`} className="break-words">
+              {directSources.slice(0, 6).map((source, index) => (
+                <div key={[
+                  "success-direct-source",
+                  source.id || "no-id",
+                  source.url || "no-url",
+                  source.title || "no-title",
+                  source.discoveryMethod || "no-discovery",
+                  source.sourceKind || "no-kind",
+                  source.evidenceStatus || "no-status",
+                  index,
+                ].join(":")} className="break-words">
                   {source.title} · {source.discoveryMethod ?? "unknown"} · {source.sourceKind ?? "unknown"}
                   {source.dateHint ? ` · ${source.dateHint}` : ""}
                   {source.evidenceStatus ? ` · ${source.evidenceStatus}` : ""}
@@ -3419,24 +3621,24 @@ function WebSearchSourcesCard({
           {bingDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-amber-200/60 bg-amber-50/70 px-2.5 py-2 text-[12px] leading-5 text-amber-900 dark:border-amber-300/20 dark:bg-amber-400/[0.08] dark:text-amber-100">
               <div className="font-medium">Bing 阶段诊断</div>
-              {bingDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {bingDiagnosticsLines.map((line, index) => (
+                <div key={`error-bing-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {preparationDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 text-[12px] leading-5 text-slate-800 dark:border-slate-300/20 dark:bg-white/[0.06] dark:text-slate-100">
               <div className="font-medium">搜索准备诊断</div>
-              {preparationDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {preparationDiagnosticsLines.map((line, index) => (
+                <div key={`error-preparation-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
           {directDiagnosticsLines.length > 0 && (
             <div className="grid gap-1 rounded-md border border-cyan-200/60 bg-cyan-50/70 px-2.5 py-2 text-[12px] leading-5 text-cyan-950 dark:border-cyan-300/20 dark:bg-cyan-400/[0.08] dark:text-cyan-100">
               <div className="font-medium">Direct Discovery 诊断</div>
-              {directDiagnosticsLines.map((line) => (
-                <div key={line} className="break-words">{line}</div>
+              {directDiagnosticsLines.map((line, index) => (
+                <div key={`error-direct-diagnostic:${index}:${line}`} className="break-words">{line}</div>
               ))}
             </div>
           )}
@@ -3928,7 +4130,11 @@ export default function AiSidebar({
     };
   }
 
-  const [inputValue, setInputValue] = useState("");
+  const [inputUiState, setInputUiState] = useState({
+    value: "",
+    isEmpty: true,
+    isSlash: false,
+  });
   const [conversations, setConversations] = useState<AiConversation[]>(
     [initialConversationRef.current],
   );
@@ -3953,13 +4159,14 @@ export default function AiSidebar({
   const [isWebSearchConsentDialogOpen, setIsWebSearchConsentDialogOpen] = useState(false);
   const [isSavingWebSearchConsent, setIsSavingWebSearchConsent] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
+  const [isOpenShellSettled, setIsOpenShellSettled] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   const [applyingTagMessageId, setApplyingTagMessageId] = useState<string | null>(null);
   const [applyingPolishMessageId, setApplyingPolishMessageId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottomState] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const [highlightedCitationId, setHighlightedCitationId] = useState<string | null>(null);
   const [highlightedLocalCitationId, setHighlightedLocalCitationId] = useState<string | null>(null);
@@ -3989,16 +4196,85 @@ export default function AiSidebar({
   const citationHighlightTimerRef = useRef<number | null>(null);
   const localCitationHighlightTimerRef = useRef<number | null>(null);
   const commandRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const inputDraftRef = useRef("");
+  const inputUiStateRef = useRef(inputUiState);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerWrapRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const userPinnedToBottomRef = useRef(true);
   const pendingMessagesScrollFrameRef = useRef<number | null>(null);
+  const pendingResizeScrollStateRef = useRef(false);
+  const resizeStartedPinnedToBottomRef = useRef(true);
   const selectedProviderLabelRef = useRef("");
   const selectedModelLabelRef = useRef("");
+  const perfDebugRef = useRef({
+    renderCount: 0,
+    messageListRenderCount: 0,
+    resizeObserverCallbackCount: 0,
+    composerResizeObserverCallbackCount: 0,
+    scrollEventCount: 0,
+    setShowScrollToBottomCount: 0,
+    scheduleScrollToBottomCount: 0,
+    scrollToBottomCount: 0,
+    activeConversationChangeCount: 0,
+    viewModeChangeCount: 0,
+    selectConversationStartAt: 0,
+    selectConversationEndAt: 0,
+    lastSelectedConversationId: null as string | null,
+    lastPrepareStateKey: "",
+    mountAt: AI_SIDEBAR_PERF_DEBUG ? performance.now() : 0,
+    hydrateStartAt: 0,
+  });
+
+  if (AI_SIDEBAR_PERF_DEBUG) {
+    perfDebugRef.current.renderCount += 1;
+    incrementNoteXAiPerfCounter("aiSidebarRender");
+    if (developerModeEnabled) {
+      incrementNoteXAiPerfCounter("developerModeEnabled");
+      incrementNoteXAiPerfCounter("aiSidebarDeveloperDiagnosticsRender");
+    }
+  }
+  inputUiStateRef.current = inputUiState;
 
   useEffect(() => {
+    if (!AI_SIDEBAR_PERF_DEBUG) return;
+    incrementNoteXAiPerfCounter("aiSidebarMount");
+    setNoteXAiPerfEvent("aiSidebarMount", {
+      at: perfDebugRef.current.mountAt,
+      isOpen,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsOpenShellSettled(false);
+      return undefined;
+    }
+    let frameId: number | null = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        setIsOpenShellSettled(true);
+      });
+    });
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [isOpen]);
+  const setShowScrollToBottom = useCallback((value: boolean | ((current: boolean) => boolean)) => {
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.setShowScrollToBottomCount += 1;
+      incrementNoteXAiPerfCounter("setShowScrollToBottom");
+    }
+    setShowScrollToBottomState(value);
+  }, []);
+
+  useEffect(() => {
+    if (AI_SIDEBAR_PERF_DEBUG && isOpen) {
+      incrementNoteXAiPerfCounter("aiSidebarInitialEffectsRun");
+    }
     hydrationTaskRef.current?.cancel();
     hydrationTaskRef.current = null;
 
@@ -4026,31 +4302,71 @@ export default function AiSidebar({
     setIsConversationHydrated(false);
     hasPersistableConversationStateRef.current = false;
 
-    hydrationTaskRef.current = hydrateConversationStateInChunks({
-      fallback,
-      onPhase: setChatHydrationPhase,
-      onHydrated: (state) => {
-        if (hydrationGenerationRef.current !== hydrationGeneration) return;
-        const shouldPreserveRuntimeConversations = conversationMutationVersionRef.current !== mutationVersionAtStart;
-        startTransition(() => {
-          setConversations((current) => (
-            shouldPreserveRuntimeConversations
-              ? mergeHydratedConversations(state.conversations, current, activeConversationId)
-              : state.conversations
-          ));
-          setActiveConversationId((currentActiveConversationId) => (
-            shouldPreserveRuntimeConversations && currentActiveConversationId
-              ? currentActiveConversationId
-              : state.activeConversationId
-          ));
-          hasLoadedConversationStateRef.current = true;
-          setIsConversationHydrated(true);
+    let cancelled = false;
+    let frameId: number | null = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        if (cancelled) return;
+        if (AI_SIDEBAR_PERF_DEBUG) {
+          perfDebugRef.current.hydrateStartAt = performance.now();
+          incrementNoteXAiPerfCounter("aiSidebarHydrateStart");
+          setNoteXAiPerfEvent("aiSidebarLastHydrateStart", {
+            at: perfDebugRef.current.hydrateStartAt,
+            activeConversationId,
+          });
+        }
+        hydrationTaskRef.current = hydrateConversationStateInChunks({
+          fallback,
+          onPhase: setChatHydrationPhase,
+          onHydrated: (state) => {
+            if (hydrationGenerationRef.current !== hydrationGeneration) return;
+            const shouldPreserveRuntimeConversations = conversationMutationVersionRef.current !== mutationVersionAtStart;
+            startTransition(() => {
+              if (AI_SIDEBAR_PERF_DEBUG) {
+                incrementNoteXAiPerfCounter("conversationsSetState");
+              }
+              setConversations((current) => (
+                shouldPreserveRuntimeConversations
+                  ? mergeHydratedConversations(state.conversations, current, activeConversationId)
+                  : state.conversations
+              ));
+              setActiveConversationId((currentActiveConversationId) => (
+                shouldPreserveRuntimeConversations && currentActiveConversationId
+                  ? currentActiveConversationId
+                  : state.activeConversationId
+              ));
+              hasLoadedConversationStateRef.current = true;
+              setIsConversationHydrated(true);
+            });
+            hasPersistableConversationStateRef.current = true;
+            if (AI_SIDEBAR_PERF_DEBUG) {
+              const endedAt = performance.now();
+              const durationMs = endedAt - perfDebugRef.current.hydrateStartAt;
+              incrementNoteXAiPerfCounter("aiSidebarHydrateEnd");
+              incrementNoteXAiPerfCounter("aiSidebarHydrateDuration");
+              setNoteXAiPerfEvent("aiSidebarLastHydrateSummary", {
+                startedAt: perfDebugRef.current.hydrateStartAt,
+                endedAt,
+                durationMs,
+                conversationCount: state.conversations.length,
+                activeConversationId: state.activeConversationId,
+              });
+              console.info("[NoteX Perf] ai sidebar hydrate summary", {
+                durationMs,
+                conversationCount: state.conversations.length,
+                activeConversationId: state.activeConversationId,
+              });
+            }
+          },
         });
-        hasPersistableConversationStateRef.current = true;
-      },
+      });
     });
 
     return () => {
+      cancelled = true;
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
       hydrationTaskRef.current?.cancel();
       hydrationTaskRef.current = null;
     };
@@ -4063,6 +4379,38 @@ export default function AiSidebar({
     () => (activeConversationMessages ?? []).filter((message) => !isLegacyStatusMessage(message)),
     [activeConversationMessages],
   );
+  const shouldShowPrepareState =
+    !hasLoadedConversationStateRef.current &&
+    chatHydrationPhase !== "hydrated" &&
+    !activeConversation &&
+    !isConversationHydrated &&
+    messages.length === 0;
+  if (AI_SIDEBAR_PERF_DEBUG && shouldShowPrepareState) {
+    const prepareStateKey = [
+      activeConversationId,
+      chatHydrationPhase,
+      String(isConversationHydrated),
+      String(Boolean(activeConversation)),
+      String(messages.length),
+      viewMode,
+    ].join("|");
+    if (perfDebugRef.current.lastPrepareStateKey !== prepareStateKey) {
+      perfDebugRef.current.lastPrepareStateKey = prepareStateKey;
+      incrementNoteXAiPerfCounter("prepareHit");
+      incrementNoteXAiPerfCounter("aiSidebarPrepareHit");
+      const prepareSnapshot = {
+        activeConversationId,
+        chatHydrationPhase,
+        isConversationHydrated,
+        currentConversationExists: Boolean(activeConversation),
+        currentMessagesLength: messages.length,
+        viewMode,
+        at: performance.now(),
+      };
+      setNoteXAiPerfEvent("aiSidebarLastPrepare", prepareSnapshot);
+      console.warn("[NoteX Perf] prepare state", prepareSnapshot);
+    }
+  }
   const enabledProviders = aiConfig?.providers.filter((provider) => provider.enabled) ?? [];
   const fallbackProvider = enabledProviders.find((provider) => provider.id === aiConfig?.default_provider_id) ?? enabledProviders[0];
   const activeProvider =
@@ -4115,6 +4463,32 @@ export default function AiSidebar({
     return `${model.id} ${model.name ?? ""}`.toLocaleLowerCase().includes(modelQuery);
   });
 
+  useEffect(() => {
+    if (!AI_SIDEBAR_PERF_DEBUG) return;
+    perfDebugRef.current.activeConversationChangeCount += 1;
+    incrementNoteXAiPerfCounter("activeConversationChange");
+    setNoteXAiPerfEvent("aiSidebarLastActiveConversationChange", {
+      activeConversationId,
+      currentConversationExists: Boolean(activeConversation),
+      currentMessagesLength: messages.length,
+      isConversationHydrated,
+      chatHydrationPhase,
+      viewMode,
+      at: performance.now(),
+    });
+  }, [activeConversation, activeConversationId, chatHydrationPhase, isConversationHydrated, messages.length, viewMode]);
+
+  useEffect(() => {
+    if (!AI_SIDEBAR_PERF_DEBUG) return;
+    perfDebugRef.current.viewModeChangeCount += 1;
+    incrementNoteXAiPerfCounter("viewModeChange");
+    setNoteXAiPerfEvent("aiSidebarLastViewModeChange", {
+      activeConversationId,
+      viewMode,
+      at: performance.now(),
+    });
+  }, [activeConversationId, viewMode]);
+
   const statusPanelSnapshot = useMemo<AiStatusSnapshot>(() => {
     const noteChars = includeCurrentNoteContext && context.filePath ? context.markdownBody.length : 0;
     const compressedChars = compressedContextSummary
@@ -4152,21 +4526,7 @@ export default function AiSidebar({
     selectedModelLabel,
   ]);
 
-  const commandQuery = inputValue.startsWith("/") ? inputValue.slice(1).trim() : "";
-  const visibleCommands = useMemo(() => {
-    if (!inputValue.startsWith("/")) return [];
-    if (!commandQuery) return SLASH_COMMANDS;
-    return SLASH_COMMANDS.filter((command) =>
-      `${command.label} ${command.description} ${command.category}`.toLocaleLowerCase().includes(commandQuery.toLocaleLowerCase()),
-    );
-  }, [commandQuery, inputValue]);
-  const isCommandPanelOpen = inputValue.startsWith("/") && !isCommandPanelDismissed;
-  const groupedVisibleCommands = COMMAND_CATEGORIES.map((category) => ({
-    category,
-    commands: visibleCommands.filter((command) => command.category === category),
-  })).filter((group) => group.commands.length > 0);
-
-  useEffect(() => {
+  const resizeComposerInput = useCallback(() => {
     const input = inputRef.current;
     if (!input) return;
     input.style.height = "auto";
@@ -4176,7 +4536,68 @@ export default function AiSidebar({
     );
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > COMPOSER_TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
-  }, [inputValue]);
+  }, []);
+
+  const clearComposerInput = useCallback(() => {
+    inputDraftRef.current = "";
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+    const nextState = { value: "", isEmpty: true, isSlash: false };
+    if (
+      inputUiStateRef.current.value !== nextState.value ||
+      inputUiStateRef.current.isEmpty !== nextState.isEmpty ||
+      inputUiStateRef.current.isSlash !== nextState.isSlash
+    ) {
+      inputUiStateRef.current = nextState;
+      setInputUiState(nextState);
+    }
+    resizeComposerInput();
+  }, [resizeComposerInput]);
+
+  const syncComposerInputState = useCallback((nextValue: string) => {
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      incrementNoteXAiPerfCounter("composerInputChange");
+    }
+    inputDraftRef.current = nextValue;
+    const nextIsEmpty = nextValue.trim().length === 0;
+    const nextIsSlash = nextValue.startsWith("/");
+    const nextState = {
+      value: nextIsSlash ? nextValue : "",
+      isEmpty: nextIsEmpty,
+      isSlash: nextIsSlash,
+    };
+    if (
+      inputUiStateRef.current.value !== nextState.value ||
+      inputUiStateRef.current.isEmpty !== nextState.isEmpty ||
+      inputUiStateRef.current.isSlash !== nextState.isSlash
+    ) {
+      inputUiStateRef.current = nextState;
+      if (AI_SIDEBAR_PERF_DEBUG) {
+        incrementNoteXAiPerfCounter("parentInputStateCommit");
+      }
+      setInputUiState(nextState);
+    }
+    resizeComposerInput();
+  }, [resizeComposerInput]);
+
+  const commandQuery = inputUiState.isSlash ? inputUiState.value.slice(1).trim() : "";
+  const visibleCommands = useMemo(() => {
+    if (!inputUiState.isSlash) return [];
+    if (!commandQuery) return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter((command) =>
+      `${command.label} ${command.description} ${command.category}`.toLocaleLowerCase().includes(commandQuery.toLocaleLowerCase()),
+    );
+  }, [commandQuery, inputUiState.isSlash]);
+  const isCommandPanelOpen = inputUiState.isSlash && !isCommandPanelDismissed;
+  const groupedVisibleCommands = COMMAND_CATEGORIES.map((category) => ({
+    category,
+    commands: visibleCommands.filter((command) => command.category === category),
+  })).filter((group) => group.commands.length > 0);
+
+  useEffect(() => {
+    resizeComposerInput();
+  }, [resizeComposerInput]);
 
   useEffect(() => {
     if (!activeConversation) {
@@ -4265,6 +4686,13 @@ export default function AiSidebar({
     let frameId: number | null = null;
     const measureComposer = () => {
       frameId = null;
+      if (AI_SIDEBAR_PERF_DEBUG) {
+        perfDebugRef.current.composerResizeObserverCallbackCount += 1;
+        incrementNoteXAiPerfCounter("composerResizeObserver");
+      }
+      if (isResizing) {
+        return;
+      }
       const rect = element.getBoundingClientRect();
       const nextHeight = Math.ceil(rect.height);
       if (Number.isFinite(nextHeight) && nextHeight > 0) {
@@ -4286,7 +4714,7 @@ export default function AiSidebar({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isOpen]);
+  }, [isOpen, isResizing]);
 
   useEffect(() => {
     if (!isCommandPanelOpen || visibleCommands.length === 0) return;
@@ -4308,6 +4736,11 @@ export default function AiSidebar({
   const scrollMessagesToBottom = (behavior: ScrollBehavior = "auto") => {
     const element = messagesScrollRef.current;
     if (!element) return;
+    if (isResizing) return;
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.scrollToBottomCount += 1;
+      incrementNoteXAiPerfCounter("scrollToBottom");
+    }
     element.scrollTo({ top: element.scrollHeight, behavior });
     setShowScrollToBottom(false);
   };
@@ -4319,7 +4752,15 @@ export default function AiSidebar({
   };
 
   const scheduleMessagesScrollToBottom = () => {
+    if (isResizing) {
+      pendingResizeScrollStateRef.current = true;
+      return;
+    }
     if (!userPinnedToBottomRef.current || pendingMessagesScrollFrameRef.current !== null) return;
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.scheduleScrollToBottomCount += 1;
+      incrementNoteXAiPerfCounter("scheduleScrollToBottom");
+    }
     pendingMessagesScrollFrameRef.current = window.requestAnimationFrame(() => {
       pendingMessagesScrollFrameRef.current = null;
       if (userPinnedToBottomRef.current) {
@@ -4329,6 +4770,14 @@ export default function AiSidebar({
   };
 
   const handleMessagesScroll = () => {
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.scrollEventCount += 1;
+      incrementNoteXAiPerfCounter("scrollEvent");
+    }
+    if (isResizing) {
+      pendingResizeScrollStateRef.current = true;
+      return;
+    }
     const isNearBottom = isMessagesNearBottom();
     isAtBottomRef.current = isNearBottom;
     userPinnedToBottomRef.current = isNearBottom;
@@ -5159,7 +5608,7 @@ export default function AiSidebar({
     setIsAllConversationsOpen(false);
     setIsProviderPickerOpen(false);
     setIsModelPickerOpen(false);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
@@ -5192,6 +5641,17 @@ export default function AiSidebar({
   };
 
   const selectConversation = (conversationId: string) => {
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.lastSelectedConversationId = conversationId;
+      perfDebugRef.current.selectConversationStartAt = performance.now();
+      incrementNoteXAiPerfCounter("selectConversation");
+      setNoteXAiPerfEvent("aiSidebarLastSelectConversationStart", {
+        conversationId,
+        conversationExists: conversations.some((conversation) => conversation.id === conversationId),
+        messageCount: conversations.find((conversation) => conversation.id === conversationId)?.messages.length ?? 0,
+        activeConversationId,
+      });
+    }
     setActiveConversationId(conversationId);
     setViewMode("chat");
     setIsAllConversationsOpen(false);
@@ -5205,6 +5665,27 @@ export default function AiSidebar({
     setShowScrollToBottom(false);
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      perfDebugRef.current.selectConversationEndAt = performance.now();
+      const selectSummary = {
+        conversationId,
+        durationMs: perfDebugRef.current.selectConversationEndAt - perfDebugRef.current.selectConversationStartAt,
+        counters: {
+          renderCount: perfDebugRef.current.renderCount,
+          messageListRenderCount: perfDebugRef.current.messageListRenderCount,
+          resizeObserverCallbackCount: perfDebugRef.current.resizeObserverCallbackCount,
+          composerResizeObserverCallbackCount: perfDebugRef.current.composerResizeObserverCallbackCount,
+          scrollEventCount: perfDebugRef.current.scrollEventCount,
+          setShowScrollToBottomCount: perfDebugRef.current.setShowScrollToBottomCount,
+          scheduleScrollToBottomCount: perfDebugRef.current.scheduleScrollToBottomCount,
+          scrollToBottomCount: perfDebugRef.current.scrollToBottomCount,
+        },
+      };
+      setNoteXAiPerfEvent("aiSidebarLastSelectConversationSummary", selectSummary);
+      console.groupCollapsed("[NoteX Perf] select conversation", conversationId);
+      console.info(selectSummary);
+      console.groupEnd();
+    }
   };
 
   const startRenameConversation = (conversation: AiConversation) => {
@@ -5401,27 +5882,47 @@ export default function AiSidebar({
   }, []);
 
   useEffect(() => {
+    if (!isOpenShellSettled && !hasLoadedConversationStateRef.current) return;
     isAtBottomRef.current = true;
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
+    if (AI_SIDEBAR_PERF_DEBUG) {
+      incrementNoteXAiPerfCounter("aiSidebarInitialScrollToBottom");
+    }
     scheduleMessagesScrollToBottom();
-  }, [activeConversationId, isOpen]);
+  }, [activeConversationId, isOpen, isOpenShellSettled]);
 
   useEffect(() => {
+    if (!isOpenShellSettled && !hasLoadedConversationStateRef.current) return;
     if (!isOpen) return;
     if (userPinnedToBottomRef.current) {
       scheduleMessagesScrollToBottom();
       return;
     }
     setShowScrollToBottom(true);
-  }, [isOpen, messages]);
+  }, [isOpen, isOpenShellSettled, messages]);
 
   useEffect(() => {
     if (!isOpen || viewMode !== "chat") return undefined;
     const messagesList = messagesScrollRef.current?.querySelector<HTMLElement>("[data-notex-message-list=\"true\"]");
     if (!messagesList) return undefined;
 
-    const observer = new ResizeObserver(() => {
+    let lastHeight = messagesList.getBoundingClientRect().height;
+    const observer = new ResizeObserver((entries) => {
+      if (AI_SIDEBAR_PERF_DEBUG) {
+        perfDebugRef.current.resizeObserverCallbackCount += 1;
+        incrementNoteXAiPerfCounter("messageResizeObserver");
+      }
+      if (isResizing) {
+        pendingResizeScrollStateRef.current = true;
+        return;
+      }
+      const entry = entries[0];
+      const nextHeight = entry ? entry.contentRect.height : messagesList.getBoundingClientRect().height;
+      if (Math.abs(nextHeight - lastHeight) <= 1) {
+        return;
+      }
+      lastHeight = nextHeight;
       if (userPinnedToBottomRef.current) {
         scheduleMessagesScrollToBottom();
       }
@@ -5431,7 +5932,26 @@ export default function AiSidebar({
     return () => {
       observer.disconnect();
     };
-  }, [activeConversationId, isOpen, messages.length, viewMode]);
+  }, [activeConversationId, isOpen, isResizing, messages.length, viewMode]);
+
+  useEffect(() => {
+    if (isResizing) {
+      resizeStartedPinnedToBottomRef.current = userPinnedToBottomRef.current;
+      return;
+    }
+    if (!pendingResizeScrollStateRef.current) return;
+    pendingResizeScrollStateRef.current = false;
+    if (resizeStartedPinnedToBottomRef.current) {
+      userPinnedToBottomRef.current = true;
+      isAtBottomRef.current = true;
+      scheduleMessagesScrollToBottom();
+      return;
+    }
+    const isNearBottom = isMessagesNearBottom();
+    isAtBottomRef.current = isNearBottom;
+    userPinnedToBottomRef.current = isNearBottom;
+    setShowScrollToBottom(!isNearBottom);
+  }, [isResizing]);
 
   useEffect(() => () => {
     cancelScheduledMessagesScroll();
@@ -5519,14 +6039,14 @@ export default function AiSidebar({
       createMessage({ role: "user", text: commandText, state: "done" }),
       createMessage({ role: "assistant", text: notice, state: "done" }),
     );
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
 
   const openStatusPanel = () => {
     setStatusPanelOpen(true);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
@@ -5688,7 +6208,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
     streamTextBufferRef.current.set(streamId, "");
@@ -5755,7 +6275,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         createMessage({ role: "user", text: displayText, state: "done" }),
         createMessage({ role: "system", text: "请先配置 AI 模型后再使用推荐标签。", state: "done" }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
@@ -5770,7 +6290,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           state: "done",
         }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
 
@@ -5795,7 +6315,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
     setIsResponding(true);
@@ -5867,7 +6387,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         createMessage({ role: "user", text: displayText, state: "done" }),
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
@@ -5882,7 +6402,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           state: "done",
         }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
 
@@ -5921,7 +6441,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
     setIsResponding(true);
@@ -6002,7 +6522,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         createMessage({ role: "user", text: displayText, state: "done" }),
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
@@ -6017,7 +6537,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           state: "done",
         }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
 
@@ -6047,7 +6567,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
     setIsResponding(true);
@@ -6125,7 +6645,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
     if (result.formattedBody === context.markdownBody) {
       appendCommandNotice(conversationId, displayText, "未发现需要格式化的内容。");
-      setInputValue("");
+      clearComposerInput();
       setActiveCommandIndex(0);
       setIsCommandPanelDismissed(false);
       return;
@@ -6155,7 +6675,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         state: "done",
       }),
     );
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
   };
@@ -6323,7 +6843,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         createMessage({ role: "user", text: userFacingText, state: "done" }),
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
     if (!selectedProviderId || !selectedModelId) {
@@ -6338,7 +6858,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           state: "done",
         }),
       );
-      setInputValue("");
+      clearComposerInput();
       return;
     }
 
@@ -6377,7 +6897,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     setShowScrollToBottom(false);
     appendMessages(conversationId, userMessage, assistantMessage);
 
-    setInputValue("");
+    clearComposerInput();
     setActiveCommandIndex(0);
     setIsCommandPanelDismissed(false);
     streamTextBufferRef.current.set(streamId, "");
@@ -6910,7 +7430,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
   const selectCommand = (command: SlashCommand) => {
     if (getCommandDisabledReason(command, context)) return;
-    setInputValue("");
+    clearComposerInput();
     setIsCommandPanelDismissed(true);
     setActiveCommandIndex(0);
     setViewMode("chat");
@@ -6919,7 +7439,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
   const submitInput = () => {
     const conversationId = activeConversation?.id;
-    const value = inputValue.trim();
+    const value = (inputRef.current?.value ?? inputDraftRef.current).trim();
     if (!conversationId || !value || isResponding) return;
     const shouldCreateConversationFromList = viewMode === "conversations" && !value.startsWith("/");
     const listConversation = shouldCreateConversationFromList
@@ -7039,6 +7559,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     "--notex-composer-avoid-height": `${composerFlowHeight}px`,
   } as CSSProperties;
   const contentColumnClass = isMaximized ? "w-full max-w-none" : "mx-auto w-full max-w-3xl";
+  const shouldRenderOpenShellOnly = isOpen && !isOpenShellSettled && !hasLoadedConversationStateRef.current;
   const renderConversationItem = (conversation: AiConversation, variant: "panel" | "overlay" = "panel") => {
     const title = getConversationDisplayTitle(conversation);
     const timeLabel = formatConversationRelativeTime(conversation.updatedAt);
@@ -7517,7 +8038,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           className="notex-scroll notex-messages min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:thin]"
           onScroll={handleMessagesScroll}
         >
-          {viewMode === "conversations" ? (
+          {shouldRenderOpenShellOnly ? (
+            <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center text-sm text-muted-foreground")}>
+              Loading NoteX...
+            </div>
+          ) : viewMode === "conversations" ? (
             <div className={cn(contentColumnClass, "notex-session-view grid gap-2")}>
               <div className="hidden">
                 <span />
@@ -7549,7 +8074,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               )}
               <div className="notex-bottom-spacer" aria-hidden="true" />
             </div>
-          ) : !isConversationHydrated && messages.length === 0 ? (
+          ) : shouldShowPrepareState ? (
             <div className={cn(contentColumnClass, "flex h-full min-h-44 items-center justify-center px-5 text-center text-sm text-muted-foreground")}>
               {chatHydrationPhase === "shell" ? "Loading recent messages..." : "Preparing recent messages..."}
             </div>
@@ -7570,7 +8095,19 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               className={cn("notex-message-list", contentColumnClass, "grid gap-3")}
               data-notex-message-list="true"
             >
-              {messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT).map((message) => {
+              {(() => {
+                const visibleMessages = messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT);
+                if (AI_SIDEBAR_PERF_DEBUG) {
+                  perfDebugRef.current.messageListRenderCount += 1;
+                  incrementNoteXAiPerfCounter("messageListRender");
+                  setNoteXAiPerfEvent("aiSidebarLastMessageListRender", {
+                    renderedMessageCount: visibleMessages.length,
+                    totalMessageCount: messages.length,
+                    activeConversationId,
+                    at: performance.now(),
+                  });
+                }
+                return visibleMessages.map((message) => {
               if (message.role === "assistant") {
                 const elapsedMs = getAssistantElapsedMs(message, elapsedNow);
                 const timingLabel = getAssistantTimingLabel(message, elapsedMs);
@@ -7748,7 +8285,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   <div data-app-context-menu-text="true" className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
                 </div>
               );
-              })}
+              });
+              })()}
             </div>
           )}
           {viewMode === "chat" && <div className="notex-bottom-spacer" aria-hidden="true" />}
@@ -7900,11 +8438,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         <div className={cn("notex-composer-card", isModelPickerOpen && "notex-composer-card-menu-open")}>
           <textarea
             ref={inputRef}
-            value={inputValue}
             onChange={(event) => {
-              setInputValue(event.target.value);
-              setActiveCommandIndex(0);
-              setIsCommandPanelDismissed(false);
+              const nextValue = event.target.value;
+              syncComposerInputState(nextValue);
+              if (nextValue.startsWith("/")) {
+                setActiveCommandIndex(0);
+                setIsCommandPanelDismissed(false);
+              }
             }}
             onPointerDownCapture={(event) => {
               event.stopPropagation();
@@ -8056,7 +8596,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
               type="button"
               className="notex-composer-send ai-composer-send inline-flex shrink-0 items-center justify-center transition-[background-color,color,opacity]"
               onClick={submitInput}
-              disabled={inputValue.trim().length === 0 || isResponding}
+              disabled={inputUiState.isEmpty || isResponding}
               title={isResponding ? "Thinking" : "Send"}
               aria-label={isResponding ? "Thinking" : "Send"}
             >

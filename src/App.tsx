@@ -144,6 +144,122 @@ const LEFT_SIDEBAR_WIDTH_MIN = 200;
 const LEFT_SIDEBAR_WIDTH_MAX = 420;
 const AI_SIDEBAR_WIDTH_DEFAULT = 390;
 const AI_SIDEBAR_WIDTH_MIN = 320;
+const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
+
+function isAiPerfDebugEnabled(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const APP_RESIZE_PERF_DEBUG = isAiPerfDebugEnabled();
+
+type NoteXAiPerfGlobal = {
+  counters: Record<string, number>;
+  lastEvents: Record<string, unknown>;
+  dump: () => void;
+  reset: () => void;
+  getSnapshot: () => {
+    counters: Record<string, number>;
+    lastEvents: Record<string, unknown>;
+  };
+};
+
+const NOTEX_AI_PERF_COUNTER_NAMES = [
+  "appResizePointerDown",
+  "appResizePointerMove",
+  "appResizeRafCommit",
+  "appResizeStateCommit",
+  "appResizeLocalStorageWrite",
+  "appResizePointerUp",
+  "aiSidebarRender",
+  "selectConversation",
+  "activeConversationChange",
+  "viewModeChange",
+  "prepareHit",
+  "messageListRender",
+  "messageResizeObserver",
+  "composerResizeObserver",
+  "scrollEvent",
+  "setShowScrollToBottom",
+  "scheduleScrollToBottom",
+  "scrollToBottom",
+  "aiSidebarOpenClick",
+  "aiSidebarOpenStateCommit",
+  "aiSidebarFirstVisible",
+  "aiSidebarOpenDuration",
+  "workbenchLayoutCommit",
+  "aiSidebarMountRequested",
+  "developerModeEnabled",
+  "aiSidebarDeveloperDiagnosticsRender",
+  "webSearchPlanCardRender",
+  "webSearchSourcesCardRender",
+  "searchDiagnosticsPanelRender",
+  "researchEngineDiagnosticsSectionRender",
+  "researchEngineSelfCheckRun",
+  "researchEngineOfflineSampleRun",
+  "diagnosticsMarkdownFormatCount",
+  "directSourceCardRender",
+  "duplicateKeyGuardCount",
+];
+
+const createNoteXAiPerfCounters = () => (
+  NOTEX_AI_PERF_COUNTER_NAMES.reduce<Record<string, number>>((counters, name) => {
+    counters[name] = 0;
+    return counters;
+  }, {})
+);
+
+const getNoteXAiPerfGlobal = (): NoteXAiPerfGlobal | null => {
+  if (!APP_RESIZE_PERF_DEBUG || typeof window === "undefined") return null;
+  const perfWindow = window as typeof window & {
+    __OINB_AI_PERF__?: NoteXAiPerfGlobal;
+    __OINB_AI_PERF_ENABLED_LOGGED__?: boolean;
+  };
+  if (!perfWindow.__OINB_AI_PERF__) {
+    const perf: NoteXAiPerfGlobal = {
+      counters: createNoteXAiPerfCounters(),
+      lastEvents: {},
+      dump: () => {
+        console.info("[NoteX Perf] snapshot", perf.getSnapshot());
+        console.table(perf.counters);
+      },
+      reset: () => {
+        perf.counters = createNoteXAiPerfCounters();
+        perf.lastEvents = {};
+        console.info("[NoteX Perf] reset");
+      },
+      getSnapshot: () => ({
+        counters: { ...perf.counters },
+        lastEvents: { ...perf.lastEvents },
+      }),
+    };
+    perfWindow.__OINB_AI_PERF__ = perf;
+  }
+  if (!perfWindow.__OINB_AI_PERF_ENABLED_LOGGED__) {
+    perfWindow.__OINB_AI_PERF_ENABLED_LOGGED__ = true;
+    console.info("[NoteX Perf] enabled", {
+      dump: "window.__OINB_AI_PERF__.dump()",
+      reset: "window.__OINB_AI_PERF__.reset()",
+      getSnapshot: "window.__OINB_AI_PERF__.getSnapshot()",
+    });
+  }
+  return perfWindow.__OINB_AI_PERF__;
+};
+
+const incrementNoteXAiPerfCounter = (name: string, amount = 1) => {
+  const perf = getNoteXAiPerfGlobal();
+  if (!perf) return;
+  perf.counters[name] = (perf.counters[name] ?? 0) + amount;
+};
+
+const setNoteXAiPerfEvent = (name: string, value: unknown) => {
+  const perf = getNoteXAiPerfGlobal();
+  if (!perf) return;
+  perf.lastEvents[name] = value;
+};
 const ACTIVITY_BAR_BASE_WIDTH = 52;
 const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
 const EDITOR_PREVIEW_RATIO_MIN = 0.2;
@@ -2420,6 +2536,21 @@ export default function App() {
   const contentZoomRef = useRef(contentZoom);
   const pendingContentZoomRef = useRef<number | null>(null);
   const contentZoomFrameRef = useRef<number | null>(null);
+  const aiSidebarResizePerfRef = useRef({
+    pointerDownAt: 0,
+    pointerMoveCount: 0,
+    pointerMoveSetStateCount: 0,
+    rafWidthUpdateCount: 0,
+    widthStateCommitCount: 0,
+    localStorageWriteCount: 0,
+  });
+  const aiSidebarOpenPerfRef = useRef({
+    openClickAt: 0,
+    opening: false,
+  });
+  const aiSidebarWidthRef = useRef(aiSidebarWidth);
+  const aiSidebarDragWidthRef = useRef(aiSidebarWidth);
+  const aiSidebarResizeRafRef = useRef<number | null>(null);
   const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
     getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
@@ -2501,6 +2632,11 @@ export default function App() {
   useEffect(() => {
     contentZoomRef.current = contentZoom;
   }, [contentZoom]);
+
+  useEffect(() => {
+    aiSidebarWidthRef.current = aiSidebarWidth;
+    aiSidebarDragWidthRef.current = aiSidebarWidth;
+  }, [aiSidebarWidth]);
 
   const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
     if (suppressedScrollPaneRef.current === source) return;
@@ -2588,13 +2724,59 @@ export default function App() {
     if (event.button !== 0) return;
 
     event.preventDefault();
+    if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
+      aiSidebarResizePerfRef.current = {
+        pointerDownAt: performance.now(),
+        pointerMoveCount: 0,
+        pointerMoveSetStateCount: 0,
+        rafWidthUpdateCount: 0,
+        widthStateCommitCount: aiSidebarResizePerfRef.current.widthStateCommitCount,
+        localStorageWriteCount: aiSidebarResizePerfRef.current.localStorageWriteCount,
+      };
+      incrementNoteXAiPerfCounter("appResizePointerDown");
+      setNoteXAiPerfEvent("appResizeLastPointerDown", {
+        startWidth: aiSidebarWidth,
+        at: aiSidebarResizePerfRef.current.pointerDownAt,
+      });
+    }
     const startX = event.clientX;
     const startLeftSidebarWidth = leftSidebarWidth;
-    const startAiSidebarWidth = aiSidebarWidth;
+    const startAiSidebarWidth = aiSidebarWidthRef.current;
+    const aiSidebarElement = handleId === "ai-sidebar"
+      ? event.currentTarget.closest<HTMLElement>(".notex-workbench.ai-sidebar-shell")
+      : null;
     const editorPreviewRect = editorPreviewContainerRef.current?.getBoundingClientRect() ?? null;
 
     setActiveResizeHandle(handleId);
     document.body.classList.add("app-column-resizing");
+
+    if (handleId === "ai-sidebar") {
+      aiSidebarDragWidthRef.current = startAiSidebarWidth;
+    }
+
+    const applyAiSidebarDragWidth = (nextWidth: number) => {
+      if (!aiSidebarElement) return;
+      aiSidebarElement.style.width = `${nextWidth}px`;
+      aiSidebarElement.style.flexBasis = `${nextWidth}px`;
+      aiSidebarElement.style.maxWidth = "100%";
+    };
+
+    const scheduleAiSidebarDragWidth = (nextWidth: number) => {
+      aiSidebarDragWidthRef.current = nextWidth;
+      if (APP_RESIZE_PERF_DEBUG) {
+        aiSidebarResizePerfRef.current.pointerMoveCount += 1;
+        incrementNoteXAiPerfCounter("appResizePointerMove");
+      }
+      if (aiSidebarResizeRafRef.current !== null) return;
+      aiSidebarResizeRafRef.current = window.requestAnimationFrame(() => {
+        aiSidebarResizeRafRef.current = null;
+        if (APP_RESIZE_PERF_DEBUG) {
+          aiSidebarResizePerfRef.current.rafWidthUpdateCount += 1;
+          incrementNoteXAiPerfCounter("appResizeRafCommit");
+        }
+        applyAiSidebarDragWidth(aiSidebarDragWidthRef.current);
+      });
+    };
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (handleId === "left-sidebar") {
@@ -2609,7 +2791,7 @@ export default function App() {
       }
 
       if (handleId === "ai-sidebar") {
-        setAiSidebarWidth(clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX));
+        scheduleAiSidebarDragWidth(clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX));
         return;
       }
 
@@ -2619,6 +2801,26 @@ export default function App() {
     };
 
     const stopResize = () => {
+      if (handleId === "ai-sidebar") {
+        if (aiSidebarResizeRafRef.current !== null) {
+          window.cancelAnimationFrame(aiSidebarResizeRafRef.current);
+          aiSidebarResizeRafRef.current = null;
+        }
+        const finalWidth = aiSidebarDragWidthRef.current;
+        applyAiSidebarDragWidth(finalWidth);
+        setAiSidebarWidth(finalWidth);
+        aiSidebarWidthRef.current = finalWidth;
+      }
+      if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
+        incrementNoteXAiPerfCounter("appResizePointerUp");
+        const summary = {
+          ...aiSidebarResizePerfRef.current,
+          pointerMoveTriggersSetAiSidebarWidth: aiSidebarResizePerfRef.current.pointerMoveSetStateCount > 0,
+          durationMs: performance.now() - aiSidebarResizePerfRef.current.pointerDownAt,
+        };
+        setNoteXAiPerfEvent("appResizeLastSummary", summary);
+        console.info("[NoteX Perf] app resize summary", summary);
+      }
       setActiveResizeHandle(null);
       document.body.classList.remove("app-column-resizing");
       window.removeEventListener("pointermove", handlePointerMove);
@@ -7209,6 +7411,19 @@ export default function App() {
   };
 
   const handleActivityAi = () => {
+    if (APP_RESIZE_PERF_DEBUG) {
+      const opening = !isAiSidebarOpen;
+      aiSidebarOpenPerfRef.current = {
+        openClickAt: performance.now(),
+        opening,
+      };
+      incrementNoteXAiPerfCounter("aiSidebarOpenClick");
+      setNoteXAiPerfEvent("aiSidebarLastOpenClick", {
+        opening,
+        wasOpen: isAiSidebarOpen,
+        at: aiSidebarOpenPerfRef.current.openClickAt,
+      });
+    }
     setIsAiSidebarOpen((open) => {
       if (open) setIsAiSidebarMaximized(false);
       return !open;
@@ -7327,7 +7542,15 @@ export default function App() {
   }, [leftSidebarWidth]);
 
   useEffect(() => {
+    if (APP_RESIZE_PERF_DEBUG) {
+      aiSidebarResizePerfRef.current.widthStateCommitCount += 1;
+      incrementNoteXAiPerfCounter("appResizeStateCommit");
+    }
     window.localStorage.setItem(AI_SIDEBAR_WIDTH_STORAGE_KEY, String(aiSidebarWidth));
+    if (APP_RESIZE_PERF_DEBUG) {
+      aiSidebarResizePerfRef.current.localStorageWriteCount += 1;
+      incrementNoteXAiPerfCounter("appResizeLocalStorageWrite");
+    }
   }, [aiSidebarWidth]);
 
   useEffect(() => {
@@ -7340,6 +7563,27 @@ export default function App() {
 
   useEffect(() => {
     aiSidebarOpenRef.current = isAiSidebarOpen;
+    if (!APP_RESIZE_PERF_DEBUG) return;
+    incrementNoteXAiPerfCounter("aiSidebarOpenStateCommit");
+    setNoteXAiPerfEvent("aiSidebarLastOpenStateCommit", {
+      isOpen: isAiSidebarOpen,
+      at: performance.now(),
+    });
+    if (!isAiSidebarOpen || !aiSidebarOpenPerfRef.current.opening) return;
+    const openClickAt = aiSidebarOpenPerfRef.current.openClickAt;
+    window.requestAnimationFrame(() => {
+      incrementNoteXAiPerfCounter("aiSidebarFirstVisible");
+      incrementNoteXAiPerfCounter("aiSidebarOpenDuration");
+      incrementNoteXAiPerfCounter("workbenchLayoutCommit");
+      const summary = {
+        openClickAt,
+        firstVisibleAt: performance.now(),
+        durationMs: performance.now() - openClickAt,
+        isOpen: isAiSidebarOpen,
+      };
+      setNoteXAiPerfEvent("aiSidebarLastOpenSummary", summary);
+      console.info("[NoteX Perf] ai sidebar open summary", summary);
+    });
   }, [isAiSidebarOpen]);
 
   useEffect(() => {

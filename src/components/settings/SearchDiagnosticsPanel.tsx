@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { CheckCircle2, Clipboard, Loader2, Play, PlugZap, Search, TriangleAlert, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clipboard, Loader2, Play, PlugZap, Search, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -1189,8 +1189,34 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
 });
 
 const researchEngineSamples = getResearchEngineDeveloperSamples();
+const SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
+
+const isSearchDiagnosticsPerfDebugEnabled = (): boolean => {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const SEARCH_DIAGNOSTICS_PERF_DEBUG = isSearchDiagnosticsPerfDebugEnabled();
+
+const incrementSearchDiagnosticsPerfCounter = (name: string, amount = 1) => {
+  if (!SEARCH_DIAGNOSTICS_PERF_DEBUG || typeof window === "undefined") return;
+  const perfWindow = window as typeof window & {
+    __OINB_AI_PERF__?: { counters?: Record<string, number> };
+  };
+  const counters = perfWindow.__OINB_AI_PERF__?.counters;
+  if (!counters) return;
+  counters[name] = (counters[name] ?? 0) + amount;
+};
 
 export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnosticsPanelProps) {
+  if (SEARCH_DIAGNOSTICS_PERF_DEBUG) {
+    incrementSearchDiagnosticsPerfCounter("searchDiagnosticsPanelRender");
+    incrementSearchDiagnosticsPerfCounter("researchEngineDiagnosticsSectionRender");
+  }
+
   const [categories, setCategories] = useState<DiagnosticCategory[]>(emptyCategories);
   const [isRunningCore, setIsRunningCore] = useState(false);
   const [isTestingProvider, setIsTestingProvider] = useState(false);
@@ -1200,10 +1226,12 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningResearchEngineSelfCheck, setIsRunningResearchEngineSelfCheck] = useState(false);
   const [isRunningResearchEngineSample, setIsRunningResearchEngineSample] = useState(false);
   const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
+  const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
   const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
   const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
+  const [isResearchEngineReportExpanded, setIsResearchEngineReportExpanded] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1213,6 +1241,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     [aiConfigDraft],
   );
   const rawWebSearchProvider = (aiConfigDraft?.web_search as unknown as { provider?: string } | undefined)?.provider;
+  const selectedResearchEngineSample = researchEngineSamples.find((sample) => sample.id === researchEngineSampleId) ?? researchEngineSamples[0];
 
   const counts = useMemo(() => {
     const result: Record<DiagnosticStatus, number> = { pass: 0, warn: 0, fail: 0, skipped: 0, running: 0 };
@@ -1496,15 +1525,17 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   };
 
   const runResearchEngineSelfCheck = () => {
+    incrementSearchDiagnosticsPerfCounter("researchEngineSelfCheckRun");
     setIsRunningResearchEngineSelfCheck(true);
     setResearchEngineCopyMessage(null);
     setResearchEngineError(null);
+    setIsResearchEngineReportExpanded(false);
     try {
       const result = runResearchEngineDeveloperSelfCheck();
       setResearchEngineSelfCheck(result);
-      toast.success(`Research Engine SelfCheck ${result.summary.passed}/${result.summary.total} passed`);
+      toast.success(`Research Engine 自检通过 ${result.summary.passed}/${result.summary.total}`);
     } catch (error) {
-      const message = `Research Engine SelfCheck failed: ${getErrorMessage(error)}`;
+      const message = `Research Engine 自检失败：${getErrorMessage(error)}`;
       setResearchEngineError(message);
       toast.error(message);
     } finally {
@@ -1513,15 +1544,17 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   };
 
   const runResearchEngineSample = () => {
+    incrementSearchDiagnosticsPerfCounter("researchEngineOfflineSampleRun");
     setIsRunningResearchEngineSample(true);
     setResearchEngineCopyMessage(null);
     setResearchEngineError(null);
+    setIsResearchEngineReportExpanded(false);
     try {
       const result = runResearchEngineDeveloperSample(researchEngineSampleId);
       setResearchEngineSample(result);
-      toast.success(`Research Engine sample ready: ${result.summary.status}`);
+      toast.success(`离线样例完成：${result.summary.statusLabelZh}`);
     } catch (error) {
-      const message = `Research Engine sample failed: ${getErrorMessage(error)}`;
+      const message = `离线样例运行失败：${getErrorMessage(error)}`;
       setResearchEngineError(message);
       toast.error(message);
     } finally {
@@ -1532,20 +1565,20 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const copyResearchEngineReport = async () => {
     const markdown = researchEngineSample?.markdownReport ?? researchEngineSelfCheck?.markdownReport;
     if (!markdown) {
-      setResearchEngineCopyMessage("Run SelfCheck or a sample first.");
+      setResearchEngineCopyMessage("请先运行自检或离线样例。");
       return;
     }
     if (!navigator.clipboard) {
-      setResearchEngineCopyMessage("Clipboard API is unavailable; use the visible Markdown report.");
+      setResearchEngineCopyMessage("当前环境不可直接复制，请手动选择下方 Markdown 报告。");
       return;
     }
     try {
       await navigator.clipboard.writeText(markdown);
-      setResearchEngineCopyMessage("Research Engine report copied.");
-      toast.success("Research Engine report copied.");
+      setResearchEngineCopyMessage("Markdown 报告已复制。");
+      toast.success("Markdown 报告已复制");
     } catch (error) {
-      setResearchEngineCopyMessage(`Copy failed: ${getErrorMessage(error)}`);
-      toast.error(`Copy failed: ${getErrorMessage(error)}`);
+      setResearchEngineCopyMessage(`复制失败：${getErrorMessage(error)}`);
+      toast.error(`复制失败：${getErrorMessage(error)}`);
     }
   };
 
@@ -1598,123 +1631,170 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
         </div>
       </div>
 
-      <section className="grid min-w-0 gap-3 border-b border-border/70 pb-4">
-        <div className="grid gap-1">
-          <div className="text-sm font-semibold text-foreground">Research Engine Core</div>
-          <div className="max-w-4xl text-xs leading-5 text-muted-foreground">
-            Offline diagnostics only. These checks use deterministic mock discovery, mock reader, evidence contracts, verifier, and diagnostics export. They do not call real providers or the legacy search flow.
+      <section className="grid min-w-0 max-w-full gap-4 overflow-hidden border-b border-border/70 pb-4">
+        <div className="grid min-w-0 gap-1">
+          <div className="text-sm font-semibold text-foreground">Research Engine 核心</div>
+          <div className="max-w-full break-words text-xs leading-5 text-muted-foreground lg:max-w-4xl">
+            离线诊断区，只运行确定性的 mock discovery、mock reader、证据合约、生成后校验和诊断导出；不会触发真实搜索、真实 provider 或旧搜索链路。
           </div>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={runResearchEngineSelfCheck} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+        <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]">
+          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSelfCheck} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
             {isRunningResearchEngineSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-            Run SelfCheck
+            运行自检
           </Button>
-          <select
-            className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            value={researchEngineSampleId}
-            onChange={(event) => setResearchEngineSampleId(event.target.value as ResearchEngineDeveloperSampleId)}
-            disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
-          >
-            {researchEngineSamples.map((sample) => (
-              <option key={sample.id} value={sample.id}>{sample.label}: {sample.question}</option>
-            ))}
-          </select>
-          <Button variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+          <div className="relative min-w-0 max-w-full">
+            <button
+              type="button"
+              className="flex min-h-9 w-full max-w-full items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setIsResearchEngineSampleMenuOpen((open) => !open)}
+              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
+            >
+              <span className="min-w-0 truncate">{selectedResearchEngineSample.labelZh}：{selectedResearchEngineSample.displayQuestion}</span>
+              <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isResearchEngineSampleMenuOpen && "rotate-180")} />
+            </button>
+            {isResearchEngineSampleMenuOpen && (
+              <div className="absolute left-0 top-11 z-20 grid max-h-72 w-full min-w-0 max-w-full overflow-auto rounded-md border border-border bg-popover p-1 text-sm shadow-lg">
+                {researchEngineSamples.map((sample) => (
+                  <button
+                    key={sample.id}
+                    type="button"
+                    className={cn(
+                      "grid min-w-0 rounded-sm px-3 py-2 text-left hover:bg-muted/60",
+                      sample.id === researchEngineSampleId && "bg-muted text-foreground",
+                    )}
+                    onClick={() => {
+                      setResearchEngineSampleId(sample.id);
+                      setIsResearchEngineSampleMenuOpen(false);
+                    }}
+                  >
+                    <span className="min-w-0 truncate font-medium text-foreground">{sample.labelZh}</span>
+                    <span className="mt-0.5 min-w-0 truncate text-xs leading-5 text-muted-foreground">{sample.displayQuestion}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
             {isRunningResearchEngineSample ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            Run offline sample
+            运行离线样例
           </Button>
-          <Button variant="outline" onClick={() => void copyResearchEngineReport()}>
+          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={() => void copyResearchEngineReport()}>
             <Clipboard className="h-3.5 w-3.5" />
-            Copy Markdown
+            复制 Markdown 报告
           </Button>
-          {researchEngineCopyMessage && <span className="text-xs text-muted-foreground">{researchEngineCopyMessage}</span>}
+          {researchEngineCopyMessage && <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground lg:self-center">{researchEngineCopyMessage}</span>}
         </div>
         {researchEngineError && (
-          <div className="rounded-sm border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-300">
+          <div className="min-w-0 max-w-full break-words rounded-sm border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-300">
             {researchEngineError}
           </div>
         )}
         {researchEngineSelfCheck && (
-          <details className="grid min-w-0 gap-2 border-l border-border/80 pl-3" open>
-            <summary className="cursor-pointer text-sm font-medium text-foreground">
-              SelfCheck: {researchEngineSelfCheck.summary.passed}/{researchEngineSelfCheck.summary.total} passed ({(researchEngineSelfCheck.summary.passRate * 100).toFixed(2)}%)
+          <details className="grid min-w-0 max-w-full gap-2 overflow-hidden border-l border-border/80 pl-3" open>
+            <summary className="cursor-pointer whitespace-normal break-words text-sm font-medium text-foreground">
+              自检结果：{researchEngineSelfCheck.summary.passed}/{researchEngineSelfCheck.summary.total} 通过（{(researchEngineSelfCheck.summary.passRate * 100).toFixed(2)}%）
             </summary>
-            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
-              <div>total={researchEngineSelfCheck.summary.total}</div>
-              <div>passed={researchEngineSelfCheck.summary.passed}</div>
-              <div>failed={researchEngineSelfCheck.summary.failed}</div>
+            <div className="grid min-w-0 gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
+              <div>总数：{researchEngineSelfCheck.summary.total}</div>
+              <div>通过：{researchEngineSelfCheck.summary.passed}</div>
+              <div>失败：{researchEngineSelfCheck.summary.failed}</div>
             </div>
-            <div className="grid gap-1 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
+            <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
               {researchEngineSelfCheck.summary.byPhase.map((phase) => (
-                <div key={phase.phase} className="rounded-sm border border-border/70 px-2 py-1">
+                <div key={phase.phase} className="min-w-0 break-words rounded-sm border border-border/70 px-2 py-1">
                   {phase.phase}: {phase.passed}/{phase.total}
                 </div>
               ))}
             </div>
             {researchEngineSelfCheck.summary.failedCases.length > 0 ? (
-              <div className="grid gap-1 text-xs text-red-300">
+              <div className="grid min-w-0 gap-1 text-xs text-red-300">
                 {researchEngineSelfCheck.summary.failedCases.map((failure) => (
-                  <div key={failure.id}>{failure.phase}/{failure.id}: {failure.failures.join("; ")}</div>
+                  <div key={failure.id} className="min-w-0 break-words">{failure.phase}/{failure.id}: {failure.failures.join("; ")}</div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs text-emerald-300">All Research Engine self checks passed.</div>
+              <div className="text-xs text-emerald-300">Research Engine 自检全部通过。</div>
             )}
           </details>
         )}
         {researchEngineSample && (
-          <details className="grid min-w-0 gap-2 border-l border-border/80 pl-3" open>
-            <summary className="cursor-pointer text-sm font-medium text-foreground">
-              Offline sample: {researchEngineSample.summary.sampleLabel} ({researchEngineSample.summary.status})
-            </summary>
-            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-              <div>answerMode={researchEngineSample.summary.answerMode ?? "n/a"}</div>
-              <div>vertical={researchEngineSample.summary.policy.vertical}</div>
-              <div>risk={researchEngineSample.summary.policy.risk}</div>
-              <div>freshness={researchEngineSample.summary.policy.freshness}</div>
-              <div>queries={researchEngineSample.summary.queryCount}</div>
-              <div>selected={researchEngineSample.summary.selectedCandidateCount}</div>
-              <div>unreadable={researchEngineSample.summary.unreadableReaderCount}</div>
-              <div>warnings={researchEngineSample.summary.warnings.length}; errors={researchEngineSample.summary.errors.length}</div>
+          <div className="grid min-w-0 max-w-full gap-3 overflow-hidden border-l border-border/80 pl-3">
+            <div className="min-w-0 break-words text-sm font-medium text-foreground">
+              离线样例：{researchEngineSample.summary.sampleLabelZh}（{researchEngineSample.summary.statusLabelZh}）
             </div>
-            <div className="grid gap-2 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
-              <div className="min-w-0 rounded-sm border border-border/70 p-2">
-                <div className="mb-1 font-medium text-foreground">Providers</div>
-                {Object.entries(researchEngineSample.summary.providerStatusSummary).length > 0
-                  ? Object.entries(researchEngineSample.summary.providerStatusSummary).map(([provider, status]) => (
-                    <div key={provider} className="truncate">{provider}: {status}</div>
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 text-xs leading-5 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["运行状态", researchEngineSample.summary.statusLabelZh],
+                ["回答模式", researchEngineSample.summary.answerModeLabelZh],
+                ["垂直领域", researchEngineSample.summary.policy.verticalLabelZh],
+                ["风险等级", researchEngineSample.summary.policy.riskLabelZh],
+                ["时效性要求", researchEngineSample.summary.policy.freshnessLabelZh],
+                ["查询数", researchEngineSample.summary.queryCount],
+                ["已选候选数", researchEngineSample.summary.selectedCandidateCount],
+                ["不可读数", researchEngineSample.summary.unreadableReaderCount],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-muted/10 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">{label}</div>
+                  <div className="mt-0.5 min-w-0 whitespace-normal break-words text-sm text-foreground">{value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 text-xs leading-5 text-muted-foreground xl:grid-cols-2">
+              <div className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 p-2">
+                <div className="mb-1 font-medium text-foreground">Provider 状态</div>
+                {Object.entries(researchEngineSample.summary.providerStatusSummaryLabelZh).length > 0
+                  ? Object.entries(researchEngineSample.summary.providerStatusSummaryLabelZh).map(([provider, status]) => (
+                    <div key={provider} className="min-w-0 truncate">{provider}: {status}</div>
                   ))
-                  : <div>none</div>}
+                  : <div>无 provider 执行</div>}
               </div>
-              <div className="min-w-0 rounded-sm border border-border/70 p-2">
-                <div className="mb-1 font-medium text-foreground">Evidence</div>
-                <div className="break-words">{JSON.stringify(researchEngineSample.summary.evidenceSummary ?? {})}</div>
+              <div className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 p-2">
+                <div className="mb-1 font-medium text-foreground">证据摘要</div>
+                <div className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
+                  <div className="min-w-0 break-words">强证据：{researchEngineSample.summary.evidenceUiSummary.strongEvidence}</div>
+                  <div className="min-w-0 break-words">中证据：{researchEngineSample.summary.evidenceUiSummary.mediumEvidence}</div>
+                  <div className="min-w-0 break-words">弱证据：{researchEngineSample.summary.evidenceUiSummary.weakEvidence}</div>
+                  <div className="min-w-0 break-words">无效证据：{researchEngineSample.summary.evidenceUiSummary.invalidEvidence}</div>
+                  <div className="min-w-0 break-words">支持：{researchEngineSample.summary.evidenceUiSummary.supports}</div>
+                  <div className="min-w-0 break-words">反驳：{researchEngineSample.summary.evidenceUiSummary.refutes}</div>
+                  <div className="min-w-0 break-words">冲突：{researchEngineSample.summary.evidenceUiSummary.conflicts}</div>
+                  <div className="min-w-0 break-words">可引用：{researchEngineSample.summary.evidenceUiSummary.citeable}</div>
+                </div>
               </div>
             </div>
-            <details className="text-xs leading-5 text-muted-foreground">
-              <summary className="cursor-pointer">Stage summaries</summary>
-              <div className="mt-1 grid gap-1">
-                {researchEngineSample.summary.stageSummaries.map((stage) => (
-                  <div key={`${stage.stage}-${stage.message}`} className="font-mono">
-                    {stage.stage}: {stage.status}; out={stage.outputCount ?? "n/a"}; warnings={stage.warningCount ?? 0}; {stage.message}
+            <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+              <summary className="cursor-pointer whitespace-normal break-words text-foreground">阶段摘要</summary>
+              <div className="mt-1 grid min-w-0 gap-1">
+                {researchEngineSample.summary.stageSummaryRows.map((stage) => (
+                  <div key={`${stage.stage}-${stage.message}`} className="min-w-0 whitespace-normal break-words font-mono [overflow-wrap:anywhere]">
+                    {stage.stageLabelZh}：{stage.statusLabelZh}；输出={stage.outputCount ?? "无"}；警告={stage.warningCount ?? 0}；{stage.message}
                   </div>
                 ))}
               </div>
             </details>
             {(researchEngineSample.summary.warnings.length > 0 || researchEngineSample.summary.errors.length > 0) && (
-              <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
-                {researchEngineSample.summary.warnings.map((warning) => <div key={`warning-${warning}`}>warning: {warning}</div>)}
-                {researchEngineSample.summary.errors.map((error) => <div key={`error-${error}`}>error: {error}</div>)}
+              <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                {researchEngineSample.summary.warningLabelsZh.map((warning) => <div key={`warning-${warning}`} className="min-w-0 break-words">警告：{warning}</div>)}
+                {researchEngineSample.summary.errorLabelsZh.map((error) => <div key={`error-${error}`} className="min-w-0 break-words">错误：{error}</div>)}
               </div>
             )}
-            <details className="text-xs leading-5 text-muted-foreground">
-              <summary className="cursor-pointer">Markdown report</summary>
-              <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5">
-                {researchEngineSample.markdownReport}
-              </pre>
+            <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+              <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
+              <button
+                type="button"
+                className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                onClick={() => setIsResearchEngineReportExpanded((expanded) => !expanded)}
+              >
+                {isResearchEngineReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
+              </button>
+              {isResearchEngineReportExpanded && (
+                <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                  {researchEngineSample.markdownReport}
+                </pre>
+              )}
             </details>
-          </details>
+          </div>
         )}
       </section>
 
@@ -1743,8 +1823,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                     <details className="text-xs leading-5 text-muted-foreground">
                       <summary className="cursor-pointer">详情</summary>
                       {item.detail && <div className="mt-1">{item.detail}</div>}
-                      {item.safeDebugInfo?.map((info) => (
-                        <div key={info} className="mt-1 font-mono">{info}</div>
+                      {item.safeDebugInfo?.map((info, infoIndex) => (
+                        <div key={`${item.id}:debug:${infoIndex}:${info}`} className="mt-1 font-mono">{info}</div>
                       ))}
                     </details>
                   )}
