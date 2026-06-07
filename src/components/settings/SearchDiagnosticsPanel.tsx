@@ -21,12 +21,14 @@ import { findCitationMarkerMatches, getUsedCitationIdList, stripMarkdownRegionsF
 import {
   getResearchEngineDeveloperSamples,
   runResearchEngineRealProviderSmoke as runResearchEngineRealProviderSmokeBridge,
+  runResearchEngineRealUrlReaderSmoke as runResearchEngineRealUrlReaderSmokeBridge,
   runResearchEngineDeveloperSample,
   runResearchEngineDeveloperSelfCheck,
   type ResearchEngineDeveloperSampleId,
   type ResearchEngineDeveloperSampleResult,
   type ResearchEngineDeveloperSelfCheckResult,
   type ResearchEngineRealProviderSmokeResult,
+  type ResearchEngineRealUrlReaderSmokeResult,
 } from "@/lib/research-engine";
 import { cn } from "@/lib/utils";
 
@@ -1192,6 +1194,7 @@ const buildNotexSelfCheckItem = (item: NotexSearchSelfCheckCaseResult): Diagnost
 
 const researchEngineSamples = getResearchEngineDeveloperSamples();
 const DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY = "React useEffect docs";
+const DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL = "https://react.dev/reference/react/useEffect";
 const SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 const isSearchDiagnosticsPerfDebugEnabled = (): boolean => {
@@ -1229,16 +1232,20 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningResearchEngineSelfCheck, setIsRunningResearchEngineSelfCheck] = useState(false);
   const [isRunningResearchEngineSample, setIsRunningResearchEngineSample] = useState(false);
   const [isRunningResearchEngineRealProviderSmoke, setIsRunningResearchEngineRealProviderSmoke] = useState(false);
+  const [isRunningResearchEngineRealUrlReaderSmoke, setIsRunningResearchEngineRealUrlReaderSmoke] = useState(false);
   const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
   const [researchEngineRealProviderSmokeQuery, setResearchEngineRealProviderSmokeQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY);
+  const [researchEngineRealUrlReaderSmokeUrl, setResearchEngineRealUrlReaderSmokeUrl] = useState(DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL);
   const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
   const [researchEngineRealProviderSmoke, setResearchEngineRealProviderSmoke] = useState<ResearchEngineRealProviderSmokeResult | null>(null);
+  const [researchEngineRealUrlReaderSmoke, setResearchEngineRealUrlReaderSmoke] = useState<ResearchEngineRealUrlReaderSmokeResult | null>(null);
   const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
   const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
   const [isResearchEngineReportExpanded, setIsResearchEngineReportExpanded] = useState(false);
   const [isResearchEngineRealProviderSmokeReportExpanded, setIsResearchEngineRealProviderSmokeReportExpanded] = useState(false);
+  const [isResearchEngineRealUrlReaderSmokeReportExpanded, setIsResearchEngineRealUrlReaderSmokeReportExpanded] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1636,6 +1643,50 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runResearchEngineRealUrlReaderSmoke = async () => {
+    setIsRunningResearchEngineRealUrlReaderSmoke(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    setIsResearchEngineRealUrlReaderSmokeReportExpanded(false);
+    try {
+      const result = await runResearchEngineRealUrlReaderSmokeBridge({
+        url: researchEngineRealUrlReaderSmokeUrl,
+      });
+      setResearchEngineRealUrlReaderSmoke(result);
+      if (result.ok) {
+        toast.success("真实 URL Reader Smoke 完成");
+      } else {
+        setResearchEngineError(`真实 URL Reader Smoke 失败：${result.errors.join("; ") || result.status}`);
+      }
+    } catch (error) {
+      const message = `真实 URL Reader Smoke 失败：${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      setIsRunningResearchEngineRealUrlReaderSmoke(false);
+    }
+  };
+
+  const copyResearchEngineRealUrlReaderSmokeReport = async () => {
+    const markdown = researchEngineRealUrlReaderSmoke?.markdownReport;
+    if (!markdown) {
+      setResearchEngineCopyMessage("请先运行真实 URL Reader Smoke。");
+      return;
+    }
+    if (!navigator.clipboard) {
+      setResearchEngineCopyMessage("当前环境不可直接复制，请手动选择下方 URL Reader Smoke Markdown 报告。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setResearchEngineCopyMessage("URL Reader Smoke Markdown 报告已复制。");
+      toast.success("URL Reader Smoke Markdown 报告已复制");
+    } catch (error) {
+      setResearchEngineCopyMessage(`复制失败：${getErrorMessage(error)}`);
+      toast.error(`复制失败：${getErrorMessage(error)}`);
+    }
+  };
+
   return (
     <section className="grid min-w-0 gap-5">
       <div className="grid gap-1 border-b border-border/80 pb-4">
@@ -1812,6 +1863,93 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                 {isResearchEngineRealProviderSmokeReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealProviderSmoke.markdownReport}
+                  </pre>
+                )}
+              </details>
+            </div>
+          )}
+        </div>
+        <div className="grid min-w-0 max-w-full gap-2 rounded-sm border border-border/70 bg-muted/10 p-3">
+          <div className="grid min-w-0 gap-1">
+            <div className="text-sm font-medium text-foreground">真实 URL Reader Smoke</div>
+            <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
+              手动验证 Research Engine URL Reader / Extractor 边界；这是浏览器侧 smoke，受 CORS 限制，只读取你输入的公开网页，不带 cookies，不绕过登录或验证码，不代表最终后端 reader 能力，也不会影响普通 NoteX 搜索。
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <input
+              className="min-h-9 min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineRealUrlReaderSmokeUrl}
+              onChange={(event) => setResearchEngineRealUrlReaderSmokeUrl(event.target.value)}
+              placeholder={DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL}
+            />
+            <Button
+              className="w-full justify-center whitespace-normal lg:w-auto"
+              variant="outline"
+              onClick={() => void runResearchEngineRealUrlReaderSmoke()}
+              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample || isRunningResearchEngineRealUrlReaderSmoke}
+            >
+              {isRunningResearchEngineRealUrlReaderSmoke ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              运行 URL Reader Smoke
+            </Button>
+            <Button
+              className="w-full justify-center whitespace-normal lg:w-auto"
+              variant="outline"
+              onClick={() => void copyResearchEngineRealUrlReaderSmokeReport()}
+              disabled={!researchEngineRealUrlReaderSmoke?.markdownReport}
+            >
+              <Clipboard className="h-3.5 w-3.5" />
+              复制 URL Reader 报告
+            </Button>
+          </div>
+          {researchEngineRealUrlReaderSmoke && (
+            <div className="grid min-w-0 max-w-full gap-3 border-l border-border/80 pl-3 text-xs leading-5">
+              <div className={cn("min-w-0 break-words", researchEngineRealUrlReaderSmoke.ok ? "text-emerald-300" : "text-amber-300")}>
+                {researchEngineRealUrlReaderSmoke.ok ? "URL Reader Smoke 已完成。" : "URL Reader Smoke 失败或质量不足。"}
+              </div>
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ["Status", researchEngineRealUrlReaderSmoke.status],
+                  ["HTTP", researchEngineRealUrlReaderSmoke.httpStatus ?? "none"],
+                  ["Content type", researchEngineRealUrlReaderSmoke.contentType ?? "none"],
+                  ["Body bytes", researchEngineRealUrlReaderSmoke.bodyBytes ?? 0],
+                  ["Blocks", researchEngineRealUrlReaderSmoke.blockCounts.total ?? 0],
+                  ["Passages", researchEngineRealUrlReaderSmoke.selectedPassageCount],
+                  ["Excerpt length", researchEngineRealUrlReaderSmoke.excerptLength],
+                  ["Quality", researchEngineRealUrlReaderSmoke.qualitySummary?.quality ?? "none"],
+                ].map(([label, value]) => (
+                  <div key={label} className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-background/40 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 min-w-0 whitespace-normal break-words text-sm text-foreground">{value}</div>
+                  </div>
+                ))}
+              </div>
+              {(researchEngineRealUrlReaderSmoke.warnings.length > 0 || researchEngineRealUrlReaderSmoke.errors.length > 0) && (
+                <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                  {researchEngineRealUrlReaderSmoke.warnings.map((warning) => <div key={`real-url-reader-warning-${warning}`} className="min-w-0 break-words">警告：{warning}</div>)}
+                  {researchEngineRealUrlReaderSmoke.errors.map((error) => <div key={`real-url-reader-error-${error}`} className="min-w-0 break-words text-red-300">错误：{error}</div>)}
+                </div>
+              )}
+              {researchEngineRealUrlReaderSmoke.excerptPreview && (
+                <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                  <summary className="cursor-pointer whitespace-normal break-words text-foreground">Excerpt Preview</summary>
+                  <pre className="mt-2 max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                    {researchEngineRealUrlReaderSmoke.excerptPreview}
+                  </pre>
+                </details>
+              )}
+              <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
+                <button
+                  type="button"
+                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  onClick={() => setIsResearchEngineRealUrlReaderSmokeReportExpanded((expanded) => !expanded)}
+                >
+                  {isResearchEngineRealUrlReaderSmokeReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
+                </button>
+                {isResearchEngineRealUrlReaderSmokeReportExpanded && (
+                  <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                    {researchEngineRealUrlReaderSmoke.markdownReport}
                   </pre>
                 )}
               </details>
