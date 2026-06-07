@@ -64,6 +64,27 @@ import {
 } from "@/lib/api";
 import "./notexWorkbench.css";
 
+function MenuCheckIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M6.7 12.8L10.0 15.95L17.4 5.85"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 type AiChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -3360,6 +3381,10 @@ export default function AiSidebar({
   const inputUiStateRef = useRef(inputUiState);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerWrapRef = useRef<HTMLDivElement | null>(null);
+  const providerPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const providerPickerMenuRef = useRef<HTMLDivElement | null>(null);
+  const modelPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const modelPickerMenuRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const userPinnedToBottomRef = useRef(true);
@@ -3754,6 +3779,41 @@ export default function AiSidebar({
     category,
     commands: visibleCommands.filter((command) => command.category === category),
   })).filter((group) => group.commands.length > 0);
+
+  useEffect(() => {
+    if (!isProviderPickerOpen && !isModelPickerOpen) return;
+
+    const dropdownRefs = [
+      providerPickerTriggerRef,
+      providerPickerMenuRef,
+      modelPickerTriggerRef,
+      modelPickerMenuRef,
+    ];
+    const closeDropdowns = () => {
+      setIsProviderPickerOpen(false);
+      setIsModelPickerOpen(false);
+    };
+
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const isInsideDropdown = dropdownRefs.some((ref) => ref.current?.contains(target));
+      if (isInsideDropdown) return;
+      closeDropdowns();
+    };
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      closeDropdowns();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [isProviderPickerOpen, isModelPickerOpen]);
 
   useEffect(() => {
     resizeComposerInput();
@@ -6768,7 +6828,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       >
         <button
           type="button"
-          className="notex-session-title notex-session-row-title min-w-0 flex-1 truncate text-left"
+          className={cn(
+            "notex-session-row-title min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[16px] font-normal leading-[21px] text-foreground",
+            !isSelected && "transition-[font-weight] group-hover:font-medium group-focus-within:font-medium",
+          )}
           onClick={() => selectConversation(conversation.id)}
           title={title}
         >
@@ -6777,10 +6840,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         <span className="notex-session-time notex-session-row-meta shrink-0 text-right tabular-nums group-hover:hidden">
           {timeLabel}
         </span>
-        <div className="notex-session-actions hidden shrink-0 items-center group-hover:flex">
+        <div className="hidden shrink-0 items-center gap-1 group-hover:flex">
           <button
             type="button"
-            className="notex-session-action inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[7px] border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               startRenameConversation(conversation);
@@ -6788,11 +6851,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             title="重命名会话"
             aria-label="重命名会话"
           >
-            <PenLine className="h-3.5 w-3.5" />
+            <PenLine className="h-[17px] w-[17px]" />
           </button>
           <button
             type="button"
-            className="notex-session-action inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[7px] border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/35 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={(event) => {
               event.stopPropagation();
               requestDeleteConversation(conversation.id);
@@ -6800,7 +6863,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             title="删除会话"
             aria-label="删除会话"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-[17px] w-[17px]" />
           </button>
         </div>
       </div>
@@ -6841,6 +6904,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           </div>
         </div>
         <button
+          ref={providerPickerTriggerRef}
           type="button"
           className={cn(
             "notex-config-trigger notex-provider-button inline-flex h-7 min-w-0 max-w-[7.5rem] items-center justify-between gap-1 rounded-md border border-border/45 bg-background/25 px-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -6969,7 +7033,18 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         </div>
 
         {isProviderPickerOpen && (
-          <div className="notex-config-menu absolute left-3 right-3 top-[calc(100%-0.15rem)] z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+          <div
+            ref={providerPickerMenuRef}
+            className="notex-config-menu absolute z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl"
+            style={{
+              top: "48px",
+              left: "50%",
+              right: "auto",
+              width: "min(240px, calc(100% - 36px))",
+              maxWidth: "min(240px, calc(100% - 36px))",
+              transform: "translateX(-50%)",
+            }}
+          >
             <div className="hidden">
               <span className="text-xs font-medium text-foreground">选择配置组</span>
               <button
@@ -7004,7 +7079,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       <span className="hidden">
                         {modelCount > 0 ? `${modelCount} models` : "无可用模型"}
                       </span>
-                      {isSelected && <span className="notex-config-menu-check" aria-hidden="true">√</span>}
+                      <span className="ml-4 inline-flex h-8 w-8 shrink-0 items-center justify-center text-foreground" aria-hidden="true">
+                        {isSelected && <MenuCheckIcon />}
+                      </span>
                     </button>
                   );
                 })
@@ -7625,6 +7702,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           <div className="notex-composer-toolbar flex min-w-0 items-center gap-1 overflow-hidden">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <button
+                ref={modelPickerTriggerRef}
                 type="button"
                 className={cn(
                   "notex-model-trigger notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -7767,7 +7845,10 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </button>
           </div>
           {isModelPickerOpen && (
-            <div className="notex-model-menu absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground">
+            <div
+              ref={modelPickerMenuRef}
+              className="notex-model-menu absolute bottom-12 left-4 z-50 w-[300px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground"
+            >
               <div className="hidden">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-medium text-foreground">
@@ -7814,7 +7895,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           <span className="hidden">
                             {model.id} · {model.source === "manual" ? "手动" : "同步"}
                           </span>
-                          {isSelected && <span className="notex-model-menu-check" aria-hidden="true">√</span>}
+                          <span className="ml-4 inline-flex h-8 w-8 shrink-0 items-center justify-center text-foreground" aria-hidden="true">
+                            {isSelected && <MenuCheckIcon />}
+                          </span>
                         </button>
                       );
                     })}
