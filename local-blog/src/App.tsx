@@ -1083,6 +1083,14 @@ function getShortNoteExcerpt(note: NoteSummary) {
   return excerpt.length > 64 ? excerpt.slice(0, 64) + " [...]" : excerpt;
 }
 
+function getLeafTagName(tagName: string) {
+  const parts = tagName
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : tagName;
+}
+
 function getHomeExcerpt(note: NoteSummary, maxLength: number) {
   return createCleanSummaryWithLimit(maxLength, note.summary, note.excerpt);
 }
@@ -1450,19 +1458,29 @@ function IndexView({
             count={filteredNotes.length}
             latestUpdatedAt={collectionGroup?.latestUpdatedAt}
           />
-          <div className="collection-detail-results">
-            <PostResults
-              notes={paged.items}
-              isLoading={isLoading}
-              error={error}
-              onRetry={onRetry}
-              sourceHref={getRouteReturnHref(route)}
-              variant="list"
-              emptyTitle={"\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6587\u96c6"}
-              emptyDescription={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
-            />
+          <section className="collection-detail-entries" aria-labelledby="collection-entries-title">
+            <header className="collection-entries-header">
+              <h2 id="collection-entries-title">{"\u6587\u7ae0\u76ee\u5f55"}</h2>
+            </header>
+            {isLoading ? (
+              <LoadingState />
+            ) : error ? (
+              <ErrorState onRetry={onRetry} />
+            ) : paged.items.length === 0 ? (
+              <EmptyState
+                title={"\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6587\u96c6"}
+                description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
+              />
+            ) : (
+              <CollectionEntryList
+                notes={paged.items}
+                collection={collection}
+                sourceHref={getRouteReturnHref(route)}
+                startIndex={(paged.currentPage - 1) * resultPageSize}
+              />
+            )}
             <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCollectionHref(collection, page)} />
-          </div>
+          </section>
         </section>
       </ListingPage>
     );
@@ -1807,14 +1825,16 @@ function CollectionDetailHeader({
   latestUpdatedAt?: string;
 }) {
   return (
-    <header className="collection-detail-header">
-      <h1>{collection}</h1>
-      <p className="collection-detail-meta">
-        {"\u5171 " + count + " \u7bc7"}
-        <span aria-hidden="true">{" \u00b7 "}</span>
-        {"\u6700\u8fd1\u66f4\u65b0 " + (formatCompactDate(latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}
-      </p>
-      <p className="collection-detail-description">{getCollectionDescription(collection)}</p>
+    <header className="collection-detail-hero">
+      <div className="collection-detail-hero-main">
+        <p className="collection-detail-kicker">{"\u6587\u96c6"}</p>
+        <h1>{collection}</h1>
+        <p className="collection-detail-meta">
+          <span>{count + " \u7bc7\u6587\u7ae0"}</span>
+          <span>{"\u6700\u8fd1\u66f4\u65b0 " + (formatCompactDate(latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}</span>
+        </p>
+        <p className="collection-detail-description">{getCollectionDescription(collection)}</p>
+      </div>
     </header>
   );
 }
@@ -2172,6 +2192,53 @@ function ArticleResultList({ notes, sourceHref }: { notes: NoteSummary[]; source
         );
       })}
     </div>
+  );
+}
+
+function CollectionEntryList({
+  notes,
+  collection,
+  sourceHref,
+  startIndex,
+}: {
+  notes: NoteSummary[];
+  collection: string;
+  sourceHref?: string;
+  startIndex: number;
+}) {
+  return (
+    <ol className="collection-entry-list">
+      {notes.map((note, index) => {
+        const displayDate = formatOptionalDate(note.date, note.updated, note.created);
+        const displayTags = getDisplayTags(note).slice(0, 2);
+        const entryNumber = String(startIndex + index + 1).padStart(2, "0");
+
+        return (
+          <li className="collection-entry-item" key={note.relativePath}>
+            <a className="collection-entry-link" href={getNoteHref(note.relativePath, sourceHref)}>
+              <span className="collection-entry-number">{entryNumber}</span>
+              <span className="collection-entry-main">
+                <span className="collection-entry-title-row">
+                  <span className="collection-entry-title">{note.title}</span>
+                  {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
+                </span>
+                <span className="collection-entry-excerpt">{getNoteExcerpt(note)}</span>
+              </span>
+              <span className="collection-entry-meta">
+                {displayDate ? <time dateTime={getNoteDateValue(note) ?? undefined}>{displayDate}</time> : <span>{"\u65e5\u671f\u672a\u77e5"}</span>}
+                <span className="collection-entry-tags">
+                  <span>{collection}</span>
+                  {displayTags.map((tag) => (
+                    <span key={tag}>{getLeafTagName(tag)}</span>
+                  ))}
+                </span>
+              </span>
+              <span className="collection-entry-arrow" aria-hidden="true">{"\u203a"}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
