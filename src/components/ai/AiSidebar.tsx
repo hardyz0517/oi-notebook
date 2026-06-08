@@ -6796,7 +6796,6 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
           "notex-session-item notex-session-row group flex w-full min-w-0 items-center transition-colors",
           variant === "overlay" && "notex-session-popover-row",
         )}
-        style={{ "--notex-hover": "#2A2D2E" } as CSSProperties}
         data-selected={isSelected ? "true" : undefined}
       >
         <button

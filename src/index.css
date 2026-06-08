@@ -326,7 +326,12 @@ html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-foldGutter .cm-gutt
 
 html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutters,
 html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutterElement {
-  background-color: var(--background);
+  background-color: #1F1F1F;
+}
+
+html[data-theme="dark"] .app-editor-workspace .app-editor-pane .cm-editor,
+html[data-theme="dark"] .app-editor-workspace .app-editor-pane .cm-editor .cm-scroller {
+  background-color: #1F1F1F !important;
 }
 
 html[data-theme="dark"] .app-editor-workspace .cm-editor .cm-gutters {
@@ -760,6 +765,16 @@ html[data-theme="light"] .app-preview-pane {
   border: 0;
   background: color-mix(in oklch, var(--surface-preview) 86%, var(--surface-workspace));
   box-shadow: none;
+}
+
+html[data-theme="dark"] .app-editor-pane,
+html[data-theme="dark"] .app-preview-pane {
+  background: #1F1F1F;
+}
+
+html[data-theme="dark"] .app-preview-pane > div,
+html[data-theme="dark"] .app-preview-pane [data-markdown-preview-content] {
+  background: #1F1F1F;
 }
 
 .open-tabs-bar {

@@ -34,6 +34,7 @@
   --notex-border-soft: rgb(255 255 255 / 0.045);
   --notex-border-subtle: var(--notex-border-soft);
   --notex-hover: rgb(255 255 255 / 0.065);
+  --notex-session-hover: #2A2D2E;
   --notex-selected: var(--notex-surface-selected);
   --notex-muted: var(--notex-text-muted);
   --notex-scrollbar-thumb: color-mix(in oklch, var(--muted-foreground) 20%, transparent);
@@ -98,6 +99,7 @@ html[data-theme="light"] .notex-workbench {
   --notex-border-soft: color-mix(in oklch, var(--border-subtle, #e0e0dc) 88%, transparent);
   --notex-border-subtle: var(--notex-border-soft);
   --notex-hover: color-mix(in oklch, var(--hover-bg, #eeeeeb) 92%, transparent);
+  --notex-session-hover: #EDEDED;
   --notex-selected: var(--notex-surface-selected);
   --notex-muted: var(--notex-text-muted);
   --notex-scrollbar-thumb: color-mix(in oklch, var(--scrollbar-thumb, #c3c3bd) 80%, transparent);
@@ -685,7 +687,7 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-session-item:hover {
-  background: var(--notex-hover) !important;
+  background: var(--notex-session-hover, var(--notex-hover)) !important;
 }
 
 .notex-session-item[data-selected="true"] {
@@ -695,7 +697,7 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-session-item[data-selected="true"]:hover {
-  background: var(--notex-hover) !important;
+  background: var(--notex-session-hover, var(--notex-hover)) !important;
 }
 
 .notex-session-title {
