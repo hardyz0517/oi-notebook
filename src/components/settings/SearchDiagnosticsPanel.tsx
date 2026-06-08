@@ -24,6 +24,7 @@ import {
   runResearchEngineRealProviderSmoke as runResearchEngineRealProviderSmokeBridge,
   runResearchEngineRealShadowRun as runResearchEngineRealShadowRunBridge,
   runResearchEngineRealUrlReaderSmoke as runResearchEngineRealUrlReaderSmokeBridge,
+  runResearchEngineShadowCompare as runResearchEngineShadowCompareBridge,
   runResearchEngineDeveloperSample,
   runResearchEngineDeveloperSelfCheck,
   type ResearchEngineDeveloperSampleId,
@@ -33,6 +34,7 @@ import {
   type ResearchEngineRealProviderSmokeResult,
   type ResearchEngineRealShadowRunResult,
   type ResearchEngineRealUrlReaderSmokeResult,
+  type ResearchEngineShadowCompareResult,
 } from "@/lib/research-engine";
 import { cn } from "@/lib/utils";
 
@@ -1203,6 +1205,9 @@ const DEFAULT_RESEARCH_ENGINE_REAL_E2E_SMOKE_QUERY = "OpenAI latest news";
 const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY = "OpenAI latest news";
 const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_READ_TOP_N = 2;
 const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_MAX_CANDIDATES = 8;
+const DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_QUERY = "OpenAI latest news";
+const DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_READ_TOP_N = 2;
+const DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_MAX_CANDIDATES = 8;
 const SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 const isSearchDiagnosticsPerfDebugEnabled = (): boolean => {
@@ -1243,6 +1248,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningResearchEngineRealUrlReaderSmoke, setIsRunningResearchEngineRealUrlReaderSmoke] = useState(false);
   const [isRunningResearchEngineRealE2ESmoke, setIsRunningResearchEngineRealE2ESmoke] = useState(false);
   const [isRunningResearchEngineRealShadowRun, setIsRunningResearchEngineRealShadowRun] = useState(false);
+  const [isRunningResearchEngineShadowCompare, setIsRunningResearchEngineShadowCompare] = useState(false);
   const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
   const [researchEngineRealProviderSmokeQuery, setResearchEngineRealProviderSmokeQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY);
   const [researchEngineRealUrlReaderSmokeUrl, setResearchEngineRealUrlReaderSmokeUrl] = useState(DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL);
@@ -1250,6 +1256,9 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [researchEngineRealShadowRunQuery, setResearchEngineRealShadowRunQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY);
   const [researchEngineRealShadowRunReadTopN, setResearchEngineRealShadowRunReadTopN] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_READ_TOP_N);
   const [researchEngineRealShadowRunMaxCandidates, setResearchEngineRealShadowRunMaxCandidates] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_MAX_CANDIDATES);
+  const [researchEngineShadowCompareQuery, setResearchEngineShadowCompareQuery] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_QUERY);
+  const [researchEngineShadowCompareReadTopN, setResearchEngineShadowCompareReadTopN] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_READ_TOP_N);
+  const [researchEngineShadowCompareMaxCandidates, setResearchEngineShadowCompareMaxCandidates] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_MAX_CANDIDATES);
   const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
@@ -1257,6 +1266,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [researchEngineRealUrlReaderSmoke, setResearchEngineRealUrlReaderSmoke] = useState<ResearchEngineRealUrlReaderSmokeResult | null>(null);
   const [researchEngineRealE2ESmoke, setResearchEngineRealE2ESmoke] = useState<ResearchEngineRealE2ESmokeResult | null>(null);
   const [researchEngineRealShadowRun, setResearchEngineRealShadowRun] = useState<ResearchEngineRealShadowRunResult | null>(null);
+  const [researchEngineShadowCompare, setResearchEngineShadowCompare] = useState<ResearchEngineShadowCompareResult | null>(null);
   const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
   const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
   const [isResearchEngineReportExpanded, setIsResearchEngineReportExpanded] = useState(false);
@@ -1264,6 +1274,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isResearchEngineRealUrlReaderSmokeReportExpanded, setIsResearchEngineRealUrlReaderSmokeReportExpanded] = useState(false);
   const [isResearchEngineRealE2ESmokeReportExpanded, setIsResearchEngineRealE2ESmokeReportExpanded] = useState(false);
   const [isResearchEngineRealShadowRunReportExpanded, setIsResearchEngineRealShadowRunReportExpanded] = useState(false);
+  const [isResearchEngineShadowCompareReportExpanded, setIsResearchEngineShadowCompareReportExpanded] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
@@ -1816,6 +1827,56 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runResearchEngineShadowCompare = async () => {
+    setIsRunningResearchEngineShadowCompare(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    setIsResearchEngineShadowCompareReportExpanded(false);
+    try {
+      const result = await runResearchEngineShadowCompareBridge({
+        query: researchEngineShadowCompareQuery,
+        webSearchConfig,
+        readTopN: researchEngineShadowCompareReadTopN,
+        maxCandidates: researchEngineShadowCompareMaxCandidates,
+        includeLegacy: true,
+      });
+      setResearchEngineShadowCompare(result);
+      if (result.ok) {
+        toast.success("Shadow Compare completed");
+      } else if (result.researchSummary.status === "not_configured") {
+        setResearchEngineError("Shadow Compare was not fully run: no configured Bocha / Brave provider is available for Research Engine shadow.");
+      } else {
+        setResearchEngineError(`Shadow Compare finished with issues: ${result.errors.join("; ") || result.comparisonSummary.recommendation}`);
+      }
+    } catch (error) {
+      const message = `Shadow Compare failed: ${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      setIsRunningResearchEngineShadowCompare(false);
+    }
+  };
+
+  const copyResearchEngineShadowCompareReport = async () => {
+    const markdown = researchEngineShadowCompare?.markdownReport;
+    if (!markdown) {
+      setResearchEngineCopyMessage("Please run Shadow Compare first.");
+      return;
+    }
+    if (!navigator.clipboard) {
+      setResearchEngineCopyMessage("Clipboard is unavailable; select the Shadow Compare Markdown report manually.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setResearchEngineCopyMessage("Shadow Compare Markdown report copied.");
+      toast.success("Shadow Compare Markdown report copied");
+    } catch (error) {
+      setResearchEngineCopyMessage(`Copy failed: ${getErrorMessage(error)}`);
+      toast.error(`Copy failed: ${getErrorMessage(error)}`);
+    }
+  };
+
   return (
     <section className="grid min-w-0 gap-5">
       <div className="grid gap-1 border-b border-border/80 pb-4">
@@ -2296,6 +2357,114 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                 {isResearchEngineRealShadowRunReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealShadowRun.markdownReport}
+                  </pre>
+                )}
+              </details>
+            </div>
+          )}
+        </div>
+        <div className="grid min-w-0 max-w-full gap-2 rounded-sm border border-border/70 bg-muted/10 p-3">
+          <div className="grid min-w-0 gap-1">
+            <div className="text-sm font-medium text-foreground">Shadow Compare</div>
+            <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
+              手动对照旧搜索诊断能力和 Research Engine Shadow Run；不影响普通 NoteX 搜索，不写入会话，不调用 LLM。可能访问已配置搜索 provider，并顺序读取最多 N 个公开 URL；不带 cookies，受 CORS 限制。
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+            <input
+              className="min-h-9 min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineShadowCompareQuery}
+              onChange={(event) => setResearchEngineShadowCompareQuery(event.target.value)}
+              placeholder={DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_QUERY}
+              disabled={isRunningResearchEngineShadowCompare}
+            />
+            <select
+              className="min-h-9 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineShadowCompareReadTopN}
+              onChange={(event) => setResearchEngineShadowCompareReadTopN(Number(event.target.value))}
+              disabled={isRunningResearchEngineShadowCompare}
+              aria-label="Shadow Compare readTopN"
+            >
+              {[1, 2, 3].map((value) => (
+                <option key={value} value={value}>readTopN {value}</option>
+              ))}
+            </select>
+            <input
+              className="min-h-9 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring xl:w-28"
+              type="number"
+              min={1}
+              max={10}
+              value={researchEngineShadowCompareMaxCandidates}
+              onChange={(event) => setResearchEngineShadowCompareMaxCandidates(Number(event.target.value) || DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_MAX_CANDIDATES)}
+              disabled={isRunningResearchEngineShadowCompare}
+              aria-label="Shadow Compare max candidates"
+            />
+            <Button
+              className="w-full justify-center whitespace-normal xl:w-auto"
+              variant="outline"
+              onClick={() => void runResearchEngineShadowCompare()}
+              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample || isRunningResearchEngineShadowCompare}
+            >
+              {isRunningResearchEngineShadowCompare ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              运行 Shadow Compare
+            </Button>
+          </div>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            <Button
+              className="justify-center whitespace-normal"
+              variant="outline"
+              onClick={() => void copyResearchEngineShadowCompareReport()}
+              disabled={!researchEngineShadowCompare?.markdownReport || isRunningResearchEngineShadowCompare}
+            >
+              <Clipboard className="h-3.5 w-3.5" />
+              复制 Compare 报告
+            </Button>
+          </div>
+          {researchEngineShadowCompare && (
+            <div className="grid min-w-0 max-w-full gap-3 border-l border-border/80 pl-3 text-xs leading-5">
+              <div className={cn("min-w-0 break-words", researchEngineShadowCompare.ok ? "text-emerald-300" : "text-amber-300")}>
+                {researchEngineShadowCompare.ok ? "Shadow Compare 已完成。" : "Shadow Compare 已完成，但存在不可用或证据不足路径。"}
+              </div>
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ["Legacy status", researchEngineShadowCompare.legacySummary.status],
+                  ["Research status", researchEngineShadowCompare.researchSummary.status],
+                  ["Candidates", researchEngineShadowCompare.researchSummary.candidateCount],
+                  ["Successful reads", researchEngineShadowCompare.researchSummary.successfulReads],
+                  ["Overlap hosts", researchEngineShadowCompare.comparisonSummary.overlapHosts.length],
+                  ["Recommendation", researchEngineShadowCompare.comparisonSummary.recommendation],
+                  ["Warnings", researchEngineShadowCompare.warnings.length],
+                  ["Errors", researchEngineShadowCompare.errors.length],
+                ].map(([label, value]) => (
+                  <div key={`shadow-compare-summary-${label}`} className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-background/40 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 min-w-0 whitespace-normal break-words text-sm text-foreground">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                <div className="min-w-0 break-words">Legacy：{researchEngineShadowCompare.legacySummary.reason}</div>
+                <div className="min-w-0 break-words">Research hosts：{researchEngineShadowCompare.researchSummary.hostnames.join(", ") || "none"}</div>
+                <div className="min-w-0 break-words">Overlap hosts：{researchEngineShadowCompare.comparisonSummary.overlapHosts.join(", ") || "none"}</div>
+              </div>
+              {(researchEngineShadowCompare.warnings.length > 0 || researchEngineShadowCompare.errors.length > 0) && (
+                <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                  {researchEngineShadowCompare.warnings.map((warning, index) => <div key={`shadow-compare-warning-${warning}-${index}`} className="min-w-0 break-words">警告：{warning}</div>)}
+                  {researchEngineShadowCompare.errors.map((error, index) => <div key={`shadow-compare-error-${error}-${index}`} className="min-w-0 break-words text-red-300">错误：{error}</div>)}
+                </div>
+              )}
+              <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
+                <button
+                  type="button"
+                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  onClick={() => setIsResearchEngineShadowCompareReportExpanded((expanded) => !expanded)}
+                >
+                  {isResearchEngineShadowCompareReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
+                </button>
+                {isResearchEngineShadowCompareReportExpanded && (
+                  <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                    {researchEngineShadowCompare.markdownReport}
                   </pre>
                 )}
               </details>

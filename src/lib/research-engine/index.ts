@@ -64,6 +64,14 @@ export type {
   ResearchEngineRealShadowRunStage,
 } from "./realShadowRun";
 export type {
+  ResearchEngineShadowCompareLegacySummary,
+  ResearchEngineShadowCompareOptions,
+  ResearchEngineShadowCompareRecommendation,
+  ResearchEngineShadowCompareResearchSummary,
+  ResearchEngineShadowCompareResult,
+  ResearchEngineShadowCompareSummary,
+} from "./shadowCompare";
+export type {
   ResearchOfflineRunConfig,
   ResearchOfflineRunDiagnostics,
   ResearchOfflineRunInput,
@@ -275,6 +283,7 @@ export { runResearchEngineRealProviderSmoke } from "./realProviderSmoke";
 export { runResearchEngineRealUrlReaderSmoke } from "./realUrlReaderSmoke";
 export { runResearchEngineRealE2ESmoke } from "./realE2ESmoke";
 export { runResearchEngineRealShadowRun } from "./realShadowRun";
+export { runResearchEngineShadowCompare } from "./shadowCompare";
 export {
   buildDiagnosticsFromOfflineRun,
   buildDiagnosticsFromSelfCheck,
