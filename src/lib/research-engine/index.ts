@@ -57,6 +57,13 @@ export type {
   ResearchEngineRealE2ESmokeResult,
 } from "./realE2ESmoke";
 export type {
+  ResearchEngineRealShadowRunCandidate,
+  ResearchEngineRealShadowRunOptions,
+  ResearchEngineRealShadowRunReadAttempt,
+  ResearchEngineRealShadowRunResult,
+  ResearchEngineRealShadowRunStage,
+} from "./realShadowRun";
+export type {
   ResearchOfflineRunConfig,
   ResearchOfflineRunDiagnostics,
   ResearchOfflineRunInput,
@@ -267,6 +274,7 @@ export {
 export { runResearchEngineRealProviderSmoke } from "./realProviderSmoke";
 export { runResearchEngineRealUrlReaderSmoke } from "./realUrlReaderSmoke";
 export { runResearchEngineRealE2ESmoke } from "./realE2ESmoke";
+export { runResearchEngineRealShadowRun } from "./realShadowRun";
 export {
   buildDiagnosticsFromOfflineRun,
   buildDiagnosticsFromSelfCheck,

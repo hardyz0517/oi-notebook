@@ -22,6 +22,7 @@ import {
   getResearchEngineDeveloperSamples,
   runResearchEngineRealE2ESmoke as runResearchEngineRealE2ESmokeBridge,
   runResearchEngineRealProviderSmoke as runResearchEngineRealProviderSmokeBridge,
+  runResearchEngineRealShadowRun as runResearchEngineRealShadowRunBridge,
   runResearchEngineRealUrlReaderSmoke as runResearchEngineRealUrlReaderSmokeBridge,
   runResearchEngineDeveloperSample,
   runResearchEngineDeveloperSelfCheck,
@@ -30,6 +31,7 @@ import {
   type ResearchEngineDeveloperSelfCheckResult,
   type ResearchEngineRealE2ESmokeResult,
   type ResearchEngineRealProviderSmokeResult,
+  type ResearchEngineRealShadowRunResult,
   type ResearchEngineRealUrlReaderSmokeResult,
 } from "@/lib/research-engine";
 import { cn } from "@/lib/utils";
@@ -1198,6 +1200,9 @@ const researchEngineSamples = getResearchEngineDeveloperSamples();
 const DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY = "React useEffect docs";
 const DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL = "https://react.dev/reference/react/useEffect";
 const DEFAULT_RESEARCH_ENGINE_REAL_E2E_SMOKE_QUERY = "OpenAI latest news";
+const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY = "OpenAI latest news";
+const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_READ_TOP_N = 2;
+const DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_MAX_CANDIDATES = 8;
 const SEARCH_DIAGNOSTICS_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 const isSearchDiagnosticsPerfDebugEnabled = (): boolean => {
@@ -1237,25 +1242,32 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [isRunningResearchEngineRealProviderSmoke, setIsRunningResearchEngineRealProviderSmoke] = useState(false);
   const [isRunningResearchEngineRealUrlReaderSmoke, setIsRunningResearchEngineRealUrlReaderSmoke] = useState(false);
   const [isRunningResearchEngineRealE2ESmoke, setIsRunningResearchEngineRealE2ESmoke] = useState(false);
+  const [isRunningResearchEngineRealShadowRun, setIsRunningResearchEngineRealShadowRun] = useState(false);
   const [researchEngineSampleId, setResearchEngineSampleId] = useState<ResearchEngineDeveloperSampleId>("docs");
   const [researchEngineRealProviderSmokeQuery, setResearchEngineRealProviderSmokeQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_PROVIDER_SMOKE_QUERY);
   const [researchEngineRealUrlReaderSmokeUrl, setResearchEngineRealUrlReaderSmokeUrl] = useState(DEFAULT_RESEARCH_ENGINE_REAL_URL_READER_SMOKE_URL);
   const [researchEngineRealE2ESmokeQuery, setResearchEngineRealE2ESmokeQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_E2E_SMOKE_QUERY);
+  const [researchEngineRealShadowRunQuery, setResearchEngineRealShadowRunQuery] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY);
+  const [researchEngineRealShadowRunReadTopN, setResearchEngineRealShadowRunReadTopN] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_READ_TOP_N);
+  const [researchEngineRealShadowRunMaxCandidates, setResearchEngineRealShadowRunMaxCandidates] = useState(DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_MAX_CANDIDATES);
   const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
   const [researchEngineRealProviderSmoke, setResearchEngineRealProviderSmoke] = useState<ResearchEngineRealProviderSmokeResult | null>(null);
   const [researchEngineRealUrlReaderSmoke, setResearchEngineRealUrlReaderSmoke] = useState<ResearchEngineRealUrlReaderSmokeResult | null>(null);
   const [researchEngineRealE2ESmoke, setResearchEngineRealE2ESmoke] = useState<ResearchEngineRealE2ESmokeResult | null>(null);
+  const [researchEngineRealShadowRun, setResearchEngineRealShadowRun] = useState<ResearchEngineRealShadowRunResult | null>(null);
   const [researchEngineCopyMessage, setResearchEngineCopyMessage] = useState<string | null>(null);
   const [researchEngineError, setResearchEngineError] = useState<string | null>(null);
   const [isResearchEngineReportExpanded, setIsResearchEngineReportExpanded] = useState(false);
   const [isResearchEngineRealProviderSmokeReportExpanded, setIsResearchEngineRealProviderSmokeReportExpanded] = useState(false);
   const [isResearchEngineRealUrlReaderSmokeReportExpanded, setIsResearchEngineRealUrlReaderSmokeReportExpanded] = useState(false);
   const [isResearchEngineRealE2ESmokeReportExpanded, setIsResearchEngineRealE2ESmokeReportExpanded] = useState(false);
+  const [isResearchEngineRealShadowRunReportExpanded, setIsResearchEngineRealShadowRunReportExpanded] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const runIdRef = useRef(0);
+  const researchEngineRealShadowRunAbortRef = useRef<AbortController | null>(null);
 
   const webSearchConfig = useMemo(
     () => aiConfigDraft ? normalizeWebSearchConfig(aiConfigDraft.web_search) : null,
@@ -1742,6 +1754,68 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     }
   };
 
+  const runResearchEngineRealShadowRun = async () => {
+    const controller = new AbortController();
+    researchEngineRealShadowRunAbortRef.current = controller;
+    setIsRunningResearchEngineRealShadowRun(true);
+    setResearchEngineCopyMessage(null);
+    setResearchEngineError(null);
+    setIsResearchEngineRealShadowRunReportExpanded(false);
+    try {
+      const result = await runResearchEngineRealShadowRunBridge({
+        query: researchEngineRealShadowRunQuery,
+        webSearchConfig,
+        readTopN: researchEngineRealShadowRunReadTopN,
+        maxCandidates: researchEngineRealShadowRunMaxCandidates,
+        abortSignal: controller.signal,
+      });
+      setResearchEngineRealShadowRun(result);
+      if (result.ok) {
+        toast.success("Real Shadow Run completed");
+      } else if (result.providerStatus === "not_configured") {
+        setResearchEngineError("Real Shadow Run was not started: no configured Bocha / Brave provider is available.");
+      } else if (result.providerStatus === "aborted") {
+        setResearchEngineError("Real Shadow Run was aborted.");
+      } else {
+        setResearchEngineError(`Real Shadow Run failed: ${result.errors.join("; ") || result.providerStatus}`);
+      }
+    } catch (error) {
+      const message = `Real Shadow Run failed: ${getErrorMessage(error)}`;
+      setResearchEngineError(message);
+      toast.error(message);
+    } finally {
+      if (researchEngineRealShadowRunAbortRef.current === controller) {
+        researchEngineRealShadowRunAbortRef.current = null;
+      }
+      setIsRunningResearchEngineRealShadowRun(false);
+    }
+  };
+
+  const cancelResearchEngineRealShadowRun = () => {
+    researchEngineRealShadowRunAbortRef.current?.abort();
+    setResearchEngineCopyMessage("Shadow Run cancel requested. The current in-flight browser request may finish, but no new URL reads will start after abort.");
+  };
+
+  const copyResearchEngineRealShadowRunReport = async () => {
+    const markdown = researchEngineRealShadowRun?.markdownReport;
+    if (!markdown) {
+      setResearchEngineCopyMessage("Please run Real Shadow Run first.");
+      return;
+    }
+    if (!navigator.clipboard) {
+      setResearchEngineCopyMessage("Clipboard is unavailable; select the Shadow Run Markdown report manually.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setResearchEngineCopyMessage("Shadow Run Markdown report copied.");
+      toast.success("Shadow Run Markdown report copied");
+    } catch (error) {
+      setResearchEngineCopyMessage(`Copy failed: ${getErrorMessage(error)}`);
+      toast.error(`Copy failed: ${getErrorMessage(error)}`);
+    }
+  };
+
   return (
     <section className="grid min-w-0 gap-5">
       <div className="grid gap-1 border-b border-border/80 pb-4">
@@ -2092,6 +2166,136 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                 {isResearchEngineRealE2ESmokeReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealE2ESmoke.markdownReport}
+                  </pre>
+                )}
+              </details>
+            </div>
+          )}
+        </div>
+        <div className="grid min-w-0 max-w-full gap-2 rounded-sm border border-border/70 bg-muted/10 p-3">
+          <div className="grid min-w-0 gap-1">
+            <div className="text-sm font-medium text-foreground">真实 Shadow Run</div>
+            <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
+              手动运行更接近正式 Research Engine 的 shadow pipeline：访问已配置搜索 provider，按顺序读取最多 N 个公开 URL，不带 cookies，不绕过登录/验证码，受 CORS 限制，不影响普通 NoteX 搜索。
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
+            <input
+              className="min-h-9 min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineRealShadowRunQuery}
+              onChange={(event) => setResearchEngineRealShadowRunQuery(event.target.value)}
+              placeholder={DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY}
+            />
+            <select
+              className="min-h-9 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              value={researchEngineRealShadowRunReadTopN}
+              onChange={(event) => setResearchEngineRealShadowRunReadTopN(Number(event.target.value))}
+              disabled={isRunningResearchEngineRealShadowRun}
+              aria-label="Shadow Run readTopN"
+            >
+              {[1, 2, 3].map((value) => (
+                <option key={value} value={value}>readTopN {value}</option>
+              ))}
+            </select>
+            <input
+              className="min-h-9 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring xl:w-28"
+              type="number"
+              min={1}
+              max={10}
+              value={researchEngineRealShadowRunMaxCandidates}
+              onChange={(event) => setResearchEngineRealShadowRunMaxCandidates(Number(event.target.value) || DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_MAX_CANDIDATES)}
+              disabled={isRunningResearchEngineRealShadowRun}
+              aria-label="Shadow Run max candidates"
+            />
+            <Button
+              className="w-full justify-center whitespace-normal xl:w-auto"
+              variant="outline"
+              onClick={() => void runResearchEngineRealShadowRun()}
+              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample || isRunningResearchEngineRealShadowRun}
+            >
+              {isRunningResearchEngineRealShadowRun ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              运行真实 Shadow Run
+            </Button>
+            {isRunningResearchEngineRealShadowRun ? (
+              <Button
+                className="w-full justify-center whitespace-normal xl:w-auto"
+                variant="outline"
+                onClick={cancelResearchEngineRealShadowRun}
+              >
+                取消
+              </Button>
+            ) : (
+              <Button
+                className="w-full justify-center whitespace-normal xl:w-auto"
+                variant="outline"
+                onClick={() => void copyResearchEngineRealShadowRunReport()}
+                disabled={!researchEngineRealShadowRun?.markdownReport}
+              >
+                <Clipboard className="h-3.5 w-3.5" />
+                复制 Shadow 报告
+              </Button>
+            )}
+          </div>
+          {researchEngineRealShadowRun && (
+            <div className="grid min-w-0 max-w-full gap-3 border-l border-border/80 pl-3 text-xs leading-5">
+              <div className={cn("min-w-0 break-words", researchEngineRealShadowRun.ok ? "text-emerald-300" : "text-amber-300")}>
+                {researchEngineRealShadowRun.ok ? "Shadow Run 已完成。" : researchEngineRealShadowRun.providerStatus === "not_configured" ? "未配置真实 provider，Shadow Run 未发起。" : researchEngineRealShadowRun.providerStatus === "aborted" ? "Shadow Run 已取消。" : "Shadow Run 失败或证据不足。"}
+              </div>
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ["Provider", researchEngineRealShadowRun.providerName],
+                  ["Provider status", researchEngineRealShadowRun.providerStatus],
+                  ["Candidates", researchEngineRealShadowRun.candidateCount],
+                  ["Read attempts", researchEngineRealShadowRun.readAttempts.length],
+                  ["Successful", researchEngineRealShadowRun.successfulReads],
+                  ["Failed", researchEngineRealShadowRun.failedReads],
+                  ["Evidence mode", researchEngineRealShadowRun.answerContractMode ?? "none"],
+                  ["Warnings", researchEngineRealShadowRun.warnings.length],
+                ].map(([label, value]) => (
+                  <div key={label} className="min-w-0 max-w-full overflow-hidden rounded-sm border border-border/70 bg-background/40 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 min-w-0 whitespace-normal break-words text-sm text-foreground">{value}</div>
+                  </div>
+                ))}
+              </div>
+              {researchEngineRealShadowRun.readAttempts.length > 0 && (
+                <div className="grid min-w-0 gap-2">
+                  {researchEngineRealShadowRun.readAttempts.map((attempt, index) => (
+                    <div key={`real-shadow-read-${attempt.candidate.id}-${attempt.candidate.url}-${attempt.status}-${index}`} className="grid min-w-0 gap-1 rounded-sm border border-border/70 bg-background/30 px-3 py-2">
+                      <div className="min-w-0 break-words text-sm text-foreground">{attempt.candidate.title}</div>
+                      <div className="min-w-0 break-words text-xs text-muted-foreground">{attempt.candidate.host} · {attempt.status} · quality={attempt.readerQuality?.quality ?? "none"} · passages={attempt.selectedPassageCount}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(researchEngineRealShadowRun.warnings.length > 0 || researchEngineRealShadowRun.errors.length > 0) && (
+                <div className="grid min-w-0 gap-1 text-xs leading-5 text-muted-foreground">
+                  {researchEngineRealShadowRun.warnings.map((warning, index) => <div key={`real-shadow-warning-${warning}-${index}`} className="min-w-0 break-words">警告：{warning}</div>)}
+                  {researchEngineRealShadowRun.errors.map((error, index) => <div key={`real-shadow-error-${error}-${index}`} className="min-w-0 break-words text-red-300">错误：{error}</div>)}
+                </div>
+              )}
+              <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer whitespace-normal break-words text-foreground">Timeline</summary>
+                <div className="mt-2 grid min-w-0 gap-1">
+                  {researchEngineRealShadowRun.stageTimeline.map((stage, index) => (
+                    <div key={`real-shadow-stage-${stage.stage}-${stage.status}-${stage.message}-${index}`} className="min-w-0 break-words font-mono">
+                      {stage.stage}: {stage.status}; {stage.message}; {stage.elapsedMs ?? "n/a"} ms
+                    </div>
+                  ))}
+                </div>
+              </details>
+              <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
+                <button
+                  type="button"
+                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  onClick={() => setIsResearchEngineRealShadowRunReportExpanded((expanded) => !expanded)}
+                >
+                  {isResearchEngineRealShadowRunReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
+                </button>
+                {isResearchEngineRealShadowRunReportExpanded && (
+                  <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
+                    {researchEngineRealShadowRun.markdownReport}
                   </pre>
                 )}
               </details>
