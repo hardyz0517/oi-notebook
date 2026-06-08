@@ -568,6 +568,9 @@ export const runResearchEngineRealShadowRun = async (
   const providerStartedAt = performance.now();
   let providerStatus: ResearchEngineRealShadowRunResult["providerStatus"] = "failed";
   let rawResults: DiscoveryRawResult[] = [];
+  let providerRawResultCount = 0;
+  let providerNormalizedResultCount = 0;
+  let providerDroppedResultCount = 0;
   let redactedProviderRequest: BrowserProviderRedactedRequest | undefined;
   let providerBodyPreview: string | undefined;
   let keylessProviderDiagnostics: Record<string, unknown> | undefined;
@@ -582,6 +585,9 @@ export const runResearchEngineRealShadowRun = async (
       timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
     rawResults = keyless.rawResults;
+    providerRawResultCount = keyless.diagnostics.rawBridgeResultCount;
+    providerNormalizedResultCount = keyless.diagnostics.normalizedResultCount;
+    providerDroppedResultCount = keyless.diagnostics.droppedResultCount;
     warnings.push(...keyless.warnings);
     errors.push(...keyless.errors);
     keylessProviderDiagnostics = keyless.diagnostics;
@@ -649,6 +655,9 @@ export const runResearchEngineRealShadowRun = async (
           maxResults: maxCandidates,
         });
         rawResults = normalized.rawResults;
+        providerRawResultCount = normalized.rawResults.length;
+        providerNormalizedResultCount = normalized.rawResults.length;
+        providerDroppedResultCount = 0;
         warnings.push(...normalized.warnings);
         if (normalized.error) {
           providerStatus = normalized.rawResults.length > 0 ? "partial" : providerStatusFromError(normalized.error);
@@ -673,7 +682,7 @@ export const runResearchEngineRealShadowRun = async (
       providerName: shadowConfig.providerName,
       providerStatus: "aborted",
       rawResultCount: 0,
-      normalizedResultCount: 0,
+      normalizedResultCount: providerNormalizedResultCount,
       candidateCount: 0,
       selectedCandidates: [],
       readAttempts: [],
@@ -715,8 +724,8 @@ export const runResearchEngineRealShadowRun = async (
       query,
       providerName: shadowConfig.providerName,
       providerStatus,
-      rawResultCount: rawResults.length,
-      normalizedResultCount: 0,
+      rawResultCount: providerRawResultCount || rawResults.length,
+      normalizedResultCount: providerNormalizedResultCount,
       candidateCount: 0,
       selectedCandidates: [],
       readAttempts: [],
@@ -733,6 +742,9 @@ export const runResearchEngineRealShadowRun = async (
         redactedProviderRequest,
         providerBodyPreview,
         keylessProviderDiagnostics,
+        providerRawResultCount: providerRawResultCount || rawResults.length,
+        providerNormalizedResultCount,
+        providerDroppedResultCount,
         readTopN,
         maxCandidates,
       },
@@ -756,7 +768,7 @@ export const runResearchEngineRealShadowRun = async (
       query,
       providerName: shadowConfig.providerName,
       providerStatus: "no_candidate_url",
-      rawResultCount: rawResults.length,
+      rawResultCount: providerRawResultCount || rawResults.length,
       normalizedResultCount: candidatePool.normalizedCount,
       candidateCount: candidatePool.dedupedCount,
       selectedCandidates,
@@ -774,6 +786,9 @@ export const runResearchEngineRealShadowRun = async (
         redactedProviderRequest,
         providerBodyPreview,
         keylessProviderDiagnostics,
+        providerRawResultCount: providerRawResultCount || rawResults.length,
+        providerNormalizedResultCount: providerNormalizedResultCount || candidatePool.normalizedCount,
+        providerDroppedResultCount,
         readTopN,
         maxCandidates,
         candidatePool: {
@@ -881,7 +896,7 @@ export const runResearchEngineRealShadowRun = async (
     query,
     providerName: shadowConfig.providerName,
     providerStatus: finalProviderStatus,
-    rawResultCount: rawResults.length,
+    rawResultCount: providerRawResultCount || rawResults.length,
     normalizedResultCount: candidatePool.normalizedCount,
     candidateCount: candidatePool.dedupedCount,
     selectedCandidates,
@@ -904,6 +919,9 @@ export const runResearchEngineRealShadowRun = async (
       redactedProviderRequest,
       providerBodyPreview,
       keylessProviderDiagnostics,
+      providerRawResultCount: providerRawResultCount || rawResults.length,
+      providerNormalizedResultCount: providerNormalizedResultCount || candidatePool.normalizedCount,
+      providerDroppedResultCount,
       candidatePool: {
         rawCount: candidatePool.rawCount,
         normalizedCount: candidatePool.normalizedCount,

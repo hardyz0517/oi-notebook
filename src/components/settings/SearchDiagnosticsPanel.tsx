@@ -160,6 +160,49 @@ const researchEngineDisplayProvider = (
   return providerName ?? "none";
 };
 
+const researchEngineKeylessDiagnostics = (
+  diagnosticsSnapshot?: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const nested = diagnosticsSnapshot?.keylessProviderDiagnostics;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) return nested as Record<string, unknown>;
+  if (diagnosticsSnapshot?.providerName === "keyless_bing") return diagnosticsSnapshot;
+  return undefined;
+};
+
+const researchEngineBridgeDiagnostics = (
+  diagnosticsSnapshot?: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const keyless = researchEngineKeylessDiagnostics(diagnosticsSnapshot);
+  const bridge = keyless?.bridgeDiagnostics;
+  return bridge && typeof bridge === "object" && !Array.isArray(bridge) ? bridge as Record<string, unknown> : undefined;
+};
+
+const researchEngineDiagnosticText = (
+  diagnosticsSnapshot: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const keyless = researchEngineKeylessDiagnostics(diagnosticsSnapshot);
+  const bridge = researchEngineBridgeDiagnostics(diagnosticsSnapshot);
+  const value = keyless?.[key] ?? bridge?.[key] ?? diagnosticsSnapshot?.[key];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(" | ") || undefined;
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+};
+
+const researchEngineStageSummary = (
+  diagnosticsSnapshot?: Record<string, unknown>,
+): string => {
+  const bridge = researchEngineBridgeDiagnostics(diagnosticsSnapshot);
+  const parts = [
+    researchEngineDiagnosticText(diagnosticsSnapshot, "parserUsed") ? `parser=${researchEngineDiagnosticText(diagnosticsSnapshot, "parserUsed")}` : undefined,
+    researchEngineDiagnosticText(diagnosticsSnapshot, "bodyKind") ? `body=${researchEngineDiagnosticText(diagnosticsSnapshot, "bodyKind")}` : undefined,
+    researchEngineDiagnosticText(diagnosticsSnapshot, "parseFailureHint") ? `hint=${researchEngineDiagnosticText(diagnosticsSnapshot, "parseFailureHint")}` : undefined,
+    researchEngineDiagnosticText(diagnosticsSnapshot, "matchedSelectors") ? `selectors=${researchEngineDiagnosticText(diagnosticsSnapshot, "matchedSelectors")}` : undefined,
+    bridge?.keptCandidateCount !== undefined ? `kept=${bridge.keptCandidateCount}` : undefined,
+    bridge?.rejectedCandidateCount !== undefined ? `rejected=${bridge.rejectedCandidateCount}` : undefined,
+  ].filter(Boolean);
+  return parts.join("; ") || researchEngineDiagnosticText(diagnosticsSnapshot, "stagePreview") || "none";
+};
+
 const summarizeDecision = (decision: SearchDecision): string =>
   `shouldSearch=${decision.shouldSearch}; intent=${decision.intent}; problemId=${decision.problemId ?? "none"}; news=${decision.newsIntent === true}; recency=${decision.recencyIntent === true}; queryCount=${decision.queries.length}`;
 
@@ -2040,6 +2083,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Provider", researchEngineDisplayProvider(researchEngineRealProviderSmoke.providerName, researchEngineRealProviderSmoke.diagnosticsSnapshot, researchEngineRealProviderSmoke.redactedConfigSummary.mode)],
                   ["API key required", researchEngineRealProviderSmoke.redactedConfigSummary.apiKeyRequired === false ? "no" : researchEngineRealProviderSmoke.redactedConfigSummary.apiKeyRequired === true ? "yes" : "unknown"],
                   ["Status", researchEngineRealProviderSmoke.status],
+                  ["Error kind", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
+                  ["Stage", researchEngineStageSummary(researchEngineRealProviderSmoke.diagnosticsSnapshot)],
                   ["Raw results", researchEngineRealProviderSmoke.rawResultCount],
                   ["Normalized", researchEngineRealProviderSmoke.normalizedResultCount],
                   ["Candidates", researchEngineRealProviderSmoke.candidateCount],
@@ -2206,6 +2251,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                 {[
                   ["Provider", researchEngineDisplayProvider(researchEngineRealE2ESmoke.providerName, researchEngineRealE2ESmoke.diagnosticsSnapshot)],
                   ["Provider status", researchEngineRealE2ESmoke.providerStatus],
+                  ["Error kind", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
+                  ["Stage", researchEngineStageSummary(researchEngineRealE2ESmoke.diagnosticsSnapshot)],
                   ["Candidates", researchEngineRealE2ESmoke.candidateCount],
                   ["Selected URL", researchEngineRealE2ESmoke.selectedCandidate?.url ?? "none"],
                   ["Reader status", researchEngineRealE2ESmoke.readerStatus],
@@ -2324,6 +2371,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                 {[
                   ["Provider", researchEngineDisplayProvider(researchEngineRealShadowRun.providerName, researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Provider status", researchEngineRealShadowRun.providerStatus],
+                  ["Error kind", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "errorKind") ?? "none"],
+                  ["Stage", researchEngineStageSummary(researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
                   ["Read attempts", researchEngineRealShadowRun.readAttempts.length],
                   ["Successful", researchEngineRealShadowRun.successfulReads],

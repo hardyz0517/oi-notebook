@@ -60,6 +60,22 @@ export type KeylessBingProviderResult = {
       discoveryMethod?: string;
       sourceKind?: string;
     };
+    bridgeDiagnostics?: {
+      parserUsed?: string;
+      matchedSelectors?: string[];
+      parseFailureHint?: string;
+      bodyKind?: string;
+      titlePreview?: string;
+      rawAnchorCount?: number;
+      rawHrefCount?: number;
+      decodedUrlCandidateCount?: number;
+      externalCandidateCount?: number;
+      keptCandidateCount?: number;
+      rejectedCandidateCount?: number;
+      filterReasonPreview?: string;
+      blockedHint?: string;
+      stagePreview?: string;
+    };
     errorKind?: KeylessBingProviderStatus;
   };
 };
@@ -79,6 +95,66 @@ const compact = (value: string | undefined, maxChars: number): string | undefine
 };
 
 const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)));
+
+const diagnosticValue = (value: string | undefined, key: string): string | undefined => {
+  if (!value) return undefined;
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = value.match(new RegExp(`(?:^|[;:\\s])${escapedKey}=([\\s\\S]*?)(?=(?:[;:]\\s*\\w+=)|$)`, "i"));
+  return compact(match?.[1], 240);
+};
+
+const diagnosticNumber = (value: string | undefined, key: string): number | undefined => {
+  const raw = diagnosticValue(value, key);
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const diagnosticList = (value: string | undefined, key: string): string[] | undefined => {
+  const raw = diagnosticValue(value, key);
+  if (!raw || raw === "none") return undefined;
+  const items = raw
+    .split(/[|,]/)
+    .map((item) => compact(item, 80))
+    .filter((item): item is string => Boolean(item));
+  return items.length > 0 ? items.slice(0, 8) : undefined;
+};
+
+const bridgeDiagnosticsFromText = (
+  value: string | undefined,
+): KeylessBingProviderResult["diagnostics"]["bridgeDiagnostics"] | undefined => {
+  const preview = redactSensitivePreview(value, MAX_STAGE_DIAGNOSTICS_PREVIEW_CHARS);
+  if (!preview) return undefined;
+  const parseFailureHint = diagnosticValue(preview, "hint");
+  const bodyKind = diagnosticValue(preview, "kind");
+  const blockedHint = [parseFailureHint, bodyKind]
+    .filter((item): item is string => Boolean(item))
+    .find((item) => /captcha|block|verify/i.test(item));
+  const diagnostics = {
+    parserUsed: diagnosticValue(preview, "parser"),
+    matchedSelectors: diagnosticList(preview, "selectors"),
+    parseFailureHint,
+    bodyKind,
+    titlePreview: diagnosticValue(preview, "title"),
+    rawAnchorCount: diagnosticNumber(preview, "rawAnchors"),
+    rawHrefCount: diagnosticNumber(preview, "rawHrefs"),
+    decodedUrlCandidateCount: diagnosticNumber(preview, "decodedUrls"),
+    externalCandidateCount: diagnosticNumber(preview, "external"),
+    keptCandidateCount: diagnosticNumber(preview, "kept"),
+    rejectedCandidateCount: diagnosticNumber(preview, "rejected"),
+    filterReasonPreview: diagnosticValue(preview, "filterReasons"),
+    blockedHint,
+    stagePreview: preview,
+  };
+  return Object.values(diagnostics).some((item) => Array.isArray(item) ? item.length > 0 : item !== undefined)
+    ? diagnostics
+    : undefined;
+};
+
+const bridgeDiagnosticsFromSources = (
+  sources: WebSearchResult[],
+): KeylessBingProviderResult["diagnostics"]["bridgeDiagnostics"] | undefined =>
+  bridgeDiagnosticsFromText(sources.find((source) => source.searchDiagnostics)?.searchDiagnostics);
 
 const redactSensitivePreview = (value: string | undefined, maxChars: number): string | undefined => {
   const compacted = compact(value, maxChars);
@@ -238,6 +314,7 @@ const baseDiagnostics = (
     stageDiagnosticsPreview?: string[];
     diagnosticsPreview?: string;
     firstResultPreview?: KeylessBingProviderResult["diagnostics"]["firstResultPreview"];
+    bridgeDiagnostics?: KeylessBingProviderResult["diagnostics"]["bridgeDiagnostics"];
     errorKind?: KeylessBingProviderStatus;
   },
 ): KeylessBingProviderResult["diagnostics"] => ({
@@ -261,6 +338,7 @@ const baseDiagnostics = (
   stageDiagnosticsPreview: input.stageDiagnosticsPreview ?? [],
   diagnosticsPreview: input.diagnosticsPreview,
   firstResultPreview: input.firstResultPreview,
+  bridgeDiagnostics: input.bridgeDiagnostics,
   errorKind: input.errorKind,
 });
 
@@ -371,6 +449,7 @@ export const runKeylessBingProvider = async (
     const diagnosticsPreview = diagnosticsPreviewFromSources(sources);
     const stageDiagnosticsPreview = stageDiagnosticsPreviewFromSources(sources);
     const firstResultPreview = firstResultPreviewFromSources(sources);
+    const bridgeDiagnostics = bridgeDiagnosticsFromSources(sources);
     const missingResultCount = sources.length - rawResults.length;
     const warnings = [
       ...(missingResultCount > 0 ? [`missing_required_fields:${missingResultCount}`] : []),
@@ -403,6 +482,7 @@ export const runKeylessBingProvider = async (
         stageDiagnosticsPreview,
         diagnosticsPreview,
         firstResultPreview,
+        bridgeDiagnostics,
         errorKind: rawResults.length > 0 ? undefined : status,
       }),
     };
@@ -410,6 +490,8 @@ export const runKeylessBingProvider = async (
     const message = error instanceof Error ? error.message : String(error);
     const safeMessage = sanitizeLegacyProviderHint(message);
     const status = errorStatusFromMessage(message);
+    const diagnosticsPreview = redactSensitivePreview(safeMessage, MAX_DIAGNOSTICS_PREVIEW_CHARS);
+    const bridgeDiagnostics = bridgeDiagnosticsFromText(safeMessage);
     return {
       ok: false,
       providerName: "bing",
@@ -422,7 +504,9 @@ export const runKeylessBingProvider = async (
         query,
         queryPurpose,
         providerStatus: status,
-        diagnosticsPreview: redactSensitivePreview(safeMessage, MAX_DIAGNOSTICS_PREVIEW_CHARS),
+        stageDiagnosticsPreview: diagnosticsPreview ? [diagnosticsPreview] : [],
+        diagnosticsPreview,
+        bridgeDiagnostics,
         errorKind: status,
       }),
     };
