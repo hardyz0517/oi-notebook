@@ -4746,6 +4746,27 @@ export default function AiSidebar({
     webSearchPrepTokensRef.current.delete(streamId);
   };
 
+  const stopActiveStream = () => {
+    const activeTargets = Array.from(streamTargetsRef.current.entries());
+    if (activeTargets.length === 0) return;
+
+    for (const [streamId, target] of activeTargets) {
+      flushStreamRevealText(streamId);
+      replaceMessage(target.conversationId, target.messageId, (message) => ({
+        ...message,
+        text: message.text.trim().length > 0 ? message.text : "Stopped.",
+        kind: message.kind === "compression-result" ? "text" : message.kind,
+        state: "done",
+        webSearchStatus: message.webSearchStatus ? "done" : undefined,
+        webSearchStatusText: undefined,
+        ...finishAssistantTiming(message),
+      }));
+      clearStreamRuntime(streamId);
+    }
+
+    updateRespondingState();
+  };
+
   const createNewConversation = () => {
     if (viewMode === "conversations") {
       setIsAllConversationsOpen(false);
@@ -7577,8 +7598,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                             className={cn(
                               "notex-command-item ai-command-item flex h-10 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1 text-left transition-[background-color,color,opacity]",
                               isDisabled
-                                ? "cursor-default"
-                                : "text-foreground hover:bg-accent/18 hover:text-foreground dark:hover:bg-white/[0.04]",
+                                ? "cursor-not-allowed"
+                                : "cursor-pointer text-foreground hover:bg-accent/18 hover:text-foreground dark:hover:bg-white/[0.04]",
                               isActive && !isDisabled
                                 ? "bg-accent/28 text-foreground dark:bg-white/[0.06]"
                                 : isActive
@@ -7657,7 +7678,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 ref={modelPickerTriggerRef}
                 type="button"
                 className={cn(
-                  "notex-model-trigger notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "notex-model-trigger notex-composer-control inline-flex min-w-[3.25rem] max-w-[7.5rem] flex-[1_1_6rem] cursor-pointer items-center gap-1 overflow-hidden text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                   isModelPickerOpen && "notex-composer-control-active",
                 )}
                 onClick={() => {
@@ -7677,7 +7698,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={includeCurrentNoteContext}
                 className={cn(
-                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 cursor-pointer items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
                   includeCurrentNoteContext && "notex-composer-control-active",
                 )}
                 onClick={() => setIncludeCurrentNoteContext((enabled) => !enabled)}
@@ -7704,7 +7725,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 role="switch"
                 aria-checked={webSearchEnabled}
                 className={cn(
-                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
+                  "notex-tool-pill notex-composer-control notex-composer-switch inline-flex shrink-0 cursor-pointer items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-[420px]:gap-1",
                   webSearchEnabled && "notex-composer-control-active",
                 )}
                 onClick={handleWebSearchToggle}
@@ -7724,7 +7745,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       </span>
                       <button
                         type="button"
-                        className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                         onClick={() => {
                           setIsModelPickerOpen(false);
                           onOpenAiSettings();
@@ -7751,9 +7772,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           return (
                             <button
                               key={model.id}
-                              type="button"
-                              className={cn(
-                                "grid min-w-0 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                            type="button"
+                            className={cn(
+                              "grid min-w-0 cursor-pointer rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
                                 isSelected && "bg-accent text-accent-foreground",
                               )}
                               onClick={() => selectConversationModel(model)}
@@ -7771,7 +7792,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         <div>{activeProvider ? "当前配置组没有可用模型" : "未选择配置组"}</div>
                         <button
                           type="button"
-                          className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                          className="mx-auto inline-flex h-7 cursor-pointer items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
                           onClick={() => {
                             setIsModelPickerOpen(false);
                             onOpenAiSettings();
@@ -7787,13 +7808,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             </div>
             <button
               type="button"
-              className="notex-composer-send ai-composer-send inline-flex shrink-0 items-center justify-center transition-[background-color,color,opacity]"
-              onClick={submitInput}
-              disabled={inputUiState.isEmpty || isResponding}
-              title={isResponding ? "Thinking" : "Send"}
-              aria-label={isResponding ? "Thinking" : "Send"}
+              className={cn(
+                "notex-composer-send ai-composer-send inline-flex shrink-0 items-center justify-center transition-[background-color,color,opacity]",
+                isResponding || !inputUiState.isEmpty ? "cursor-pointer" : "cursor-default disabled:cursor-default",
+              )}
+              onClick={isResponding ? stopActiveStream : submitInput}
+              disabled={!isResponding && inputUiState.isEmpty}
+              title={isResponding ? "停止生成" : "Send"}
+              aria-label={isResponding ? "停止生成" : "Send"}
             >
-              {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+              {isResponding ? <span className="h-2.5 w-2.5 rounded-[2px] bg-[var(--notex-send-fg)]" aria-hidden="true" /> : <ArrowUp className="h-4 w-4" />}
             </button>
           </div>
           {isModelPickerOpen && (
@@ -7808,7 +7832,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   </span>
                   <button
                     type="button"
-                    className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                     onClick={() => {
                       setIsModelPickerOpen(false);
                       onOpenAiSettings();
@@ -7837,7 +7861,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                           key={model.id}
                           type="button"
                           className={cn(
-                            "notex-model-menu-item flex min-w-0 items-center rounded-md text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                            "notex-model-menu-item flex min-w-0 cursor-pointer items-center rounded-md text-left transition-colors hover:bg-accent hover:text-accent-foreground",
                             isSelected && "is-selected",
                           )}
                           data-selected={isSelected ? "true" : undefined}
@@ -7859,7 +7883,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                     <div>{activeProvider ? "当前配置组没有可用模型" : "未选择配置组"}</div>
                     <button
                       type="button"
-                      className="mx-auto inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
+                      className="mx-auto inline-flex h-7 cursor-pointer items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-accent"
                       onClick={() => {
                         setIsModelPickerOpen(false);
                         onOpenAiSettings();
