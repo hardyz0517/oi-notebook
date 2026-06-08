@@ -67,6 +67,19 @@ export type KeylessBingProviderResult = {
     targetDistinctHosts: number;
     hostDiversityShortfall: number;
     queryCount: number;
+    providerGlobalTimeoutMs: number;
+    perQueryTimeoutMs: number;
+    completedQueryCount: number;
+    failedQueryCount: number;
+    timedOutQueryCount: number;
+    partialResultsUsed: boolean;
+    timedOutQueries: string[];
+    failedQueries: string[];
+    earlyStop: boolean;
+    earlyStopReason?: string;
+    distinctHostCountAtStop: number;
+    candidateCountAtStop: number;
+    perQueryElapsedMs: Record<string, number>;
     perQueryResultCount: Record<string, number>;
     perQueryHostPreview: Record<string, string[]>;
     queryPurpose: QueryPurpose;
@@ -123,6 +136,31 @@ const RAW_HTML_REDACTED_PREVIEW = "[redacted raw html preview]";
 const MAX_ENTITY_NEWS_BRIDGE_QUERIES = 4;
 const MAX_BROAD_NEWS_BRIDGE_QUERIES = 6;
 const MAX_QUALITY_PREVIEW = 8;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 8_000;
+const ENTITY_NEWS_PROVIDER_TIMEOUT_MS = 20_000;
+const BROAD_NEWS_PROVIDER_TIMEOUT_MS = 26_000;
+const NEWS_PER_QUERY_TIMEOUT_MS = 7_000;
+
+type KeylessBingQueryExecutionResult = {
+  sources: WebSearchResult[];
+  warnings: string[];
+  errors: string[];
+  providerGlobalTimeoutMs: number;
+  perQueryTimeoutMs: number;
+  completedQueryCount: number;
+  failedQueryCount: number;
+  timedOutQueryCount: number;
+  partialResultsUsed: boolean;
+  timedOutQueries: string[];
+  failedQueries: string[];
+  earlyStop: boolean;
+  earlyStopReason?: string;
+  distinctHostCountAtStop: number;
+  candidateCountAtStop: number;
+  perQueryElapsedMs: Record<string, number>;
+  perQueryResultCount: Record<string, number>;
+  perQueryHostPreview: Record<string, string[]>;
+};
 
 const elapsedMsSince = (startedAt: number): number => Math.max(0, Math.round(performance.now() - startedAt));
 
@@ -618,26 +656,6 @@ const firstResultPreviewFromSources = (
   };
 };
 
-const queryKeyForSource = (source: WebSearchResult): string =>
-  diagnosticValue(source.searchDiagnostics, "query") ?? "combined";
-
-const perQueryResultCountFor = (sources: WebSearchResult[]): Record<string, number> =>
-  sources.reduce((acc, source) => {
-    const key = queryKeyForSource(source);
-    return { ...acc, [key]: (acc[key] ?? 0) + 1 };
-  }, {} as Record<string, number>);
-
-const perQueryHostPreviewFor = (sources: WebSearchResult[]): Record<string, string[]> => {
-  const grouped: Record<string, string[]> = {};
-  for (const source of sources) {
-    const key = queryKeyForSource(source);
-    const host = hostFromSource(source);
-    if (!host) continue;
-    grouped[key] = unique([...(grouped[key] ?? []), host]).slice(0, 6);
-  }
-  return grouped;
-};
-
 const baseDiagnostics = (
   input: {
     query: string;
@@ -655,6 +673,19 @@ const baseDiagnostics = (
     rawHostDistribution?: Record<string, number>;
     normalizedHostDistribution?: Record<string, number>;
     targetDistinctHosts?: number;
+    providerGlobalTimeoutMs?: number;
+    perQueryTimeoutMs?: number;
+    completedQueryCount?: number;
+    failedQueryCount?: number;
+    timedOutQueryCount?: number;
+    partialResultsUsed?: boolean;
+    timedOutQueries?: string[];
+    failedQueries?: string[];
+    earlyStop?: boolean;
+    earlyStopReason?: string;
+    distinctHostCountAtStop?: number;
+    candidateCountAtStop?: number;
+    perQueryElapsedMs?: Record<string, number>;
     perQueryResultCount?: Record<string, number>;
     perQueryHostPreview?: Record<string, string[]>;
     queryPurpose: QueryPurpose;
@@ -700,6 +731,19 @@ const baseDiagnostics = (
   targetDistinctHosts: input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0),
   hostDiversityShortfall: Math.max(0, (input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0)) - Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length),
   queryCount: input.bridgeQueries?.length ?? (input.query ? 1 : 0),
+  providerGlobalTimeoutMs: input.providerGlobalTimeoutMs ?? 8_000,
+  perQueryTimeoutMs: input.perQueryTimeoutMs ?? input.providerGlobalTimeoutMs ?? 8_000,
+  completedQueryCount: input.completedQueryCount ?? 0,
+  failedQueryCount: input.failedQueryCount ?? 0,
+  timedOutQueryCount: input.timedOutQueryCount ?? 0,
+  partialResultsUsed: input.partialResultsUsed ?? false,
+  timedOutQueries: input.timedOutQueries ?? [],
+  failedQueries: input.failedQueries ?? [],
+  earlyStop: input.earlyStop ?? false,
+  earlyStopReason: input.earlyStopReason,
+  distinctHostCountAtStop: input.distinctHostCountAtStop ?? 0,
+  candidateCountAtStop: input.candidateCountAtStop ?? 0,
+  perQueryElapsedMs: input.perQueryElapsedMs ?? {},
   perQueryResultCount: input.perQueryResultCount ?? {},
   perQueryHostPreview: input.perQueryHostPreview ?? {},
   queryPurpose: input.queryPurpose,
@@ -726,6 +770,236 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<
   } finally {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId);
   }
+};
+
+const isTimeoutMessage = (message: string): boolean =>
+  /timeout|timed out|超时/i.test(message);
+
+const isNewsDiscoveryMode = (
+  queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
+  bridgeQueries: string[],
+): boolean =>
+  queryPurpose === "news" ||
+  newsQueryMode === "broad_news_digest" ||
+  bridgeQueries.some(queryContainsReadableNewsSignal);
+
+const providerGlobalTimeoutFor = (
+  timeoutMs: number | undefined,
+  queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
+  bridgeQueries: string[],
+): number => {
+  if (!isNewsDiscoveryMode(queryPurpose, newsQueryMode, bridgeQueries)) return timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+  const newsDefault = newsQueryMode === "broad_news_digest"
+    ? BROAD_NEWS_PROVIDER_TIMEOUT_MS
+    : ENTITY_NEWS_PROVIDER_TIMEOUT_MS;
+  return Math.max(timeoutMs ?? 0, newsDefault);
+};
+
+const perQueryTimeoutFor = (
+  queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
+  bridgeQueries: string[],
+): number =>
+  isNewsDiscoveryMode(queryPurpose, newsQueryMode, bridgeQueries)
+    ? NEWS_PER_QUERY_TIMEOUT_MS
+    : DEFAULT_PROVIDER_TIMEOUT_MS;
+
+const sourceKey = (source: WebSearchResult): string =>
+  `${source.finalUrl ?? source.resolvedUrl ?? source.url ?? ""}::${source.title ?? ""}`.toLocaleLowerCase();
+
+const hostsFromSources = (sources: WebSearchResult[]): string[] =>
+  sources.map((source) => hostFromSource(source)).filter((host): host is string => Boolean(host));
+
+const uniqueSources = (sources: WebSearchResult[]): WebSearchResult[] => {
+  const seen = new Set<string>();
+  const output: WebSearchResult[] = [];
+  for (const source of sources) {
+    const key = sourceKey(source);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(source);
+  }
+  return output;
+};
+
+const earlyStopCheck = (
+  sources: WebSearchResult[],
+  queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
+): { stop: boolean; reason?: string; candidateCount: number; distinctHostCount: number } => {
+  const rankedSources = rankSourcesForPurpose(sources, queryPurpose, newsQueryMode);
+  const candidateCount = rankedSources.length;
+  const distinctHostCount = Object.keys(distribution(rankedSources.map(({ source }) => hostFromSource(source)))).length;
+  if (newsQueryMode === "broad_news_digest") {
+    if (distinctHostCount >= 10) return { stop: true, reason: "target_distinct_hosts_reached", candidateCount, distinctHostCount };
+    if (candidateCount >= 24 && distinctHostCount >= 8) return { stop: true, reason: "candidate_and_host_floor_reached", candidateCount, distinctHostCount };
+    return { stop: false, candidateCount, distinctHostCount };
+  }
+  if (queryPurpose === "news" || newsQueryMode === "entity_news") {
+    if (distinctHostCount >= 8) return { stop: true, reason: "target_distinct_hosts_reached", candidateCount, distinctHostCount };
+    if (candidateCount >= 16 && distinctHostCount >= 6) return { stop: true, reason: "candidate_and_host_floor_reached", candidateCount, distinctHostCount };
+  }
+  return { stop: false, candidateCount, distinctHostCount };
+};
+
+const runSingleBridgeQuery = async (
+  input: {
+    rawUserQuery: string;
+    bridgeQuery: string;
+    queryPurpose: QueryPurpose;
+    newsQueryMode: NewsQueryMode;
+    maxResults: number;
+    timeoutMs: number;
+  },
+): Promise<WebSearchResult[]> => {
+  const result = await withTimeout(searchWebSources({
+    provider: "bing",
+    rawUserQuery: input.rawUserQuery,
+    queries: [input.bridgeQuery],
+    intent: "general_web",
+    vertical: verticalForProviderRequest(input.queryPurpose, input.newsQueryMode),
+    freshness: freshnessForProviderRequest(input.queryPurpose, input.newsQueryMode),
+    maxResults: input.maxResults,
+  }), input.timeoutMs);
+  if (!Array.isArray(result)) {
+    throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
+  }
+  return result;
+};
+
+const runBridgeQueries = async (
+  input: {
+    query: string;
+    rawUserQuery: string;
+    bridgeQueries: string[];
+    queryPurpose: QueryPurpose;
+    newsQueryMode: NewsQueryMode;
+    maxResults: number;
+    providerGlobalTimeoutMs: number;
+    perQueryTimeoutMs: number;
+  },
+): Promise<KeylessBingQueryExecutionResult> => {
+  const startedAt = performance.now();
+  const newsMode = isNewsDiscoveryMode(input.queryPurpose, input.newsQueryMode, input.bridgeQueries);
+  if (!newsMode) {
+    const sources = await withTimeout(searchWebSources({
+      provider: "bing",
+      rawUserQuery: input.rawUserQuery,
+      queries: input.bridgeQueries,
+      intent: "general_web",
+      vertical: verticalForProviderRequest(input.queryPurpose, input.newsQueryMode),
+      freshness: freshnessForProviderRequest(input.queryPurpose, input.newsQueryMode),
+      maxResults: input.maxResults,
+    }), input.providerGlobalTimeoutMs);
+    if (!Array.isArray(sources)) {
+      throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
+    }
+    return {
+      sources,
+      warnings: [],
+      errors: [],
+      providerGlobalTimeoutMs: input.providerGlobalTimeoutMs,
+      perQueryTimeoutMs: input.providerGlobalTimeoutMs,
+      completedQueryCount: 1,
+      failedQueryCount: 0,
+      timedOutQueryCount: 0,
+      partialResultsUsed: false,
+      timedOutQueries: [],
+      failedQueries: [],
+      earlyStop: false,
+      distinctHostCountAtStop: Object.keys(distribution(hostsFromSources(sources))).length,
+      candidateCountAtStop: sources.length,
+      perQueryElapsedMs: { [input.query]: elapsedMsSince(startedAt) },
+      perQueryResultCount: { [input.query]: sources.length },
+      perQueryHostPreview: { [input.query]: unique(hostsFromSources(sources)).slice(0, 6) },
+    };
+  }
+
+  const sources: WebSearchResult[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const timedOutQueries: string[] = [];
+  const failedQueries: string[] = [];
+  const perQueryElapsedMs: Record<string, number> = {};
+  const perQueryResultCount: Record<string, number> = {};
+  const perQueryHostPreview: Record<string, string[]> = {};
+  let completedQueryCount = 0;
+  let earlyStop = false;
+  let earlyStopReason: string | undefined;
+  let distinctHostCountAtStop = 0;
+  let candidateCountAtStop = 0;
+
+  for (const bridgeQuery of input.bridgeQueries) {
+    const elapsed = elapsedMsSince(startedAt);
+    const remainingMs = input.providerGlobalTimeoutMs - elapsed;
+    if (remainingMs <= 0) {
+      timedOutQueries.push(bridgeQuery);
+      warnings.push(`provider_global_timeout_before_query:${bridgeQuery}`);
+      continue;
+    }
+    const queryStartedAt = performance.now();
+    try {
+      const querySources = await runSingleBridgeQuery({
+        rawUserQuery: input.rawUserQuery,
+        bridgeQuery,
+        queryPurpose: input.queryPurpose,
+        newsQueryMode: input.newsQueryMode,
+        maxResults: input.maxResults,
+        timeoutMs: Math.max(1, Math.min(input.perQueryTimeoutMs, remainingMs)),
+      });
+      completedQueryCount += 1;
+      sources.push(...querySources);
+      perQueryElapsedMs[bridgeQuery] = elapsedMsSince(queryStartedAt);
+      perQueryResultCount[bridgeQuery] = querySources.length;
+      perQueryHostPreview[bridgeQuery] = unique(hostsFromSources(querySources)).slice(0, 6);
+      const stopCheck = earlyStopCheck(uniqueSources(sources), input.queryPurpose, input.newsQueryMode);
+      distinctHostCountAtStop = stopCheck.distinctHostCount;
+      candidateCountAtStop = stopCheck.candidateCount;
+      if (stopCheck.stop) {
+        earlyStop = true;
+        earlyStopReason = stopCheck.reason;
+        break;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      perQueryElapsedMs[bridgeQuery] = elapsedMsSince(queryStartedAt);
+      perQueryResultCount[bridgeQuery] = 0;
+      perQueryHostPreview[bridgeQuery] = [];
+      if (isTimeoutMessage(message)) {
+        timedOutQueries.push(bridgeQuery);
+        warnings.push(`timed_out_query:${bridgeQuery}`);
+      } else {
+        failedQueries.push(bridgeQuery);
+        warnings.push(`failed_query:${bridgeQuery}`);
+        errors.push(redactSensitivePreview(message, MAX_ERROR_PREVIEW_CHARS) ?? "failed_query");
+      }
+    }
+  }
+
+  const dedupedSources = uniqueSources(sources);
+  const finalStopCheck = earlyStopCheck(dedupedSources, input.queryPurpose, input.newsQueryMode);
+  return {
+    sources: dedupedSources,
+    warnings,
+    errors: dedupedSources.length > 0 ? [] : errors,
+    providerGlobalTimeoutMs: input.providerGlobalTimeoutMs,
+    perQueryTimeoutMs: input.perQueryTimeoutMs,
+    completedQueryCount,
+    failedQueryCount: failedQueries.length,
+    timedOutQueryCount: timedOutQueries.length,
+    partialResultsUsed: dedupedSources.length > 0 && (timedOutQueries.length > 0 || failedQueries.length > 0),
+    timedOutQueries,
+    failedQueries,
+    earlyStop,
+    earlyStopReason,
+    distinctHostCountAtStop: earlyStop ? distinctHostCountAtStop : finalStopCheck.distinctHostCount,
+    candidateCountAtStop: earlyStop ? candidateCountAtStop : finalStopCheck.candidateCount,
+    perQueryElapsedMs,
+    perQueryResultCount,
+    perQueryHostPreview,
+  };
 };
 
 const rawResultFromWebSource = (
@@ -783,6 +1057,8 @@ export const runKeylessBingProvider = async (
   const queryPurpose = options.queryPurpose ?? "recall";
   const newsQueryMode = detectNewsQueryMode(options);
   const bridgeQueries = chooseBridgeQueries(options, queryPurpose, newsQueryMode);
+  const providerGlobalTimeoutMs = providerGlobalTimeoutFor(options.timeoutMs, queryPurpose, newsQueryMode, bridgeQueries);
+  const perQueryTimeoutMs = perQueryTimeoutFor(queryPurpose, newsQueryMode, bridgeQueries);
   if (!query) {
     return {
       ok: false,
@@ -800,6 +1076,8 @@ export const runKeylessBingProvider = async (
           newsQueryUsed: false,
           newsQueryMode,
           broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
+          providerGlobalTimeoutMs,
+          perQueryTimeoutMs,
           queryPurpose,
           providerStatus: "empty_result",
           errorKind: "empty_result",
@@ -814,19 +1092,17 @@ export const runKeylessBingProvider = async (
     if (typeof window === "undefined") {
       throw new Error("tauri_bridge_unavailable: Keyless Bing provider requires the Tauri webview runtime.");
     }
-    const sourceResult = await withTimeout(searchWebSources({
-      provider: "bing",
+    const execution = await runBridgeQueries({
+      query,
       rawUserQuery: options.rawUserQuery ?? query,
-      queries: bridgeQueries,
-      intent: "general_web",
-      vertical: verticalForProviderRequest(queryPurpose, newsQueryMode),
-      freshness: freshnessForProviderRequest(queryPurpose, newsQueryMode),
+      bridgeQueries,
+      queryPurpose,
+      newsQueryMode,
       maxResults: Math.max(1, Math.min(options.maxResults ?? 8, newsQueryMode === "broad_news_digest" ? 24 : queryPurpose === "news" ? 16 : 10)),
-    }), options.timeoutMs ?? 8_000);
-    if (!Array.isArray(sourceResult)) {
-      throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
-    }
-    const sources = sourceResult;
+      providerGlobalTimeoutMs,
+      perQueryTimeoutMs,
+    });
+    const sources = execution.sources;
     const rankedSources = rankSourcesForPurpose(sources, queryPurpose, newsQueryMode);
     const rawResults = rankedSources
       .map(({ source, quality }, index) => rawResultFromWebSource(source, index, {
@@ -850,14 +1126,19 @@ export const runKeylessBingProvider = async (
     const newsQueryUsed = bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news";
     const missingResultCount = sources.length - rawResults.length;
     const warnings = [
+      ...execution.warnings,
       ...(missingResultCount > 0 ? [`missing_required_fields:${missingResultCount}`] : []),
+      ...(execution.partialResultsUsed ? ["partial_results_used"] : []),
+      ...(execution.earlyStop ? [`early_stop:${execution.earlyStopReason ?? "target_reached"}`] : []),
       "keyless_bing_uses_existing_tauri_public_search_bridge",
     ];
     const status = rawResults.length > 0
       ? (warnings.length > 1 ? "partial" : "available")
       : sources.length > 0
         ? "parse_failed"
-        : "empty_result";
+        : execution.timedOutQueryCount > 0 && execution.completedQueryCount === 0
+          ? "timeout"
+          : "empty_result";
     return {
       ok: rawResults.length > 0,
       providerName: "bing",
@@ -865,9 +1146,11 @@ export const runKeylessBingProvider = async (
       rawResults,
       warnings,
       errors: rawResults.length > 0 ? [] : [
-        sources.length > 0
+        execution.timedOutQueryCount > 0 && execution.completedQueryCount === 0
+          ? `Keyless Bing provider timed out before any query returned usable candidates. timedOutQueries=${execution.timedOutQueries.join(" | ")}`
+          : sources.length > 0
           ? `Keyless Bing provider returned ${sources.length} raw bridge results, but none had the required title/url fields after normalization.`
-          : "Keyless Bing provider returned no raw bridge results.",
+          : execution.errors[0] ?? "Keyless Bing provider returned no raw bridge results.",
       ],
       elapsedMs: elapsedMsSince(startedAt),
       diagnostics: baseDiagnostics({
@@ -882,8 +1165,21 @@ export const runKeylessBingProvider = async (
         rawHostDistribution,
         normalizedHostDistribution: candidateHostDistribution,
         targetDistinctHosts,
-        perQueryResultCount: perQueryResultCountFor(sources),
-        perQueryHostPreview: perQueryHostPreviewFor(sources),
+        providerGlobalTimeoutMs: execution.providerGlobalTimeoutMs,
+        perQueryTimeoutMs: execution.perQueryTimeoutMs,
+        completedQueryCount: execution.completedQueryCount,
+        failedQueryCount: execution.failedQueryCount,
+        timedOutQueryCount: execution.timedOutQueryCount,
+        partialResultsUsed: execution.partialResultsUsed,
+        timedOutQueries: execution.timedOutQueries,
+        failedQueries: execution.failedQueries,
+        earlyStop: execution.earlyStop,
+        earlyStopReason: execution.earlyStopReason,
+        distinctHostCountAtStop: execution.distinctHostCountAtStop,
+        candidateCountAtStop: execution.candidateCountAtStop,
+        perQueryElapsedMs: execution.perQueryElapsedMs,
+        perQueryResultCount: execution.perQueryResultCount,
+        perQueryHostPreview: execution.perQueryHostPreview,
         hostDiversityApplied: queryPurpose === "news" || newsQueryMode === "broad_news_digest",
         ...rejectionStats,
         queryPurpose,
@@ -920,6 +1216,8 @@ export const runKeylessBingProvider = async (
         newsQueryUsed: bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news",
         newsQueryMode,
         broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
+        providerGlobalTimeoutMs,
+        perQueryTimeoutMs,
         queryPurpose,
         providerStatus: status,
         stageDiagnosticsPreview: diagnosticsPreview ? [diagnosticsPreview] : [],
