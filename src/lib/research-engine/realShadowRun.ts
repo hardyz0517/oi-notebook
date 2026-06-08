@@ -4,11 +4,13 @@ import { buildCandidatePool } from "./candidatePool";
 import { buildEvidencePacket } from "./evidencePacket";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
 import { runKeylessBingProvider } from "./keylessBingProvider";
+import { evaluateNewsEvidenceGate } from "./newsEvidenceGate";
 import { normalizeRealProviderPayload } from "./providerResponseNormalizer";
 import { buildQueryPlan } from "./queryPlanner";
 import { runBrowserProviderSmokeRequest, type BrowserProviderRedactedRequest } from "./browserProviderTransport";
 import { runResearchEngineRealUrlReaderSmoke, type ResearchEngineRealUrlReaderSmokeResult } from "./realUrlReaderSmoke";
 import { buildSearchPolicyDecision } from "./searchPolicy";
+import { buildSourcePortfolio, canonicalizePortfolioHost, type SourcePortfolioQueryMode } from "./sourcePortfolio";
 import type { AnswerMode, EvidenceItemBuildInput, EvidenceSummary } from "./evidenceTypes";
 import type { ExcerptBuildResult, ExcerptWarning, ExtractedDocument, ReaderQualityEvaluation, UrlReaderResult, UrlReaderStatus } from "./readerTypes";
 import type { RealDiscoveryProviderName, RealDiscoveryTransportError, RealProviderPayloadKind } from "./realProviderTypes";
@@ -39,7 +41,7 @@ export type ResearchEngineRealShadowRunOptions = {
 };
 
 export type ResearchEngineRealShadowRunStage = {
-  stage: "provider" | "normalize" | "candidate_pool" | "reader" | "evidence" | "contract" | "abort";
+  stage: "provider" | "normalize" | "candidate_pool" | "source_portfolio" | "reader" | "evidence" | "contract" | "abort";
   status: "completed" | "partial" | "failed" | "skipped" | "aborted";
   message: string;
   elapsedMs?: number;
@@ -57,6 +59,8 @@ export type ResearchEngineRealShadowRunCandidate = {
 export type ResearchEngineRealShadowRunReadAttempt = {
   candidate: ResearchEngineRealShadowRunCandidate;
   status: ResearchEngineRealUrlReaderSmokeResult["status"] | "skipped" | "aborted";
+  whyRead?: string;
+  whySkipped?: string;
   httpStatus?: number;
   contentType?: string;
   readerTransport?: string;
@@ -71,7 +75,7 @@ export type ResearchEngineRealShadowRunResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "tauri_bridge_unavailable" | "malformed_response" | "parse_failed" | "empty_result" | "invalid_response" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "no_candidate_url" | "all_reader_failed" | "backend_reader_network_error" | "cors_or_reader_network_error" | "unknown_error" | "aborted";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "tauri_bridge_unavailable" | "malformed_response" | "parse_failed" | "empty_result" | "invalid_response" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "no_candidate_url" | "all_reader_failed" | "backend_reader_network_error" | "cors_or_reader_network_error" | "source_diversity_failed" | "insufficient_evidence" | "unknown_error" | "aborted";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -91,12 +95,14 @@ export type ResearchEngineRealShadowRunResult = {
 const DEFAULT_QUERY = "OpenAI latest news";
 const DEFAULT_PROVIDER_TIMEOUT_MS = 8_000;
 const DEFAULT_READER_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_CANDIDATES = 8;
+const DEFAULT_MAX_CANDIDATES = 24;
 const DEFAULT_READ_TOP_N = 2;
 const MAX_READ_TOP_N = 3;
-const DEFAULT_NEWS_MAX_READ_ATTEMPTS = 4;
-const DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS = 6;
-const MAX_READ_ATTEMPTS = 6;
+const DEFAULT_NEWS_EVIDENCE_TARGET = 4;
+const DEFAULT_BROAD_NEWS_EVIDENCE_TARGET = 5;
+const DEFAULT_NEWS_MAX_READ_ATTEMPTS = 10;
+const DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS = 12;
+const MAX_READ_ATTEMPTS = 12;
 const NEWS_PER_HOST_EVIDENCE_LIMIT = 1;
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const EXCERPT_PREVIEW_MAX_CHARS = 1200;
@@ -229,8 +235,12 @@ const providerStatusFromReaderFailures = (
 const clampReadTopN = (value: number | undefined): number =>
   Math.max(1, Math.min(value ?? DEFAULT_READ_TOP_N, MAX_READ_TOP_N));
 
-const clampMaxCandidates = (value: number | undefined): number =>
-  Math.max(1, Math.min(value ?? DEFAULT_MAX_CANDIDATES, 10));
+const clampMaxCandidates = (value: number | undefined, newsMode = false, broadNewsDigest = false): number => {
+  const defaultValue = broadNewsDigest ? 24 : newsMode ? 16 : DEFAULT_MAX_CANDIDATES;
+  const requested = value ?? defaultValue;
+  const minimum = broadNewsDigest ? 24 : newsMode ? 16 : 1;
+  return Math.max(minimum, Math.min(requested, broadNewsDigest ? 24 : newsMode ? 16 : DEFAULT_MAX_CANDIDATES));
+};
 
 const clampMaxReadAttempts = (
   value: number | undefined,
@@ -242,16 +252,34 @@ const clampMaxReadAttempts = (
   return Math.max(readTopN, Math.min(value ?? defaultValue, MAX_READ_ATTEMPTS));
 };
 
+const evidenceTargetFor = (readTopN: number, newsMode: boolean, broadNewsDigest: boolean): number =>
+  broadNewsDigest ? DEFAULT_BROAD_NEWS_EVIDENCE_TARGET : newsMode ? DEFAULT_NEWS_EVIDENCE_TARGET : readTopN;
+
+const sourcePortfolioQueryModeFor = (newsMode: boolean, broadNewsDigest: boolean): SourcePortfolioQueryMode =>
+  broadNewsDigest ? "broad_news_digest" : newsMode ? "entity_news" : "normal";
+
 const isBroadNewsDigestQuery = (query: string): boolean =>
   /\b(world news|international news|global news|major world events|world events|what happened in the world)\b/i.test(query) ||
   /\u56fd\u9645(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u4e16\u754c(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u5168\u7403\u8981\u95fb|\u56fd\u9645\u70ed\u70b9|\u4e16\u754c.*\u53d1\u751f/.test(query);
 
 const hostCount = (items: EvidenceItemBuildInput[]): Record<string, number> =>
   items.reduce((acc, item) => {
-    const host = item.candidate?.host;
+    const host = canonicalizePortfolioHost(item.candidate?.host);
     if (!host) return acc;
     return { ...acc, [host]: (acc[host] ?? 0) + 1 };
   }, {} as Record<string, number>);
+
+const evidenceHostCount = (items: EvidenceItemBuildInput[]): number => Object.keys(hostCount(items)).length;
+
+const shouldStopReadingNews = (
+  evidenceItems: EvidenceItemBuildInput[],
+  queryMode: SourcePortfolioQueryMode,
+  evidenceTarget: number,
+): boolean => {
+  if (queryMode === "normal") return evidenceItems.length >= evidenceTarget;
+  const hostTarget = queryMode === "broad_news_digest" ? 4 : 3;
+  return evidenceItems.length >= evidenceTarget && evidenceHostCount(evidenceItems) >= hostTarget;
+};
 
 const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowRunCandidate => ({
   id: candidate.id,
@@ -446,6 +474,11 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
     `- candidateCount: ${result.candidateCount}`,
     `- selectedCandidates: ${result.selectedCandidates.length}`,
     `- readAttempts: ${result.readAttempts.length}`,
+    `- sourcePortfolioEnabled: ${result.diagnosticsSnapshot.sourcePortfolioEnabled ?? "false"}`,
+    `- targetDistinctHosts: ${result.diagnosticsSnapshot.targetDistinctHosts ?? "none"}`,
+    `- usableEvidenceHostCount: ${result.diagnosticsSnapshot.usableEvidenceHostCount ?? "none"}`,
+    `- evidenceGateStatus: ${result.diagnosticsSnapshot.evidenceGateStatus ?? "none"}`,
+    `- evidenceGateReason: ${result.diagnosticsSnapshot.evidenceGateReason ?? "none"}`,
     `- successfulReads: ${result.successfulReads}`,
     `- failedReads: ${result.failedReads}`,
     `- answerContractMode: ${result.answerContractMode ?? "none"}`,
@@ -517,7 +550,6 @@ export const runResearchEngineRealShadowRun = async (
 ): Promise<ResearchEngineRealShadowRunResult> => {
   const query = options.query.trim() || DEFAULT_QUERY;
   const readTopN = clampReadTopN(options.readTopN);
-  const maxCandidates = clampMaxCandidates(options.maxCandidates);
   const requestedProvider = options.providerName ?? (options.webSearchConfig?.provider as RealDiscoveryProviderName | undefined) ?? "none";
   const timeline: ResearchEngineRealShadowRunStage[] = [];
   const warnings: string[] = [];
@@ -582,7 +614,7 @@ export const runResearchEngineRealShadowRun = async (
         noteConversationTouched: false,
         realProviderConfigured: false,
         readTopN,
-        maxCandidates,
+        maxCandidates: clampMaxCandidates(options.maxCandidates),
       },
     });
   }
@@ -590,8 +622,11 @@ export const runResearchEngineRealShadowRun = async (
   const { request, policy, queryPlan } = makeRequestContext(query);
   const broadNewsDigest = isBroadNewsDigestQuery(query);
   const newsMode = policy.mode === "news_recent";
-  const hostDiversityApplied = newsMode;
+  const maxCandidates = clampMaxCandidates(options.maxCandidates, newsMode, broadNewsDigest);
+  const hostDiversityApplied = newsMode || broadNewsDigest;
   const maxReadAttempts = clampMaxReadAttempts(options.maxReadAttempts, readTopN, newsMode, broadNewsDigest);
+  const evidenceTarget = evidenceTargetFor(readTopN, newsMode, broadNewsDigest);
+  const sourcePortfolioQueryMode = sourcePortfolioQueryModeFor(newsMode, broadNewsDigest);
   const plannedQuery = queryPlan.queries[0] ?? {
     query,
     language: policy.locale,
@@ -803,8 +838,22 @@ export const runResearchEngineRealShadowRun = async (
       },
     },
   });
-  const selectedCandidates = candidatePool.selectedCandidates.map(candidateSummary);
+  const portfolioStartedAt = performance.now();
+  const sourcePortfolio = buildSourcePortfolio(candidatePool.selectedCandidates, {
+    queryMode: sourcePortfolioQueryMode,
+    plannedQueries: queryPlan.queries.map((item) => item.query),
+    maxCandidateCount: maxCandidates,
+  });
+  const selectedCandidates = (hostDiversityApplied ? sourcePortfolio.portfolioCandidates : candidatePool.selectedCandidates).map(candidateSummary);
   mark("candidate_pool", candidatePool.selectedCount > 0 ? "completed" : "failed", `${candidatePool.selectedCount} selected candidates`, candidateStartedAt);
+  mark(
+    "source_portfolio",
+    hostDiversityApplied ? sourcePortfolio.readQueue.length > 0 ? "completed" : "failed" : "skipped",
+    hostDiversityApplied
+      ? `${sourcePortfolio.selectedHostCount} hosts in source portfolio; readQueue=${sourcePortfolio.readQueue.length}`
+      : "Source portfolio is not required for non-news query.",
+    portfolioStartedAt,
+  );
 
   if (selectedCandidates.length === 0) {
     return finalize({
@@ -834,7 +883,10 @@ export const runResearchEngineRealShadowRun = async (
         providerNormalizedResultCount: providerNormalizedResultCount || candidatePool.normalizedCount,
         providerDroppedResultCount,
         readTopN,
+        evidenceTarget,
+        maxReadAttempts,
         maxCandidates,
+        ...sourcePortfolio.diagnostics,
         candidatePool: {
           rawCount: candidatePool.rawCount,
           normalizedCount: candidatePool.normalizedCount,
@@ -851,13 +903,14 @@ export const runResearchEngineRealShadowRun = async (
   const readAttempts: ResearchEngineRealShadowRunReadAttempt[] = [];
   const evidenceItems: EvidenceItemBuildInput[] = [];
   const skippedSameHostEvidence: string[] = [];
-  const candidatesToRead = candidatePool.selectedCandidates.slice(0, maxReadAttempts);
+  const candidatesToRead = (hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates).slice(0, maxReadAttempts);
   for (const candidate of candidatesToRead) {
     const summary = candidateSummary(candidate);
     if (aborted()) {
       readAttempts.push({
         candidate: summary,
         status: "aborted",
+        whyRead: "source_portfolio_read_queue",
         selectedPassageCount: 0,
         warnings: [],
         errors: ["real shadow run aborted before this URL reader request"],
@@ -869,6 +922,7 @@ export const runResearchEngineRealShadowRun = async (
       readAttempts.push({
         candidate: summary,
         status: "skipped",
+        whySkipped: "no_candidate_url",
         selectedPassageCount: 0,
         warnings: ["no_candidate_url"],
         errors: ["Candidate URL is empty."],
@@ -884,6 +938,7 @@ export const runResearchEngineRealShadowRun = async (
     const attempt: ResearchEngineRealShadowRunReadAttempt = {
       candidate: summary,
       status: reader.status,
+      whyRead: hostDiversityApplied ? `source_portfolio:${canonicalizePortfolioHost(candidate.host)}` : "ranked_candidate_pool",
       httpStatus: reader.httpStatus,
       contentType: reader.contentType,
       readerTransport: typeof reader.diagnosticsSnapshot.readerTransport === "string" ? reader.diagnosticsSnapshot.readerTransport : undefined,
@@ -896,14 +951,15 @@ export const runResearchEngineRealShadowRun = async (
     readAttempts.push(attempt);
     mark("reader", reader.ok ? "completed" : reader.status === "validation_failed" ? "skipped" : "failed", `${candidate.host}: ${reader.status}`, readerStartedAt);
     if (reader.ok) {
-      const existingHostCount = hostCount(evidenceItems)[candidate.host] ?? 0;
+      const candidateHost = canonicalizePortfolioHost(candidate.host);
+      const existingHostCount = hostCount(evidenceItems)[candidateHost] ?? 0;
       if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
-        skippedSameHostEvidence.push(candidate.host);
+        skippedSameHostEvidence.push(candidateHost);
         attempt.warnings = unique([...attempt.warnings, "source_diversity_same_host_evidence_skipped"]);
       } else {
         evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan, candidate, reader }));
       }
-      if (evidenceItems.length >= readTopN) break;
+      if (shouldStopReadingNews(evidenceItems, sourcePortfolioQueryMode, evidenceTarget)) break;
     }
   }
 
@@ -916,11 +972,22 @@ export const runResearchEngineRealShadowRun = async (
     items: evidenceItems,
   });
   const evaluation = evaluateEvidencePacket({ packet });
-  mark("evidence", evidenceItems.length > 0 ? "completed" : "failed", `${evidenceItems.length} evidence items`, evidenceStartedAt);
+  const newsEvidenceGate = evaluateNewsEvidenceGate(sourcePortfolioQueryMode, packet.evidenceItems);
+  mark(
+    "evidence",
+    newsEvidenceGate.evidenceGateStatus === "failed" ? "failed" : evidenceItems.length > 0 ? "completed" : "failed",
+    `${evidenceItems.length} evidence items; gate=${newsEvidenceGate.evidenceGateStatus}`,
+    evidenceStartedAt,
+  );
 
   const contractStartedAt = performance.now();
   const answerContract = buildAnswerContract(evaluation);
-  mark("contract", "completed", `answerMode=${answerContract.answerMode}`, contractStartedAt);
+  const gatedAnswerMode: AnswerMode = newsEvidenceGate.evidenceGateStatus === "failed"
+    ? "insufficient_evidence"
+    : newsEvidenceGate.evidenceGateStatus === "cautious"
+      ? "cautious"
+      : answerContract.answerMode;
+  mark("contract", "completed", `answerMode=${gatedAnswerMode}; evidenceGate=${newsEvidenceGate.evidenceGateStatus}`, contractStartedAt);
 
   const successfulReads = readAttempts.filter((attempt) => attempt.status === "fetched" || attempt.status === "partial" || attempt.status === "body_too_large").length;
   const failedReads = readAttempts.filter((attempt) => attempt.status !== "fetched" && attempt.status !== "partial" && attempt.status !== "body_too_large").length;
@@ -933,23 +1000,29 @@ export const runResearchEngineRealShadowRun = async (
     ...(readTopN !== (options.readTopN ?? DEFAULT_READ_TOP_N) ? [`readTopN_clamped_to_${readTopN}`] : []),
     ...(maxReadAttempts > readTopN ? [`reader_continue_after_failure_enabled:maxReadAttempts=${maxReadAttempts}`] : []),
     ...(hostDiversityApplied ? ["host_diversity_applied:perHostEvidenceLimit=1"] : []),
+    ...(hostDiversityApplied ? ["source_portfolio_enabled"] : []),
+    ...(newsEvidenceGate.evidenceGateStatus === "cautious" ? ["news_evidence_gate_cautious"] : []),
+    ...(newsEvidenceGate.evidenceGateStatus === "failed" ? [`news_evidence_gate_failed:${newsEvidenceGate.evidenceGateReason}`] : []),
     ...(broadNewsDigest ? ["news_query_mode:broad_news_digest"] : []),
     ...(skippedSameHostEvidence.length > 0 ? [`source_diversity_same_host_skipped:${unique(skippedSameHostEvidence).join(",")}`] : []),
   ]);
   const allErrors = unique([
     ...errors,
     ...readAttempts.flatMap((attempt) => attempt.errors),
+    ...(newsEvidenceGate.evidenceGateStatus === "failed" ? [`Research Engine news evidence gate failed: ${newsEvidenceGate.evidenceGateReason}; usableEvidence=${newsEvidenceGate.usableEvidenceCount}; usableHosts=${newsEvidenceGate.usableEvidenceHostCount}.`] : []),
     ...(abortedRun ? ["real shadow run aborted"] : []),
   ]);
 
   const finalProviderStatus: ResearchEngineRealShadowRunResult["providerStatus"] = abortedRun
     ? "aborted"
+    : newsEvidenceGate.evidenceGateStatus === "failed" && successfulReads > 0
+      ? newsEvidenceGate.evidenceGateReason === "source_diversity_failed" ? "source_diversity_failed" : "insufficient_evidence"
     : successfulReads > 0
       ? discoveryStatusFromProviderStatus(providerStatus)
       : providerStatusFromReaderFailures(readAttempts);
 
   return finalize({
-    ok: successfulReads > 0 && !abortedRun,
+    ok: successfulReads > 0 && !abortedRun && newsEvidenceGate.evidenceGateStatus !== "failed",
     query,
     providerName: shadowConfig.providerName,
     providerStatus: finalProviderStatus,
@@ -961,7 +1034,7 @@ export const runResearchEngineRealShadowRun = async (
     successfulReads,
     failedReads,
     evidenceSummary: packet.evidenceSummary,
-    answerContractMode: answerContract.answerMode,
+    answerContractMode: gatedAnswerMode,
     stageTimeline: timeline,
     warnings: allWarnings,
     errors: allErrors,
@@ -970,12 +1043,14 @@ export const runResearchEngineRealShadowRun = async (
       oldSearchPathTouched: false,
       noteConversationTouched: false,
       readTopN,
+      evidenceTarget,
       maxReadAttempts,
       newsQueryMode: broadNewsDigest ? "broad_news_digest" : newsMode ? "entity_news" : "not_news",
       hostDiversityApplied,
       perHostEvidenceLimit: hostDiversityApplied ? NEWS_PER_HOST_EVIDENCE_LIMIT : "none",
-      sourceDiversityLow: hostDiversityApplied && Object.keys(hostCount(evidenceItems)).length < Math.min(readTopN, evidenceItems.length || readTopN),
       evidenceHostDistribution: hostCount(evidenceItems),
+      ...sourcePortfolio.diagnostics,
+      ...newsEvidenceGate,
       skippedSameHostEvidenceHosts: unique(skippedSameHostEvidence),
       maxCandidates,
       maxReadTopN: MAX_READ_TOP_N,
@@ -1002,9 +1077,10 @@ export const runResearchEngineRealShadowRun = async (
         summary: packet.evidenceSummary,
         missingEvidenceReasons: packet.missingEvidenceReasons,
         citationIds: Object.keys(packet.citationMap),
+        gate: newsEvidenceGate,
       },
       contract: {
-        answerMode: answerContract.answerMode,
+        answerMode: gatedAnswerMode,
         mustCite: answerContract.mustCite,
         allowedEvidenceCount: answerContract.allowedEvidenceIds.length,
         forbiddenClaimCount: answerContract.forbiddenClaims.length,

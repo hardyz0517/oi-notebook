@@ -642,8 +642,21 @@ const buildResearchEngineTakeoverFailureText = (
   };
 
 const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResult): string | undefined => {
-  if (result.successfulReads > 0) return undefined;
+  if (result.successfulReads > 0 && result.ok) return undefined;
   const primaryError = result.errors[0] ?? result.warnings[0];
+  if (result.providerStatus === "source_diversity_failed" || result.providerStatus === "insufficient_evidence") {
+    const selectedHosts = Array.isArray(result.diagnosticsSnapshot.selectedEvidenceHosts)
+      ? result.diagnosticsSnapshot.selectedEvidenceHosts.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const hostText = selectedHosts.length > 0 ? selectedHosts.join(", ") : "none";
+    const gateReason = typeof result.diagnosticsSnapshot.evidenceGateReason === "string"
+      ? result.diagnosticsSnapshot.evidenceGateReason
+      : result.providerStatus;
+    return buildResearchEngineTakeoverFailureText(
+      `已找到新闻候选，但未读取到足够多的独立来源。当前可用来源：${hostText}。新闻类问题需要多个独立来源交叉验证，Research Engine 拒绝用单一网站生成完整总结。gate=${gateReason}`,
+      result.providerName,
+    );
+  }
   if (result.providerStatus === "not_configured") {
     if (result.providerName === "bocha" || result.providerName === "brave") {
       return buildResearchEngineTakeoverFailureText("当前 API provider 缺少 key；但主线将优先维护无 key 公共搜索 provider。", result.providerName);
@@ -730,6 +743,12 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
     `readAttempts=${result.readAttempts.length}`,
     `successfulReads=${result.successfulReads}`,
     `failedReads=${result.failedReads}`,
+    `sourcePortfolioEnabled=${encodeDebugValue(String(result.diagnosticsSnapshot.sourcePortfolioEnabled ?? false))}`,
+    `targetDistinctHosts=${encodeDebugValue(String(result.diagnosticsSnapshot.targetDistinctHosts ?? "none"))}`,
+    `usableEvidenceHostCount=${encodeDebugValue(String(result.diagnosticsSnapshot.usableEvidenceHostCount ?? "none"))}`,
+    `evidenceGateStatus=${encodeDebugValue(String(result.diagnosticsSnapshot.evidenceGateStatus ?? "none"))}`,
+    `evidenceGateReason=${encodeDebugValue(String(result.diagnosticsSnapshot.evidenceGateReason ?? "none"))}`,
+    `sourceDiversitySatisfied=${encodeDebugValue(String(result.diagnosticsSnapshot.sourceDiversitySatisfied ?? "unknown"))}`,
     `answerContractMode=${encodeDebugValue(result.answerContractMode ?? "none")}`,
     `warnings=${encodeDebugValue(result.warnings.slice(0, 8).join(" | ") || "none")}`,
     `errors=${encodeDebugValue(result.errors.slice(0, 8).join(" | ") || "none")}`,
@@ -738,6 +757,13 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
 };
 
 const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRunResult): WebSource[] | undefined => {
+  const evidenceGateStatus = typeof result.diagnosticsSnapshot.evidenceGateStatus === "string"
+    ? result.diagnosticsSnapshot.evidenceGateStatus
+    : "not_applicable";
+  const gateAllowsPromptEvidence = evidenceGateStatus !== "failed";
+  const evidenceGateReason = typeof result.diagnosticsSnapshot.evidenceGateReason === "string"
+    ? result.diagnosticsSnapshot.evidenceGateReason
+    : undefined;
   const sources = result.readAttempts.map((attempt, index): WebSource => {
     const evidenceId = `E${index + 1}`;
     const host = attempt.candidate.host || getResearchEngineHost(attempt.candidate.url);
@@ -747,7 +773,8 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       attempt.errors[0],
       attempt.status,
     ].filter(Boolean).join(" ");
-    const usable = isResearchEngineReadSuccess(attempt) && Boolean(excerpt);
+    const readerUsable = isResearchEngineReadSuccess(attempt) && Boolean(excerpt);
+    const usable = readerUsable && gateAllowsPromptEvidence;
     const excerptStatus = getResearchEngineExcerptStatus(attempt);
     const searchDiagnostics = formatResearchEngineSearchDebug(result);
     return {
@@ -768,9 +795,16 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       usableEvidence: usable,
       injectedIntoAnswer: usable,
       evidenceReason: usable
-        ? `${evidenceId}: Research Engine Shadow Run selected this public URL and built an excerpt preview. Use only the excerpt as web evidence.`
-        : `${evidenceId}: Research Engine Shadow Run could not produce usable excerpt evidence for this URL.`,
-      rejectedReason: usable ? undefined : [attempt.status, ...attempt.errors, ...attempt.warnings].filter(Boolean).join("; "),
+        ? `${evidenceId}: Research Engine Shadow Run selected this public URL and built an excerpt preview. Use only the excerpt as web evidence. Evidence gate=${evidenceGateStatus}.`
+        : gateAllowsPromptEvidence
+          ? `${evidenceId}: Research Engine Shadow Run could not produce usable excerpt evidence for this URL.`
+          : `${evidenceId}: Research Engine read this URL, but the news evidence gate rejected prompt injection because independent source coverage is insufficient.`,
+      rejectedReason: usable ? undefined : [
+        gateAllowsPromptEvidence ? undefined : `evidence_gate_${evidenceGateStatus}:${evidenceGateReason ?? "insufficient_evidence"}`,
+        attempt.status,
+        ...attempt.errors,
+        ...attempt.warnings,
+      ].filter(Boolean).join("; "),
       pageType: attempt.candidate.sourceType === "mainstream_news" ? "news_article" : "unknown",
       contentStatus: usable ? (attempt.status === "partial" || attempt.status === "body_too_large" ? "partial" : "fetched") : attempt.status === "needs_js" ? "needs_js" : "failed",
       sourceStrength: usable ? "strong" : "rejected",

@@ -61,6 +61,14 @@ export type KeylessBingProviderResult = {
     rejectedByEntityFilterCount: number;
     rejectedByReadabilityCount: number;
     rejectedByFreshnessCount: number;
+    rawHostDistribution: Record<string, number>;
+    normalizedHostDistribution: Record<string, number>;
+    distinctHostCount: number;
+    targetDistinctHosts: number;
+    hostDiversityShortfall: number;
+    queryCount: number;
+    perQueryResultCount: Record<string, number>;
+    perQueryHostPreview: Record<string, string[]>;
     queryPurpose: QueryPurpose;
     rawBridgeResultCount: number;
     normalizedResultCount: number;
@@ -112,7 +120,8 @@ const MAX_STAGE_DIAGNOSTICS = 6;
 const MAX_STAGE_DIAGNOSTICS_PREVIEW_CHARS = 480;
 const MAX_ERROR_PREVIEW_CHARS = 900;
 const RAW_HTML_REDACTED_PREVIEW = "[redacted raw html preview]";
-const MAX_BRIDGE_QUERIES = 4;
+const MAX_ENTITY_NEWS_BRIDGE_QUERIES = 4;
+const MAX_BROAD_NEWS_BRIDGE_QUERIES = 6;
 const MAX_QUALITY_PREVIEW = 8;
 
 const elapsedMsSince = (startedAt: number): number => Math.max(0, Math.round(performance.now() - startedAt));
@@ -174,7 +183,7 @@ const chooseBridgeQueries = (
   newsQueryMode: NewsQueryMode,
 ): string[] => {
   if (newsQueryMode === "broad_news_digest") {
-    return unique(broadNewsBridgeQueries(options).map(normalizeQuery)).slice(0, MAX_BRIDGE_QUERIES);
+    return unique(broadNewsBridgeQueries(options).map(normalizeQuery)).slice(0, MAX_BROAD_NEWS_BRIDGE_QUERIES);
   }
   const plannedQueries = options.plannedQueries ?? [];
   const newsQueries = plannedQueries
@@ -191,7 +200,7 @@ const chooseBridgeQueries = (
   const preferred = queryPurpose === "news"
     ? [...newsQueries, ...officialNewsQueries, ...allPlannedQueries, options.query]
     : [options.query, ...allPlannedQueries];
-  return unique(preferred.map(normalizeQuery)).slice(0, MAX_BRIDGE_QUERIES);
+  return unique(preferred.map(normalizeQuery)).slice(0, MAX_ENTITY_NEWS_BRIDGE_QUERIES);
 };
 
 const diagnosticValue = (value: string | undefined, key: string): string | undefined => {
@@ -609,6 +618,26 @@ const firstResultPreviewFromSources = (
   };
 };
 
+const queryKeyForSource = (source: WebSearchResult): string =>
+  diagnosticValue(source.searchDiagnostics, "query") ?? "combined";
+
+const perQueryResultCountFor = (sources: WebSearchResult[]): Record<string, number> =>
+  sources.reduce((acc, source) => {
+    const key = queryKeyForSource(source);
+    return { ...acc, [key]: (acc[key] ?? 0) + 1 };
+  }, {} as Record<string, number>);
+
+const perQueryHostPreviewFor = (sources: WebSearchResult[]): Record<string, string[]> => {
+  const grouped: Record<string, string[]> = {};
+  for (const source of sources) {
+    const key = queryKeyForSource(source);
+    const host = hostFromSource(source);
+    if (!host) continue;
+    grouped[key] = unique([...(grouped[key] ?? []), host]).slice(0, 6);
+  }
+  return grouped;
+};
+
 const baseDiagnostics = (
   input: {
     query: string;
@@ -623,6 +652,11 @@ const baseDiagnostics = (
     rejectedByEntityFilterCount?: number;
     rejectedByReadabilityCount?: number;
     rejectedByFreshnessCount?: number;
+    rawHostDistribution?: Record<string, number>;
+    normalizedHostDistribution?: Record<string, number>;
+    targetDistinctHosts?: number;
+    perQueryResultCount?: Record<string, number>;
+    perQueryHostPreview?: Record<string, string[]>;
     queryPurpose: QueryPurpose;
     providerStatus: KeylessBingProviderStatus;
     rawBridgeResultCount?: number;
@@ -660,6 +694,14 @@ const baseDiagnostics = (
   rejectedByEntityFilterCount: input.rejectedByEntityFilterCount ?? 0,
   rejectedByReadabilityCount: input.rejectedByReadabilityCount ?? 0,
   rejectedByFreshnessCount: input.rejectedByFreshnessCount ?? 0,
+  rawHostDistribution: input.rawHostDistribution ?? {},
+  normalizedHostDistribution: input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {},
+  distinctHostCount: Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length,
+  targetDistinctHosts: input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0),
+  hostDiversityShortfall: Math.max(0, (input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0)) - Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length),
+  queryCount: input.bridgeQueries?.length ?? (input.query ? 1 : 0),
+  perQueryResultCount: input.perQueryResultCount ?? {},
+  perQueryHostPreview: input.perQueryHostPreview ?? {},
   queryPurpose: input.queryPurpose,
   rawBridgeResultCount: input.rawBridgeResultCount ?? 0,
   normalizedResultCount: input.normalizedResultCount ?? 0,
@@ -779,7 +821,7 @@ export const runKeylessBingProvider = async (
       intent: "general_web",
       vertical: verticalForProviderRequest(queryPurpose, newsQueryMode),
       freshness: freshnessForProviderRequest(queryPurpose, newsQueryMode),
-      maxResults: Math.max(1, Math.min(options.maxResults ?? 8, 10)),
+      maxResults: Math.max(1, Math.min(options.maxResults ?? 8, newsQueryMode === "broad_news_digest" ? 24 : queryPurpose === "news" ? 16 : 10)),
     }), options.timeoutMs ?? 8_000);
     if (!Array.isArray(sourceResult)) {
       throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
@@ -800,7 +842,9 @@ export const runKeylessBingProvider = async (
     const firstResultPreview = firstResultPreviewFromSources(sources);
     const bridgeDiagnostics = bridgeDiagnosticsFromSources(sources);
     const qualityPreview = qualityPreviewFor(rankedSources);
+    const rawHostDistribution = distribution(sources.map((source) => hostFromSource(source)));
     const candidateHostDistribution = distribution(rankedSources.map(({ source }) => hostFromSource(source)));
+    const targetDistinctHosts = newsQueryMode === "broad_news_digest" ? 10 : queryPurpose === "news" ? 8 : 0;
     const rejectionStats = qualityRejectionStats(rankedSources, bridgeDiagnostics);
     const newsStageUsed = sources.some((source) => isNewsStage(source.searchStage));
     const newsQueryUsed = bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news";
@@ -835,7 +879,12 @@ export const runKeylessBingProvider = async (
         newsQueryMode,
         broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
         candidateHostDistribution,
-        hostDiversityApplied: queryPurpose === "news",
+        rawHostDistribution,
+        normalizedHostDistribution: candidateHostDistribution,
+        targetDistinctHosts,
+        perQueryResultCount: perQueryResultCountFor(sources),
+        perQueryHostPreview: perQueryHostPreviewFor(sources),
+        hostDiversityApplied: queryPurpose === "news" || newsQueryMode === "broad_news_digest",
         ...rejectionStats,
         queryPurpose,
         providerStatus: status,
