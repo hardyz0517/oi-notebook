@@ -36,6 +36,7 @@ import { WebSearchSourcesCard } from "@/components/ai/diagnostics/WebSearchSourc
 import { applyAiSearchQueryPlan, applySourceStrategyPlan, buildExplicitUrlReadPlan, buildSearchDecision, evaluateWebSourceEvidence, getNewsFreshnessPolicy, getWebReadBudgetPlan, limitWebSearchQueriesForProvider, markAiQueryPlannerFallback, normalizeWebSearchConfig, prepareWebSourcesForDecision, PUBLIC_WEB_REQUEST_POLICY, rankPreparedWebSources, shouldUseAiQueryPlanner, validateAiSearchQueryPlan, WEB_CACHE_STATUSES, WEB_CONTENT_STATUSES, WEB_DISCOVERY_METHODS, WEB_EVIDENCE_STATUSES, WEB_PAGE_TYPES, WEB_SOURCE_EXCERPT_STATUSES, WEB_SOURCE_KINDS, WEB_SOURCE_RELIABILITIES, WEB_SOURCE_STRENGTHS, type AiSearchPlannerContext, type AiSearchPlannerState, type ExplicitUrlReadPlan, type SearchDecision, type WebSearchMode, type WebSearchProvider, type WebSource } from "@/lib/aiWebSearch";
 import { findCitationMarkerMatches, getUsedCitationIdList, possibleCitationMarkerPattern } from "@/lib/citations";
 import { createSearchPreparationDiagnostics, encodeDebugValue, formatSearchPreparationDiagnostics, mergeSearchDebug } from "@/lib/searchDiagnostics";
+import { runResearchEngineRealShadowRun, type ResearchEngineRealShadowRunReadAttempt, type ResearchEngineRealShadowRunResult } from "@/lib/research-engine";
 import { formatLuoguSolution, type SolutionFormatChange } from "@/lib/solutionFormatter";
 import { buildAiTagRecommendationInput, buildAiTagSuggestionMessagePayload, createAiTagRecommendationFailureMessage, normalizeAiTags, normalizeAiTagValue, type AiTagRecommendation, type AiTagRecommendationResult } from "@/lib/aiTagRecommendations";
 import { cn } from "@/lib/utils";
@@ -545,6 +546,175 @@ const getFileNameFromPath = (path: string): string => {
 const truncateText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
   if (text.length <= maxChars) return { text, truncated: false };
   return { text: text.slice(0, maxChars), truncated: true };
+};
+
+const RESEARCH_ENGINE_PROMPT_EXCERPT_LIMIT = 1800;
+const RESEARCH_ENGINE_SOURCE_PREVIEW_LIMIT = 320;
+
+const getResearchEngineHost = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+};
+
+const compactResearchEngineText = (value: string | undefined, maxChars: number): string | undefined => {
+  const compact = value?.replace(/\s+/g, " ").trim();
+  if (!compact) return undefined;
+  const truncated = truncateText(compact, maxChars);
+  return truncated.truncated ? `${truncated.text}...` : truncated.text;
+};
+
+const isResearchEngineReadSuccess = (attempt: ResearchEngineRealShadowRunReadAttempt): boolean =>
+  attempt.status === "fetched" || attempt.status === "partial" || attempt.status === "body_too_large";
+
+const getResearchEngineSourceType = (candidateType: ResearchEngineRealShadowRunReadAttempt["candidate"]["sourceType"]): WebSource["sourceType"] => {
+  if (candidateType === "official" || candidateType === "documentation") return "official";
+  if (candidateType === "technical_blog") return "blog";
+  if (candidateType === "community_solution" || candidateType === "forum") return "discussion";
+  return "unknown";
+};
+
+const getResearchEngineSourceKind = (candidateType: ResearchEngineRealShadowRunReadAttempt["candidate"]["sourceType"]): WebSource["sourceKind"] => {
+  if (candidateType === "documentation") return "docs_page";
+  if (candidateType === "mainstream_news") return "media_article";
+  if (candidateType === "seo_aggregator") return "aggregator_item";
+  return "search_result";
+};
+
+const getResearchEngineExcerptStatus = (attempt: ResearchEngineRealShadowRunReadAttempt): WebSource["excerptStatus"] => {
+  if (isResearchEngineReadSuccess(attempt)) return "fetched";
+  if (attempt.status === "validation_failed" || attempt.status === "unsupported_content_type" || attempt.status === "body_too_large") return "blocked";
+  if (attempt.status === "needs_js" || attempt.status === "empty_body") return "unavailable";
+  return "failed";
+};
+
+const getResearchEngineExcerptQuality = (attempt: ResearchEngineRealShadowRunReadAttempt): WebSource["excerptQuality"] => {
+  if (!isResearchEngineReadSuccess(attempt)) {
+    if (attempt.status === "needs_js" || attempt.status === "empty_body") return "unavailable";
+    if (attempt.status === "validation_failed" || attempt.status === "unsupported_content_type") return "blocked";
+    return "failed";
+  }
+  if (attempt.readerQuality?.quality === "strong") return "high";
+  if (attempt.readerQuality?.quality === "medium") return "medium";
+  return attempt.status === "partial" || attempt.status === "body_too_large" ? "partial" : "low";
+};
+
+const getResearchEngineReadStatus = (attempt: ResearchEngineRealShadowRunReadAttempt): WebSource["readStatus"] => {
+  if (attempt.status === "fetched") return "fetched";
+  if (attempt.status === "partial" || attempt.status === "body_too_large") return "partial";
+  if (attempt.status === "validation_failed" || attempt.status === "unsupported_content_type") return "blocked";
+  return "failed";
+};
+
+const getResearchEngineWebSearchProvider = (providerName: ResearchEngineRealShadowRunResult["providerName"]): WebSearchProvider | undefined =>
+  providerName === "bocha" || providerName === "brave" ? providerName : undefined;
+
+const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResult): string | undefined => {
+  if (result.successfulReads > 0) return undefined;
+  const primaryError = result.errors[0] ?? result.warnings[0];
+  if (result.providerStatus === "not_configured") return "Research Engine search failed: provider is not configured for Developer Mode takeover.";
+  if (result.providerStatus === "unsupported_provider") return "Research Engine search failed: current provider is not supported by the real Shadow Run.";
+  if (result.providerStatus === "aborted") return "Research Engine search was aborted before usable evidence was available.";
+  if (result.candidateCount === 0) return `Research Engine search found no readable candidate URL${primaryError ? `: ${primaryError}` : "."}`;
+  return `Research Engine search did not produce usable evidence${primaryError ? `: ${primaryError}` : "."}`;
+};
+
+const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResult): string => {
+  const readStatuses = result.readAttempts.map((attempt, index) => `${index + 1}:${attempt.candidate.host || getResearchEngineHost(attempt.candidate.url)}:${attempt.status}`);
+  return [
+    "debug=researchEnginePhase17",
+    "engine=research_engine",
+    "phase=17",
+    "forcedTakeover=yes",
+    "legacySearchExecuted=no",
+    "fallback=no",
+    "developerModeOnly=yes",
+    `provider=${encodeDebugValue(result.providerName)}`,
+    `providerStatus=${encodeDebugValue(result.providerStatus)}`,
+    `rawResultCount=${result.rawResultCount}`,
+    `normalizedResultCount=${result.normalizedResultCount}`,
+    `candidateCount=${result.candidateCount}`,
+    `selectedCandidateCount=${result.selectedCandidates.length}`,
+    `readAttempts=${result.readAttempts.length}`,
+    `successfulReads=${result.successfulReads}`,
+    `failedReads=${result.failedReads}`,
+    `answerContractMode=${encodeDebugValue(result.answerContractMode ?? "none")}`,
+    `warnings=${encodeDebugValue(result.warnings.slice(0, 8).join(" | ") || "none")}`,
+    `errors=${encodeDebugValue(result.errors.slice(0, 8).join(" | ") || "none")}`,
+    `readStatuses=${encodeDebugValue(readStatuses.join(" | ") || "none")}`,
+  ].join("; ");
+};
+
+const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRunResult): WebSource[] | undefined => {
+  const sources = result.readAttempts.map((attempt, index): WebSource => {
+    const evidenceId = `E${index + 1}`;
+    const host = attempt.candidate.host || getResearchEngineHost(attempt.candidate.url);
+    const excerpt = compactResearchEngineText(attempt.excerptPreview, RESEARCH_ENGINE_PROMPT_EXCERPT_LIMIT);
+    const snippet = compactResearchEngineText(attempt.excerptPreview, RESEARCH_ENGINE_SOURCE_PREVIEW_LIMIT) ?? [
+      attempt.warnings[0],
+      attempt.errors[0],
+      attempt.status,
+    ].filter(Boolean).join(" ");
+    const usable = isResearchEngineReadSuccess(attempt) && Boolean(excerpt);
+    const excerptStatus = getResearchEngineExcerptStatus(attempt);
+    const searchDiagnostics = formatResearchEngineSearchDebug(result);
+    return {
+      id: `research-engine-${evidenceId.toLowerCase()}`,
+      title: attempt.candidate.title || attempt.candidate.url,
+      url: attempt.candidate.url,
+      finalUrl: attempt.candidate.url,
+      site: host,
+      snippet,
+      sourceKind: getResearchEngineSourceKind(attempt.candidate.sourceType),
+      discoveryMethod: "search_provider",
+      sourceReliability: "unknown",
+      searchProvider: getResearchEngineWebSearchProvider(result.providerName),
+      searchStage: "research-engine-shadow-run",
+      searchDiagnostics,
+      finalIncludedInPrompt: usable,
+      evidenceStatus: usable ? "usable" : "rejected",
+      usableEvidence: usable,
+      injectedIntoAnswer: usable,
+      evidenceReason: usable
+        ? `${evidenceId}: Research Engine Shadow Run selected this public URL and built an excerpt preview. Use only the excerpt as web evidence.`
+        : `${evidenceId}: Research Engine Shadow Run could not produce usable excerpt evidence for this URL.`,
+      rejectedReason: usable ? undefined : [attempt.status, ...attempt.errors, ...attempt.warnings].filter(Boolean).join("; "),
+      pageType: attempt.candidate.sourceType === "mainstream_news" ? "news_article" : "unknown",
+      contentStatus: usable ? (attempt.status === "partial" || attempt.status === "body_too_large" ? "partial" : "fetched") : attempt.status === "needs_js" ? "needs_js" : "failed",
+      sourceStrength: usable ? "strong" : "rejected",
+      sourceType: getResearchEngineSourceType(attempt.candidate.sourceType),
+      reliability: "unknown",
+      reliabilityLabel: "Research Engine evidence",
+      reliabilityReason: "Developer Mode Research Engine Shadow Run; provider secrets and raw bodies are redacted.",
+      relevance: usable ? "strong" : "candidate",
+      relevanceLabel: usable ? "usable Research Engine evidence" : "candidate read failed",
+      relevanceReason: `Research Engine selected candidate ${attempt.candidate.id}; reader status=${attempt.status}.`,
+      excerptStatus,
+      excerpt,
+      excerptError: usable ? undefined : [attempt.errors[0], attempt.warnings[0]].filter(Boolean).join("; ") || attempt.status,
+      contentType: attempt.contentType,
+      bodyBytes: undefined,
+      extractedTextChars: excerpt?.length,
+      excerptChars: excerpt?.length,
+      fetchedAt: Date.now(),
+      cacheStatus: "miss",
+      readStatus: getResearchEngineReadStatus(attempt),
+      errorKind: attempt.status === "timeout" ? "timeout" : attempt.status === "validation_failed" ? "invalid_url" : attempt.status === "unsupported_content_type" ? "content_type_unsupported" : attempt.status === "body_too_large" ? "too_large" : attempt.status === "network_error" ? "unknown" : undefined,
+      excerptQuality: getResearchEngineExcerptQuality(attempt),
+      extractor: "generic",
+      excerptReason: `Research Engine excerpt preview only; selected passages=${attempt.selectedPassageCount}.`,
+      blockedReason: excerptStatus === "blocked" ? [attempt.status, ...attempt.warnings].filter(Boolean).join("; ") : undefined,
+      needsJsReason: attempt.status === "needs_js" ? [attempt.warnings[0], attempt.errors[0]].filter(Boolean).join("; ") || "needs_js" : undefined,
+      extractionFailureReason: usable ? undefined : [attempt.errors[0], attempt.warnings[0]].filter(Boolean).join("; "),
+      rankScore: typeof attempt.candidate.score === "number" ? Math.round(attempt.candidate.score) : undefined,
+      rankReason: `Research Engine candidate pool score=${attempt.candidate.score ?? "unknown"}.`,
+      selected: usable,
+      isConstructed: false,
+    };
+  });
+  return sources.length > 0 ? sources : undefined;
 };
 
 const getLineNumberAtOffset = (text: string, offset: number | null | undefined): number | null => {
@@ -2741,6 +2911,23 @@ const shouldStopRecentNewsWithoutSources = (
   );
 };
 
+const shouldStopResearchEngineWithoutSources = (
+  sources: WebSource[] | undefined,
+  searchError?: string,
+  searchDebug?: string,
+): boolean => {
+  if (!searchDebug?.includes("debug=researchEnginePhase17")) return false;
+  const usableSources = getPromptCitationCandidates(sources ?? []);
+  return Boolean(searchError) && usableSources.length === 0;
+};
+
+const getResearchEngineNoSourceMessage = (searchError?: string): string =>
+  [
+    "Research Engine search failed in Developer Mode.",
+    searchError?.trim(),
+    "Legacy NoteX web search was not used. Turn Developer Mode off to use the old search path.",
+  ].filter(Boolean).join(" ");
+
 const buildWebContextDecision = (
   question: string,
   context: NoteChatContextPayload,
@@ -4112,6 +4299,58 @@ export default function AiSidebar({
     };
     const explicitSources = options?.explicitSources ?? [];
     const preparationDiagnostics = createSearchPreparationDiagnostics(decision);
+    if (developerModeEnabled) {
+      try {
+        setStatus("searching", "Research Engine is running Developer Mode web search...");
+        const result = await runResearchEngineRealShadowRun({
+          query: options?.userInput ?? decision.rawQuestion ?? decision.queries[0] ?? "",
+          webSearchConfig,
+          maxCandidates: 8,
+          readTopN: 2,
+          providerTimeoutMs: 8000,
+          readerTimeoutMs: 10000,
+        });
+        if (!isCurrent()) return {};
+        const sources = mapResearchEngineShadowRunToSources(result);
+        const searchDebug = mergeSearchDebug(formatSearchPreparationDiagnostics(preparationDiagnostics), formatResearchEngineSearchDebug(result));
+        const hasUsableResearchEngineSources = getPromptCitationCandidates(sources ?? []).length > 0;
+        const error = getResearchEngineFailureMessage(result) ?? (
+          hasUsableResearchEngineSources ? undefined : "Research Engine search did not produce usable excerpt evidence."
+        );
+        setStatus(error ? "failed" : "answering", error ?? "Research Engine evidence is ready; generating answer...");
+        return {
+          sources,
+          error,
+          searchDebug,
+          filteredCount: Math.max(0, result.selectedCandidates.length - result.readAttempts.length),
+          filterReason: result.warnings.length > 0 ? result.warnings.slice(0, 3).join("; ") : undefined,
+          decision,
+        };
+      } catch (error) {
+        if (!isCurrent()) return {};
+        const message = error instanceof Error ? error.message : String(error);
+        const searchDebug = mergeSearchDebug(
+          formatSearchPreparationDiagnostics(preparationDiagnostics),
+          [
+            "debug=researchEnginePhase17",
+            "engine=research_engine",
+            "phase=17",
+            "forcedTakeover=yes",
+            "legacySearchExecuted=no",
+            "fallback=no",
+            "developerModeOnly=yes",
+            `exception=${encodeDebugValue(message)}`,
+          ].join("; "),
+        );
+        const errorMessage = `Research Engine search failed before usable evidence was available: ${message}`;
+        setStatus("failed", errorMessage);
+        return {
+          error: errorMessage,
+          searchDebug,
+          decision,
+        };
+      }
+    }
     const updateDecision = (nextDecision: SearchDecision) => {
       if (!isCurrent() || !options?.conversationId || !options.messageId) return;
       replaceMessage(options.conversationId, options.messageId, (message) => ({
@@ -6164,6 +6403,30 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     const effectiveSearchDecision = searchResult.decision ?? searchDecision;
     const searchError = [explicitUrlNotice, searchResult.error].filter(Boolean).join("；") || undefined;
     const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
+    if (shouldStopResearchEngineWithoutSources(sourcesWithCitations, searchError, searchResult.searchDebug)) {
+      replaceMessage(conversationId, assistantMessage.id, (message) => ({
+        ...message,
+        text: getResearchEngineNoSourceMessage(searchError),
+        state: "done",
+        searchDecision: effectiveSearchDecision,
+        sources: sourcesWithCitations,
+        searchError,
+        searchErrorDebug: searchResult.searchDebug,
+        webSearchFilteredCount: searchResult.filteredCount,
+        webSearchFilterReason: searchResult.filterReason,
+        localNoteSources: localNoteSearchResult.localNoteSources,
+        localNoteSearchStatus: requestLocalNoteSearchEnabled
+          ? localNoteSearchResult.error ? "failed" : "done"
+          : undefined,
+        localNoteSearchError: localNoteSearchResult.error,
+        webSearchStatus: "failed",
+        webSearchStatusText: getResearchEngineNoSourceMessage(searchError),
+        ...finishAssistantTiming(message),
+      }));
+      clearStreamRuntime(streamId);
+      updateRespondingState();
+      return;
+    }
     if (shouldStopRecentNewsWithoutSources(effectiveSearchDecision, sourcesWithCitations, searchError, explicitUrlPlan.sources.length)) {
         replaceMessage(conversationId, assistantMessage.id, (message) => ({
           ...message,
@@ -6415,6 +6678,30 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
       const effectiveSearchDecision = searchResult.decision ?? searchDecision;
       const searchError = [explicitUrlNotice, searchResult.error].filter(Boolean).join("；") || undefined;
       const sourcesWithCitations = assignWebSourceCitationIds(searchResult.sources);
+      if (shouldStopResearchEngineWithoutSources(sourcesWithCitations, searchError, searchResult.searchDebug)) {
+        replaceMessage(conversationId, assistantMessage.id, (current) => ({
+          ...current,
+          text: getResearchEngineNoSourceMessage(searchError),
+          state: "done",
+          searchDecision: effectiveSearchDecision,
+          sources: sourcesWithCitations,
+          searchError,
+          searchErrorDebug: searchResult.searchDebug,
+          webSearchFilteredCount: searchResult.filteredCount,
+          webSearchFilterReason: searchResult.filterReason,
+          localNoteSources: localNoteSearchResult.localNoteSources,
+          localNoteSearchStatus: requestLocalNoteSearchEnabled
+            ? localNoteSearchResult.error ? "failed" : "done"
+            : undefined,
+          localNoteSearchError: localNoteSearchResult.error,
+          webSearchStatus: "failed",
+          webSearchStatusText: getResearchEngineNoSourceMessage(searchError),
+          ...finishAssistantTiming(current),
+        }));
+        clearStreamRuntime(streamId);
+        updateRespondingState();
+        return;
+      }
       if (shouldStopRecentNewsWithoutSources(effectiveSearchDecision, sourcesWithCitations, searchError, explicitUrlPlan.sources.length)) {
         replaceMessage(conversationId, assistantMessage.id, (current) => ({
           ...current,
@@ -7728,8 +8015,8 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   webSearchEnabled && "notex-composer-control-active",
                 )}
                 onClick={handleWebSearchToggle}
-                title={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
-                aria-label={webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
+                title={developerModeEnabled && webSearchEnabled ? "Web search is on: Developer Mode will use Research Engine, with no legacy fallback." : webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
+                aria-label={developerModeEnabled && webSearchEnabled ? "Web search is on. Developer Mode will use Research Engine with no legacy fallback." : webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭"}
               >
                 <Search className="h-3.5 w-3.5 shrink-0" />
                 <span className="hidden truncate min-[420px]:inline">联网</span>
