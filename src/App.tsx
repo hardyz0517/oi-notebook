@@ -8733,7 +8733,7 @@ export default function App() {
                               <span className="font-medium text-foreground">扫描完成，但没有找到可导入提交。</span>
                             </div>
                           )}
-                          <div className="min-h-0 flex-1 overflow-auto">
+                          <div className="min-h-0 flex-1 overflow-auto dark:bg-[#242424]">
                             <div className="min-w-0">
                               <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[42px_minmax(260px,1fr)_86px_136px_132px] gap-2 border-b border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-[0_1px_0_0_hsl(var(--border))]">
                                 <div className="flex items-center" onClick={(event) => event.stopPropagation()}>
