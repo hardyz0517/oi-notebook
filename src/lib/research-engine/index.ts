@@ -53,6 +53,10 @@ export type {
   ResearchEngineRealUrlReaderSmokeStatus,
 } from "./realUrlReaderSmoke";
 export type {
+  ResearchEngineRealE2ESmokeOptions,
+  ResearchEngineRealE2ESmokeResult,
+} from "./realE2ESmoke";
+export type {
   ResearchOfflineRunConfig,
   ResearchOfflineRunDiagnostics,
   ResearchOfflineRunInput,
@@ -262,6 +266,7 @@ export {
 } from "./providerFixtures";
 export { runResearchEngineRealProviderSmoke } from "./realProviderSmoke";
 export { runResearchEngineRealUrlReaderSmoke } from "./realUrlReaderSmoke";
+export { runResearchEngineRealE2ESmoke } from "./realE2ESmoke";
 export {
   buildDiagnosticsFromOfflineRun,
   buildDiagnosticsFromSelfCheck,
