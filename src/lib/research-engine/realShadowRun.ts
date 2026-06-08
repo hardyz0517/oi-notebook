@@ -3,6 +3,7 @@ import { buildAnswerContract } from "./answerContract";
 import { buildCandidatePool } from "./candidatePool";
 import { buildEvidencePacket } from "./evidencePacket";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
+import { runKeylessBingProvider } from "./keylessBingProvider";
 import { normalizeRealProviderPayload } from "./providerResponseNormalizer";
 import { buildQueryPlan } from "./queryPlanner";
 import { runBrowserProviderSmokeRequest, type BrowserProviderRedactedRequest } from "./browserProviderTransport";
@@ -23,7 +24,7 @@ import type {
   SourceType,
 } from "./types";
 
-type ShadowProviderName = Extract<RealDiscoveryProviderName, "bocha" | "brave">;
+type ShadowProviderName = Extract<RealDiscoveryProviderName, "bing" | "bocha" | "brave">;
 
 export type ResearchEngineRealShadowRunOptions = {
   query: string;
@@ -68,7 +69,7 @@ export type ResearchEngineRealShadowRunResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "malformed_response" | "empty_result" | "aborted";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "malformed_response" | "empty_result" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "aborted";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -105,20 +106,28 @@ const previewText = (value: string | undefined, maxChars: number): string | unde
 };
 
 const isShadowProviderName = (value: string | undefined): value is ShadowProviderName =>
-  value === "bocha" || value === "brave";
+  value === "bing" || value === "bocha" || value === "brave";
 
 const configForShadowRun = (
   config: WebSearchConfig | null,
   providerName?: ShadowProviderName,
 ): {
   providerName: ShadowProviderName;
-  endpoint: string;
-  apiKey: string;
-  payloadKind: RealProviderPayloadKind;
+  endpoint?: string;
+  apiKey?: string;
+  payloadKind?: RealProviderPayloadKind;
   providerPriority: number;
+  mode: "keyless_bing" | "api";
 } | undefined => {
   if (!config || !config.enabled || !config.publicSearchConsent) return undefined;
   const selectedProvider = providerName ?? (isShadowProviderName(config.provider) ? config.provider : undefined);
+  if (selectedProvider === "bing") {
+    return {
+      providerName: "bing",
+      providerPriority: 82,
+      mode: "keyless_bing",
+    };
+  }
   if (selectedProvider === "bocha" && config.bochaApiKey.trim()) {
     return {
       providerName: "bocha",
@@ -126,6 +135,7 @@ const configForShadowRun = (
       apiKey: config.bochaApiKey.trim(),
       payloadKind: "bocha_like",
       providerPriority: 86,
+      mode: "api",
     };
   }
   if (selectedProvider === "brave" && config.braveApiKey.trim()) {
@@ -135,6 +145,7 @@ const configForShadowRun = (
       apiKey: config.braveApiKey.trim(),
       payloadKind: "brave_like",
       providerPriority: 84,
+      mode: "api",
     };
   }
   return undefined;
@@ -150,15 +161,13 @@ const unconfiguredWarningsFor = (
   const selectedProvider = providerName ?? config.provider;
   if (selectedProvider === "bing") {
     return [
-      "Bing public search remains on the legacy NoteX path and is not run by this Research Engine shadow run.",
-      "Configure Bocha or Brave with a key to run the Phase 15 real shadow run.",
+      "Bing public search should use the Research Engine keyless Bing provider; real shadow run was not started because base web search config is unavailable.",
     ];
   }
-  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; real shadow run was not started."];
-  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Brave API key is missing; real shadow run was not started."];
+  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; API providers are optional. Research Engine mainline should use a no-key public provider such as Bing."];
+  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Brave Search API key is missing; API providers are optional. Research Engine mainline should use a no-key public provider such as Bing."];
   return [
-    "Only configured Bocha or Brave providers are supported for the real shadow run.",
-    "Bing public search remains on the legacy NoteX path and is not run by this shadow run.",
+    "Only Bing keyless public search or configured optional API providers are supported for the real shadow run.",
   ];
 };
 
@@ -181,6 +190,19 @@ const discoveryStatusFromProviderStatus = (
   if (status === "partial") return "partial";
   if (status === "timeout") return "timeout";
   if (status === "not_configured" || status === "unsupported_provider") return "disabled";
+  return "failed";
+};
+
+const providerStatusFromKeylessBingStatus = (
+  status: Awaited<ReturnType<typeof runKeylessBingProvider>>["status"],
+): ResearchEngineRealShadowRunResult["providerStatus"] => {
+  if (status === "available") return "available";
+  if (status === "partial") return "partial";
+  if (status === "blocked_or_captcha") return "blocked_or_captcha";
+  if (status === "timeout") return "timeout";
+  if (status === "network_error") return "network_error";
+  if (status === "unsupported_environment") return "unsupported_environment";
+  if (status === "empty_result" || status === "parse_failed") return "empty_result";
   return "failed";
 };
 
@@ -527,50 +549,104 @@ export const runResearchEngineRealShadowRun = async (
     expectedSourceTypes: ["official" as const, "mainstream_news" as const],
   };
   const providerStartedAt = performance.now();
-  const providerTransport = await runBrowserProviderSmokeRequest({
-    providerName: shadowConfig.providerName,
-    endpoint: shadowConfig.endpoint,
-    apiKey: shadowConfig.apiKey,
-    query: plannedQuery.query,
-    maxResults: maxCandidates,
-    timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
-  });
   let providerStatus: ResearchEngineRealShadowRunResult["providerStatus"] = "failed";
   let rawResults: DiscoveryRawResult[] = [];
-  let redactedProviderRequest: BrowserProviderRedactedRequest | undefined = providerTransport.redactedRequest;
+  let redactedProviderRequest: BrowserProviderRedactedRequest | undefined;
+  let providerBodyPreview: string | undefined;
+  let keylessProviderDiagnostics: Record<string, unknown> | undefined;
 
-  if (!providerTransport.ok) {
-    providerStatus = providerStatusFromError(providerTransport.error);
-    errors.push(providerTransport.error.message);
-    mark("provider", "failed", providerTransport.error.message, providerStartedAt);
-    return finalize({
-      ok: false,
-      query,
-      providerName: shadowConfig.providerName,
-      providerStatus,
-      rawResultCount: 0,
-      normalizedResultCount: 0,
-      candidateCount: 0,
-      selectedCandidates: [],
-      readAttempts: [],
-      successfulReads: 0,
-      failedReads: 0,
-      stageTimeline: timeline,
-      warnings,
-      errors,
-      diagnosticsSnapshot: {
-        developerDiagnosticsOnly: true,
-        oldSearchPathTouched: false,
-        noteConversationTouched: false,
-        providerStatus,
-        redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
-        readTopN,
-        maxCandidates,
-      },
+  if (shadowConfig.mode === "keyless_bing") {
+    const keyless = await runKeylessBingProvider({
+      query: plannedQuery.query,
+      rawUserQuery: query,
+      queryPurpose: plannedQuery.purpose,
+      queryLanguage: plannedQuery.language,
+      maxResults: maxCandidates,
+      timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
+    rawResults = keyless.rawResults;
+    warnings.push(...keyless.warnings);
+    errors.push(...keyless.errors);
+    keylessProviderDiagnostics = keyless.diagnostics;
+    providerStatus = providerStatusFromKeylessBingStatus(keyless.status);
+    mark("provider", keyless.ok ? "completed" : "failed", `Keyless Bing public search: ${keyless.status}; results=${rawResults.length}`, providerStartedAt);
+  } else {
+    const providerTransport = await runBrowserProviderSmokeRequest({
+      providerName: shadowConfig.providerName as Extract<ShadowProviderName, "bocha" | "brave">,
+      endpoint: shadowConfig.endpoint ?? "",
+      apiKey: shadowConfig.apiKey ?? "",
+      query: plannedQuery.query,
+      maxResults: maxCandidates,
+      timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    });
+    redactedProviderRequest = providerTransport.redactedRequest;
+    providerBodyPreview = providerTransport.bodyPreview;
+
+    if (!providerTransport.ok) {
+      providerStatus = providerStatusFromError(providerTransport.error);
+      errors.push(providerTransport.error.message);
+      mark("provider", "failed", providerTransport.error.message, providerStartedAt);
+      return finalize({
+        ok: false,
+        query,
+        providerName: shadowConfig.providerName,
+        providerStatus,
+        rawResultCount: 0,
+        normalizedResultCount: 0,
+        candidateCount: 0,
+        selectedCandidates: [],
+        readAttempts: [],
+        successfulReads: 0,
+        failedReads: 0,
+        stageTimeline: timeline,
+        warnings,
+        errors,
+        diagnosticsSnapshot: {
+          developerDiagnosticsOnly: true,
+          oldSearchPathTouched: false,
+          noteConversationTouched: false,
+          providerStatus,
+          redactedProviderRequest,
+          providerBodyPreview,
+          readTopN,
+          maxCandidates,
+        },
+      });
+    }
+    mark("provider", "completed", `Provider HTTP ${providerTransport.statusCode}`, providerStartedAt);
+
+    const normalizeStartedAt = performance.now();
+    if (!providerTransport.bodyText.trim()) {
+      providerStatus = "empty_result";
+      errors.push("provider response body is empty");
+      mark("normalize", "failed", "Provider response body is empty.", normalizeStartedAt);
+    } else {
+      try {
+        const payload = JSON.parse(providerTransport.bodyText) as unknown;
+        const normalized = normalizeRealProviderPayload({
+          providerName: shadowConfig.providerName,
+          payloadKind: shadowConfig.payloadKind ?? "unknown",
+          payload,
+          request: { request, policy, queryPlan, query: plannedQuery },
+          providerPriority: shadowConfig.providerPriority,
+          maxResults: maxCandidates,
+        });
+        rawResults = normalized.rawResults;
+        warnings.push(...normalized.warnings);
+        if (normalized.error) {
+          providerStatus = normalized.rawResults.length > 0 ? "partial" : providerStatusFromError(normalized.error);
+          errors.push(normalized.error.message);
+        } else {
+          providerStatus = normalized.partial ? "partial" : "available";
+        }
+        mark("normalize", normalized.rawResults.length > 0 ? "completed" : "failed", `${normalized.rawResults.length} normalized results`, normalizeStartedAt);
+      } catch {
+        providerStatus = "malformed_response";
+        errors.push("provider response body is not valid JSON");
+        mark("normalize", "failed", "Provider response body is not valid JSON.", normalizeStartedAt);
+      }
+    }
   }
-  mark("provider", "completed", `Provider HTTP ${providerTransport.statusCode}`, providerStartedAt);
 
   if (aborted()) {
     mark("abort", "aborted", "Shadow run aborted after provider response; no URL reader requests were started.");
@@ -595,43 +671,12 @@ export const runResearchEngineRealShadowRun = async (
         noteConversationTouched: false,
         aborted: true,
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         readTopN,
         maxCandidates,
       },
     });
-  }
-
-  const normalizeStartedAt = performance.now();
-  if (!providerTransport.bodyText.trim()) {
-    providerStatus = "empty_result";
-    errors.push("provider response body is empty");
-    mark("normalize", "failed", "Provider response body is empty.", normalizeStartedAt);
-  } else {
-    try {
-      const payload = JSON.parse(providerTransport.bodyText) as unknown;
-      const normalized = normalizeRealProviderPayload({
-        providerName: shadowConfig.providerName,
-        payloadKind: shadowConfig.payloadKind,
-        payload,
-        request: { request, policy, queryPlan, query: plannedQuery },
-        providerPriority: shadowConfig.providerPriority,
-        maxResults: maxCandidates,
-      });
-      rawResults = normalized.rawResults;
-      warnings.push(...normalized.warnings);
-      if (normalized.error) {
-        providerStatus = normalized.rawResults.length > 0 ? "partial" : providerStatusFromError(normalized.error);
-        errors.push(normalized.error.message);
-      } else {
-        providerStatus = normalized.partial ? "partial" : "available";
-      }
-      mark("normalize", normalized.rawResults.length > 0 ? "completed" : "failed", `${normalized.rawResults.length} normalized results`, normalizeStartedAt);
-    } catch {
-      providerStatus = "malformed_response";
-      errors.push("provider response body is not valid JSON");
-      mark("normalize", "failed", "Provider response body is not valid JSON.", normalizeStartedAt);
-    }
   }
 
   if (rawResults.length === 0 || providerStatus === "malformed_response" || providerStatus === "empty_result") {
@@ -656,7 +701,8 @@ export const runResearchEngineRealShadowRun = async (
         noteConversationTouched: false,
         providerStatus,
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         readTopN,
         maxCandidates,
       },
@@ -696,7 +742,8 @@ export const runResearchEngineRealShadowRun = async (
         noteConversationTouched: false,
         providerStatus,
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         readTopN,
         maxCandidates,
         candidatePool: {
@@ -819,7 +866,8 @@ export const runResearchEngineRealShadowRun = async (
       maxReadTopN: MAX_READ_TOP_N,
       providerStatus,
       redactedProviderRequest,
-      providerBodyPreview: providerTransport.bodyPreview,
+      providerBodyPreview,
+      keylessProviderDiagnostics,
       candidatePool: {
         rawCount: candidatePool.rawCount,
         normalizedCount: candidatePool.normalizedCount,

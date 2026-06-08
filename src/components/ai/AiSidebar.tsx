@@ -609,16 +609,79 @@ const getResearchEngineReadStatus = (attempt: ResearchEngineRealShadowRunReadAtt
 };
 
 const getResearchEngineWebSearchProvider = (providerName: ResearchEngineRealShadowRunResult["providerName"]): WebSearchProvider | undefined =>
-  providerName === "bocha" || providerName === "brave" ? providerName : undefined;
+  providerName === "bing" || providerName === "bocha" || providerName === "brave" ? providerName : undefined;
+
+const getResearchEngineProviderLabel = (providerName: ResearchEngineRealShadowRunResult["providerName"] | WebSearchProvider | string | undefined): string => {
+  if (providerName === "bing") return "Bing 公共搜索";
+  if (providerName === "bocha") return "Bocha 搜索";
+  if (providerName === "brave") return "Brave Search";
+  if (providerName === "none" || !providerName) return "未配置搜索 provider";
+  return providerName;
+};
+
+const buildResearchEngineTakeoverFailureText = (
+  reason: string,
+  providerName: ResearchEngineRealShadowRunResult["providerName"] | WebSearchProvider | string | undefined,
+): string =>
+  {
+    const providerLabel = getResearchEngineProviderLabel(providerName);
+    const providerLine = providerName === "bing"
+      ? `当前使用的是无 key 公共搜索 provider：${providerLabel}。`
+      : providerName === "bocha" || providerName === "brave"
+        ? `当前使用的是可选 API provider：${providerLabel}。`
+        : `当前搜索配置：${providerLabel}。`;
+    return [
+      "Research Engine 搜索失败",
+      "",
+      "当前处于开发者模式，联网搜索已由 Research Engine 接管。",
+      providerLine,
+      `搜索失败原因：${reason}`,
+      "",
+      "旧 NoteX 搜索不会自动回退；请根据诊断继续修复 Research Engine。",
+    ].join("\n");
+  };
 
 const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResult): string | undefined => {
   if (result.successfulReads > 0) return undefined;
   const primaryError = result.errors[0] ?? result.warnings[0];
-  if (result.providerStatus === "not_configured") return "Research Engine search failed: provider is not configured for Developer Mode takeover.";
-  if (result.providerStatus === "unsupported_provider") return "Research Engine search failed: current provider is not supported by the real Shadow Run.";
-  if (result.providerStatus === "aborted") return "Research Engine search was aborted before usable evidence was available.";
-  if (result.candidateCount === 0) return `Research Engine search found no readable candidate URL${primaryError ? `: ${primaryError}` : "."}`;
-  return `Research Engine search did not produce usable evidence${primaryError ? `: ${primaryError}` : "."}`;
+  if (result.providerStatus === "not_configured") {
+    if (result.providerName === "bocha" || result.providerName === "brave") {
+      return buildResearchEngineTakeoverFailureText("当前 API provider 缺少 key；但主线将优先维护无 key 公共搜索 provider。", result.providerName);
+    }
+    return buildResearchEngineTakeoverFailureText("Research Engine 暂未配置或暂不支持该 provider。", result.providerName);
+  }
+  if (result.providerStatus === "unsupported_provider") {
+    return buildResearchEngineTakeoverFailureText("Research Engine 暂不支持该 provider。", result.providerName);
+  }
+  if (result.providerStatus === "blocked_or_captcha") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索被限制或验证页拦截；${primaryError}` : "Bing 公共搜索被限制或验证页拦截。", result.providerName);
+  }
+  if (result.providerStatus === "timeout") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索超时；${primaryError}` : "Bing 公共搜索超时。", result.providerName);
+  }
+  if (result.providerStatus === "network_error") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索网络请求失败；${primaryError}` : "Bing 公共搜索网络请求失败。", result.providerName);
+  }
+  if (result.providerStatus === "unsupported_environment") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `当前运行环境暂不支持 Bing 公共搜索；${primaryError}` : "当前运行环境暂不支持 Bing 公共搜索。", result.providerName);
+  }
+  if (result.providerStatus === "aborted") {
+    return buildResearchEngineTakeoverFailureText("搜索在获得可用证据前已中止。", result.providerName);
+  }
+  if (result.candidateCount === 0) {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `没有可读取的候选 URL；${primaryError}` : "没有可读取的候选 URL。", result.providerName);
+  }
+  return buildResearchEngineTakeoverFailureText(primaryError ? `没有产出可用证据；${primaryError}` : "没有产出可用证据。", result.providerName);
+};
+
+const getResearchEngineDebugProvider = (result: ResearchEngineRealShadowRunResult): string => {
+  const keyless = result.diagnosticsSnapshot.keylessProviderDiagnostics;
+  return keyless && typeof keyless === "object" ? "keyless_bing" : result.providerName;
+};
+
+const getResearchEngineApiKeyRequired = (result: ResearchEngineRealShadowRunResult): string => {
+  const keyless = result.diagnosticsSnapshot.keylessProviderDiagnostics;
+  return keyless && typeof keyless === "object" ? "no" : result.providerName === "bocha" || result.providerName === "brave" ? "yes" : "unknown";
 };
 
 const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResult): string => {
@@ -631,7 +694,10 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
     "legacySearchExecuted=no",
     "fallback=no",
     "developerModeOnly=yes",
-    `provider=${encodeDebugValue(result.providerName)}`,
+    `provider=${encodeDebugValue(getResearchEngineDebugProvider(result))}`,
+    `configuredProvider=${encodeDebugValue(result.providerName)}`,
+    `apiKeyRequired=${getResearchEngineApiKeyRequired(result)}`,
+    `providerLabel=${encodeDebugValue(getResearchEngineProviderLabel(result.providerName))}`,
     `providerStatus=${encodeDebugValue(result.providerStatus)}`,
     `rawResultCount=${result.rawResultCount}`,
     `normalizedResultCount=${result.normalizedResultCount}`,
@@ -776,10 +842,10 @@ const getWebSearchErrorMessage = (error: unknown): string => {
     const directCandidatesFound = Number(message.match(/directDiscoveryCandidatesFound=(\d+)/)?.[1] ?? "0");
     const directCandidatesKept = Number(message.match(/directDiscoveryCandidatesKept=(\d+)/)?.[1] ?? "0");
     if (message.includes("errorKind=rate_limited") || message.includes("429")) {
-      return "Bing 公开搜索被限制了，稍后可以重试，或切换 Bocha / Brave。";
+      return "Bing 公开搜索被限制了，稍后可以重试；Research Engine 主线会继续维护无 key 公共搜索 provider。";
     }
     if (message.includes("errorKind=blocked_or_captcha") || /captcha|verify/i.test(message)) {
-      return "Bing 公开搜索被验证页拦截了，稍后可以重试，或切换 Bocha / Brave。";
+      return "Bing 公开搜索被验证页拦截了，稍后可以重试；Research Engine 不会绕过验证码或登录限制。";
     }
     if (message.includes("errorKind=timeout")) return "Bing 公开搜索超时了，可以稍后重试。";
     if (message.includes("finalFailureReason=all_filtered") || message.includes("fallback_web_filtered_all")) {
@@ -2863,10 +2929,10 @@ const getNewsEventClusterCount = (sources: WebSource[]): number => {
 };
 
 const getWebSearchProviderMissingKeyMessage = (provider: WebSearchProvider): string => {
-  if (provider === "bing") return "Bing 公开搜索暂时不可用，可以稍后重试，或在设置中配置 Bocha / Brave。";
+  if (provider === "bing") return "Bing 公开搜索暂时不可用；Research Engine 主线会优先维护无 key 公共搜索 provider。";
   return provider === "bocha"
-    ? "需要在 AI 设置中配置博查 API Key"
-    : "需要在 AI 设置中配置 Brave Search API Key";
+    ? "当前 API provider 缺少 Bocha API Key；但主线将优先维护无 key 公共搜索 provider。"
+    : "当前 API provider 缺少 Brave Search API Key；但主线将优先维护无 key 公共搜索 provider。";
 };
 
 const NEWS_SEARCH_NO_SOURCE_MESSAGE = "当前没有成功完成联网搜索，因此我不能可靠总结最新动态。";
@@ -2922,11 +2988,16 @@ const shouldStopResearchEngineWithoutSources = (
 };
 
 const getResearchEngineNoSourceMessage = (searchError?: string): string =>
-  [
-    "Research Engine search failed in Developer Mode.",
-    searchError?.trim(),
-    "Legacy NoteX web search was not used. Turn Developer Mode off to use the old search path.",
-  ].filter(Boolean).join(" ");
+  searchError?.trim().startsWith("Research Engine 搜索失败")
+    ? searchError.trim()
+    : [
+      "Research Engine 搜索失败",
+      "",
+      "当前处于开发者模式，联网搜索已由 Research Engine 接管。",
+      searchError?.trim() ? `失败原因：${searchError.trim()}` : "失败原因：没有可用证据。",
+      "",
+      "旧 NoteX 搜索不会自动回退。关闭开发者模式后可使用旧搜索链路。",
+    ].join("\n");
 
 const buildWebContextDecision = (
   question: string,
@@ -4339,10 +4410,12 @@ export default function AiSidebar({
             "legacySearchExecuted=no",
             "fallback=no",
             "developerModeOnly=yes",
+            `provider=${encodeDebugValue(activeWebSearchProvider)}`,
+            `providerLabel=${encodeDebugValue(getResearchEngineProviderLabel(activeWebSearchProvider))}`,
             `exception=${encodeDebugValue(message)}`,
           ].join("; "),
         );
-        const errorMessage = `Research Engine search failed before usable evidence was available: ${message}`;
+        const errorMessage = buildResearchEngineTakeoverFailureText(`运行失败：${message}`, activeWebSearchProvider);
         setStatus("failed", errorMessage);
         return {
           error: errorMessage,

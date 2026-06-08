@@ -123,15 +123,15 @@ const unconfiguredWarningsFor = (
   const selectedProvider = providerName ?? config.provider;
   if (selectedProvider === "bing") {
     return [
-      "Bing public search remains on the legacy NoteX path and is not run by this Research Engine E2E smoke.",
-      "Configure Bocha or Brave with a key to run the Phase 14 real E2E smoke.",
+      "Bing public search is handled by the Research Engine keyless public provider in Phase 17.",
+      "This Phase 14 real E2E smoke only exercises optional API-key providers.",
     ];
   }
-  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; real E2E smoke was not started."];
-  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Brave API key is missing; real E2E smoke was not started."];
+  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; API providers are optional, and the Research Engine mainline should use a no-key public provider such as Bing."];
+  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Brave API key is missing; API providers are optional, and the Research Engine mainline should use a no-key public provider such as Bing."];
   return [
-    "Only configured Bocha or Brave providers are supported for the first real E2E smoke.",
-    "Bing public search remains on the legacy NoteX path and is not run by this smoke.",
+    "This real E2E smoke supports configured optional API providers.",
+    "Research Engine mainline discovery should prefer no-key public providers such as Bing.",
   ];
 };
 
