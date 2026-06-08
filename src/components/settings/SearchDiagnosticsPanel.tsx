@@ -139,6 +139,12 @@ const classifyError = (error: unknown): string => {
   if (lower.includes("empty_result") || lower.includes("no_results")) return "Bing 公开搜索没有返回可用自然结果。";
   if (lower.includes("no_candidate_url")) return "搜索结果没有进入可读取候选 URL。";
   if (lower.includes("all_reader_failed")) return "候选 URL 已选出，但 URL reader 全部失败。";
+  if (lower.includes("backend_reader_network_error") || lower.includes("backend_network_error")) return "后端公开网页 reader 网络读取失败；这不是浏览器 CORS，请查看 HTTP/内容/阻断诊断。";
+  if (lower.includes("http_non_2xx")) return "后端公开网页 reader 收到非 2xx HTTP 状态。";
+  if (lower.includes("unsupported_content_type")) return "后端公开网页 reader 收到不支持的内容类型。";
+  if (lower.includes("body_too_large")) return "后端公开网页 reader 因正文过大停止读取。";
+  if (lower.includes("needs_js")) return "网页可能依赖 JS 渲染，后端静态 reader 无法提取足够正文。";
+  if (lower.includes("low_quality")) return "后端 reader 读到的正文质量不足，不能作为可用证据。";
   if (lower.includes("cors_or_reader_network_error")) return "候选 URL reader 受 CORS 或网络错误影响。";
   if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "Bing 公开搜索网络连接失败；这是无 key 公共搜索诊断，请稍后重试。";
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) return "搜索服务返回 429 或限流，可以稍后重试。";
@@ -186,6 +192,22 @@ const researchEngineDiagnosticText = (
   const value = keyless?.[key] ?? bridge?.[key] ?? diagnosticsSnapshot?.[key];
   if (Array.isArray(value)) return value.map(String).filter(Boolean).join(" | ") || undefined;
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+};
+
+const researchEngineRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+const researchEngineReaderDiagnostics = (
+  diagnosticsSnapshot?: Record<string, unknown>,
+): Record<string, unknown> | undefined =>
+  researchEngineRecord(diagnosticsSnapshot?.readerDiagnostics);
+
+const researchEngineReaderDiagnosticText = (
+  diagnosticsSnapshot: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const readerDiagnostics = researchEngineReaderDiagnostics(diagnosticsSnapshot);
+  return researchEngineDiagnosticText(readerDiagnostics, key) ?? researchEngineDiagnosticText(diagnosticsSnapshot, key);
 };
 
 const researchEngineStageSummary = (
@@ -2163,9 +2185,13 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   ["Status", researchEngineRealUrlReaderSmoke.status],
+                  ["Transport", researchEngineReaderDiagnosticText(researchEngineRealUrlReaderSmoke.diagnosticsSnapshot, "readerTransport") ?? "none"],
+                  ["Backend bridge", researchEngineReaderDiagnosticText(researchEngineRealUrlReaderSmoke.diagnosticsSnapshot, "backendBridgeName") ?? "none"],
+                  ["CORS", researchEngineReaderDiagnosticText(researchEngineRealUrlReaderSmoke.diagnosticsSnapshot, "browserCorsNotApplicable") === "true" ? "not applicable" : "unknown"],
                   ["HTTP", researchEngineRealUrlReaderSmoke.httpStatus ?? "none"],
                   ["Content type", researchEngineRealUrlReaderSmoke.contentType ?? "none"],
                   ["Body bytes", researchEngineRealUrlReaderSmoke.bodyBytes ?? 0],
+                  ["Preview chars", researchEngineReaderDiagnosticText(researchEngineRealUrlReaderSmoke.diagnosticsSnapshot, "bodyPreviewLength") ?? "none"],
                   ["Blocks", researchEngineRealUrlReaderSmoke.blockCounts.total ?? 0],
                   ["Passages", researchEngineRealUrlReaderSmoke.selectedPassageCount],
                   ["Excerpt length", researchEngineRealUrlReaderSmoke.excerptLength],
@@ -2256,6 +2282,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Candidates", researchEngineRealE2ESmoke.candidateCount],
                   ["Selected URL", researchEngineRealE2ESmoke.selectedCandidate?.url ?? "none"],
                   ["Reader status", researchEngineRealE2ESmoke.readerStatus],
+                  ["Reader transport", researchEngineReaderDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "readerTransport") ?? "none"],
+                  ["Backend bridge", researchEngineReaderDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "backendBridgeName") ?? "none"],
                   ["Passages", researchEngineRealE2ESmoke.selectedPassageCount],
                   ["Evidence mode", researchEngineRealE2ESmoke.answerContractMode ?? "none"],
                   ["Quality", researchEngineRealE2ESmoke.readerQuality?.quality ?? "none"],
@@ -2375,6 +2403,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Stage", researchEngineStageSummary(researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
                   ["Read attempts", researchEngineRealShadowRun.readAttempts.length],
+                  ["Reader transport", researchEngineRealShadowRun.readAttempts.find((attempt) => attempt.readerTransport)?.readerTransport ?? "none"],
                   ["Successful", researchEngineRealShadowRun.successfulReads],
                   ["Failed", researchEngineRealShadowRun.failedReads],
                   ["Evidence mode", researchEngineRealShadowRun.answerContractMode ?? "none"],

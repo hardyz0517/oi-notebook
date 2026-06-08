@@ -883,7 +883,7 @@ export async function planSearchQueries(input: PlanSearchQueriesInput): Promise<
   }
 }
 
-export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest): Promise<WebSourceExcerptResult[]> {
+export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest & { cacheEnabled?: boolean }): Promise<WebSourceExcerptResult[]> {
   try {
     return await invoke<WebSourceExcerptResult[]>("fetch_web_source_excerpts", { input });
   } catch (e) {

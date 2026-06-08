@@ -54,7 +54,7 @@ export type ResearchEngineRealE2ESmokeResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "timeout" | "tauri_bridge_unavailable" | "blocked_or_captcha" | "network_error" | "parse_failed" | "invalid_response" | "unsupported_environment" | "malformed_response" | "empty_result" | "all_reader_failed" | "cors_or_reader_network_error" | "unknown_error";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "timeout" | "tauri_bridge_unavailable" | "blocked_or_captcha" | "network_error" | "parse_failed" | "invalid_response" | "unsupported_environment" | "malformed_response" | "empty_result" | "all_reader_failed" | "backend_reader_network_error" | "cors_or_reader_network_error" | "unknown_error";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -177,7 +177,11 @@ const discoveryStatusFromProviderStatus = (
 const providerStatusFromReaderFailure = (
   reader: ResearchEngineRealUrlReaderSmokeResult,
 ): ResearchEngineRealE2ESmokeResult["providerStatus"] =>
-  reader.status === "network_error" ? "cors_or_reader_network_error" : "all_reader_failed";
+  reader.status === "backend_network_error"
+    ? "backend_reader_network_error"
+    : reader.status === "network_error"
+      ? "cors_or_reader_network_error"
+      : "all_reader_failed";
 
 const makeRequestContext = (
   query: string,

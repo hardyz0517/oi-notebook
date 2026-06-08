@@ -58,6 +58,7 @@ export type ResearchEngineRealShadowRunReadAttempt = {
   status: ResearchEngineRealUrlReaderSmokeResult["status"] | "skipped" | "aborted";
   httpStatus?: number;
   contentType?: string;
+  readerTransport?: string;
   readerQuality?: ResearchEngineRealUrlReaderSmokeResult["qualitySummary"];
   selectedPassageCount: number;
   excerptPreview?: string;
@@ -69,7 +70,7 @@ export type ResearchEngineRealShadowRunResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "tauri_bridge_unavailable" | "malformed_response" | "parse_failed" | "empty_result" | "invalid_response" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "no_candidate_url" | "all_reader_failed" | "cors_or_reader_network_error" | "unknown_error" | "aborted";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "tauri_bridge_unavailable" | "malformed_response" | "parse_failed" | "empty_result" | "invalid_response" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "no_candidate_url" | "all_reader_failed" | "backend_reader_network_error" | "cors_or_reader_network_error" | "unknown_error" | "aborted";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -214,9 +215,11 @@ const providerStatusFromKeylessBingStatus = (
 const providerStatusFromReaderFailures = (
   readAttempts: ResearchEngineRealShadowRunReadAttempt[],
 ): ResearchEngineRealShadowRunResult["providerStatus"] =>
-  readAttempts.some((attempt) => attempt.status === "network_error")
-    ? "cors_or_reader_network_error"
-    : "all_reader_failed";
+  readAttempts.some((attempt) => attempt.status === "backend_network_error")
+    ? "backend_reader_network_error"
+    : readAttempts.some((attempt) => attempt.status === "network_error")
+      ? "cors_or_reader_network_error"
+      : "all_reader_failed";
 
 const clampReadTopN = (value: number | undefined): number =>
   Math.max(1, Math.min(value ?? DEFAULT_READ_TOP_N, MAX_READ_TOP_N));
@@ -432,6 +435,7 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
         `### ${index + 1}. ${attempt.candidate.title}`,
         `- url: ${attempt.candidate.url}`,
         `- status: ${attempt.status}`,
+        `- readerTransport: ${attempt.readerTransport ?? "none"}`,
         `- httpStatus: ${attempt.httpStatus ?? "none"}`,
         `- contentType: ${attempt.contentType ?? "none"}`,
         `- quality: ${attempt.readerQuality?.quality ?? "none"}`,
@@ -468,7 +472,7 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
     "- 当前使用无 key Bing 公共搜索时，只通过 search_web_sources 旧 bridge 做诊断传输。",
     "- 失败不会回退旧 NoteX 搜索；请根据 providerStatus、timeline 和 reader status 继续修复 Research Engine。",
     "- Provider request secrets are redacted.",
-    "- URL reader uses browser fetch with credentials omitted.",
+    "- URL reader uses the Tauri backend public URL reader with credentials omitted.",
     "- No cookies, Authorization, full request body, full raw provider response, or full page body are included.",
     "- CORS, login, captcha, and paywall restrictions are not bypassed.",
   ];
@@ -841,6 +845,7 @@ export const runResearchEngineRealShadowRun = async (
       status: reader.status,
       httpStatus: reader.httpStatus,
       contentType: reader.contentType,
+      readerTransport: typeof reader.diagnosticsSnapshot.readerTransport === "string" ? reader.diagnosticsSnapshot.readerTransport : undefined,
       readerQuality: reader.qualitySummary,
       selectedPassageCount: reader.selectedPassageCount,
       excerptPreview: previewText(reader.excerptPreview, EXCERPT_PREVIEW_MAX_CHARS),

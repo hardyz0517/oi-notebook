@@ -423,6 +423,8 @@ pub struct FetchWebSourceExcerptsInput {
     pub error_keywords: Vec<String>,
     #[serde(default)]
     pub queries: Vec<String>,
+    #[serde(default)]
+    pub cache_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -8820,6 +8822,7 @@ fn fetch_web_source_excerpts_blocking(
         .max_chars_per_source
         .unwrap_or(WEB_EXTRACT_MAX_CHARS_PER_SOURCE)
         .clamp(500, WEB_EXTRACT_MAX_CHARS_PER_SOURCE);
+    let cache_enabled = input.cache_enabled.unwrap_or(true);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(5))
@@ -8849,7 +8852,13 @@ fn fetch_web_source_excerpts_blocking(
             std::thread::spawn(move || {
                 (
                     index,
-                    fetch_single_web_source_excerpt(&client, &source, &context, max_chars),
+                    fetch_single_web_source_excerpt_with_cache(
+                        &client,
+                        &source,
+                        &context,
+                        max_chars,
+                        cache_enabled,
+                    ),
                 )
             })
         })

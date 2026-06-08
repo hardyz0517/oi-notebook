@@ -4,10 +4,10 @@ import { evaluateReaderQuality } from "./readerQuality";
 import { buildQueryPlan } from "./queryPlanner";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import {
-  runBrowserUrlReaderRequest,
-  type BrowserUrlReaderRedactedRequest,
-  type BrowserUrlReaderTransportErrorKind,
-} from "./browserUrlReaderTransport";
+  runTauriUrlReaderRequest,
+  type TauriUrlReaderRedactedRequest,
+  type TauriUrlReaderTransportErrorKind,
+} from "./tauriUrlReaderTransport";
 import type {
   ExcerptBuildResult,
   ExtractedContentBlock,
@@ -38,14 +38,18 @@ export type ResearchEngineRealUrlReaderSmokeStatus =
   | "fetched"
   | "partial"
   | "validation_failed"
+  | "tauri_bridge_unavailable"
   | "unsupported_environment"
-  | "non_2xx"
+  | "backend_network_error"
+  | "http_non_2xx"
   | "unsupported_content_type"
   | "empty_body"
   | "body_too_large"
   | "timeout"
   | "network_error"
+  | "blocked_or_captcha"
   | "needs_js"
+  | "low_quality"
   | "parse_failed";
 
 export type ResearchEngineRealUrlReaderSmokeResult = {
@@ -394,13 +398,19 @@ const extractedDocumentFromBody = (
   };
 };
 
-const statusFromTransportError = (kind: BrowserUrlReaderTransportErrorKind): ResearchEngineRealUrlReaderSmokeStatus => {
-  if (kind === "timeout" || kind === "aborted") return "timeout";
-  if (kind === "non_2xx") return "non_2xx";
+const statusFromTransportError = (kind: TauriUrlReaderTransportErrorKind): ResearchEngineRealUrlReaderSmokeStatus => {
+  if (kind === "tauri_bridge_unavailable") return "tauri_bridge_unavailable";
+  if (kind === "validation_failed") return "validation_failed";
+  if (kind === "backend_network_error") return "backend_network_error";
+  if (kind === "timeout") return "timeout";
+  if (kind === "http_non_2xx") return "http_non_2xx";
   if (kind === "unsupported_content_type") return "unsupported_content_type";
   if (kind === "empty_body") return "empty_body";
   if (kind === "body_too_large") return "body_too_large";
-  return "network_error";
+  if (kind === "blocked_or_captcha") return "blocked_or_captcha";
+  if (kind === "needs_js") return "needs_js";
+  if (kind === "low_quality") return "low_quality";
+  return "parse_failed";
 };
 
 const urlReaderStatusToSmokeStatus = (status: UrlReaderStatus): ResearchEngineRealUrlReaderSmokeStatus => {
@@ -418,9 +428,10 @@ const blockCountsFor = (quality?: ReaderQualityEvaluation): Record<string, numbe
 
 const buildMarkdownReport = (input: {
   result: Omit<ResearchEngineRealUrlReaderSmokeResult, "markdownReport">;
-  redactedRequest?: BrowserUrlReaderRedactedRequest;
+  redactedRequest?: TauriUrlReaderRedactedRequest;
 }): string => {
   const { result, redactedRequest } = input;
+  const transport = redactedRequest?.transport ?? "none";
   const lines = [
     "# Research Engine Real URL Reader Smoke",
     "",
@@ -435,10 +446,17 @@ const buildMarkdownReport = (input: {
     `- excerptLength: ${result.excerptLength}`,
     "",
     "## Redacted Request",
+    `- readerTransport: ${transport}`,
+    `- backendBridge: ${redactedRequest?.backendBridgeName ?? "none"}`,
     `- method: ${redactedRequest?.method ?? "none"}`,
     `- urlOrigin: ${redactedRequest?.urlOrigin ?? "none"}`,
     `- headerKeys: ${redactedRequest ? Object.keys(redactedRequest.headers).join(", ") : "none"}`,
     `- credentials: ${redactedRequest?.credentials ?? "omit"}`,
+    `- cookiesUsed: ${redactedRequest?.cookiesUsed ? "yes" : "no"}`,
+    `- authorizationUsed: ${redactedRequest?.authorizationUsed ? "yes" : "no"}`,
+    `- browserFetchUsed: ${redactedRequest?.browserFetchUsed ? "yes" : "no"}`,
+    `- browserCorsNotApplicable: ${redactedRequest?.browserCorsNotApplicable === true ? "yes" : "unknown"}`,
+    `- maxBytes: ${redactedRequest?.maxBytes ?? "none"}`,
     `- redactionFields: ${redactedRequest?.redactionFields.join(", ") || "authorization, cookie"}`,
     "",
     "## Block Counts",
@@ -461,7 +479,7 @@ const buildMarkdownReport = (input: {
 
 const failureResult = (
   input: Omit<ResearchEngineRealUrlReaderSmokeResult, "markdownReport"> & {
-    redactedRequest?: BrowserUrlReaderRedactedRequest;
+    redactedRequest?: TauriUrlReaderRedactedRequest;
   },
 ): ResearchEngineRealUrlReaderSmokeResult => ({
   ...input,
@@ -484,8 +502,16 @@ export const runResearchEngineRealUrlReaderSmoke = async (
       errors: [`URL rejected: ${validation.reason}`],
       diagnosticsSnapshot: {
         developerDiagnosticsOnly: true,
-        browserSideSmokeOnly: true,
-        dnsRebindingProtectionGuaranteed: false,
+        readerTransport: "tauri_backend",
+        backendBridgeName: "fetch_web_source_excerpts",
+        frontendUrlSafetyValidation: true,
+        backendUrlSafetyValidation: "not_reached",
+        dnsRebindingProtectionGuaranteed: true,
+        credentials: "omit",
+        cookiesUsed: false,
+        authorizationUsed: false,
+        browserFetchUsed: false,
+        browserCorsNotApplicable: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
         validationReason: validation.reason,
@@ -494,10 +520,12 @@ export const runResearchEngineRealUrlReaderSmoke = async (
   }
 
   const { request, policy, queryPlan, candidate } = makeRequestContext(validation.url);
-  const transport = await runBrowserUrlReaderRequest({
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const transport = await runTauriUrlReaderRequest({
     url: validation.url.toString(),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    maxBodyBytes,
+    userInput: validation.url.toString(),
   });
 
   if (!transport.ok) {
@@ -516,12 +544,37 @@ export const runResearchEngineRealUrlReaderSmoke = async (
       errors: [transport.error.message],
       diagnosticsSnapshot: {
         developerDiagnosticsOnly: true,
-        browserSideSmokeOnly: true,
-        dnsRebindingProtectionGuaranteed: false,
+        readerTransport: "tauri_backend",
+        backendBridgeName: "fetch_web_source_excerpts",
+        frontendUrlSafetyValidation: true,
+        backendUrlSafetyValidation: true,
+        dnsRebindingProtectionGuaranteed: true,
+        credentials: "omit",
+        cookiesUsed: false,
+        authorizationUsed: false,
+        browserFetchUsed: false,
+        browserCorsNotApplicable: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
         transportStatus: transport.error.kind,
+        maxBytes: maxBodyBytes,
+        bodyPreviewLength: transport.bodyPreviewLength ?? 0,
+        sourceContentType: transport.sourceContentType,
+        httpStatus: transport.httpStatus,
+        contentType: transport.contentType,
+        bodyBytes: transport.bodyBytes,
         redactedRequest: transport.redactedRequest,
+        backendResult: transport.backendResult ? {
+          status: transport.backendResult.status,
+          errorKind: transport.backendResult.errorKind,
+          excerptQuality: transport.backendResult.excerptQuality,
+          extractor: transport.backendResult.extractor,
+          contentStatus: transport.backendResult.contentStatus,
+          bodyBytes: transport.backendResult.bodyBytes,
+          extractedTextChars: transport.backendResult.extractedTextChars,
+          excerptChars: transport.backendResult.excerptChars,
+          finalUrlHost: transport.backendResult.finalUrlHost,
+        } : undefined,
       },
       redactedRequest: transport.redactedRequest,
     });
@@ -547,10 +600,14 @@ export const runResearchEngineRealUrlReaderSmoke = async (
       : undefined,
     diagnostics: {
       phase13RealUrlReaderSmoke: true,
+      readerTransport: "tauri_backend",
       httpStatus: transport.httpStatus,
       contentType: transport.contentType,
+      sourceContentType: transport.sourceContentType,
       bodyBytes: transport.bodyBytes,
       bodyTruncated: transport.truncated,
+      browserFetchUsed: false,
+      browserCorsNotApplicable: true,
     },
   };
   const quality = evaluateReaderQuality(readerResult);
@@ -574,7 +631,7 @@ export const runResearchEngineRealUrlReaderSmoke = async (
     ...quality.warnings,
     ...selection.warnings,
     ...excerpt.warnings,
-    "browser_side_smoke_not_backend_ssrf_boundary",
+    "tauri_backend_public_url_reader",
   ]));
   const errors = extracted.errors;
   const ok = errors.length === 0 && quality.canSupportAnswer;
@@ -603,21 +660,43 @@ export const runResearchEngineRealUrlReaderSmoke = async (
     errors,
     diagnosticsSnapshot: {
       developerDiagnosticsOnly: true,
-      browserSideSmokeOnly: true,
-      dnsRebindingProtectionGuaranteed: false,
+      readerTransport: "tauri_backend",
+      backendBridgeName: "fetch_web_source_excerpts",
+      frontendUrlSafetyValidation: true,
+      backendUrlSafetyValidation: true,
+      dnsRebindingProtectionGuaranteed: true,
+      credentials: "omit",
+      cookiesUsed: false,
+      authorizationUsed: false,
+      browserFetchUsed: false,
+      browserCorsNotApplicable: true,
       oldSearchPathTouched: false,
       noteConversationTouched: false,
       requestId: request.requestId,
       redactedRequest: transport.redactedRequest,
       httpStatus: transport.httpStatus,
       contentType: transport.contentType,
+      sourceContentType: transport.sourceContentType,
       bodyBytes: transport.bodyBytes,
       bodyPreview: transport.bodyPreview,
+      bodyPreviewLength: transport.bodyPreviewLength,
+      maxBytes: maxBodyBytes,
       readerStatus: readerResult.status,
       readerQuality: quality.quality,
       blockCounts: quality.blockStats,
       passageSelection: selection.coverage,
       excerptLength: excerpt.excerptMarkdown.length,
+      backendResult: {
+        status: transport.backendResult.status,
+        errorKind: transport.backendResult.errorKind,
+        excerptQuality: transport.backendResult.excerptQuality,
+        extractor: transport.backendResult.extractor,
+        contentStatus: transport.backendResult.contentStatus,
+        bodyBytes: transport.backendResult.bodyBytes,
+        extractedTextChars: transport.backendResult.extractedTextChars,
+        excerptChars: transport.backendResult.excerptChars,
+        finalUrlHost: transport.backendResult.finalUrlHost,
+      },
     },
   };
 
