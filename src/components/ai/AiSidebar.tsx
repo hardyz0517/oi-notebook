@@ -2819,6 +2819,14 @@ function WebSearchProgressCard({ status, text, decision }: { status?: AiChatMess
   );
 }
 
+const shouldShowAssistantSearchDetails = (message: AiChatMessage): boolean => {
+  if (message.role !== "assistant") return false;
+  if (!message.searchDecision?.shouldSearch) return false;
+  if (message.text.trim().length > 0) return true;
+  if (message.state === "done" || message.state === "error") return true;
+  return message.webSearchStatus === "failed";
+};
+
 function LocalNoteSearchProgressCard({
   status,
   error,
@@ -4136,7 +4144,10 @@ export default function AiSidebar({
 
     if (conversationPersistTimerRef.current !== null) {
       window.clearTimeout(conversationPersistTimerRef.current);
+      conversationPersistTimerRef.current = null;
     }
+
+    if (isResponding) return undefined;
 
     conversationPersistTimerRef.current = window.setTimeout(() => {
       conversationPersistTimerRef.current = null;
@@ -4168,7 +4179,7 @@ export default function AiSidebar({
       window.clearTimeout(conversationPersistTimerRef.current);
       conversationPersistTimerRef.current = null;
     };
-  }, [activeConversationId, conversations]);
+  }, [activeConversationId, conversations, isResponding]);
 
   useEffect(() => {
     setActiveCommandIndex(0);
@@ -5030,15 +5041,19 @@ export default function AiSidebar({
     conversationMutationVersionRef.current += 1;
     setConversations((current) => {
       const now = Date.now();
+      let changed = false;
       const next = current.map((conversation) => {
         if (conversation.id !== conversationId) return conversation;
         const updated = updater(conversation);
+        if (updated === conversation) return conversation;
+        changed = true;
         return {
           ...updated,
           messages: updated.messages.slice(-AI_CONVERSATION_MESSAGE_LIMIT),
           updatedAt: now,
         };
       });
+      if (!changed) return current;
       return limitConversations(next);
     });
   };
@@ -5062,10 +5077,16 @@ export default function AiSidebar({
     messageId: string,
     updater: (message: AiChatMessage) => AiChatMessage,
   ) => {
-    updateConversationMessages(conversationId, (conversation) => ({
-      ...conversation,
-      messages: conversation.messages.map((message) => (message.id === messageId ? updater(message) : message)),
-    }));
+    updateConversationMessages(conversationId, (conversation) => {
+      let changed = false;
+      const messages = conversation.messages.map((message) => {
+        if (message.id !== messageId) return message;
+        const nextMessage = updater(message);
+        if (nextMessage !== message) changed = true;
+        return nextMessage;
+      });
+      return changed ? { ...conversation, messages } : conversation;
+    });
   };
 
   const clearStreamFlushFrame = (streamId: string) => {
@@ -6485,11 +6506,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
     await waitForNextFrame();
     const updateWebSearchStatus = (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => {
-      replaceMessage(conversationId, assistantMessage.id, (message) => ({
-        ...message,
-        webSearchStatus: status,
-        webSearchStatusText: text ?? getWebSearchStageText(status, undefined, searchDecision),
-      }));
+      const nextText = text ?? getWebSearchStageText(status, undefined, searchDecision);
+      replaceMessage(conversationId, assistantMessage.id, (message) => (
+        message.webSearchStatus === status && message.webSearchStatusText === nextText
+          ? message
+          : {
+              ...message,
+              webSearchStatus: status,
+              webSearchStatusText: nextText,
+            }
+      ));
     };
     const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
       replaceMessage(conversationId, assistantMessage.id, (message) => ({
@@ -6760,11 +6786,16 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     void (async () => {
       await waitForNextFrame();
       const updateWebSearchStatus = (status: NonNullable<AiChatMessage["webSearchStatus"]>, text?: string) => {
-        replaceMessage(conversationId, assistantMessage.id, (current) => ({
-          ...current,
-          webSearchStatus: status,
-          webSearchStatusText: text ?? getWebSearchStageText(status, undefined, searchDecision),
-        }));
+        const nextText = text ?? getWebSearchStageText(status, undefined, searchDecision);
+        replaceMessage(conversationId, assistantMessage.id, (current) => (
+          current.webSearchStatus === status && current.webSearchStatusText === nextText
+            ? current
+            : {
+                ...current,
+                webSearchStatus: status,
+                webSearchStatusText: nextText,
+              }
+        ));
       };
       const updateLocalNoteSearchStatus = (status: NonNullable<AiChatMessage["localNoteSearchStatus"]>, error?: string) => {
         replaceMessage(conversationId, assistantMessage.id, (current) => ({
@@ -7750,7 +7781,9 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 const copyFeedback = messageCopyFeedback?.messageId === message.id ? messageCopyFeedback.status : null;
                 const canCopyAssistantMessage = message.text.trim().length > 0;
                 const canRetryMessage = canRetryAssistantMessage(message);
-                const sourceCitations = getSourceCitations(message.sources);
+                const shouldShowSearchDetails = shouldShowAssistantSearchDetails(message);
+                const visibleWebSources = shouldShowSearchDetails ? message.sources : undefined;
+                const sourceCitations = getSourceCitations(visibleWebSources);
                 const displayedSourceCitations = getDisplayedSourceCitations(message.text, sourceCitations);
                 const hasUsedSourceCitations = getUsedCitationIds(message.text, sourceCitations).size > 0;
                 const displayedLocalNoteSources = getDisplayedLocalNoteSources(message.text, message.localNoteSources);
@@ -7776,7 +7809,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                       "min-w-0",
                       message.state === "error" && "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2",
                     )}>
-                      {developerModeEnabled && message.searchDecision?.shouldSearch && (
+                      {developerModeEnabled && shouldShowSearchDetails && message.searchDecision?.shouldSearch && (
                         <WebSearchPlanCard
                           decision={message.searchDecision}
                           provider={activeWebSearchProvider}
@@ -7792,15 +7825,15 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                         status={message.localNoteSearchStatus}
                         error={message.localNoteSearchError}
                       />
-                      {!developerModeEnabled && message.searchDecision?.shouldSearch && message.searchError && (
+                      {!developerModeEnabled && shouldShowSearchDetails && message.searchDecision?.shouldSearch && message.searchError && (
                         <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-amber-200/70 bg-amber-50/70 px-2.5 py-1 text-[11px] leading-5 text-amber-800 dark:border-amber-300/20 dark:bg-amber-400/[0.08] dark:text-amber-100">
                           <Info className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 truncate">{getUserFacingSearchError(message.searchError, message.searchDecision)}</span>
                         </div>
                       )}
-                      {developerModeEnabled && message.searchDecision?.shouldSearch && (
+                      {developerModeEnabled && shouldShowSearchDetails && message.searchDecision?.shouldSearch && (
                         <WebSearchSourcesCard
-                          sources={message.sources}
+                          sources={visibleWebSources}
                           error={message.searchError}
                           searchDebug={message.searchErrorDebug}
                           messageId={message.id}
