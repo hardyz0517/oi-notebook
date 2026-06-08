@@ -32,6 +32,7 @@ export type ResearchEngineRealShadowRunOptions = {
   providerName?: ShadowProviderName;
   maxCandidates?: number;
   readTopN?: number;
+  maxReadAttempts?: number;
   providerTimeoutMs?: number;
   readerTimeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -93,6 +94,8 @@ const DEFAULT_READER_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_CANDIDATES = 8;
 const DEFAULT_READ_TOP_N = 2;
 const MAX_READ_TOP_N = 3;
+const DEFAULT_NEWS_MAX_READ_ATTEMPTS = 4;
+const MAX_READ_ATTEMPTS = 4;
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const EXCERPT_PREVIEW_MAX_CHARS = 1200;
 
@@ -227,6 +230,15 @@ const clampReadTopN = (value: number | undefined): number =>
 const clampMaxCandidates = (value: number | undefined): number =>
   Math.max(1, Math.min(value ?? DEFAULT_MAX_CANDIDATES, 10));
 
+const clampMaxReadAttempts = (
+  value: number | undefined,
+  readTopN: number,
+  newsMode: boolean,
+): number => {
+  const defaultValue = newsMode ? DEFAULT_NEWS_MAX_READ_ATTEMPTS : readTopN;
+  return Math.max(readTopN, Math.min(value ?? defaultValue, MAX_READ_ATTEMPTS));
+};
+
 const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowRunCandidate => ({
   id: candidate.id,
   title: candidate.title,
@@ -250,7 +262,7 @@ const makeRequestContext = (
     options: {
       allowPublicWeb: true,
       offlineOnly: false,
-      maxQueries: 1,
+      maxQueries: 4,
     },
     extensions: {
       developerDiagnosticsOnly: true,
@@ -562,6 +574,7 @@ export const runResearchEngineRealShadowRun = async (
   }
 
   const { request, policy, queryPlan } = makeRequestContext(query);
+  const maxReadAttempts = clampMaxReadAttempts(options.maxReadAttempts, readTopN, policy.mode === "news_recent");
   const plannedQuery = queryPlan.queries[0] ?? {
     query,
     language: policy.locale,
@@ -585,6 +598,7 @@ export const runResearchEngineRealShadowRun = async (
       rawUserQuery: query,
       queryPurpose: plannedQuery.purpose,
       queryLanguage: plannedQuery.language,
+      plannedQueries: queryPlan.queries,
       maxResults: maxCandidates,
       timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
@@ -810,7 +824,7 @@ export const runResearchEngineRealShadowRun = async (
 
   const readAttempts: ResearchEngineRealShadowRunReadAttempt[] = [];
   const evidenceItems: EvidenceItemBuildInput[] = [];
-  const candidatesToRead = candidatePool.selectedCandidates.slice(0, readTopN);
+  const candidatesToRead = candidatePool.selectedCandidates.slice(0, maxReadAttempts);
   for (const candidate of candidatesToRead) {
     const summary = candidateSummary(candidate);
     if (aborted()) {
@@ -856,6 +870,7 @@ export const runResearchEngineRealShadowRun = async (
     mark("reader", reader.ok ? "completed" : reader.status === "validation_failed" ? "skipped" : "failed", `${candidate.host}: ${reader.status}`, readerStartedAt);
     if (reader.ok) {
       evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan, candidate, reader }));
+      if (evidenceItems.length >= readTopN) break;
     }
   }
 
@@ -883,6 +898,7 @@ export const runResearchEngineRealShadowRun = async (
     ...packet.missingEvidenceReasons,
     ...evaluation.missingEvidenceReasons,
     ...(readTopN !== (options.readTopN ?? DEFAULT_READ_TOP_N) ? [`readTopN_clamped_to_${readTopN}`] : []),
+    ...(maxReadAttempts > readTopN ? [`reader_continue_after_failure_enabled:maxReadAttempts=${maxReadAttempts}`] : []),
   ]);
   const allErrors = unique([
     ...errors,
@@ -918,6 +934,7 @@ export const runResearchEngineRealShadowRun = async (
       oldSearchPathTouched: false,
       noteConversationTouched: false,
       readTopN,
+      maxReadAttempts,
       maxCandidates,
       maxReadTopN: MAX_READ_TOP_N,
       providerStatus: finalProviderStatus,

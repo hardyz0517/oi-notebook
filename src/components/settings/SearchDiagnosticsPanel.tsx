@@ -210,6 +210,24 @@ const researchEngineReaderDiagnosticText = (
   return researchEngineDiagnosticText(readerDiagnostics, key) ?? researchEngineDiagnosticText(diagnosticsSnapshot, key);
 };
 
+const researchEngineQualityPreviewText = (
+  diagnosticsSnapshot?: Record<string, unknown>,
+): string | undefined => {
+  const keyless = researchEngineKeylessDiagnostics(diagnosticsSnapshot);
+  const preview = Array.isArray(keyless?.qualityPreview) ? keyless.qualityPreview : undefined;
+  const first = researchEngineRecord(preview?.[0]);
+  if (!first) return undefined;
+  const title = typeof first.title === "string" ? first.title : undefined;
+  const url = typeof first.url === "string" ? first.url : undefined;
+  const stage = typeof first.stage === "string" ? first.stage : "none";
+  const score = typeof first.newsCandidateScore === "number" ? first.newsCandidateScore : 0;
+  const readability = typeof first.readabilityPrior === "number" ? first.readabilityPrior : 0;
+  const freshness = typeof first.freshnessSignal === "number" ? first.freshnessSignal : 0;
+  const penalty = typeof first.rankingPenalty === "number" ? first.rankingPenalty : 0;
+  const rejected = typeof first.whyRejected === "string" ? `; rejected=${first.whyRejected}` : "";
+  return `${title ?? url ?? "candidate"}; stage=${stage}; news=${score}; read=${readability}; fresh=${freshness}; penalty=${penalty}${rejected}`;
+};
+
 const researchEngineStageSummary = (
   diagnosticsSnapshot?: Record<string, unknown>,
 ): string => {
@@ -2107,6 +2125,9 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Status", researchEngineRealProviderSmoke.status],
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealProviderSmoke.diagnosticsSnapshot)],
+                  ["Bridge queries", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News stage", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Top quality", researchEngineQualityPreviewText(researchEngineRealProviderSmoke.diagnosticsSnapshot) ?? "none"],
                   ["Raw results", researchEngineRealProviderSmoke.rawResultCount],
                   ["Normalized", researchEngineRealProviderSmoke.normalizedResultCount],
                   ["Candidates", researchEngineRealProviderSmoke.candidateCount],
@@ -2279,6 +2300,9 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Provider status", researchEngineRealE2ESmoke.providerStatus],
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealE2ESmoke.diagnosticsSnapshot)],
+                  ["Bridge queries", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News stage", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Top quality", researchEngineQualityPreviewText(researchEngineRealE2ESmoke.diagnosticsSnapshot) ?? "none"],
                   ["Candidates", researchEngineRealE2ESmoke.candidateCount],
                   ["Selected URL", researchEngineRealE2ESmoke.selectedCandidate?.url ?? "none"],
                   ["Reader status", researchEngineRealE2ESmoke.readerStatus],
@@ -2401,8 +2425,12 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Provider status", researchEngineRealShadowRun.providerStatus],
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealShadowRun.diagnosticsSnapshot)],
+                  ["Bridge queries", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News stage", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Top quality", researchEngineQualityPreviewText(researchEngineRealShadowRun.diagnosticsSnapshot) ?? "none"],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
                   ["Read attempts", researchEngineRealShadowRun.readAttempts.length],
+                  ["Max attempts", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "maxReadAttempts") ?? "none"],
                   ["Reader transport", researchEngineRealShadowRun.readAttempts.find((attempt) => attempt.readerTransport)?.readerTransport ?? "none"],
                   ["Successful", researchEngineRealShadowRun.successfulReads],
                   ["Failed", researchEngineRealShadowRun.failedReads],

@@ -197,7 +197,7 @@ const makeRequestContext = (
     options: {
       allowPublicWeb: true,
       offlineOnly: false,
-      maxQueries: 1,
+      maxQueries: 4,
     },
     extensions: {
       developerDiagnosticsOnly: true,
@@ -537,6 +537,7 @@ export const runResearchEngineRealE2ESmoke = async (
       rawUserQuery: query,
       queryPurpose: plannedQuery.purpose,
       queryLanguage: plannedQuery.language,
+      plannedQueries: queryPlan.queries,
       maxResults: maxCandidates,
       timeoutMs: options.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
@@ -641,6 +642,10 @@ export const runResearchEngineRealE2ESmoke = async (
         mode: smokeConfig.mode === "keyless_bing" ? "public_search" : "api",
         apiKeyRequired: smokeConfig.mode !== "keyless_bing",
         legacyBridgeName: smokeConfig.mode === "keyless_bing" ? "search_web_sources" : undefined,
+        plannedQueries: queryPlan.queries.map((item) => item.query),
+        bridgeQueries: keylessProviderDiagnostics?.bridgeQueries,
+        newsQueryUsed: keylessProviderDiagnostics?.newsQueryUsed,
+        newsStageUsed: keylessProviderDiagnostics?.newsStageUsed,
         providerStatus,
         redactedProviderRequest,
         providerBodyPreview,

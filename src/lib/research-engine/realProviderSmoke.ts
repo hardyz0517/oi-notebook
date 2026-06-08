@@ -202,7 +202,7 @@ const makeRequestContext = (
     options: {
       allowPublicWeb: true,
       offlineOnly: false,
-      maxQueries: 1,
+      maxQueries: 4,
     },
     extensions: {
       developerDiagnosticsOnly: true,
@@ -322,6 +322,7 @@ export const runResearchEngineRealProviderSmoke = async (
       rawUserQuery: query,
       queryPurpose: plannedQuery.purpose,
       queryLanguage: plannedQuery.language,
+      plannedQueries: queryPlan.queries,
       maxResults: DEFAULT_MAX_RESULTS,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
@@ -366,6 +367,10 @@ export const runResearchEngineRealProviderSmoke = async (
         apiKeyRequired: false,
         legacyBridgeName: "search_web_sources",
         plannedQuery: plannedQuery.query,
+        plannedQueries: queryPlan.queries.map((item) => item.query),
+        bridgeQueries: keyless.diagnostics.bridgeQueries,
+        newsQueryUsed: keyless.diagnostics.newsQueryUsed,
+        newsStageUsed: keyless.diagnostics.newsStageUsed,
         queryPurpose: plannedQuery.purpose,
         providerStatus: keyless.status,
         elapsedMs: keyless.elapsedMs,
