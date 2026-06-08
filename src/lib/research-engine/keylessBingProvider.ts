@@ -2,6 +2,8 @@ import { searchWebSources } from "@/lib/api";
 import type { AiSearchFreshness, SearchVertical, WebSearchResult } from "@/lib/aiWebSearch";
 import type { DiscoveryRawResult, PlannedQuery, QueryPurpose, SourceType } from "./types";
 
+type NewsQueryMode = "entity_news" | "broad_news_digest";
+
 export type KeylessBingProviderStatus =
   | "available"
   | "partial"
@@ -51,6 +53,14 @@ export type KeylessBingProviderResult = {
     plannedQueryCount: number;
     newsQueryUsed: boolean;
     newsStageUsed: boolean;
+    newsQueryMode: NewsQueryMode;
+    broadNewsRelaxedEntityFilter: boolean;
+    candidateHostDistribution: Record<string, number>;
+    diversityHostCount: number;
+    hostDiversityApplied: boolean;
+    rejectedByEntityFilterCount: number;
+    rejectedByReadabilityCount: number;
+    rejectedByFreshnessCount: number;
     queryPurpose: QueryPurpose;
     rawBridgeResultCount: number;
     normalizedResultCount: number;
@@ -65,6 +75,7 @@ export type KeylessBingProviderResult = {
       rankingPenalty: number;
       whySelected: string[];
       whyRejected?: string;
+      host?: string;
     }>;
     resultCount: number;
     stageDiagnosticsPreview: string[];
@@ -120,17 +131,58 @@ const queryContainsNewsSignal = (value: string): boolean =>
   /\b(news|latest|recent|today|announcement|announcements|update|updates|press|release|launch)\b/i.test(value) ||
   /新闻|最新|近期|最近|消息|发布|公告|今天|本周|本月/.test(value);
 
+const queryContainsReadableNewsSignal = (value: string): boolean =>
+  queryContainsNewsSignal(value) ||
+  /\u65b0\u95fb|\u6700\u65b0|\u8fd1\u671f|\u6700\u8fd1|\u6d88\u606f|\u53d1\u5e03|\u516c\u544a|\u4eca\u5929|\u672c\u5468|\u672c\u6708/.test(value);
+
+const broadNewsDigestSignal = (value: string): boolean =>
+  /\b(world news|international news|global news|major world events|world events|what happened in the world)\b/i.test(value) ||
+  /\u56fd\u9645(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u4e16\u754c(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u5168\u7403\u8981\u95fb|\u56fd\u9645\u70ed\u70b9|\u4e16\u754c.*\u53d1\u751f/.test(value);
+
+const entityNewsSignal = (value: string): boolean =>
+  /\b(OpenAI|ChatGPT|Anthropic|Claude|Google|Microsoft|Meta|Apple|Nvidia|Tesla|DeepSeek|Gemini|Sam Altman)\b/i.test(value);
+
+const detectNewsQueryMode = (options: KeylessBingProviderOptions): NewsQueryMode => {
+  const haystack = [
+    options.rawUserQuery,
+    options.query,
+    ...(options.plannedQueries ?? []).map((item) => item.query),
+  ].filter(Boolean).join(" ");
+  if (broadNewsDigestSignal(haystack) && !entityNewsSignal(haystack)) return "broad_news_digest";
+  return "entity_news";
+};
+
+const broadNewsBridgeQueries = (options: KeylessBingProviderOptions): string[] => {
+  const haystack = `${options.rawUserQuery ?? ""} ${options.query}`;
+  const zhFirst = /[\u3400-\u9fff]/.test(haystack);
+  const zhQueries = [
+    "\u56fd\u9645\u65b0\u95fb \u6700\u65b0",
+    "\u4eca\u65e5\u56fd\u9645\u65b0\u95fb",
+    "\u5168\u7403\u8981\u95fb",
+  ];
+  const enQueries = [
+    "world news today",
+    "latest world news",
+    "international news today",
+  ];
+  return zhFirst ? [...zhQueries, ...enQueries] : [...enQueries, ...zhQueries];
+};
+
 const chooseBridgeQueries = (
   options: KeylessBingProviderOptions,
   queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
 ): string[] => {
+  if (newsQueryMode === "broad_news_digest") {
+    return unique(broadNewsBridgeQueries(options).map(normalizeQuery)).slice(0, MAX_BRIDGE_QUERIES);
+  }
   const plannedQueries = options.plannedQueries ?? [];
   const newsQueries = plannedQueries
-    .filter((item) => item.purpose === "news" || item.expectedSourceTypes.includes("mainstream_news") || queryContainsNewsSignal(item.query))
+    .filter((item) => item.purpose === "news" || item.expectedSourceTypes.includes("mainstream_news") || queryContainsReadableNewsSignal(item.query))
     .sort((left, right) => right.priority - left.priority)
     .map((item) => item.query);
   const officialNewsQueries = plannedQueries
-    .filter((item) => item.purpose === "official" && item.expectedSourceTypes.includes("official") && queryContainsNewsSignal(item.query))
+    .filter((item) => item.purpose === "official" && item.expectedSourceTypes.includes("official") && queryContainsReadableNewsSignal(item.query))
     .sort((left, right) => right.priority - left.priority)
     .map((item) => item.query);
   const allPlannedQueries = plannedQueries
@@ -232,6 +284,12 @@ const verticalForPurpose = (purpose: QueryPurpose): SearchVertical | undefined =
 const freshnessForPurpose = (purpose: QueryPurpose): AiSearchFreshness | undefined =>
   purpose === "news" ? "news" : undefined;
 
+const verticalForProviderRequest = (purpose: QueryPurpose, newsQueryMode: NewsQueryMode): SearchVertical | undefined =>
+  newsQueryMode === "broad_news_digest" ? "news" : verticalForPurpose(purpose);
+
+const freshnessForProviderRequest = (purpose: QueryPurpose, newsQueryMode: NewsQueryMode): AiSearchFreshness | undefined =>
+  newsQueryMode === "broad_news_digest" ? "news" : freshnessForPurpose(purpose);
+
 const sourceTypeHintFor = (source: WebSearchResult): SourceType => {
   if (source.sourceType === "official" || source.sourceKind === "official_news" || source.sourceKind === "official_blog") return "official";
   if (source.sourceKind === "docs_page") return "docs";
@@ -263,6 +321,9 @@ const parseSourceUrl = (source: WebSearchResult): URL | undefined => {
 
 const isNewsStage = (stage: string | undefined): boolean => stage?.startsWith("news") === true;
 
+const hostFromSource = (source: WebSearchResult): string | undefined =>
+  parseSourceUrl(source)?.hostname.toLocaleLowerCase().replace(/^www\./, "");
+
 const isReadableNewsPath = (parsed: URL | undefined): boolean => {
   if (!parsed) return false;
   const path = parsed.pathname.toLocaleLowerCase();
@@ -290,7 +351,9 @@ const hasFreshnessSignal = (source: WebSearchResult): boolean =>
 const sourceQualityFor = (
   source: WebSearchResult,
   queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
 ): KeylessSourceQuality => {
+  const newsLikeMode = queryPurpose === "news" || newsQueryMode === "broad_news_digest";
   const parsed = parseSourceUrl(source);
   const stage = source.searchStage;
   const text = `${source.title ?? ""} ${source.snippet ?? ""} ${parsed?.pathname ?? ""}`;
@@ -337,11 +400,12 @@ const sourceQualityFor = (
   }
 
   const genericCompanyPage = isGenericCompanyPage(source, parsed);
-  if (genericCompanyPage && queryPurpose === "news") rankingPenalty += 80;
-  if (queryPurpose === "news" && !isNewsStage(stage) && source.newsLike !== true && !isReadableNewsPath(parsed) && !hasFreshnessSignal(source)) {
+  if (genericCompanyPage && newsLikeMode) rankingPenalty += 80;
+  if (newsLikeMode && !isNewsStage(stage) && source.newsLike !== true && !isReadableNewsPath(parsed) && !hasFreshnessSignal(source)) {
     rankingPenalty += 34;
   }
-  if (source.filteredReason) rankingPenalty += 24;
+  const entityFilterRejected = /wrong_focus_entity|entity/i.test(source.filteredReason ?? source.rejectedReason ?? "");
+  if (source.filteredReason && !(newsQueryMode === "broad_news_digest" && entityFilterRejected)) rankingPenalty += 24;
   if (source.rejectedReason) rankingPenalty += 32;
 
   return {
@@ -351,7 +415,9 @@ const sourceQualityFor = (
     rankingPenalty,
     stage,
     whySelected: whySelected.length > 0 ? whySelected : ["no_news_or_readability_signal"],
-    whyRejected: genericCompanyPage
+    whyRejected: newsQueryMode === "broad_news_digest" && entityFilterRejected
+      ? undefined
+      : genericCompanyPage
       ? "generic_company_page_for_news_query"
       : source.filteredReason ?? source.rejectedReason,
   };
@@ -361,8 +427,9 @@ const sourceTypeHintForPurpose = (
   source: WebSearchResult,
   queryPurpose: QueryPurpose,
   quality: KeylessSourceQuality,
+  newsQueryMode: NewsQueryMode,
 ): SourceType => {
-  if (queryPurpose !== "news") return sourceTypeHintFor(source);
+  if (queryPurpose !== "news" && newsQueryMode !== "broad_news_digest") return sourceTypeHintFor(source);
   if (quality.whyRejected === "generic_company_page_for_news_query") return "unknown";
   if (source.sourceKind === "official_news" || source.sourceKind === "official_blog") return "official";
   if (source.sourceKind === "media_article" || source.newsLike === true || source.pageType === "news_article" || isNewsStage(source.searchStage)) {
@@ -374,11 +441,12 @@ const sourceTypeHintForPurpose = (
 const rankSourcesForPurpose = (
   sources: WebSearchResult[],
   queryPurpose: QueryPurpose,
+  newsQueryMode: NewsQueryMode,
 ): Array<{ source: WebSearchResult; originalIndex: number; quality: KeylessSourceQuality; score: number }> =>
   sources
     .map((source, originalIndex) => {
-      const quality = sourceQualityFor(source, queryPurpose);
-      const score = queryPurpose === "news"
+      const quality = sourceQualityFor(source, queryPurpose, newsQueryMode);
+      const score = queryPurpose === "news" || newsQueryMode === "broad_news_digest"
         ? quality.newsCandidateScore + quality.readabilityPrior + quality.freshnessSignal - quality.rankingPenalty - originalIndex * 0.01
         : -originalIndex;
       return { source, originalIndex, quality, score };
@@ -391,6 +459,7 @@ const qualityPreviewFor = (
   rankedSources.slice(0, MAX_QUALITY_PREVIEW).map(({ source, quality }) => ({
     title: compact(source.title, 120),
     url: compact(source.finalUrl ?? source.resolvedUrl ?? source.url, 220),
+    host: hostFromSource(source),
     stage: quality.stage,
     newsCandidateScore: quality.newsCandidateScore,
     readabilityPrior: quality.readabilityPrior,
@@ -399,6 +468,38 @@ const qualityPreviewFor = (
     whySelected: quality.whySelected,
     whyRejected: quality.whyRejected,
   }));
+
+const distribution = (values: Array<string | undefined>): Record<string, number> =>
+  values.filter((value): value is string => Boolean(value)).reduce((acc, value) => ({
+    ...acc,
+    [value]: (acc[value] ?? 0) + 1,
+  }), {} as Record<string, number>);
+
+const reasonCountFromPreview = (
+  bridgeDiagnostics: KeylessBingProviderResult["diagnostics"]["bridgeDiagnostics"] | undefined,
+  pattern: RegExp,
+): number => {
+  const preview = bridgeDiagnostics?.filterReasonPreview;
+  if (!preview || !pattern.test(preview)) return 0;
+  const matched = preview.match(new RegExp(`(?:${pattern.source})\\D*(\\d+)`, "i"));
+  const parsed = matched?.[1] ? Number.parseInt(matched[1], 10) : undefined;
+  if (Number.isFinite(parsed)) return parsed ?? 0;
+  return bridgeDiagnostics?.rejectedCandidateCount ?? 0;
+};
+
+const qualityRejectionStats = (
+  rankedSources: Array<{ quality: KeylessSourceQuality }>,
+  bridgeDiagnostics: KeylessBingProviderResult["diagnostics"]["bridgeDiagnostics"] | undefined,
+): Pick<KeylessBingProviderResult["diagnostics"], "rejectedByEntityFilterCount" | "rejectedByReadabilityCount" | "rejectedByFreshnessCount"> => {
+  const entityFromQuality = rankedSources.filter((item) => /wrong_focus_entity|entity/i.test(item.quality.whyRejected ?? "")).length;
+  const readabilityFromQuality = rankedSources.filter((item) => /generic_company_page|not_news_like|docs_or_homepage|wiki_or_reference|low_quality/i.test(item.quality.whyRejected ?? "")).length;
+  const freshnessFromQuality = rankedSources.filter((item) => /stale|old|freshness/i.test(item.quality.whyRejected ?? "")).length;
+  return {
+    rejectedByEntityFilterCount: entityFromQuality + reasonCountFromPreview(bridgeDiagnostics, /wrong_focus_entity|entity/i),
+    rejectedByReadabilityCount: readabilityFromQuality + reasonCountFromPreview(bridgeDiagnostics, /not_news_like|docs_or_homepage|wiki_or_reference|low_quality/i),
+    rejectedByFreshnessCount: freshnessFromQuality + reasonCountFromPreview(bridgeDiagnostics, /stale|old|freshness/i),
+  };
+};
 
 const errorStatusFromMessage = (message: string): KeylessBingProviderStatus => {
   const lower = message.toLocaleLowerCase();
@@ -515,6 +616,13 @@ const baseDiagnostics = (
     plannedQueryCount?: number;
     newsQueryUsed?: boolean;
     newsStageUsed?: boolean;
+    newsQueryMode?: NewsQueryMode;
+    broadNewsRelaxedEntityFilter?: boolean;
+    candidateHostDistribution?: Record<string, number>;
+    hostDiversityApplied?: boolean;
+    rejectedByEntityFilterCount?: number;
+    rejectedByReadabilityCount?: number;
+    rejectedByFreshnessCount?: number;
     queryPurpose: QueryPurpose;
     providerStatus: KeylessBingProviderStatus;
     rawBridgeResultCount?: number;
@@ -544,6 +652,14 @@ const baseDiagnostics = (
   plannedQueryCount: input.plannedQueryCount ?? 0,
   newsQueryUsed: input.newsQueryUsed ?? input.queryPurpose === "news",
   newsStageUsed: input.newsStageUsed ?? false,
+  newsQueryMode: input.newsQueryMode ?? "entity_news",
+  broadNewsRelaxedEntityFilter: input.broadNewsRelaxedEntityFilter ?? false,
+  candidateHostDistribution: input.candidateHostDistribution ?? {},
+  diversityHostCount: Object.keys(input.candidateHostDistribution ?? {}).length,
+  hostDiversityApplied: input.hostDiversityApplied ?? false,
+  rejectedByEntityFilterCount: input.rejectedByEntityFilterCount ?? 0,
+  rejectedByReadabilityCount: input.rejectedByReadabilityCount ?? 0,
+  rejectedByFreshnessCount: input.rejectedByFreshnessCount ?? 0,
   queryPurpose: input.queryPurpose,
   rawBridgeResultCount: input.rawBridgeResultCount ?? 0,
   normalizedResultCount: input.normalizedResultCount ?? 0,
@@ -577,6 +693,7 @@ const rawResultFromWebSource = (
     query: string;
     queryPurpose: QueryPurpose;
     queryLanguage?: "zh" | "en" | "mixed";
+    newsQueryMode: NewsQueryMode;
     quality: KeylessSourceQuality;
   },
 ): DiscoveryRawResult | undefined => {
@@ -596,7 +713,7 @@ const rawResultFromWebSource = (
     snippet: source.snippet,
     publishedAt: source.sourcePublishedAt ?? source.dateHint,
     discoveredAt: Date.now(),
-    sourceTypeHint: sourceTypeHintForPurpose(source, input.queryPurpose, input.quality),
+    sourceTypeHint: sourceTypeHintForPurpose(source, input.queryPurpose, input.quality, input.newsQueryMode),
     extensions: {
       phase17KeylessBingProvider: {
         apiKeyRequired: false,
@@ -622,7 +739,8 @@ export const runKeylessBingProvider = async (
   const startedAt = performance.now();
   const query = options.query.trim();
   const queryPurpose = options.queryPurpose ?? "recall";
-  const bridgeQueries = chooseBridgeQueries(options, queryPurpose);
+  const newsQueryMode = detectNewsQueryMode(options);
+  const bridgeQueries = chooseBridgeQueries(options, queryPurpose, newsQueryMode);
   if (!query) {
     return {
       ok: false,
@@ -638,6 +756,8 @@ export const runKeylessBingProvider = async (
           bridgeQueries,
           plannedQueryCount: options.plannedQueries?.length ?? 0,
           newsQueryUsed: false,
+          newsQueryMode,
+          broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
           queryPurpose,
           providerStatus: "empty_result",
           errorKind: "empty_result",
@@ -657,20 +777,21 @@ export const runKeylessBingProvider = async (
       rawUserQuery: options.rawUserQuery ?? query,
       queries: bridgeQueries,
       intent: "general_web",
-      vertical: verticalForPurpose(queryPurpose),
-      freshness: freshnessForPurpose(queryPurpose),
+      vertical: verticalForProviderRequest(queryPurpose, newsQueryMode),
+      freshness: freshnessForProviderRequest(queryPurpose, newsQueryMode),
       maxResults: Math.max(1, Math.min(options.maxResults ?? 8, 10)),
     }), options.timeoutMs ?? 8_000);
     if (!Array.isArray(sourceResult)) {
       throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
     }
     const sources = sourceResult;
-    const rankedSources = rankSourcesForPurpose(sources, queryPurpose);
+    const rankedSources = rankSourcesForPurpose(sources, queryPurpose, newsQueryMode);
     const rawResults = rankedSources
       .map(({ source, quality }, index) => rawResultFromWebSource(source, index, {
         query,
         queryPurpose,
         queryLanguage: options.queryLanguage,
+        newsQueryMode,
         quality,
       }))
       .filter((source): source is DiscoveryRawResult => Boolean(source));
@@ -679,8 +800,10 @@ export const runKeylessBingProvider = async (
     const firstResultPreview = firstResultPreviewFromSources(sources);
     const bridgeDiagnostics = bridgeDiagnosticsFromSources(sources);
     const qualityPreview = qualityPreviewFor(rankedSources);
+    const candidateHostDistribution = distribution(rankedSources.map(({ source }) => hostFromSource(source)));
+    const rejectionStats = qualityRejectionStats(rankedSources, bridgeDiagnostics);
     const newsStageUsed = sources.some((source) => isNewsStage(source.searchStage));
-    const newsQueryUsed = bridgeQueries.some(queryContainsNewsSignal) || queryPurpose === "news";
+    const newsQueryUsed = bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news";
     const missingResultCount = sources.length - rawResults.length;
     const warnings = [
       ...(missingResultCount > 0 ? [`missing_required_fields:${missingResultCount}`] : []),
@@ -709,6 +832,11 @@ export const runKeylessBingProvider = async (
         plannedQueryCount: options.plannedQueries?.length ?? 0,
         newsQueryUsed,
         newsStageUsed,
+        newsQueryMode,
+        broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
+        candidateHostDistribution,
+        hostDiversityApplied: queryPurpose === "news",
+        ...rejectionStats,
         queryPurpose,
         providerStatus: status,
         rawBridgeResultCount: sources.length,
@@ -740,7 +868,9 @@ export const runKeylessBingProvider = async (
         query,
         bridgeQueries,
         plannedQueryCount: options.plannedQueries?.length ?? 0,
-        newsQueryUsed: bridgeQueries.some(queryContainsNewsSignal) || queryPurpose === "news",
+        newsQueryUsed: bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news",
+        newsQueryMode,
+        broadNewsRelaxedEntityFilter: newsQueryMode === "broad_news_digest",
         queryPurpose,
         providerStatus: status,
         stageDiagnosticsPreview: diagnosticsPreview ? [diagnosticsPreview] : [],

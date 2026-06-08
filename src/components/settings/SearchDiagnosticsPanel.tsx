@@ -228,6 +228,21 @@ const researchEngineQualityPreviewText = (
   return `${title ?? url ?? "candidate"}; stage=${stage}; news=${score}; read=${readability}; fresh=${freshness}; penalty=${penalty}${rejected}`;
 };
 
+const researchEngineDistributionText = (
+  diagnosticsSnapshot: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const keyless = researchEngineKeylessDiagnostics(diagnosticsSnapshot);
+  const value = researchEngineRecord(keyless?.[key]) ?? researchEngineRecord(diagnosticsSnapshot?.[key]);
+  if (!value) return undefined;
+  const entries = Object.entries(value)
+    .filter(([, count]) => typeof count === "number")
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .slice(0, 5)
+    .map(([host, count]) => `${host}:${count}`);
+  return entries.join(" | ") || undefined;
+};
+
 const researchEngineStageSummary = (
   diagnosticsSnapshot?: Record<string, unknown>,
 ): string => {
@@ -2126,7 +2141,11 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealProviderSmoke.diagnosticsSnapshot)],
                   ["Bridge queries", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News mode", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "newsQueryMode") ?? "none"],
                   ["News stage", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Host diversity", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "hostDiversityApplied") ?? "false"],
+                  ["Candidate hosts", researchEngineDistributionText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "candidateHostDistribution") ?? "none"],
+                  ["Entity rejects", researchEngineDiagnosticText(researchEngineRealProviderSmoke.diagnosticsSnapshot, "rejectedByEntityFilterCount") ?? "0"],
                   ["Top quality", researchEngineQualityPreviewText(researchEngineRealProviderSmoke.diagnosticsSnapshot) ?? "none"],
                   ["Raw results", researchEngineRealProviderSmoke.rawResultCount],
                   ["Normalized", researchEngineRealProviderSmoke.normalizedResultCount],
@@ -2301,7 +2320,11 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealE2ESmoke.diagnosticsSnapshot)],
                   ["Bridge queries", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News mode", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "newsQueryMode") ?? "none"],
                   ["News stage", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Host diversity", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "hostDiversityApplied") ?? "false"],
+                  ["Candidate hosts", researchEngineDistributionText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "candidateHostDistribution") ?? "none"],
+                  ["Entity rejects", researchEngineDiagnosticText(researchEngineRealE2ESmoke.diagnosticsSnapshot, "rejectedByEntityFilterCount") ?? "0"],
                   ["Top quality", researchEngineQualityPreviewText(researchEngineRealE2ESmoke.diagnosticsSnapshot) ?? "none"],
                   ["Candidates", researchEngineRealE2ESmoke.candidateCount],
                   ["Selected URL", researchEngineRealE2ESmoke.selectedCandidate?.url ?? "none"],
@@ -2426,7 +2449,11 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Bridge queries", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["News mode", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "newsQueryMode") ?? "none"],
                   ["News stage", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
+                  ["Host diversity", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "hostDiversityApplied") ?? "false"],
+                  ["Candidate hosts", researchEngineDistributionText(researchEngineRealShadowRun.diagnosticsSnapshot, "candidateHostDistribution") ?? "none"],
+                  ["Evidence hosts", researchEngineDistributionText(researchEngineRealShadowRun.diagnosticsSnapshot, "evidenceHostDistribution") ?? "none"],
                   ["Top quality", researchEngineQualityPreviewText(researchEngineRealShadowRun.diagnosticsSnapshot) ?? "none"],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
                   ["Read attempts", researchEngineRealShadowRun.readAttempts.length],

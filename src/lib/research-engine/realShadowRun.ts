@@ -95,7 +95,9 @@ const DEFAULT_MAX_CANDIDATES = 8;
 const DEFAULT_READ_TOP_N = 2;
 const MAX_READ_TOP_N = 3;
 const DEFAULT_NEWS_MAX_READ_ATTEMPTS = 4;
-const MAX_READ_ATTEMPTS = 4;
+const DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS = 6;
+const MAX_READ_ATTEMPTS = 6;
+const NEWS_PER_HOST_EVIDENCE_LIMIT = 1;
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const EXCERPT_PREVIEW_MAX_CHARS = 1200;
 
@@ -234,10 +236,22 @@ const clampMaxReadAttempts = (
   value: number | undefined,
   readTopN: number,
   newsMode: boolean,
+  broadNewsDigest: boolean,
 ): number => {
-  const defaultValue = newsMode ? DEFAULT_NEWS_MAX_READ_ATTEMPTS : readTopN;
+  const defaultValue = broadNewsDigest ? DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS : newsMode ? DEFAULT_NEWS_MAX_READ_ATTEMPTS : readTopN;
   return Math.max(readTopN, Math.min(value ?? defaultValue, MAX_READ_ATTEMPTS));
 };
+
+const isBroadNewsDigestQuery = (query: string): boolean =>
+  /\b(world news|international news|global news|major world events|world events|what happened in the world)\b/i.test(query) ||
+  /\u56fd\u9645(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u4e16\u754c(?:\u5927\u4e8b|\u65b0\u95fb|\u8981\u95fb)|\u5168\u7403\u8981\u95fb|\u56fd\u9645\u70ed\u70b9|\u4e16\u754c.*\u53d1\u751f/.test(query);
+
+const hostCount = (items: EvidenceItemBuildInput[]): Record<string, number> =>
+  items.reduce((acc, item) => {
+    const host = item.candidate?.host;
+    if (!host) return acc;
+    return { ...acc, [host]: (acc[host] ?? 0) + 1 };
+  }, {} as Record<string, number>);
 
 const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowRunCandidate => ({
   id: candidate.id,
@@ -574,7 +588,10 @@ export const runResearchEngineRealShadowRun = async (
   }
 
   const { request, policy, queryPlan } = makeRequestContext(query);
-  const maxReadAttempts = clampMaxReadAttempts(options.maxReadAttempts, readTopN, policy.mode === "news_recent");
+  const broadNewsDigest = isBroadNewsDigestQuery(query);
+  const newsMode = policy.mode === "news_recent";
+  const hostDiversityApplied = newsMode;
+  const maxReadAttempts = clampMaxReadAttempts(options.maxReadAttempts, readTopN, newsMode, broadNewsDigest);
   const plannedQuery = queryPlan.queries[0] ?? {
     query,
     language: policy.locale,
@@ -775,7 +792,16 @@ export const runResearchEngineRealShadowRun = async (
     policy,
     queryPlan,
     rawResults,
-    config: { maxSelected: maxCandidates, perHostLimit: 2 },
+    config: {
+      maxSelected: maxCandidates,
+      perHostLimit: hostDiversityApplied ? 1 : 2,
+      diversity: {
+        maxSelected: maxCandidates,
+        perHostLimit: hostDiversityApplied ? 1 : 2,
+        preferredSourceTypes: ["mainstream_news", "official", "tech_media", "docs", "community"],
+        minClusterRepresentatives: broadNewsDigest ? 4 : 2,
+      },
+    },
   });
   const selectedCandidates = candidatePool.selectedCandidates.map(candidateSummary);
   mark("candidate_pool", candidatePool.selectedCount > 0 ? "completed" : "failed", `${candidatePool.selectedCount} selected candidates`, candidateStartedAt);
@@ -824,6 +850,7 @@ export const runResearchEngineRealShadowRun = async (
 
   const readAttempts: ResearchEngineRealShadowRunReadAttempt[] = [];
   const evidenceItems: EvidenceItemBuildInput[] = [];
+  const skippedSameHostEvidence: string[] = [];
   const candidatesToRead = candidatePool.selectedCandidates.slice(0, maxReadAttempts);
   for (const candidate of candidatesToRead) {
     const summary = candidateSummary(candidate);
@@ -869,7 +896,13 @@ export const runResearchEngineRealShadowRun = async (
     readAttempts.push(attempt);
     mark("reader", reader.ok ? "completed" : reader.status === "validation_failed" ? "skipped" : "failed", `${candidate.host}: ${reader.status}`, readerStartedAt);
     if (reader.ok) {
-      evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan, candidate, reader }));
+      const existingHostCount = hostCount(evidenceItems)[candidate.host] ?? 0;
+      if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
+        skippedSameHostEvidence.push(candidate.host);
+        attempt.warnings = unique([...attempt.warnings, "source_diversity_same_host_evidence_skipped"]);
+      } else {
+        evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan, candidate, reader }));
+      }
       if (evidenceItems.length >= readTopN) break;
     }
   }
@@ -899,6 +932,9 @@ export const runResearchEngineRealShadowRun = async (
     ...evaluation.missingEvidenceReasons,
     ...(readTopN !== (options.readTopN ?? DEFAULT_READ_TOP_N) ? [`readTopN_clamped_to_${readTopN}`] : []),
     ...(maxReadAttempts > readTopN ? [`reader_continue_after_failure_enabled:maxReadAttempts=${maxReadAttempts}`] : []),
+    ...(hostDiversityApplied ? ["host_diversity_applied:perHostEvidenceLimit=1"] : []),
+    ...(broadNewsDigest ? ["news_query_mode:broad_news_digest"] : []),
+    ...(skippedSameHostEvidence.length > 0 ? [`source_diversity_same_host_skipped:${unique(skippedSameHostEvidence).join(",")}`] : []),
   ]);
   const allErrors = unique([
     ...errors,
@@ -935,6 +971,12 @@ export const runResearchEngineRealShadowRun = async (
       noteConversationTouched: false,
       readTopN,
       maxReadAttempts,
+      newsQueryMode: broadNewsDigest ? "broad_news_digest" : newsMode ? "entity_news" : "not_news",
+      hostDiversityApplied,
+      perHostEvidenceLimit: hostDiversityApplied ? NEWS_PER_HOST_EVIDENCE_LIMIT : "none",
+      sourceDiversityLow: hostDiversityApplied && Object.keys(hostCount(evidenceItems)).length < Math.min(readTopN, evidenceItems.length || readTopN),
+      evidenceHostDistribution: hostCount(evidenceItems),
+      skippedSameHostEvidenceHosts: unique(skippedSameHostEvidence),
       maxCandidates,
       maxReadTopN: MAX_READ_TOP_N,
       providerStatus: finalProviderStatus,
