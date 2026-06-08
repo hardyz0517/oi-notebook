@@ -656,17 +656,41 @@ const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResu
   if (result.providerStatus === "blocked_or_captcha") {
     return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索被限制或验证页拦截；${primaryError}` : "Bing 公共搜索被限制或验证页拦截。", result.providerName);
   }
+  if (result.providerStatus === "tauri_bridge_unavailable") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Tauri 搜索 bridge 不可用；${primaryError}` : "Tauri 搜索 bridge 不可用。", result.providerName);
+  }
+  if (result.providerStatus === "rate_limited") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索被限流；${primaryError}` : "Bing 公共搜索被限流。", result.providerName);
+  }
   if (result.providerStatus === "timeout") {
     return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索超时；${primaryError}` : "Bing 公共搜索超时。", result.providerName);
   }
   if (result.providerStatus === "network_error") {
     return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索网络请求失败；${primaryError}` : "Bing 公共搜索网络请求失败。", result.providerName);
   }
+  if (result.providerStatus === "parse_failed") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索返回内容解析失败；${primaryError}` : "Bing 公共搜索返回内容解析失败。", result.providerName);
+  }
+  if (result.providerStatus === "invalid_response" || result.providerStatus === "malformed_response") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `搜索 bridge 返回格式不符合预期；${primaryError}` : "搜索 bridge 返回格式不符合预期。", result.providerName);
+  }
+  if (result.providerStatus === "empty_result") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `Bing 公共搜索没有返回可用结果；${primaryError}` : "Bing 公共搜索没有返回可用结果。", result.providerName);
+  }
   if (result.providerStatus === "unsupported_environment") {
     return buildResearchEngineTakeoverFailureText(primaryError ? `当前运行环境暂不支持 Bing 公共搜索；${primaryError}` : "当前运行环境暂不支持 Bing 公共搜索。", result.providerName);
   }
   if (result.providerStatus === "aborted") {
     return buildResearchEngineTakeoverFailureText("搜索在获得可用证据前已中止。", result.providerName);
+  }
+  if (result.providerStatus === "no_candidate_url") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `没有可读取的候选 URL；${primaryError}` : "没有可读取的候选 URL。", result.providerName);
+  }
+  if (result.providerStatus === "cors_or_reader_network_error") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `URL reader 受 CORS 或网络错误影响，未读到可用证据；${primaryError}` : "URL reader 受 CORS 或网络错误影响，未读到可用证据。", result.providerName);
+  }
+  if (result.providerStatus === "all_reader_failed") {
+    return buildResearchEngineTakeoverFailureText(primaryError ? `所有候选 URL reader 都失败；${primaryError}` : "所有候选 URL reader 都失败。", result.providerName);
   }
   if (result.candidateCount === 0) {
     return buildResearchEngineTakeoverFailureText(primaryError ? `没有可读取的候选 URL；${primaryError}` : "没有可读取的候选 URL。", result.providerName);

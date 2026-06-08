@@ -69,7 +69,7 @@ export type ResearchEngineRealShadowRunResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "malformed_response" | "empty_result" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "aborted";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "tauri_bridge_unavailable" | "malformed_response" | "parse_failed" | "empty_result" | "invalid_response" | "blocked_or_captcha" | "network_error" | "unsupported_environment" | "no_candidate_url" | "all_reader_failed" | "cors_or_reader_network_error" | "unknown_error" | "aborted";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -201,10 +201,22 @@ const providerStatusFromKeylessBingStatus = (
   if (status === "blocked_or_captcha") return "blocked_or_captcha";
   if (status === "timeout") return "timeout";
   if (status === "network_error") return "network_error";
+  if (status === "tauri_bridge_unavailable") return "tauri_bridge_unavailable";
+  if (status === "rate_limited") return "rate_limited";
+  if (status === "parse_failed") return "parse_failed";
+  if (status === "invalid_response") return "invalid_response";
   if (status === "unsupported_environment") return "unsupported_environment";
-  if (status === "empty_result" || status === "parse_failed") return "empty_result";
-  return "failed";
+  if (status === "empty_result") return "empty_result";
+  if (status === "unknown_error") return "unknown_error";
+  return status;
 };
+
+const providerStatusFromReaderFailures = (
+  readAttempts: ResearchEngineRealShadowRunReadAttempt[],
+): ResearchEngineRealShadowRunResult["providerStatus"] =>
+  readAttempts.some((attempt) => attempt.status === "network_error")
+    ? "cors_or_reader_network_error"
+    : "all_reader_failed";
 
 const clampReadTopN = (value: number | undefined): number =>
   Math.max(1, Math.min(value ?? DEFAULT_READ_TOP_N, MAX_READ_TOP_N));
@@ -395,8 +407,11 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
     "## Summary",
     `- ok: ${result.ok}`,
     `- query: ${result.query}`,
-    `- provider: ${result.providerName}`,
+    `- provider: ${result.diagnosticsSnapshot.keylessProviderDiagnostics ? "keyless_bing" : result.providerName}`,
     `- providerStatus: ${result.providerStatus}`,
+    `- apiKeyRequired: ${result.diagnosticsSnapshot.keylessProviderDiagnostics ? "no" : result.providerName === "bocha" || result.providerName === "brave" ? "yes" : "unknown"}`,
+    `- mode: ${result.diagnosticsSnapshot.keylessProviderDiagnostics ? "public_search" : "api"}`,
+    `- legacyBridge: ${result.diagnosticsSnapshot.keylessProviderDiagnostics ? "search_web_sources" : "none"}`,
     `- rawResultCount: ${result.rawResultCount}`,
     `- normalizedResultCount: ${result.normalizedResultCount}`,
     `- candidateCount: ${result.candidateCount}`,
@@ -450,6 +465,8 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
     "",
     "## Security Notes",
     "- Developer Diagnostics manual shadow run only.",
+    "- 当前使用无 key Bing 公共搜索时，只通过 search_web_sources 旧 bridge 做诊断传输。",
+    "- 失败不会回退旧 NoteX 搜索；请根据 providerStatus、timeline 和 reader status 继续修复 Research Engine。",
     "- Provider request secrets are redacted.",
     "- URL reader uses browser fetch with credentials omitted.",
     "- No cookies, Authorization, full request body, full raw provider response, or full page body are included.",
@@ -679,7 +696,20 @@ export const runResearchEngineRealShadowRun = async (
     });
   }
 
-  if (rawResults.length === 0 || providerStatus === "malformed_response" || providerStatus === "empty_result") {
+  if (
+    rawResults.length === 0 ||
+    providerStatus === "malformed_response" ||
+    providerStatus === "empty_result" ||
+    providerStatus === "parse_failed" ||
+    providerStatus === "invalid_response" ||
+    providerStatus === "tauri_bridge_unavailable" ||
+    providerStatus === "blocked_or_captcha" ||
+    providerStatus === "rate_limited" ||
+    providerStatus === "network_error" ||
+    providerStatus === "timeout" ||
+    providerStatus === "unsupported_environment" ||
+    providerStatus === "unknown_error"
+  ) {
     return finalize({
       ok: false,
       query,
@@ -725,7 +755,7 @@ export const runResearchEngineRealShadowRun = async (
       ok: false,
       query,
       providerName: shadowConfig.providerName,
-      providerStatus: discoveryStatusFromProviderStatus(providerStatus),
+      providerStatus: "no_candidate_url",
       rawResultCount: rawResults.length,
       normalizedResultCount: candidatePool.normalizedCount,
       candidateCount: candidatePool.dedupedCount,
@@ -740,7 +770,7 @@ export const runResearchEngineRealShadowRun = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
-        providerStatus,
+        providerStatus: "no_candidate_url",
         redactedProviderRequest,
         providerBodyPreview,
         keylessProviderDiagnostics,
@@ -840,11 +870,17 @@ export const runResearchEngineRealShadowRun = async (
     ...(abortedRun ? ["real shadow run aborted"] : []),
   ]);
 
+  const finalProviderStatus: ResearchEngineRealShadowRunResult["providerStatus"] = abortedRun
+    ? "aborted"
+    : successfulReads > 0
+      ? discoveryStatusFromProviderStatus(providerStatus)
+      : providerStatusFromReaderFailures(readAttempts);
+
   return finalize({
     ok: successfulReads > 0 && !abortedRun,
     query,
     providerName: shadowConfig.providerName,
-    providerStatus: abortedRun ? "aborted" : discoveryStatusFromProviderStatus(providerStatus),
+    providerStatus: finalProviderStatus,
     rawResultCount: rawResults.length,
     normalizedResultCount: candidatePool.normalizedCount,
     candidateCount: candidatePool.dedupedCount,
@@ -864,7 +900,7 @@ export const runResearchEngineRealShadowRun = async (
       readTopN,
       maxCandidates,
       maxReadTopN: MAX_READ_TOP_N,
-      providerStatus,
+      providerStatus: finalProviderStatus,
       redactedProviderRequest,
       providerBodyPreview,
       keylessProviderDiagnostics,

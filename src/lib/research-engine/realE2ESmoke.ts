@@ -3,6 +3,7 @@ import { buildAnswerContract } from "./answerContract";
 import { buildCandidatePool } from "./candidatePool";
 import { buildEvidencePacket } from "./evidencePacket";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
+import { runKeylessBingProvider } from "./keylessBingProvider";
 import { normalizeRealProviderPayload } from "./providerResponseNormalizer";
 import { buildQueryPlan } from "./queryPlanner";
 import { runBrowserProviderSmokeRequest, type BrowserProviderRedactedRequest } from "./browserProviderTransport";
@@ -23,7 +24,22 @@ import type {
   SourceType,
 } from "./types";
 
-type SmokeProviderName = Extract<RealDiscoveryProviderName, "bocha" | "brave">;
+type SmokeProviderName = Extract<RealDiscoveryProviderName, "bing" | "bocha" | "brave">;
+type ApiSmokeProviderName = Extract<RealDiscoveryProviderName, "bocha" | "brave">;
+type E2ESmokeConfig =
+  | {
+    providerName: "bing";
+    mode: "keyless_bing";
+    providerPriority: number;
+  }
+  | {
+    providerName: ApiSmokeProviderName;
+    mode: "api";
+    endpoint: string;
+    apiKey: string;
+    payloadKind: RealProviderPayloadKind;
+    providerPriority: number;
+  };
 
 export type ResearchEngineRealE2ESmokeOptions = {
   query: string;
@@ -38,7 +54,7 @@ export type ResearchEngineRealE2ESmokeResult = {
   ok: boolean;
   query: string;
   providerName: RealDiscoveryProviderName | "none";
-  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "malformed_response" | "empty_result";
+  providerStatus: DiscoveryProviderStatus | "not_configured" | "unsupported_provider" | "unauthorized" | "rate_limited" | "timeout" | "tauri_bridge_unavailable" | "blocked_or_captcha" | "network_error" | "parse_failed" | "invalid_response" | "unsupported_environment" | "malformed_response" | "empty_result" | "all_reader_failed" | "cors_or_reader_network_error" | "unknown_error";
   rawResultCount: number;
   normalizedResultCount: number;
   candidateCount: number;
@@ -70,7 +86,7 @@ const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const EXCERPT_PREVIEW_MAX_CHARS = 1200;
 
 const isSmokeProviderName = (value: string | undefined): value is SmokeProviderName =>
-  value === "bocha" || value === "brave";
+  value === "bing" || value === "bocha" || value === "brave";
 
 const previewText = (value: string | undefined, maxChars: number): string | undefined => {
   if (!value) return undefined;
@@ -83,18 +99,20 @@ const unique = (values: string[]): string[] => Array.from(new Set(values.filter(
 const configForSmoke = (
   config: WebSearchConfig | null,
   providerName?: SmokeProviderName,
-): {
-  providerName: SmokeProviderName;
-  endpoint: string;
-  apiKey: string;
-  payloadKind: RealProviderPayloadKind;
-  providerPriority: number;
-} | undefined => {
+): E2ESmokeConfig | undefined => {
   if (!config || !config.enabled || !config.publicSearchConsent) return undefined;
   const selectedProvider = providerName ?? (isSmokeProviderName(config.provider) ? config.provider : undefined);
+  if (selectedProvider === "bing") {
+    return {
+      providerName: "bing",
+      mode: "keyless_bing",
+      providerPriority: 82,
+    };
+  }
   if (selectedProvider === "bocha" && config.bochaApiKey.trim()) {
     return {
       providerName: "bocha",
+      mode: "api",
       endpoint: config.bochaEndpoint.trim() || "https://api.bochaai.com/v1/web-search",
       apiKey: config.bochaApiKey.trim(),
       payloadKind: "bocha_like",
@@ -104,6 +122,7 @@ const configForSmoke = (
   if (selectedProvider === "brave" && config.braveApiKey.trim()) {
     return {
       providerName: "brave",
+      mode: "api",
       endpoint: BRAVE_ENDPOINT,
       apiKey: config.braveApiKey.trim(),
       payloadKind: "brave_like",
@@ -123,8 +142,7 @@ const unconfiguredWarningsFor = (
   const selectedProvider = providerName ?? config.provider;
   if (selectedProvider === "bing") {
     return [
-      "Bing public search is handled by the Research Engine keyless public provider in Phase 17.",
-      "This Phase 14 real E2E smoke only exercises optional API-key providers.",
+      "Bing public search uses the Research Engine keyless public provider. It requires no API key and does not fall back to legacy NoteX search.",
     ];
   }
   if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; API providers are optional, and the Research Engine mainline should use a no-key public provider such as Bing."];
@@ -155,6 +173,11 @@ const discoveryStatusFromProviderStatus = (
   if (status === "not_configured" || status === "unsupported_provider") return "disabled";
   return "failed";
 };
+
+const providerStatusFromReaderFailure = (
+  reader: ResearchEngineRealUrlReaderSmokeResult,
+): ResearchEngineRealE2ESmokeResult["providerStatus"] =>
+  reader.status === "network_error" ? "cors_or_reader_network_error" : "all_reader_failed";
 
 const makeRequestContext = (
   query: string,
@@ -324,13 +347,89 @@ const buildEvidenceInputs = (
 };
 
 const buildMarkdownReport = (result: Omit<ResearchEngineRealE2ESmokeResult, "markdownReport">): string => {
+  const providerLabel = result.diagnosticsSnapshot.providerName === "keyless_bing" ? "keyless_bing" : result.providerName;
+  const apiKeyRequired = result.diagnosticsSnapshot.apiKeyRequired === false
+    ? "no"
+    : result.diagnosticsSnapshot.apiKeyRequired === true
+      ? "yes"
+      : "unknown";
+  const mode = typeof result.diagnosticsSnapshot.mode === "string" ? result.diagnosticsSnapshot.mode : "api";
+  const legacyBridge = typeof result.diagnosticsSnapshot.legacyBridgeName === "string"
+    ? result.diagnosticsSnapshot.legacyBridgeName
+    : "none";
+  const excerptPreview = typeof result.diagnosticsSnapshot.excerptPreview === "string"
+    ? result.diagnosticsSnapshot.excerptPreview
+    : "none";
+  const chineseDiagnostics = [
+    "## \u4e2d\u6587\u8bca\u65ad\u8bf4\u660e",
+    "- \u5f53\u524d\u4e3a Research Engine \u5f00\u53d1\u8bca\u65ad\u3002",
+    "- Bing \u8def\u5f84\u4f7f\u7528\u65e0 key \u516c\u5171\u641c\u7d22\uff0c\u4e0d\u8bfb\u53d6 API key\u3001Cookie \u6216 Authorization\u3002",
+    "- \u65e7 NoteX \u641c\u7d22\u4e0d\u4f1a\u81ea\u52a8\u56de\u9000\u3002",
+  ];
+  return [
+    "# Research Engine Real E2E Smoke",
+    "",
+    `- ok: ${result.ok}`,
+    `- query: ${result.query}`,
+    `- provider: ${providerLabel}`,
+    `- providerStatus: ${result.providerStatus}`,
+    `- apiKeyRequired: ${apiKeyRequired}`,
+    `- mode: ${mode}`,
+    `- legacyBridge: ${legacyBridge}`,
+    `- rawResultCount: ${result.rawResultCount}`,
+    `- normalizedResultCount: ${result.normalizedResultCount}`,
+    `- candidateCount: ${result.candidateCount}`,
+    `- selectedUrl: ${result.selectedCandidate?.url ?? "none"}`,
+    `- readerStatus: ${result.readerStatus}`,
+    `- readerQuality: ${result.readerQuality?.quality ?? "none"}`,
+    `- selectedPassageCount: ${result.selectedPassageCount}`,
+    `- answerContractMode: ${result.answerContractMode ?? "none"}`,
+    "",
+    "## Selected Candidate",
+    result.selectedCandidate
+      ? `- ${result.selectedCandidate.title} (${result.selectedCandidate.host})\n- ${result.selectedCandidate.url}`
+      : "- none",
+    "",
+    "## Evidence Summary",
+    result.evidenceSummary
+      ? [
+        `- strong: ${result.evidenceSummary.strongCount}`,
+        `- medium: ${result.evidenceSummary.mediumCount}`,
+        `- weak: ${result.evidenceSummary.weakCount}`,
+        `- none: ${result.evidenceSummary.noneCount}`,
+        `- citeable: ${result.evidenceSummary.citeableCount}`,
+      ].join("\n")
+      : "- none",
+    "",
+    "## Excerpt Preview",
+    excerptPreview,
+    "",
+    "## Warnings",
+    ...(result.warnings.length > 0 ? result.warnings.map((warning) => `- ${warning}`) : ["- none"]),
+    "",
+    "## Errors",
+    ...(result.errors.length > 0 ? result.errors.map((error) => `- ${error}`) : ["- none"]),
+    "",
+    "## 中文诊断说明",
+    "- 当前为 Research Engine 开发诊断。",
+    "- Bing 路径使用无 key 公共搜索，不读取 API key、Cookie 或 Authorization。",
+    "- 旧 NoteX 搜索不会自动回退。",
+  ]
+    .filter((line) => !line.includes("\u6d93") && !line.includes("\u8930") && !line.includes("\u749a") && !line.includes("\u93c3"))
+    .concat(chineseDiagnostics)
+    .join("\n");
+
+  /*
   const lines = [
     "# Research Engine Real E2E Smoke",
     "",
     `- ok: ${result.ok}`,
     `- query: ${result.query}`,
-    `- provider: ${result.providerName}`,
+    `- provider: ${result.diagnosticsSnapshot.providerName === "keyless_bing" ? "keyless_bing" : result.providerName}`,
     `- providerStatus: ${result.providerStatus}`,
+    `- apiKeyRequired: ${result.diagnosticsSnapshot.apiKeyRequired === false ? "no" : result.diagnosticsSnapshot.apiKeyRequired === true ? "yes" : "unknown"}`,
+    `- mode: ${typeof result.diagnosticsSnapshot.mode === "string" ? result.diagnosticsSnapshot.mode : "api"}`,
+    `- legacyBridge: ${typeof result.diagnosticsSnapshot.legacyBridgeName === "string" ? result.diagnosticsSnapshot.legacyBridgeName : "none"}`,
     `- rawResultCount: ${result.rawResultCount}`,
     `- normalizedResultCount: ${result.normalizedResultCount}`,
     `- candidateCount: ${result.candidateCount}`,
@@ -364,8 +463,14 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealE2ESmokeResult, "mar
     "",
     "## Errors",
     ...(result.errors.length > 0 ? result.errors.map((error) => `- ${error}`) : ["- none"]),
+    "",
+    "## 中文诊断说明",
+    "- 当前为 Research Engine 开发诊断。",
+    "- Bing 路径使用无 key 公共搜索，不读取 API key、Cookie 或 Authorization。",
+    "- 旧 NoteX 搜索不会自动回退。",
   ];
   return lines.join("\n");
+  */
 };
 
 const finalize = (
@@ -413,75 +518,100 @@ export const runResearchEngineRealE2ESmoke = async (
     priority: 100,
     expectedSourceTypes: ["official" as const, "mainstream_news" as const],
   };
-  const providerTransport = await runBrowserProviderSmokeRequest({
-    providerName: smokeConfig.providerName,
-    endpoint: smokeConfig.endpoint,
-    apiKey: smokeConfig.apiKey,
-    query: plannedQuery.query,
-    maxResults: maxCandidates,
-    timeoutMs: options.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
-  });
-
   let providerStatus: ResearchEngineRealE2ESmokeResult["providerStatus"] = "failed";
   let rawResults: DiscoveryRawResult[] = [];
+  let rawResultCount = 0;
   const warnings: string[] = [];
   const errors: string[] = [];
   let redactedProviderRequest: BrowserProviderRedactedRequest | undefined;
+  let providerBodyPreview: string | undefined;
+  let keylessProviderDiagnostics: Record<string, unknown> | undefined;
 
-  if (!providerTransport.ok) {
-    providerStatus = statusFromError(providerTransport.error);
-    errors.push(providerTransport.error.message);
-    redactedProviderRequest = providerTransport.redactedRequest;
-    return finalize({
-      ok: false,
-      query,
-      providerName: smokeConfig.providerName,
-      providerStatus,
-      rawResultCount: 0,
-      normalizedResultCount: 0,
-      candidateCount: 0,
-      readerStatus: "not_started",
-      selectedPassageCount: 0,
-      warnings,
-      errors,
-      diagnosticsSnapshot: {
-        developerDiagnosticsOnly: true,
-        oldSearchPathTouched: false,
-        noteConversationTouched: false,
-        providerStatus,
-        redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
-        readerStarted: false,
-      },
+  if (smokeConfig.mode === "keyless_bing") {
+    const keyless = await runKeylessBingProvider({
+      query: plannedQuery.query,
+      rawUserQuery: query,
+      queryPurpose: plannedQuery.purpose,
+      queryLanguage: plannedQuery.language,
+      maxResults: maxCandidates,
+      timeoutMs: options.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
-  }
-
-  redactedProviderRequest = providerTransport.redactedRequest;
-  if (!providerTransport.bodyText.trim()) {
-    providerStatus = "empty_result";
-    errors.push("provider response body is empty");
+    providerStatus = keyless.status;
+    rawResults = keyless.rawResults;
+    rawResultCount = keyless.diagnostics.rawBridgeResultCount;
+    warnings.push(...keyless.warnings);
+    errors.push(...keyless.errors);
+    keylessProviderDiagnostics = keyless.diagnostics;
   } else {
-    try {
-      const payload = JSON.parse(providerTransport.bodyText) as unknown;
-      const normalized = normalizeRealProviderPayload({
+    const providerTransport = await runBrowserProviderSmokeRequest({
+      providerName: smokeConfig.providerName,
+      endpoint: smokeConfig.endpoint ?? "",
+      apiKey: smokeConfig.apiKey ?? "",
+      query: plannedQuery.query,
+      maxResults: maxCandidates,
+      timeoutMs: options.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    });
+    providerBodyPreview = providerTransport.bodyPreview;
+
+    if (!providerTransport.ok) {
+      providerStatus = statusFromError(providerTransport.error);
+      errors.push(providerTransport.error.message);
+      redactedProviderRequest = providerTransport.redactedRequest;
+      return finalize({
+        ok: false,
+        query,
         providerName: smokeConfig.providerName,
-        payloadKind: smokeConfig.payloadKind,
-        payload,
-        request: { request, policy, queryPlan, query: plannedQuery },
-        providerPriority: smokeConfig.providerPriority,
-        maxResults: maxCandidates,
+        providerStatus,
+        rawResultCount: 0,
+        normalizedResultCount: 0,
+        candidateCount: 0,
+        readerStatus: "not_started",
+        selectedPassageCount: 0,
+        warnings,
+        errors,
+        diagnosticsSnapshot: {
+          developerDiagnosticsOnly: true,
+          oldSearchPathTouched: false,
+          noteConversationTouched: false,
+          providerName: smokeConfig.providerName,
+          mode: "api",
+          apiKeyRequired: true,
+          providerStatus,
+          redactedProviderRequest,
+          providerBodyPreview,
+          readerStarted: false,
+        },
       });
-      rawResults = normalized.rawResults;
-      warnings.push(...normalized.warnings);
-      if (normalized.error) {
-        providerStatus = normalized.rawResults.length > 0 ? "partial" : statusFromError(normalized.error);
-        errors.push(normalized.error.message);
-      } else {
-        providerStatus = normalized.partial ? "partial" : "available";
+    }
+
+    redactedProviderRequest = providerTransport.redactedRequest;
+    if (!providerTransport.bodyText.trim()) {
+      providerStatus = "empty_result";
+      errors.push("provider response body is empty");
+    } else {
+      try {
+        const payload = JSON.parse(providerTransport.bodyText) as unknown;
+        const normalized = normalizeRealProviderPayload({
+          providerName: smokeConfig.providerName,
+          payloadKind: smokeConfig.payloadKind ?? "unknown",
+          payload,
+          request: { request, policy, queryPlan, query: plannedQuery },
+          providerPriority: smokeConfig.providerPriority,
+          maxResults: maxCandidates,
+        });
+        rawResults = normalized.rawResults;
+        rawResultCount = normalized.rawResults.length;
+        warnings.push(...normalized.warnings);
+        if (normalized.error) {
+          providerStatus = normalized.rawResults.length > 0 ? "partial" : statusFromError(normalized.error);
+          errors.push(normalized.error.message);
+        } else {
+          providerStatus = normalized.partial ? "partial" : "available";
+        }
+      } catch {
+        providerStatus = "malformed_response";
+        errors.push("provider response body is not valid JSON");
       }
-    } catch {
-      providerStatus = "malformed_response";
-      errors.push("provider response body is not valid JSON");
     }
   }
 
@@ -491,7 +621,7 @@ export const runResearchEngineRealE2ESmoke = async (
       query,
       providerName: smokeConfig.providerName,
       providerStatus,
-      rawResultCount: rawResults.length,
+      rawResultCount,
       normalizedResultCount: 0,
       candidateCount: 0,
       readerStatus: "not_started",
@@ -502,9 +632,15 @@ export const runResearchEngineRealE2ESmoke = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
+        providerName: smokeConfig.mode === "keyless_bing" ? "keyless_bing" : smokeConfig.providerName,
+        configuredProvider: smokeConfig.providerName,
+        mode: smokeConfig.mode === "keyless_bing" ? "public_search" : "api",
+        apiKeyRequired: smokeConfig.mode !== "keyless_bing",
+        legacyBridgeName: smokeConfig.mode === "keyless_bing" ? "search_web_sources" : undefined,
         providerStatus,
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         readerStarted: false,
       },
     });
@@ -524,7 +660,7 @@ export const runResearchEngineRealE2ESmoke = async (
       query,
       providerName: smokeConfig.providerName,
       providerStatus: discoveryStatusFromProviderStatus(providerStatus),
-      rawResultCount: rawResults.length,
+      rawResultCount,
       normalizedResultCount: candidatePool.normalizedCount,
       candidateCount: candidatePool.dedupedCount,
       readerStatus: "not_started",
@@ -535,9 +671,15 @@ export const runResearchEngineRealE2ESmoke = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
+        providerName: smokeConfig.mode === "keyless_bing" ? "keyless_bing" : smokeConfig.providerName,
+        configuredProvider: smokeConfig.providerName,
+        mode: smokeConfig.mode === "keyless_bing" ? "public_search" : "api",
+        apiKeyRequired: smokeConfig.mode !== "keyless_bing",
+        legacyBridgeName: smokeConfig.mode === "keyless_bing" ? "search_web_sources" : undefined,
         providerStatus,
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         candidatePool: {
           rawCount: candidatePool.rawCount,
           normalizedCount: candidatePool.normalizedCount,
@@ -570,8 +712,8 @@ export const runResearchEngineRealE2ESmoke = async (
       ok: false,
       query,
       providerName: smokeConfig.providerName,
-      providerStatus: discoveryStatusFromProviderStatus(providerStatus),
-      rawResultCount: rawResults.length,
+      providerStatus: providerStatusFromReaderFailure(reader),
+      rawResultCount,
       normalizedResultCount: candidatePool.normalizedCount,
       candidateCount: candidatePool.dedupedCount,
       selectedCandidate: selectedCandidateSummary,
@@ -584,9 +726,15 @@ export const runResearchEngineRealE2ESmoke = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
-        providerStatus,
+        providerName: smokeConfig.mode === "keyless_bing" ? "keyless_bing" : smokeConfig.providerName,
+        configuredProvider: smokeConfig.providerName,
+        mode: smokeConfig.mode === "keyless_bing" ? "public_search" : "api",
+        apiKeyRequired: smokeConfig.mode !== "keyless_bing",
+        legacyBridgeName: smokeConfig.mode === "keyless_bing" ? "search_web_sources" : undefined,
+        providerStatus: providerStatusFromReaderFailure(reader),
         redactedProviderRequest,
-        providerBodyPreview: providerTransport.bodyPreview,
+        providerBodyPreview,
+        keylessProviderDiagnostics,
         candidatePool: {
           rawCount: candidatePool.rawCount,
           normalizedCount: candidatePool.normalizedCount,
@@ -626,7 +774,7 @@ export const runResearchEngineRealE2ESmoke = async (
     query,
     providerName: smokeConfig.providerName,
     providerStatus: discoveryStatusFromProviderStatus(providerStatus),
-    rawResultCount: rawResults.length,
+    rawResultCount,
     normalizedResultCount: candidatePool.normalizedCount,
     candidateCount: candidatePool.dedupedCount,
     selectedCandidate: selectedCandidateSummary,
@@ -642,9 +790,15 @@ export const runResearchEngineRealE2ESmoke = async (
       oldSearchPathTouched: false,
       noteConversationTouched: false,
       readTopN,
+      providerName: smokeConfig.mode === "keyless_bing" ? "keyless_bing" : smokeConfig.providerName,
+      configuredProvider: smokeConfig.providerName,
+      mode: smokeConfig.mode === "keyless_bing" ? "public_search" : "api",
+      apiKeyRequired: smokeConfig.mode !== "keyless_bing",
+      legacyBridgeName: smokeConfig.mode === "keyless_bing" ? "search_web_sources" : undefined,
       providerStatus,
       redactedProviderRequest,
-      providerBodyPreview: providerTransport.bodyPreview,
+      providerBodyPreview,
+      keylessProviderDiagnostics,
       candidatePool: {
         rawCount: candidatePool.rawCount,
         normalizedCount: candidatePool.normalizedCount,

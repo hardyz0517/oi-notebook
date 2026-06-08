@@ -1,5 +1,6 @@
 import type { WebSearchConfig } from "@/lib/aiWebSearch";
 import { buildCandidatePool } from "./candidatePool";
+import { runKeylessBingProvider } from "./keylessBingProvider";
 import { normalizeRealProviderPayload } from "./providerResponseNormalizer";
 import { buildQueryPlan } from "./queryPlanner";
 import { buildSearchPolicyDecision } from "./searchPolicy";
@@ -20,7 +21,20 @@ import type {
   ResearchSearchRequest,
 } from "./types";
 
-type SmokeProviderName = Extract<RealDiscoveryProviderName, "bocha" | "brave">;
+type SmokeProviderName = Extract<RealDiscoveryProviderName, "bing" | "bocha" | "brave">;
+type ApiSmokeProviderName = Extract<RealDiscoveryProviderName, "bocha" | "brave">;
+type ProviderSmokeConfig =
+  | {
+    providerName: "bing";
+    mode: "keyless_bing";
+  }
+  | {
+    providerName: ApiSmokeProviderName;
+    mode: "api";
+    endpoint: string;
+    apiKey: string;
+    payloadKind: RealProviderPayloadKind;
+  };
 
 export type ResearchEngineRealProviderSmokeOptions = {
   query: string;
@@ -37,8 +51,15 @@ export type ResearchEngineRealProviderSmokeStatus =
   | "unauthorized"
   | "rate_limited"
   | "timeout"
+  | "tauri_bridge_unavailable"
+  | "blocked_or_captcha"
+  | "network_error"
+  | "parse_failed"
+  | "invalid_response"
+  | "unsupported_environment"
   | "malformed_response"
   | "empty_result"
+  | "unknown_error"
   | "failed";
 
 export type ResearchEngineRealProviderSmokeResult = {
@@ -56,6 +77,9 @@ export type ResearchEngineRealProviderSmokeResult = {
     endpointOrigin?: string;
     endpointHost?: string;
     credentialAvailable: boolean;
+    apiKeyRequired?: boolean;
+    mode?: "public_search" | "api";
+    legacyBridgeName?: string;
     redactionFields: string[];
   };
   errors: string[];
@@ -70,7 +94,7 @@ const DEFAULT_MAX_RESULTS = 5;
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 
 const isSmokeProviderName = (value: string | undefined): value is SmokeProviderName =>
-  value === "bocha" || value === "brave";
+  value === "bing" || value === "bocha" || value === "brave";
 
 const endpointOrigin = (endpoint: string): { origin: string; host: string } => {
   try {
@@ -84,17 +108,19 @@ const endpointOrigin = (endpoint: string): { origin: string; host: string } => {
 const configForSmoke = (
   config: WebSearchConfig | null,
   providerName?: SmokeProviderName,
-): {
-  providerName: SmokeProviderName;
-  endpoint: string;
-  apiKey: string;
-  payloadKind: RealProviderPayloadKind;
-} | undefined => {
+): ProviderSmokeConfig | undefined => {
   if (!config || !config.enabled || !config.publicSearchConsent) return undefined;
   const selectedProvider = providerName ?? (isSmokeProviderName(config.provider) ? config.provider : undefined);
+  if (selectedProvider === "bing") {
+    return {
+      providerName: "bing",
+      mode: "keyless_bing",
+    };
+  }
   if (selectedProvider === "bocha" && config.bochaApiKey.trim()) {
     return {
       providerName: "bocha",
+      mode: "api",
       endpoint: config.bochaEndpoint.trim() || "https://api.bochaai.com/v1/web-search",
       apiKey: config.bochaApiKey.trim(),
       payloadKind: "bocha_like",
@@ -103,6 +129,7 @@ const configForSmoke = (
   if (selectedProvider === "brave" && config.braveApiKey.trim()) {
     return {
       providerName: "brave",
+      mode: "api",
       endpoint: BRAVE_ENDPOINT,
       apiKey: config.braveApiKey.trim(),
       payloadKind: "brave_like",
@@ -127,8 +154,7 @@ const unconfiguredWarningsFor = (
   const selectedProvider = providerName ?? config.provider;
   if (selectedProvider === "bing") {
     return [
-      "Bing public search is handled by the Research Engine keyless public provider in Phase 17.",
-      "This Phase 12 real provider smoke only exercises optional API-key providers.",
+      "Bing public search uses the Research Engine keyless public provider. It requires no API key and calls the legacy search_web_sources bridge only as a diagnostic transport.",
     ];
   }
   if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) {
@@ -205,8 +231,11 @@ const buildMarkdownReport = (input: {
     "# Research Engine Real Provider Smoke",
     "",
     `- ok: ${result.ok}`,
-    `- provider: ${result.providerName}`,
+    `- provider: ${result.redactedConfigSummary.mode === "public_search" ? "keyless_bing" : result.providerName}`,
     `- status: ${result.status}`,
+    `- apiKeyRequired: ${result.redactedConfigSummary.apiKeyRequired === false ? "no" : result.redactedConfigSummary.apiKeyRequired === true ? "yes" : "unknown"}`,
+    `- mode: ${result.redactedConfigSummary.mode ?? "api"}`,
+    `- legacyBridge: ${result.redactedConfigSummary.legacyBridgeName ?? "none"}`,
     `- query: ${result.query}`,
     `- rawResultCount: ${result.rawResultCount}`,
     `- normalizedResultCount: ${result.normalizedResultCount}`,
@@ -257,6 +286,9 @@ const unconfiguredResult = (
     redactedConfigSummary: {
       providerName: requestedProvider,
       credentialAvailable: false,
+      apiKeyRequired: requestedProvider === "bing" ? false : undefined,
+      mode: requestedProvider === "bing" ? "public_search" as const : "api" as const,
+      legacyBridgeName: requestedProvider === "bing" ? "search_web_sources" : undefined,
       redactionFields: ["apiKey", "authorization", "cookie", "requestBody"],
     },
     errors: ["real provider smoke is not configured for the current web search settings"],
@@ -284,11 +316,84 @@ export const runResearchEngineRealProviderSmoke = async (
   }
 
   const { request, policy, queryPlan, query: plannedQuery } = makeRequestContext(query);
-  const redactedEndpoint = endpointOrigin(smokeConfig.endpoint);
+  if (smokeConfig.mode === "keyless_bing") {
+    const keyless = await runKeylessBingProvider({
+      query: plannedQuery.query,
+      rawUserQuery: query,
+      queryPurpose: plannedQuery.purpose,
+      queryLanguage: plannedQuery.language,
+      maxResults: DEFAULT_MAX_RESULTS,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+    const candidatePool = keyless.rawResults.length > 0
+      ? buildCandidatePool({
+        request,
+        policy,
+        queryPlan,
+        rawResults: keyless.rawResults,
+        config: { maxSelected: 4, perHostLimit: 2 },
+      })
+      : undefined;
+    const summary = {
+      ok: keyless.ok,
+      providerName: smokeConfig.providerName,
+      status: keyless.status,
+      query,
+      rawResultCount: keyless.diagnostics.rawBridgeResultCount,
+      normalizedResultCount: keyless.rawResults.length,
+      candidateCount: candidatePool?.dedupedCount ?? 0,
+      selectedCandidateCount: candidatePool?.selectedCount ?? 0,
+      providerStatusSummary: { keyless_bing: discoveryStatusFromSmoke(keyless.status) },
+      redactedConfigSummary: {
+        providerName: smokeConfig.providerName,
+        endpointHost: "search_web_sources",
+        credentialAvailable: false,
+        apiKeyRequired: false,
+        mode: "public_search" as const,
+        legacyBridgeName: "search_web_sources",
+        redactionFields: ["authorization", "cookie", "rawHtml", "requestBody"],
+      },
+      errors: keyless.errors,
+      warnings: keyless.warnings,
+      diagnosticsSnapshot: {
+        developerDiagnosticsOnly: true,
+        oldSearchPathTouched: false,
+        noteConversationTouched: false,
+        requestId: request.requestId,
+        providerName: "keyless_bing",
+        configuredProvider: smokeConfig.providerName,
+        mode: "public_search",
+        apiKeyRequired: false,
+        legacyBridgeName: "search_web_sources",
+        plannedQuery: plannedQuery.query,
+        queryPurpose: plannedQuery.purpose,
+        providerStatus: keyless.status,
+        elapsedMs: keyless.elapsedMs,
+        keylessProviderDiagnostics: keyless.diagnostics,
+        candidatePool: candidatePool
+          ? {
+            rawCount: candidatePool.rawCount,
+            normalizedCount: candidatePool.normalizedCount,
+            dedupedCount: candidatePool.dedupedCount,
+            selectedCount: candidatePool.selectedCount,
+            rejectedCount: candidatePool.rejectedCount,
+            hostDistribution: candidatePool.hostDistribution,
+            sourceTypeDistribution: candidatePool.sourceTypeDistribution,
+          }
+          : undefined,
+      },
+    };
+    return {
+      ...summary,
+      markdownReport: buildMarkdownReport({ result: summary }),
+    };
+  }
+
+  const redactedEndpoint = endpointOrigin(smokeConfig.endpoint ?? "");
   const transport = await runBrowserProviderSmokeRequest({
     providerName: smokeConfig.providerName,
-    endpoint: smokeConfig.endpoint,
-    apiKey: smokeConfig.apiKey,
+    endpoint: smokeConfig.endpoint ?? "",
+    apiKey: smokeConfig.apiKey ?? "",
     query: plannedQuery.query,
     maxResults: DEFAULT_MAX_RESULTS,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -311,7 +416,7 @@ export const runResearchEngineRealProviderSmoke = async (
       const payload = JSON.parse(transport.bodyText) as unknown;
       const normalized = normalizeRealProviderPayload({
         providerName: smokeConfig.providerName,
-        payloadKind: smokeConfig.payloadKind,
+        payloadKind: smokeConfig.payloadKind ?? "unknown",
         payload,
         request: { request, policy, queryPlan, query: plannedQuery },
         providerPriority: smokeConfig.providerName === "bocha" ? 86 : 84,
@@ -357,6 +462,8 @@ export const runResearchEngineRealProviderSmoke = async (
       endpointOrigin: redactedEndpoint.origin,
       endpointHost: redactedEndpoint.host,
       credentialAvailable: true,
+      apiKeyRequired: true,
+      mode: "api" as const,
       redactionFields: transport.redactedRequest.redactionFields,
     },
     errors,
@@ -367,7 +474,7 @@ export const runResearchEngineRealProviderSmoke = async (
       noteConversationTouched: false,
       requestId: request.requestId,
       providerName: smokeConfig.providerName,
-      payloadKind: smokeConfig.payloadKind,
+      payloadKind: smokeConfig.payloadKind ?? "unknown",
       plannedQuery: plannedQuery.query,
       queryPurpose: plannedQuery.purpose,
       providerStatus,

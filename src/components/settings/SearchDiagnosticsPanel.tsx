@@ -131,16 +131,33 @@ const classifyError = (error: unknown): string => {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
   if (lower.includes("timeout") || message.includes("超时")) return "搜索服务测试超时。";
-  if (lower.includes("captcha") || lower.includes("verify") || lower.includes("blocked") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) return "Bing 公开搜索遇到验证页或访问限制，可以稍后重试或改用 Bocha / Brave。";
-  if (lower.includes("rate_limited") || lower.includes("errorkind=rate_limited")) return "Bing 公开搜索被限流，可以稍后重试或改用 Bocha / Brave。";
+  if (lower.includes("captcha") || lower.includes("verify") || lower.includes("blocked") || lower.includes("errorkind=blocked_or_captcha") || lower.includes("errorkind=blocked")) return "Bing 公开搜索遇到验证页或访问限制；这是无 key 公共搜索诊断，请稍后重试或继续修复解析/阻断路径。";
+  if (lower.includes("rate_limited") || lower.includes("errorkind=rate_limited")) return "Bing 公开搜索被限流；这是无 key 公共搜索诊断，请稍后重试。";
+  if (lower.includes("tauri_bridge_unavailable")) return "Tauri 搜索 bridge 不可用，Research Engine 无法调用 search_web_sources。";
   if (lower.includes("parse_failed")) return "Bing 公开搜索结果结构解析失败，可能是页面结构变化。";
-  if (lower.includes("no_results")) return "Bing 公开搜索没有返回可用自然结果。";
-  if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "Bing 公开搜索网络连接失败，可以稍后重试或改用 Bocha / Brave。";
+  if (lower.includes("invalid_response")) return "搜索 bridge 返回结构不符合预期，请检查 keyless Bing 诊断字段。";
+  if (lower.includes("empty_result") || lower.includes("no_results")) return "Bing 公开搜索没有返回可用自然结果。";
+  if (lower.includes("no_candidate_url")) return "搜索结果没有进入可读取候选 URL。";
+  if (lower.includes("all_reader_failed")) return "候选 URL 已选出，但 URL reader 全部失败。";
+  if (lower.includes("cors_or_reader_network_error")) return "候选 URL reader 受 CORS 或网络错误影响。";
+  if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "Bing 公开搜索网络连接失败；这是无 key 公共搜索诊断，请稍后重试。";
   if (message.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) return "搜索服务返回 429 或限流，可以稍后重试。";
   if (message.includes("401") || message.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) return "搜索服务返回 401/403，API Key 或权限可能有问题。";
   if (lower.includes("json") || message.includes("JSON")) return "搜索服务返回格式不符合预期，请检查 API 地址。";
   if (lower.includes("dns") || lower.includes("connect") || lower.includes("tls") || lower.includes("network") || message.includes("网络")) return "网络、DNS、连接或 TLS 可能不可用。";
   return truncate(message, 220);
+};
+
+const researchEngineDisplayProvider = (
+  providerName: string | undefined,
+  diagnosticsSnapshot?: Record<string, unknown>,
+  mode?: string,
+): string => {
+  if (mode === "public_search") return "keyless_bing";
+  if (diagnosticsSnapshot?.providerName === "keyless_bing") return "keyless_bing";
+  const keyless = diagnosticsSnapshot?.keylessProviderDiagnostics;
+  if (keyless && typeof keyless === "object") return "keyless_bing";
+  return providerName ?? "none";
 };
 
 const summarizeDecision = (decision: SearchDecision): string =>
@@ -1618,11 +1635,11 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       });
       setResearchEngineRealProviderSmoke(result);
       if (result.ok) {
-        toast.success(`真实 Provider Smoke 完成：${result.providerName}`);
+        toast.success(`真实 Provider Smoke 完成：${researchEngineDisplayProvider(result.providerName, result.diagnosticsSnapshot, result.redactedConfigSummary.mode)}`);
       } else if (result.status === "not_configured") {
-        setResearchEngineError("真实 Provider Smoke 未运行：当前未配置可用的 Bocha / Brave provider。");
+        setResearchEngineError("真实 Provider Smoke 未运行：当前未启用联网搜索或公开搜索授权；Bing 主线使用无 key public search，Bocha / Brave 仅为可选 API provider。");
       } else {
-        setResearchEngineError(`真实 Provider Smoke 失败：${result.errors.join("; ") || result.status}`);
+        setResearchEngineError(`真实 Provider Smoke 失败：${classifyError(result.errors.join("; ") || result.status)}`);
       }
     } catch (error) {
       const message = `真实 Provider Smoke 失败：${getErrorMessage(error)}`;
@@ -1730,14 +1747,14 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       });
       setResearchEngineRealE2ESmoke(result);
       if (result.ok) {
-        toast.success("Real E2E Smoke completed");
+        toast.success("真实 E2E Smoke 完成");
       } else if (result.providerStatus === "not_configured") {
-        setResearchEngineError("Real E2E Smoke was not started: no configured Bocha / Brave provider is available.");
+        setResearchEngineError("真实 E2E Smoke 未运行：当前未启用联网搜索或公开搜索授权；Bing 主线使用无 key public search，Bocha / Brave 仅为可选 API provider。");
       } else {
-        setResearchEngineError(`Real E2E Smoke failed: ${result.errors.join("; ") || result.readerStatus || result.providerStatus}`);
+        setResearchEngineError(`真实 E2E Smoke 失败：${classifyError(result.errors.join("; ") || result.readerStatus || result.providerStatus)}`);
       }
     } catch (error) {
-      const message = `Real E2E Smoke failed: ${getErrorMessage(error)}`;
+      const message = `真实 E2E Smoke 失败：${classifyError(error)}`;
       setResearchEngineError(message);
       toast.error(message);
     } finally {
@@ -1782,16 +1799,16 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       });
       setResearchEngineRealShadowRun(result);
       if (result.ok) {
-        toast.success("Real Shadow Run completed");
+        toast.success("真实 Shadow Run 完成");
       } else if (result.providerStatus === "not_configured") {
-        setResearchEngineError("Real Shadow Run was not started: no configured Bocha / Brave provider is available.");
+        setResearchEngineError("真实 Shadow Run 未运行：当前未启用联网搜索或公开搜索授权；Bing 主线使用无 key public search，Bocha / Brave 仅为可选 API provider。");
       } else if (result.providerStatus === "aborted") {
-        setResearchEngineError("Real Shadow Run was aborted.");
+        setResearchEngineError("真实 Shadow Run 已取消。");
       } else {
-        setResearchEngineError(`Real Shadow Run failed: ${result.errors.join("; ") || result.providerStatus}`);
+        setResearchEngineError(`真实 Shadow Run 失败：${classifyError(result.errors.join("; ") || result.providerStatus)}`);
       }
     } catch (error) {
-      const message = `Real Shadow Run failed: ${getErrorMessage(error)}`;
+      const message = `真实 Shadow Run 失败：${classifyError(error)}`;
       setResearchEngineError(message);
       toast.error(message);
     } finally {
@@ -1842,14 +1859,14 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       });
       setResearchEngineShadowCompare(result);
       if (result.ok) {
-        toast.success("Shadow Compare completed");
+        toast.success("Shadow Compare 完成");
       } else if (result.researchSummary.status === "not_configured") {
-        setResearchEngineError("Shadow Compare was not fully run: no configured Bocha / Brave provider is available for Research Engine shadow.");
+        setResearchEngineError("Shadow Compare 未完整运行：当前未启用联网搜索或公开搜索授权；Bing 主线使用无 key public search，Bocha / Brave 仅为可选 API provider。");
       } else {
-        setResearchEngineError(`Shadow Compare finished with issues: ${result.errors.join("; ") || result.comparisonSummary.recommendation}`);
+        setResearchEngineError(`Shadow Compare 完成但存在问题：${classifyError(result.errors.join("; ") || result.comparisonSummary.recommendation)}`);
       }
     } catch (error) {
-      const message = `Shadow Compare failed: ${getErrorMessage(error)}`;
+      const message = `Shadow Compare 失败：${classifyError(error)}`;
       setResearchEngineError(message);
       toast.error(message);
     } finally {
@@ -1984,7 +2001,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           <div className="grid min-w-0 gap-1">
             <div className="text-sm font-medium text-foreground">真实 Provider Smoke</div>
             <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
-              手动验证 Research Engine provider boundary 的最小真实搜索闭环；只会访问当前配置的 Bocha / Brave，不会替换普通 NoteX 搜索，也不会写入会话。
+              手动验证 Research Engine provider boundary 的最小真实搜索闭环；Bing 走无 key public search，Bocha / Brave 仅作为可选 API provider；不会替换普通 NoteX 搜索，也不会写入会话。
             </div>
           </div>
           <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -2020,7 +2037,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               </div>
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {[
-                  ["Provider", researchEngineRealProviderSmoke.providerName],
+                  ["Provider", researchEngineDisplayProvider(researchEngineRealProviderSmoke.providerName, researchEngineRealProviderSmoke.diagnosticsSnapshot, researchEngineRealProviderSmoke.redactedConfigSummary.mode)],
+                  ["API key required", researchEngineRealProviderSmoke.redactedConfigSummary.apiKeyRequired === false ? "no" : researchEngineRealProviderSmoke.redactedConfigSummary.apiKeyRequired === true ? "yes" : "unknown"],
                   ["Status", researchEngineRealProviderSmoke.status],
                   ["Raw results", researchEngineRealProviderSmoke.rawResultCount],
                   ["Normalized", researchEngineRealProviderSmoke.normalizedResultCount],
@@ -2150,7 +2168,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           <div className="grid min-w-0 gap-1">
             <div className="text-sm font-medium text-foreground">真实 E2E Smoke</div>
             <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
-              手动串联 Research Engine provider、candidate pool、top 1 URL reader、evidence evaluator 和 answer contract；会访问已配置搜索 provider，并读取 top 1 公开 URL，不带 cookies，不绕过登录/验证码，也不影响普通 NoteX 搜索。
+              手动串联 Research Engine provider、candidate pool、top 1 URL reader、evidence evaluator 和 answer contract；Bing 走无 key public search，并读取 top 1 公开 URL，不带 cookies，不绕过登录/验证码，也不影响普通 NoteX 搜索。
             </div>
           </div>
           <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -2186,7 +2204,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               </div>
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {[
-                  ["Provider", researchEngineRealE2ESmoke.providerName],
+                  ["Provider", researchEngineDisplayProvider(researchEngineRealE2ESmoke.providerName, researchEngineRealE2ESmoke.diagnosticsSnapshot)],
                   ["Provider status", researchEngineRealE2ESmoke.providerStatus],
                   ["Candidates", researchEngineRealE2ESmoke.candidateCount],
                   ["Selected URL", researchEngineRealE2ESmoke.selectedCandidate?.url ?? "none"],
@@ -2237,7 +2255,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           <div className="grid min-w-0 gap-1">
             <div className="text-sm font-medium text-foreground">真实 Shadow Run</div>
             <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
-              手动运行更接近正式 Research Engine 的 shadow pipeline：访问已配置搜索 provider，按顺序读取最多 N 个公开 URL，不带 cookies，不绕过登录/验证码，受 CORS 限制，不影响普通 NoteX 搜索。
+              手动运行更接近正式 Research Engine 的 shadow pipeline：Bing 走无 key public search，按顺序读取最多 N 个公开 URL，不带 cookies，不绕过登录/验证码，受 CORS 限制，不影响普通 NoteX 搜索。
             </div>
           </div>
           <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
@@ -2304,7 +2322,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               </div>
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {[
-                  ["Provider", researchEngineRealShadowRun.providerName],
+                  ["Provider", researchEngineDisplayProvider(researchEngineRealShadowRun.providerName, researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Provider status", researchEngineRealShadowRun.providerStatus],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
                   ["Read attempts", researchEngineRealShadowRun.readAttempts.length],
@@ -2367,7 +2385,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
           <div className="grid min-w-0 gap-1">
             <div className="text-sm font-medium text-foreground">Shadow Compare</div>
             <div className="max-w-full break-words text-xs leading-5 text-muted-foreground">
-              手动对照旧搜索诊断能力和 Research Engine Shadow Run；不影响普通 NoteX 搜索，不写入会话，不调用 LLM。可能访问已配置搜索 provider，并顺序读取最多 N 个公开 URL；不带 cookies，受 CORS 限制。
+              手动对照旧搜索诊断能力和 Research Engine Shadow Run；不影响普通 NoteX 搜索，不写入会话，不调用 LLM。Bing 走无 key public search，并顺序读取最多 N 个公开 URL；不带 cookies，受 CORS 限制。
             </div>
           </div>
           <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
@@ -2428,6 +2446,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   ["Legacy status", researchEngineShadowCompare.legacySummary.status],
+                  ["Research provider", researchEngineDisplayProvider(researchEngineShadowCompare.researchSummary.providerName)],
                   ["Research status", researchEngineShadowCompare.researchSummary.status],
                   ["Candidates", researchEngineShadowCompare.researchSummary.candidateCount],
                   ["Successful reads", researchEngineShadowCompare.researchSummary.successfulReads],

@@ -5,13 +5,16 @@ import type { DiscoveryRawResult, QueryPurpose, SourceType } from "./types";
 export type KeylessBingProviderStatus =
   | "available"
   | "partial"
+  | "tauri_bridge_unavailable"
   | "blocked_or_captcha"
+  | "rate_limited"
   | "timeout"
   | "network_error"
   | "parse_failed"
   | "empty_result"
+  | "invalid_response"
   | "unsupported_environment"
-  | "failed";
+  | "unknown_error";
 
 export type KeylessBingProviderOptions = {
   query: string;
@@ -32,21 +35,40 @@ export type KeylessBingProviderResult = {
   elapsedMs: number;
   diagnostics: {
     provider: "keyless_bing";
+    providerStatus: KeylessBingProviderStatus;
     apiKeyRequired: false;
+    mode: "public_search";
     credentialPolicy: "none";
     credentials: "omit";
+    authorizationUsed: false;
     legacyTauriBridgeUsed: true;
+    legacyBridgeName: "search_web_sources";
     browserFetchUsed: false;
     cookiesUsed: false;
     query: string;
     queryPurpose: QueryPurpose;
+    rawBridgeResultCount: number;
+    normalizedResultCount: number;
+    droppedResultCount: number;
     resultCount: number;
+    stageDiagnosticsPreview: string[];
     diagnosticsPreview?: string;
+    firstResultPreview?: {
+      title?: string;
+      url?: string;
+      searchStage?: string;
+      discoveryMethod?: string;
+      sourceKind?: string;
+    };
     errorKind?: KeylessBingProviderStatus;
   };
 };
 
 const MAX_DIAGNOSTICS_PREVIEW_CHARS = 1_200;
+const MAX_STAGE_DIAGNOSTICS = 6;
+const MAX_STAGE_DIAGNOSTICS_PREVIEW_CHARS = 480;
+const MAX_ERROR_PREVIEW_CHARS = 900;
+const RAW_HTML_REDACTED_PREVIEW = "[redacted raw html preview]";
 
 const elapsedMsSince = (startedAt: number): number => Math.max(0, Math.round(performance.now() - startedAt));
 
@@ -54,6 +76,28 @@ const compact = (value: string | undefined, maxChars: number): string | undefine
   const normalized = value?.replace(/\s+/g, " ").trim();
   if (!normalized) return undefined;
   return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}...` : normalized;
+};
+
+const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)));
+
+const redactSensitivePreview = (value: string | undefined, maxChars: number): string | undefined => {
+  const compacted = compact(value, maxChars);
+  if (!compacted) return undefined;
+  const lower = compacted.toLocaleLowerCase();
+  if (
+    lower.includes("<!doctype html") ||
+    lower.includes("<html") ||
+    lower.includes("<body") ||
+    lower.includes("id=\"b_content\"") ||
+    lower.includes("class=\"b_algo\"")
+  ) {
+    return RAW_HTML_REDACTED_PREVIEW;
+  }
+  return compacted
+    .replace(/Authorization:\s*[^\s;]+/gi, "Authorization:[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/Cookie:\s*[^;]+/gi, "Cookie:[redacted]")
+    .replace(/([?&](?:api[_-]?key|token|access_token|authorization)=)[^&\s]+/gi, "$1[redacted]");
 };
 
 const verticalForPurpose = (purpose: QueryPurpose): SearchVertical | undefined => {
@@ -77,20 +121,148 @@ const sourceTypeHintFor = (source: WebSearchResult): SourceType => {
 
 const errorStatusFromMessage = (message: string): KeylessBingProviderStatus => {
   const lower = message.toLocaleLowerCase();
-  if (lower.includes("blocked_or_captcha") || lower.includes("captcha") || lower.includes("rate_limited")) return "blocked_or_captcha";
-  if (lower.includes("timeout")) return "timeout";
-  if (lower.includes("network_error") || lower.includes("dns_failed") || lower.includes("tls_error")) return "network_error";
-  if (lower.includes("parse_failed")) return "parse_failed";
-  if (lower.includes("no_results")) return "empty_result";
-  if (lower.includes("unsupported")) return "unsupported_environment";
-  return "failed";
+  if (
+    lower.includes("tauri_bridge_unavailable") ||
+    lower.includes("__tauri__") ||
+    lower.includes("invoke is not") ||
+    lower.includes("invoke function") ||
+    lower.includes("search_web_sources not found") ||
+    lower.includes("command search_web_sources")
+  ) return "tauri_bridge_unavailable";
+  if (lower.includes("timeout") || message.includes("超时")) return "timeout";
+  if (
+    lower.includes("rate_limited") ||
+    lower.includes("too many requests") ||
+    lower.includes("rate limit") ||
+    message.includes("429")
+  ) return "rate_limited";
+  if (
+    lower.includes("blocked_or_captcha") ||
+    lower.includes("captcha_or_block_page") ||
+    lower.includes("captcha") ||
+    lower.includes("verify you are a human") ||
+    lower.includes("unusual traffic") ||
+    lower.includes("automated queries") ||
+    lower.includes("blocked") ||
+    message.includes("验证页") ||
+    message.includes("访问限制")
+  ) return "blocked_or_captcha";
+  if (
+    lower.includes("network_error") ||
+    lower.includes("dns_failed") ||
+    lower.includes("tls_error") ||
+    lower.includes("connect_error") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("network") ||
+    message.includes("网络")
+  ) return "network_error";
+  if (
+    lower.includes("parse_failed") ||
+    lower.includes("parser") ||
+    lower.includes("rss_returned_html") ||
+    lower.includes("no_html_candidates") ||
+    lower.includes("no_candidates")
+  ) return "parse_failed";
+  if (
+    lower.includes("no_results") ||
+    lower.includes("empty_result") ||
+    lower.includes("resultcount=0") ||
+    lower.includes("result count=0") ||
+    message.includes("没有返回") ||
+    message.includes("没有找到")
+  ) return "empty_result";
+  if (
+    lower.includes("invalid_response") ||
+    lower.includes("malformed") ||
+    lower.includes("invalid response") ||
+    lower.includes("serde") ||
+    lower.includes("json")
+  ) return "invalid_response";
+  if (
+    lower.includes("unsupported") ||
+    message.includes("不支持") ||
+    message.includes("需要先启用公开网页搜索授权") ||
+    message.includes("需要先在 AI 设置中启用联网搜索")
+  ) return "unsupported_environment";
+  return "unknown_error";
 };
 
 const sanitizeLegacyProviderHint = (message: string): string =>
-  message.replace(
-    /Bing public search is temporarily unavailable\.[^;]+settings\./,
-    "Bing public search is temporarily unavailable in the keyless public provider path.",
+  message
+    .replace(
+      /Bing public search is temporarily unavailable\.[^;]+settings\./,
+      "Bing public search is temporarily unavailable in the keyless public provider path.",
+    )
+    .replace(/需要先配置 Bocha API Key，或切换到 Bing 公开搜索。/g, "可选 Bocha API provider 缺少 key；Research Engine 主线仍优先维护无 key 公共搜索 provider。")
+    .replace(/需要先配置 Brave Search API Key，或切换到 Bing 公开搜索。/g, "可选 Brave Search API provider 缺少 key；Research Engine 主线仍优先维护无 key 公共搜索 provider。")
+    .replace(/改用 Bocha \/ Brave/g, "稍后重试无 key 公共搜索")
+    .replace(/Authorization:\s*[^\s;]+/gi, "Authorization:[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/Cookie:\s*[^;]+/gi, "Cookie:[redacted]");
+
+const diagnosticsPreviewFromSources = (sources: WebSearchResult[]): string | undefined =>
+  redactSensitivePreview(
+    sources.find((source) => source.searchDiagnostics)?.searchDiagnostics,
+    MAX_DIAGNOSTICS_PREVIEW_CHARS,
   );
+
+const stageDiagnosticsPreviewFromSources = (sources: WebSearchResult[]): string[] =>
+  unique(
+    sources
+      .map((source) => redactSensitivePreview(source.searchDiagnostics, MAX_STAGE_DIAGNOSTICS_PREVIEW_CHARS))
+      .filter((value): value is string => Boolean(value)),
+  ).slice(0, MAX_STAGE_DIAGNOSTICS);
+
+const firstResultPreviewFromSources = (
+  sources: WebSearchResult[],
+): KeylessBingProviderResult["diagnostics"]["firstResultPreview"] | undefined => {
+  const first = sources[0];
+  if (!first) return undefined;
+  return {
+    title: compact(first.title, 160),
+    url: compact(first.finalUrl ?? first.resolvedUrl ?? first.url, 240),
+    searchStage: first.searchStage,
+    discoveryMethod: first.discoveryMethod,
+    sourceKind: first.sourceKind,
+  };
+};
+
+const baseDiagnostics = (
+  input: {
+    query: string;
+    queryPurpose: QueryPurpose;
+    providerStatus: KeylessBingProviderStatus;
+    rawBridgeResultCount?: number;
+    normalizedResultCount?: number;
+    droppedResultCount?: number;
+    stageDiagnosticsPreview?: string[];
+    diagnosticsPreview?: string;
+    firstResultPreview?: KeylessBingProviderResult["diagnostics"]["firstResultPreview"];
+    errorKind?: KeylessBingProviderStatus;
+  },
+): KeylessBingProviderResult["diagnostics"] => ({
+  provider: "keyless_bing",
+  providerStatus: input.providerStatus,
+  apiKeyRequired: false,
+  mode: "public_search",
+  credentialPolicy: "none",
+  credentials: "omit",
+  authorizationUsed: false,
+  legacyTauriBridgeUsed: true,
+  legacyBridgeName: "search_web_sources",
+  browserFetchUsed: false,
+  cookiesUsed: false,
+  query: input.query,
+  queryPurpose: input.queryPurpose,
+  rawBridgeResultCount: input.rawBridgeResultCount ?? 0,
+  normalizedResultCount: input.normalizedResultCount ?? 0,
+  droppedResultCount: input.droppedResultCount ?? 0,
+  resultCount: input.normalizedResultCount ?? 0,
+  stageDiagnosticsPreview: input.stageDiagnosticsPreview ?? [],
+  diagnosticsPreview: input.diagnosticsPreview,
+  firstResultPreview: input.firstResultPreview,
+  errorKind: input.errorKind,
+});
 
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
@@ -138,7 +310,7 @@ const rawResultFromWebSource = (
         searchStage: source.searchStage,
         discoveryMethod: source.discoveryMethod,
         sourceKind: source.sourceKind,
-        diagnosticsPreview: compact(source.searchDiagnostics, MAX_DIAGNOSTICS_PREVIEW_CHARS),
+        diagnosticsPreview: redactSensitivePreview(source.searchDiagnostics, MAX_DIAGNOSTICS_PREVIEW_CHARS),
       },
     },
   };
@@ -160,23 +332,23 @@ export const runKeylessBingProvider = async (
       errors: ["Keyless Bing provider query is empty."],
       elapsedMs: elapsedMsSince(startedAt),
       diagnostics: {
-        provider: "keyless_bing",
-        apiKeyRequired: false,
-        credentialPolicy: "none",
-        credentials: "omit",
-        legacyTauriBridgeUsed: true,
-        browserFetchUsed: false,
-        cookiesUsed: false,
+        ...baseDiagnostics({
+          query,
+          queryPurpose,
+          providerStatus: "empty_result",
+          errorKind: "empty_result",
+        }),
         query,
         queryPurpose,
-        resultCount: 0,
-        errorKind: "empty_result",
       },
     };
   }
 
   try {
-    const sources = await withTimeout(searchWebSources({
+    if (typeof window === "undefined") {
+      throw new Error("tauri_bridge_unavailable: Keyless Bing provider requires the Tauri webview runtime.");
+    }
+    const sourceResult = await withTimeout(searchWebSources({
       provider: "bing",
       rawUserQuery: options.rawUserQuery ?? query,
       queries: [query],
@@ -185,6 +357,10 @@ export const runKeylessBingProvider = async (
       freshness: freshnessForPurpose(queryPurpose),
       maxResults: Math.max(1, Math.min(options.maxResults ?? 8, 10)),
     }), options.timeoutMs ?? 8_000);
+    if (!Array.isArray(sourceResult)) {
+      throw new Error("invalid_response: search_web_sources did not return an array of WebSearchResult.");
+    }
+    const sources = sourceResult;
     const rawResults = sources
       .map((source, index) => rawResultFromWebSource(source, index, {
         query,
@@ -192,37 +368,43 @@ export const runKeylessBingProvider = async (
         queryLanguage: options.queryLanguage,
       }))
       .filter((source): source is DiscoveryRawResult => Boolean(source));
-    const diagnosticsPreview = compact(
-      sources.find((source) => source.searchDiagnostics)?.searchDiagnostics,
-      MAX_DIAGNOSTICS_PREVIEW_CHARS,
-    );
+    const diagnosticsPreview = diagnosticsPreviewFromSources(sources);
+    const stageDiagnosticsPreview = stageDiagnosticsPreviewFromSources(sources);
+    const firstResultPreview = firstResultPreviewFromSources(sources);
     const missingResultCount = sources.length - rawResults.length;
     const warnings = [
       ...(missingResultCount > 0 ? [`missing_required_fields:${missingResultCount}`] : []),
       "keyless_bing_uses_existing_tauri_public_search_bridge",
     ];
+    const status = rawResults.length > 0
+      ? (warnings.length > 1 ? "partial" : "available")
+      : sources.length > 0
+        ? "parse_failed"
+        : "empty_result";
     return {
       ok: rawResults.length > 0,
       providerName: "bing",
-      status: rawResults.length > 0 ? (warnings.length > 1 ? "partial" : "available") : "empty_result",
+      status,
       rawResults,
       warnings,
-      errors: rawResults.length > 0 ? [] : ["Keyless Bing provider returned no normalized results."],
+      errors: rawResults.length > 0 ? [] : [
+        sources.length > 0
+          ? `Keyless Bing provider returned ${sources.length} raw bridge results, but none had the required title/url fields after normalization.`
+          : "Keyless Bing provider returned no raw bridge results.",
+      ],
       elapsedMs: elapsedMsSince(startedAt),
-      diagnostics: {
-        provider: "keyless_bing",
-        apiKeyRequired: false,
-        credentialPolicy: "none",
-        credentials: "omit",
-        legacyTauriBridgeUsed: true,
-        browserFetchUsed: false,
-        cookiesUsed: false,
+      diagnostics: baseDiagnostics({
         query,
         queryPurpose,
-        resultCount: rawResults.length,
+        providerStatus: status,
+        rawBridgeResultCount: sources.length,
+        normalizedResultCount: rawResults.length,
+        droppedResultCount: missingResultCount,
+        stageDiagnosticsPreview,
         diagnosticsPreview,
-        errorKind: rawResults.length > 0 ? undefined : "empty_result",
-      },
+        firstResultPreview,
+        errorKind: rawResults.length > 0 ? undefined : status,
+      }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -234,22 +416,15 @@ export const runKeylessBingProvider = async (
       status,
       rawResults: [],
       warnings: ["keyless_bing_provider_failed"],
-      errors: [safeMessage],
+      errors: [redactSensitivePreview(safeMessage, MAX_ERROR_PREVIEW_CHARS) ?? status],
       elapsedMs: elapsedMsSince(startedAt),
-      diagnostics: {
-        provider: "keyless_bing",
-        apiKeyRequired: false,
-        credentialPolicy: "none",
-        credentials: "omit",
-        legacyTauriBridgeUsed: true,
-        browserFetchUsed: false,
-        cookiesUsed: false,
+      diagnostics: baseDiagnostics({
         query,
         queryPurpose,
-        resultCount: 0,
-        diagnosticsPreview: compact(safeMessage, MAX_DIAGNOSTICS_PREVIEW_CHARS),
+        providerStatus: status,
+        diagnosticsPreview: redactSensitivePreview(safeMessage, MAX_DIAGNOSTICS_PREVIEW_CHARS),
         errorKind: status,
-      },
+      }),
     };
   }
 };
