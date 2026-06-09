@@ -652,8 +652,32 @@ const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResu
     const gateReason = typeof result.diagnosticsSnapshot.evidenceGateReason === "string"
       ? result.diagnosticsSnapshot.evidenceGateReason
       : result.providerStatus;
+    const attemptedReadCount = typeof result.diagnosticsSnapshot.attemptedReadCount === "number"
+      ? result.diagnosticsSnapshot.attemptedReadCount
+      : result.readAttempts.length;
+    const usableBodyEvidenceCount = typeof result.diagnosticsSnapshot.usableBodyEvidenceCount === "number"
+      ? result.diagnosticsSnapshot.usableBodyEvidenceCount
+      : 0;
+    const freshEvidenceCount = typeof result.diagnosticsSnapshot.freshEvidenceCount === "number"
+      ? result.diagnosticsSnapshot.freshEvidenceCount
+      : undefined;
+    const staleEvidenceCount = typeof result.diagnosticsSnapshot.staleEvidenceCount === "number"
+      ? result.diagnosticsSnapshot.staleEvidenceCount
+      : undefined;
+    const unknownDateEvidenceCount = typeof result.diagnosticsSnapshot.unknownDateEvidenceCount === "number"
+      ? result.diagnosticsSnapshot.unknownDateEvidenceCount
+      : undefined;
+    const freshnessWindowDays = typeof result.diagnosticsSnapshot.freshnessWindowDays === "number"
+      ? result.diagnosticsSnapshot.freshnessWindowDays
+      : undefined;
+    if (gateReason === "freshness_failed" || result.diagnosticsSnapshot.freshnessGateStatus === "failed") {
+      return buildResearchEngineTakeoverFailureText(
+        `已找到可读来源，但没有足够近期正文证据。为避免把旧新闻当作最新动态，Research Engine 拒绝生成完整总结。attemptedReadCount=${attemptedReadCount}; usableBodyEvidence=${usableBodyEvidenceCount}; freshEvidence=${freshEvidenceCount ?? "none"}; staleEvidence=${staleEvidenceCount ?? "none"}; unknownDateEvidence=${unknownDateEvidenceCount ?? "none"}; freshnessWindowDays=${freshnessWindowDays ?? "none"}`,
+        result.providerName,
+      );
+    }
     return buildResearchEngineTakeoverFailureText(
-      `已找到新闻候选，但未读取到足够多的独立来源。当前可用来源：${hostText}。新闻类问题需要多个独立来源交叉验证，Research Engine 拒绝用单一网站生成完整总结。gate=${gateReason}`,
+      `已尝试读取 ${attemptedReadCount} 条候选，但正文证据 / 来源覆盖不足，不能可靠回答。usableBodyEvidence=${usableBodyEvidenceCount}; hosts=${hostText}; gate=${gateReason}`,
       result.providerName,
     );
   }
@@ -736,6 +760,34 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
     `apiKeyRequired=${getResearchEngineApiKeyRequired(result)}`,
     `providerLabel=${encodeDebugValue(getResearchEngineProviderLabel(result.providerName))}`,
     `providerStatus=${encodeDebugValue(result.providerStatus)}`,
+    `llmPlannerStarted=${encodeDebugValue(String(result.diagnosticsSnapshot.llmPlannerStarted ?? false))}`,
+    `llmPlannerSucceeded=${encodeDebugValue(String(result.diagnosticsSnapshot.llmPlannerSucceeded ?? false))}`,
+    `llmPlannerFailedReason=${encodeDebugValue(String(result.diagnosticsSnapshot.llmPlannerFailedReason ?? "none"))}`,
+    `plannerIntent=${encodeDebugValue(String(result.diagnosticsSnapshot.plannerIntent ?? "none"))}`,
+    `coveragePlanIntent=${encodeDebugValue(String(result.diagnosticsSnapshot.coveragePlanIntent ?? "none"))}`,
+    `coverageFacets=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.coverageFacets) ? result.diagnosticsSnapshot.coverageFacets.join("|") : "none")}`,
+    `generatedQueryCount=${encodeDebugValue(String(result.diagnosticsSnapshot.generatedQueryCount ?? "none"))}`,
+    `targetReadCount=${encodeDebugValue(String(result.diagnosticsSnapshot.targetReadCount ?? "none"))}`,
+    `attemptedReadCount=${encodeDebugValue(String(result.diagnosticsSnapshot.attemptedReadCount ?? result.readAttempts.length))}`,
+    `readerConcurrency=${encodeDebugValue(String(result.diagnosticsSnapshot.readerConcurrency ?? "none"))}`,
+    `globalReaderBudgetMs=${encodeDebugValue(String(result.diagnosticsSnapshot.globalReaderBudgetMs ?? "none"))}`,
+    `distinctAttemptedHosts=${encodeDebugValue(String(result.diagnosticsSnapshot.distinctAttemptedHosts ?? "none"))}`,
+    `usableBodyEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.usableBodyEvidenceCount ?? "none"))}`,
+    `usableFreshBodyEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.usableFreshBodyEvidenceCount ?? "none"))}`,
+    `currentDate=${encodeDebugValue(String(result.diagnosticsSnapshot.currentDate ?? "none"))}`,
+    `freshnessWindowDays=${encodeDebugValue(String(result.diagnosticsSnapshot.freshnessWindowDays ?? "none"))}`,
+    `freshnessGateStatus=${encodeDebugValue(String(result.diagnosticsSnapshot.freshnessGateStatus ?? "none"))}`,
+    `freshnessFailureReason=${encodeDebugValue(String(result.diagnosticsSnapshot.freshnessFailureReason ?? "none"))}`,
+    `freshEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.freshEvidenceCount ?? "none"))}`,
+    `staleEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.staleEvidenceCount ?? "none"))}`,
+    `unknownDateEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.unknownDateEvidenceCount ?? "none"))}`,
+    `rejectedByFreshnessCount=${encodeDebugValue(String(result.diagnosticsSnapshot.rejectedByFreshnessCount ?? "none"))}`,
+    `bodyEvidenceRatio=${encodeDebugValue(String(result.diagnosticsSnapshot.bodyEvidenceRatio ?? "none"))}`,
+    `coveredFacetCount=${encodeDebugValue(String(result.diagnosticsSnapshot.coveredFacetCount ?? "none"))}`,
+    `missingFacets=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.missingFacets) ? result.diagnosticsSnapshot.missingFacets.join("|") : "none")}`,
+    `candidateShortage=${encodeDebugValue(String(result.diagnosticsSnapshot.candidateShortage ?? false))}`,
+    `sourcePortfolioSummary=${encodeDebugValue(String(result.diagnosticsSnapshot.sourcePortfolioSummary ?? "none"))}`,
+    `concurrentReaderSummary=${encodeDebugValue(String(result.diagnosticsSnapshot.concurrentReaderSummary ?? "none"))}`,
     `rawResultCount=${result.rawResultCount}`,
     `normalizedResultCount=${result.normalizedResultCount}`,
     `candidateCount=${result.candidateCount}`,
@@ -756,6 +808,14 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
     `usableEvidenceHostCount=${encodeDebugValue(String(result.diagnosticsSnapshot.usableEvidenceHostCount ?? "none"))}`,
     `evidenceGateStatus=${encodeDebugValue(String(result.diagnosticsSnapshot.evidenceGateStatus ?? "none"))}`,
     `evidenceGateReason=${encodeDebugValue(String(result.diagnosticsSnapshot.evidenceGateReason ?? "none"))}`,
+    `evidenceQualityDistribution=${encodeDebugValue(JSON.stringify(result.diagnosticsSnapshot.evidenceQualityDistribution ?? {}))}`,
+    `selectedEvidenceByFacet=${encodeDebugValue(JSON.stringify(result.diagnosticsSnapshot.selectedEvidenceByFacet ?? {}))}`,
+    `concreteNewsEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.concreteNewsEvidenceCount ?? "none"))}`,
+    `backgroundEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.backgroundEvidenceCount ?? "none"))}`,
+    `downgradedEvidenceCount=${encodeDebugValue(String(result.diagnosticsSnapshot.downgradedEvidenceCount ?? "none"))}`,
+    `missingEvidenceFacets=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.missingEvidenceFacets) ? result.diagnosticsSnapshot.missingEvidenceFacets.join("|") : "none")}`,
+    `synthesisPlanItemCount=${encodeDebugValue(String(result.diagnosticsSnapshot.synthesisPlanItemCount ?? "none"))}`,
+    `answerMode=${encodeDebugValue(String(result.diagnosticsSnapshot.answerMode ?? "none"))}`,
     `sourceDiversitySatisfied=${encodeDebugValue(String(result.diagnosticsSnapshot.sourceDiversitySatisfied ?? "unknown"))}`,
     `answerContractMode=${encodeDebugValue(result.answerContractMode ?? "none")}`,
     `warnings=${encodeDebugValue(result.warnings.slice(0, 8).join(" | ") || "none")}`,
@@ -772,8 +832,27 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
   const evidenceGateReason = typeof result.diagnosticsSnapshot.evidenceGateReason === "string"
     ? result.diagnosticsSnapshot.evidenceGateReason
     : undefined;
+  const gateCaution = evidenceGateStatus === "cautious"
+    ? "当前证据有限，回答必须谨慎，不得声称全面。"
+    : undefined;
+  const coverageIntent = typeof result.diagnosticsSnapshot.coveragePlanIntent === "string"
+    ? result.diagnosticsSnapshot.coveragePlanIntent
+    : "unknown";
+  const answerMode = typeof result.diagnosticsSnapshot.answerMode === "string"
+    ? result.diagnosticsSnapshot.answerMode
+    : evidenceGateStatus === "cautious" ? "cautious" : evidenceGateStatus === "failed" ? "failed" : "normal";
+  const coverageFacets = Array.isArray(result.diagnosticsSnapshot.coverageFacets)
+    ? result.diagnosticsSnapshot.coverageFacets.filter((item): item is string => typeof item === "string").join(", ")
+    : String(result.diagnosticsSnapshot.coverageFacets ?? "none");
+  const limitations = Array.isArray(result.diagnosticsSnapshot.limitations)
+    ? result.diagnosticsSnapshot.limitations.filter((item): item is string => typeof item === "string").slice(0, 4).join(" | ")
+    : "";
+  const currentDate = String(result.diagnosticsSnapshot.currentDate ?? "none");
+  const freshnessWindowDays = String(result.diagnosticsSnapshot.freshnessWindowDays ?? "none");
+  const freshEvidenceCount = String(result.diagnosticsSnapshot.freshEvidenceCount ?? "none");
+  const staleEvidenceCount = String(result.diagnosticsSnapshot.staleEvidenceCount ?? "none");
   const sources = result.readAttempts.map((attempt, index): WebSource => {
-    const evidenceId = `E${index + 1}`;
+    const evidenceId = attempt.evidenceId ?? `E${index + 1}`;
     const host = attempt.candidate.host || getResearchEngineHost(attempt.candidate.url);
     const excerpt = compactResearchEngineText(attempt.excerptPreview, RESEARCH_ENGINE_PROMPT_EXCERPT_LIMIT);
     const snippet = compactResearchEngineText(attempt.excerptPreview, RESEARCH_ENGINE_SOURCE_PREVIEW_LIMIT) ?? [
@@ -782,9 +861,39 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       attempt.status,
     ].filter(Boolean).join(" ");
     const readerUsable = isResearchEngineReadSuccess(attempt) && Boolean(excerpt);
-    const usable = readerUsable && gateAllowsPromptEvidence;
+    const synthesisSelected = attempt.synthesisSelected === true;
+    const usable = readerUsable && gateAllowsPromptEvidence && synthesisSelected;
     const excerptStatus = getResearchEngineExcerptStatus(attempt);
     const searchDiagnostics = formatResearchEngineSearchDebug(result);
+    const sourceRole = attempt.sourceRole ?? "weak_candidate";
+    const evidenceQualityTier = attempt.evidenceQualityTier ?? "low";
+    const staleLike = attempt.freshnessStatus === "stale" || attempt.freshnessStatus === "unknown" || attempt.freshnessStatus === "future_date_suspicious";
+    const backgroundLike = staleLike || sourceRole === "analysis_report" || sourceRole === "background_context" || sourceRole === "index_page";
+    const qualityLabel = `${evidenceQualityTier}/${sourceRole}`;
+    const synthesisContext = [
+      `coverageIntent=${coverageIntent}`,
+      `answerMode=${answerMode}`,
+      `coveredFacets=${coverageFacets || "none"}`,
+      `facet=${attempt.facet ?? "primary"}`,
+      `quality=${qualityLabel}`,
+      attempt.dateSignal ? `dateSignal=${attempt.dateSignal}` : undefined,
+      attempt.publishedDate ? `publishedDate=${attempt.publishedDate}` : undefined,
+      typeof attempt.ageDays === "number" ? `ageDays=${attempt.ageDays}` : undefined,
+      attempt.freshnessStatus ? `freshnessStatus=${attempt.freshnessStatus}` : undefined,
+      `currentDate=${currentDate}`,
+      `freshnessWindowDays=${freshnessWindowDays}`,
+      `freshEvidenceCount=${freshEvidenceCount}`,
+      `staleEvidenceCount=${staleEvidenceCount}`,
+      attempt.synthesisItemTitle ? `synthesisItem=${attempt.synthesisItemTitle}` : undefined,
+      limitations ? `limitations=${limitations}` : undefined,
+    ].filter(Boolean).join("; ");
+    const webFreshnessStatus: WebSource["freshnessStatus"] | undefined = attempt.freshnessStatus === "fresh"
+      ? "recent_fortnight"
+      : attempt.freshnessStatus === "stale" || attempt.freshnessStatus === "future_date_suspicious"
+        ? "stale"
+        : attempt.freshnessStatus === "unknown"
+          ? "undated"
+          : undefined;
     return {
       id: `research-engine-${evidenceId.toLowerCase()}`,
       title: attempt.candidate.title || attempt.candidate.url,
@@ -797,32 +906,48 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       sourceReliability: "unknown",
       searchProvider: getResearchEngineWebSearchProvider(result.providerName),
       searchStage: "research-engine-shadow-run",
+      dateHint: attempt.publishedDate ?? attempt.dateSignal,
+      sourcePublishedAt: attempt.publishedDate ?? attempt.dateSignal,
+      sourceAgeDays: attempt.ageDays,
+      freshnessStatus: webFreshnessStatus,
+      staleReason: attempt.freshnessStatus && attempt.freshnessStatus !== "fresh" ? attempt.freshnessReason : undefined,
       searchDiagnostics,
       finalIncludedInPrompt: usable,
       evidenceStatus: usable ? "usable" : "rejected",
       usableEvidence: usable,
       injectedIntoAnswer: usable,
       evidenceReason: usable
-        ? `${evidenceId}: Research Engine Shadow Run selected this public URL and built an excerpt preview. Use only the excerpt as web evidence. Evidence gate=${evidenceGateStatus}.`
+        ? `${evidenceId}: Research Engine synthesis selected this fresh body excerpt. ${synthesisContext}. Use only the body excerpt as web evidence; never infer from title, URL, or snippet. Do not treat material older than the freshness window as latest news; old or undated material is background only. Organize the answer by covered facets and synthesize across sources instead of listing search results. Do not expand any item without body-excerpt support. Evidence gate=${evidenceGateStatus}.${gateCaution ? ` ${gateCaution}` : ""}`
         : gateAllowsPromptEvidence
-          ? `${evidenceId}: Research Engine Shadow Run could not produce usable excerpt evidence for this URL.`
-          : `${evidenceId}: Research Engine read this URL, but the news evidence gate rejected prompt injection because independent source coverage is insufficient.`,
+          ? `${evidenceId}: Research Engine did not select this candidate for answer synthesis. Reason: readerUsable=${readerUsable}; synthesisSelected=${synthesisSelected}; quality=${qualityLabel}; freshness=${attempt.freshnessStatus ?? "unknown"}. Title, URL, and snippet are not usable evidence; stale or undated news cannot support latest-news claims.`
+          : `${evidenceId}: Research Engine read this URL, but the evidence gate rejected prompt injection because body evidence, source coverage, or freshness coverage is insufficient.`,
       rejectedReason: usable ? undefined : [
         gateAllowsPromptEvidence ? undefined : `evidence_gate_${evidenceGateStatus}:${evidenceGateReason ?? "insufficient_evidence"}`,
+        synthesisSelected ? undefined : `not_selected_by_synthesis_plan:${qualityLabel}`,
         attempt.status,
         ...attempt.errors,
         ...attempt.warnings,
       ].filter(Boolean).join("; "),
-      pageType: attempt.candidate.sourceType === "mainstream_news" ? "news_article" : "unknown",
+      pageType: sourceRole === "index_page"
+        ? "homepage"
+        : attempt.candidate.sourceType === "documentation"
+          ? "docs"
+          : attempt.candidate.sourceType === "mainstream_news" || sourceRole === "breaking_news" || sourceRole === "official_announcement"
+            ? "news_article"
+            : sourceRole === "analysis_report"
+              ? "article"
+              : "unknown",
       contentStatus: usable ? (attempt.status === "partial" || attempt.status === "body_too_large" ? "partial" : "fetched") : attempt.status === "needs_js" ? "needs_js" : "failed",
-      sourceStrength: usable ? "strong" : "rejected",
+      sourceStrength: usable ? evidenceQualityTier === "high" ? "strong" : evidenceQualityTier === "medium" ? "medium" : "weak" : "rejected",
       sourceType: getResearchEngineSourceType(attempt.candidate.sourceType),
       reliability: "unknown",
-      reliabilityLabel: "Research Engine evidence",
+      reliabilityLabel: staleLike ? "Research Engine old/background" : backgroundLike ? "Research Engine background/analysis" : "Research Engine evidence",
       reliabilityReason: "Developer Mode Research Engine Shadow Run; provider secrets and raw bodies are redacted.",
       relevance: usable ? "strong" : "candidate",
-      relevanceLabel: usable ? "usable Research Engine evidence" : "candidate read failed",
-      relevanceReason: `Research Engine selected candidate ${attempt.candidate.id}; reader status=${attempt.status}.`,
+      relevanceLabel: usable ? "selected fresh synthesis evidence" : staleLike ? "old/background candidate" : backgroundLike ? "background/analysis candidate" : "candidate not selected",
+      relevanceReason: usable
+        ? `Research Engine selected candidate ${attempt.candidate.id} for synthesis; ${synthesisContext}. Summary hint is derived from the body excerpt only.`
+        : `Research Engine candidate ${attempt.candidate.id}; reader status=${attempt.status}; quality=${qualityLabel}; synthesisSelected=${synthesisSelected}.`,
       excerptStatus,
       excerpt,
       excerptError: usable ? undefined : [attempt.errors[0], attempt.warnings[0]].filter(Boolean).join("; ") || attempt.status,
@@ -842,6 +967,11 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       extractionFailureReason: usable ? undefined : [attempt.errors[0], attempt.warnings[0]].filter(Boolean).join("; "),
       rankScore: typeof attempt.candidate.score === "number" ? Math.round(attempt.candidate.score) : undefined,
       rankReason: `Research Engine candidate pool score=${attempt.candidate.score ?? "unknown"}.`,
+      eventCluster: attempt.synthesisItemTitle ? `${attempt.facet ?? "primary"}:${attempt.synthesisItemTitle}` : undefined,
+      clusterLabel: attempt.synthesisItemTitle,
+      clusterReason: attempt.synthesisSummaryHint
+        ? `Synthesis summary hint from body excerpt only: ${attempt.synthesisSummaryHint}`
+        : undefined,
       selected: usable,
       isConstructed: false,
     };
@@ -4453,12 +4583,47 @@ export default function AiSidebar({
         const result = await runResearchEngineRealShadowRun({
           query: options?.userInput ?? decision.rawQuestion ?? decision.queries[0] ?? "",
           webSearchConfig,
-          maxCandidates: 8,
+          maxCandidates: 30,
           readTopN: 2,
-          providerTimeoutMs: 8000,
-          readerTimeoutMs: 10000,
+          providerTimeoutMs: 60000,
+          readerTimeoutMs: 9000,
+          providerId: selectedProviderId,
+          modelId: selectedModelId,
         });
         if (!isCurrent()) return {};
+        preparationDiagnostics.plannerStarted = Boolean(result.diagnosticsSnapshot.llmPlannerStarted);
+        preparationDiagnostics.ruleFallbackUsed = Boolean(result.diagnosticsSnapshot.ruleFallbackUsed);
+        preparationDiagnostics.plannerFailedReason = typeof result.diagnosticsSnapshot.llmPlannerFailedReason === "string"
+          ? result.diagnosticsSnapshot.llmPlannerFailedReason
+          : undefined;
+        preparationDiagnostics.llmPlannerStarted = String(result.diagnosticsSnapshot.llmPlannerStarted ?? false);
+        preparationDiagnostics.llmPlannerSucceeded = String(result.diagnosticsSnapshot.llmPlannerSucceeded ?? false);
+        preparationDiagnostics.llmPlannerFailedReason = typeof result.diagnosticsSnapshot.llmPlannerFailedReason === "string" ? result.diagnosticsSnapshot.llmPlannerFailedReason : undefined;
+        preparationDiagnostics.plannerIntent = String(result.diagnosticsSnapshot.plannerIntent ?? "none");
+        preparationDiagnostics.coveragePlanIntent = String(result.diagnosticsSnapshot.coveragePlanIntent ?? "none");
+        preparationDiagnostics.coverageFacets = Array.isArray(result.diagnosticsSnapshot.coverageFacets) ? result.diagnosticsSnapshot.coverageFacets.join("|") : undefined;
+        preparationDiagnostics.targetReadCount = String(result.diagnosticsSnapshot.targetReadCount ?? "none");
+        preparationDiagnostics.attemptedReadCount = String(result.diagnosticsSnapshot.attemptedReadCount ?? result.readAttempts.length);
+        preparationDiagnostics.readerConcurrency = String(result.diagnosticsSnapshot.readerConcurrency ?? "none");
+        preparationDiagnostics.globalReaderBudgetMs = String(result.diagnosticsSnapshot.globalReaderBudgetMs ?? "none");
+        preparationDiagnostics.distinctAttemptedHosts = String(result.diagnosticsSnapshot.distinctAttemptedHosts ?? "none");
+        preparationDiagnostics.usableBodyEvidenceCount = String(result.diagnosticsSnapshot.usableBodyEvidenceCount ?? "none");
+        preparationDiagnostics.usableFreshBodyEvidenceCount = String(result.diagnosticsSnapshot.usableFreshBodyEvidenceCount ?? "none");
+        preparationDiagnostics.currentDate = String(result.diagnosticsSnapshot.currentDate ?? "none");
+        preparationDiagnostics.freshnessWindowDays = String(result.diagnosticsSnapshot.freshnessWindowDays ?? "none");
+        preparationDiagnostics.freshnessGateStatus = String(result.diagnosticsSnapshot.freshnessGateStatus ?? "none");
+        preparationDiagnostics.freshnessFailureReason = String(result.diagnosticsSnapshot.freshnessFailureReason ?? "none");
+        preparationDiagnostics.freshEvidenceCount = String(result.diagnosticsSnapshot.freshEvidenceCount ?? "none");
+        preparationDiagnostics.staleEvidenceCount = String(result.diagnosticsSnapshot.staleEvidenceCount ?? "none");
+        preparationDiagnostics.unknownDateEvidenceCount = String(result.diagnosticsSnapshot.unknownDateEvidenceCount ?? "none");
+        preparationDiagnostics.rejectedByFreshnessCount = String(result.diagnosticsSnapshot.rejectedByFreshnessCount ?? "none");
+        preparationDiagnostics.evidenceGateStatus = String(result.diagnosticsSnapshot.evidenceGateStatus ?? "none");
+        preparationDiagnostics.bodyEvidenceRatio = String(result.diagnosticsSnapshot.bodyEvidenceRatio ?? "none");
+        preparationDiagnostics.coveredFacets = String(result.diagnosticsSnapshot.coveredFacetCount ?? "none");
+        preparationDiagnostics.missingFacets = Array.isArray(result.diagnosticsSnapshot.missingFacets) ? result.diagnosticsSnapshot.missingFacets.join("|") : undefined;
+        preparationDiagnostics.candidateShortage = String(result.diagnosticsSnapshot.candidateShortage ?? false);
+        preparationDiagnostics.sourcePortfolioSummary = String(result.diagnosticsSnapshot.sourcePortfolioSummary ?? "none");
+        preparationDiagnostics.concurrentReaderSummary = String(result.diagnosticsSnapshot.concurrentReaderSummary ?? "none");
         const sources = mapResearchEngineShadowRunToSources(result);
         const searchDebug = mergeSearchDebug(formatSearchPreparationDiagnostics(preparationDiagnostics), formatResearchEngineSearchDebug(result));
         const hasUsableResearchEngineSources = getPromptCitationCandidates(sources ?? []).length > 0;

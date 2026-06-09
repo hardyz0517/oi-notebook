@@ -1,8 +1,9 @@
 import { searchWebSources } from "@/lib/api";
 import type { AiSearchFreshness, SearchVertical, WebSearchResult } from "@/lib/aiWebSearch";
 import type { DiscoveryRawResult, PlannedQuery, QueryPurpose, SourceType } from "./types";
+import type { ExecutableCoveragePlan } from "./researchPlanTypes";
 
-type NewsQueryMode = "entity_news" | "broad_news_digest";
+type NewsQueryMode = "entity_news" | "broad_news_digest" | "broad_topic_news" | "technical_docs" | "official_reference" | "general_web" | "oi_problem";
 
 export type KeylessBingProviderStatus =
   | "available"
@@ -24,6 +25,7 @@ export type KeylessBingProviderOptions = {
   queryPurpose?: QueryPurpose;
   queryLanguage?: "zh" | "en" | "mixed";
   plannedQueries?: PlannedQuery[];
+  coveragePlan?: ExecutableCoveragePlan;
   maxResults?: number;
   timeoutMs?: number;
 };
@@ -81,7 +83,9 @@ export type KeylessBingProviderResult = {
     candidateCountAtStop: number;
     perQueryElapsedMs: Record<string, number>;
     perQueryResultCount: Record<string, number>;
+    perFacetResultCount: Record<string, number>;
     perQueryHostPreview: Record<string, string[]>;
+    candidateShortage: boolean;
     queryPurpose: QueryPurpose;
     rawBridgeResultCount: number;
     normalizedResultCount: number;
@@ -133,12 +137,14 @@ const MAX_STAGE_DIAGNOSTICS = 6;
 const MAX_STAGE_DIAGNOSTICS_PREVIEW_CHARS = 480;
 const MAX_ERROR_PREVIEW_CHARS = 900;
 const RAW_HTML_REDACTED_PREVIEW = "[redacted raw html preview]";
-const MAX_ENTITY_NEWS_BRIDGE_QUERIES = 4;
-const MAX_BROAD_NEWS_BRIDGE_QUERIES = 6;
+const MAX_ENTITY_NEWS_BRIDGE_QUERIES = 12;
+const MAX_BROAD_NEWS_BRIDGE_QUERIES = 16;
+const MAX_BROAD_TOPIC_NEWS_BRIDGE_QUERIES = 16;
+const MAX_GENERAL_BRIDGE_QUERIES = 8;
 const MAX_QUALITY_PREVIEW = 8;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 8_000;
-const ENTITY_NEWS_PROVIDER_TIMEOUT_MS = 20_000;
-const BROAD_NEWS_PROVIDER_TIMEOUT_MS = 26_000;
+const ENTITY_NEWS_PROVIDER_TIMEOUT_MS = 60_000;
+const BROAD_NEWS_PROVIDER_TIMEOUT_MS = 60_000;
 const NEWS_PER_QUERY_TIMEOUT_MS = 7_000;
 
 type KeylessBingQueryExecutionResult = {
@@ -159,7 +165,9 @@ type KeylessBingQueryExecutionResult = {
   candidateCountAtStop: number;
   perQueryElapsedMs: Record<string, number>;
   perQueryResultCount: Record<string, number>;
+  perFacetResultCount: Record<string, number>;
   perQueryHostPreview: Record<string, string[]>;
+  candidateShortage: boolean;
 };
 
 const elapsedMsSince = (startedAt: number): number => Math.max(0, Math.round(performance.now() - startedAt));
@@ -190,6 +198,7 @@ const entityNewsSignal = (value: string): boolean =>
   /\b(OpenAI|ChatGPT|Anthropic|Claude|Google|Microsoft|Meta|Apple|Nvidia|Tesla|DeepSeek|Gemini|Sam Altman)\b/i.test(value);
 
 const detectNewsQueryMode = (options: KeylessBingProviderOptions): NewsQueryMode => {
+  if (options.coveragePlan?.intent) return options.coveragePlan.intent;
   const haystack = [
     options.rawUserQuery,
     options.query,
@@ -220,8 +229,25 @@ const chooseBridgeQueries = (
   queryPurpose: QueryPurpose,
   newsQueryMode: NewsQueryMode,
 ): string[] => {
+  if (options.coveragePlan?.queries.length) {
+    const limit = newsQueryMode === "broad_news_digest" || newsQueryMode === "broad_topic_news"
+      ? MAX_BROAD_TOPIC_NEWS_BRIDGE_QUERIES
+      : newsQueryMode === "entity_news"
+        ? MAX_ENTITY_NEWS_BRIDGE_QUERIES
+        : newsQueryMode === "technical_docs" || newsQueryMode === "official_reference"
+          ? 6
+          : MAX_GENERAL_BRIDGE_QUERIES;
+    return unique(options.coveragePlan.queries.map(normalizeQuery)).slice(0, limit);
+  }
   if (newsQueryMode === "broad_news_digest") {
     return unique(broadNewsBridgeQueries(options).map(normalizeQuery)).slice(0, MAX_BROAD_NEWS_BRIDGE_QUERIES);
+  }
+  if (newsQueryMode === "broad_topic_news") {
+    const plannedQueries = options.plannedQueries ?? [];
+    const allPlannedQueries = plannedQueries
+      .sort((left, right) => right.priority - left.priority)
+      .map((item) => item.query);
+    return unique([...allPlannedQueries, options.query].map(normalizeQuery)).slice(0, MAX_BROAD_TOPIC_NEWS_BRIDGE_QUERIES);
   }
   const plannedQueries = options.plannedQueries ?? [];
   const newsQueries = plannedQueries
@@ -687,7 +713,9 @@ const baseDiagnostics = (
     candidateCountAtStop?: number;
     perQueryElapsedMs?: Record<string, number>;
     perQueryResultCount?: Record<string, number>;
+    perFacetResultCount?: Record<string, number>;
     perQueryHostPreview?: Record<string, string[]>;
+    candidateShortage?: boolean;
     queryPurpose: QueryPurpose;
     providerStatus: KeylessBingProviderStatus;
     rawBridgeResultCount?: number;
@@ -728,8 +756,8 @@ const baseDiagnostics = (
   rawHostDistribution: input.rawHostDistribution ?? {},
   normalizedHostDistribution: input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {},
   distinctHostCount: Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length,
-  targetDistinctHosts: input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0),
-  hostDiversityShortfall: Math.max(0, (input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0)) - Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length),
+  targetDistinctHosts: input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" || input.newsQueryMode === "broad_topic_news" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0),
+  hostDiversityShortfall: Math.max(0, (input.targetDistinctHosts ?? (input.newsQueryMode === "broad_news_digest" || input.newsQueryMode === "broad_topic_news" ? 10 : input.newsQueryMode === "entity_news" ? 8 : 0)) - Object.keys(input.normalizedHostDistribution ?? input.candidateHostDistribution ?? {}).length),
   queryCount: input.bridgeQueries?.length ?? (input.query ? 1 : 0),
   providerGlobalTimeoutMs: input.providerGlobalTimeoutMs ?? 8_000,
   perQueryTimeoutMs: input.perQueryTimeoutMs ?? input.providerGlobalTimeoutMs ?? 8_000,
@@ -745,7 +773,9 @@ const baseDiagnostics = (
   candidateCountAtStop: input.candidateCountAtStop ?? 0,
   perQueryElapsedMs: input.perQueryElapsedMs ?? {},
   perQueryResultCount: input.perQueryResultCount ?? {},
+  perFacetResultCount: input.perFacetResultCount ?? {},
   perQueryHostPreview: input.perQueryHostPreview ?? {},
+  candidateShortage: input.candidateShortage ?? false,
   queryPurpose: input.queryPurpose,
   rawBridgeResultCount: input.rawBridgeResultCount ?? 0,
   normalizedResultCount: input.normalizedResultCount ?? 0,
@@ -782,6 +812,8 @@ const isNewsDiscoveryMode = (
 ): boolean =>
   queryPurpose === "news" ||
   newsQueryMode === "broad_news_digest" ||
+  newsQueryMode === "broad_topic_news" ||
+  newsQueryMode === "entity_news" ||
   bridgeQueries.some(queryContainsReadableNewsSignal);
 
 const providerGlobalTimeoutFor = (
@@ -828,10 +860,23 @@ const earlyStopCheck = (
   sources: WebSearchResult[],
   queryPurpose: QueryPurpose,
   newsQueryMode: NewsQueryMode,
+  coveragePlan?: ExecutableCoveragePlan,
 ): { stop: boolean; reason?: string; candidateCount: number; distinctHostCount: number } => {
   const rankedSources = rankSourcesForPurpose(sources, queryPurpose, newsQueryMode);
   const candidateCount = rankedSources.length;
   const distinctHostCount = Object.keys(distribution(rankedSources.map(({ source }) => hostFromSource(source)))).length;
+  if (coveragePlan) {
+    const targetReadCount = coveragePlan.sourceRequirements.targetReadCount;
+    const targetHosts = coveragePlan.sourceRequirements.targetDistinctHosts;
+    if (candidateCount >= targetReadCount && distinctHostCount >= Math.min(targetHosts, targetReadCount)) {
+      return { stop: true, reason: "coverage_plan_candidate_and_host_target_reached", candidateCount, distinctHostCount };
+    }
+    return { stop: false, candidateCount, distinctHostCount };
+  }
+  if (newsQueryMode === "broad_topic_news") {
+    if (distinctHostCount >= 10 && candidateCount >= 30) return { stop: true, reason: "target_distinct_hosts_and_read_count_reached", candidateCount, distinctHostCount };
+    return { stop: false, candidateCount, distinctHostCount };
+  }
   if (newsQueryMode === "broad_news_digest") {
     if (distinctHostCount >= 10) return { stop: true, reason: "target_distinct_hosts_reached", candidateCount, distinctHostCount };
     if (candidateCount >= 24 && distinctHostCount >= 8) return { stop: true, reason: "candidate_and_host_floor_reached", candidateCount, distinctHostCount };
@@ -879,6 +924,7 @@ const runBridgeQueries = async (
     maxResults: number;
     providerGlobalTimeoutMs: number;
     perQueryTimeoutMs: number;
+    coveragePlan?: ExecutableCoveragePlan;
   },
 ): Promise<KeylessBingQueryExecutionResult> => {
   const startedAt = performance.now();
@@ -913,7 +959,9 @@ const runBridgeQueries = async (
       candidateCountAtStop: sources.length,
       perQueryElapsedMs: { [input.query]: elapsedMsSince(startedAt) },
       perQueryResultCount: { [input.query]: sources.length },
+      perFacetResultCount: {},
       perQueryHostPreview: { [input.query]: unique(hostsFromSources(sources)).slice(0, 6) },
+      candidateShortage: false,
     };
   }
 
@@ -950,11 +998,11 @@ const runBridgeQueries = async (
         timeoutMs: Math.max(1, Math.min(input.perQueryTimeoutMs, remainingMs)),
       });
       completedQueryCount += 1;
-      sources.push(...querySources);
+      sources.push(...querySources.map((source) => ({ ...source, discoveredBy: bridgeQuery })));
       perQueryElapsedMs[bridgeQuery] = elapsedMsSince(queryStartedAt);
       perQueryResultCount[bridgeQuery] = querySources.length;
       perQueryHostPreview[bridgeQuery] = unique(hostsFromSources(querySources)).slice(0, 6);
-      const stopCheck = earlyStopCheck(uniqueSources(sources), input.queryPurpose, input.newsQueryMode);
+      const stopCheck = earlyStopCheck(uniqueSources(sources), input.queryPurpose, input.newsQueryMode, input.coveragePlan);
       distinctHostCountAtStop = stopCheck.distinctHostCount;
       candidateCountAtStop = stopCheck.candidateCount;
       if (stopCheck.stop) {
@@ -979,7 +1027,13 @@ const runBridgeQueries = async (
   }
 
   const dedupedSources = uniqueSources(sources);
-  const finalStopCheck = earlyStopCheck(dedupedSources, input.queryPurpose, input.newsQueryMode);
+  const finalStopCheck = earlyStopCheck(dedupedSources, input.queryPurpose, input.newsQueryMode, input.coveragePlan);
+  const perFacetResultCount = Object.entries(perQueryResultCount).reduce<Record<string, number>>((acc, [query, count]) => {
+    const facet = input.coveragePlan?.queryFacets[query.toLocaleLowerCase()] ?? "primary";
+    acc[facet] = (acc[facet] ?? 0) + count;
+    return acc;
+  }, {});
+  const targetReadCount = input.coveragePlan?.sourceRequirements.targetReadCount ?? 0;
   return {
     sources: dedupedSources,
     warnings,
@@ -998,7 +1052,9 @@ const runBridgeQueries = async (
     candidateCountAtStop: earlyStop ? candidateCountAtStop : finalStopCheck.candidateCount,
     perQueryElapsedMs,
     perQueryResultCount,
+    perFacetResultCount,
     perQueryHostPreview,
+    candidateShortage: targetReadCount > 0 && dedupedSources.length < targetReadCount,
   };
 };
 
@@ -1011,6 +1067,7 @@ const rawResultFromWebSource = (
     queryLanguage?: "zh" | "en" | "mixed";
     newsQueryMode: NewsQueryMode;
     quality: KeylessSourceQuality;
+    coveragePlan?: ExecutableCoveragePlan;
   },
 ): DiscoveryRawResult | undefined => {
   const title = source.title?.trim();
@@ -1020,7 +1077,7 @@ const rawResultFromWebSource = (
     id: `keyless_bing:${input.queryPurpose}:${index}:${url}`,
     provider: "bing",
     providerPriority: 82,
-    query: input.query,
+    query: source.discoveredBy ?? input.query,
     queryPurpose: input.queryPurpose,
     queryLanguage: input.queryLanguage,
     resultIndex: index,
@@ -1034,9 +1091,17 @@ const rawResultFromWebSource = (
       phase17KeylessBingProvider: {
         apiKeyRequired: false,
         sourceId: source.id,
+        query: source.discoveredBy ?? input.query,
+        facet: input.coveragePlan?.queryFacets[(source.discoveredBy ?? input.query).toLocaleLowerCase()] ?? "primary",
+        rank: index,
+        host: hostFromSource(source),
+        stage: source.searchStage,
         searchStage: source.searchStage,
         discoveryMethod: source.discoveryMethod,
         sourceKind: source.sourceKind,
+        dateHint: source.dateHint,
+        sourcePublishedAt: source.sourcePublishedAt,
+        publishedAt: source.sourcePublishedAt ?? source.dateHint,
         newsCandidateScore: input.quality.newsCandidateScore,
         readabilityPrior: input.quality.readabilityPrior,
         freshnessSignal: input.quality.freshnessSignal,
@@ -1101,6 +1166,7 @@ export const runKeylessBingProvider = async (
       maxResults: Math.max(1, Math.min(options.maxResults ?? 8, newsQueryMode === "broad_news_digest" ? 24 : queryPurpose === "news" ? 16 : 10)),
       providerGlobalTimeoutMs,
       perQueryTimeoutMs,
+      coveragePlan: options.coveragePlan,
     });
     const sources = execution.sources;
     const rankedSources = rankSourcesForPurpose(sources, queryPurpose, newsQueryMode);
@@ -1111,6 +1177,7 @@ export const runKeylessBingProvider = async (
         queryLanguage: options.queryLanguage,
         newsQueryMode,
         quality,
+        coveragePlan: options.coveragePlan,
       }))
       .filter((source): source is DiscoveryRawResult => Boolean(source));
     const diagnosticsPreview = diagnosticsPreviewFromSources(sources);
@@ -1120,7 +1187,8 @@ export const runKeylessBingProvider = async (
     const qualityPreview = qualityPreviewFor(rankedSources);
     const rawHostDistribution = distribution(sources.map((source) => hostFromSource(source)));
     const candidateHostDistribution = distribution(rankedSources.map(({ source }) => hostFromSource(source)));
-    const targetDistinctHosts = newsQueryMode === "broad_news_digest" ? 10 : queryPurpose === "news" ? 8 : 0;
+    const targetDistinctHosts = options.coveragePlan?.sourceRequirements.targetDistinctHosts ?? (newsQueryMode === "broad_news_digest" || newsQueryMode === "broad_topic_news" ? 10 : queryPurpose === "news" ? 8 : 0);
+    const targetReadCount = options.coveragePlan?.sourceRequirements.targetReadCount ?? 0;
     const rejectionStats = qualityRejectionStats(rankedSources, bridgeDiagnostics);
     const newsStageUsed = sources.some((source) => isNewsStage(source.searchStage));
     const newsQueryUsed = bridgeQueries.some(queryContainsReadableNewsSignal) || queryPurpose === "news";
@@ -1179,7 +1247,9 @@ export const runKeylessBingProvider = async (
         candidateCountAtStop: execution.candidateCountAtStop,
         perQueryElapsedMs: execution.perQueryElapsedMs,
         perQueryResultCount: execution.perQueryResultCount,
+        perFacetResultCount: execution.perFacetResultCount,
         perQueryHostPreview: execution.perQueryHostPreview,
+        candidateShortage: execution.candidateShortage || (targetReadCount > 0 && rawResults.length < targetReadCount),
         hostDiversityApplied: queryPurpose === "news" || newsQueryMode === "broad_news_digest",
         ...rejectionStats,
         queryPurpose,

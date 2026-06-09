@@ -22,6 +22,34 @@ export type SearchPreparationDiagnostics = {
   plannerStarted: boolean;
   plannerTimedOut: boolean;
   plannerFailedReason?: string;
+  llmPlannerStarted?: string;
+  llmPlannerSucceeded?: string;
+  llmPlannerFailedReason?: string;
+  plannerIntent?: string;
+  coveragePlanIntent?: string;
+  coverageFacets?: string;
+  targetReadCount?: string;
+  attemptedReadCount?: string;
+  readerConcurrency?: string;
+  globalReaderBudgetMs?: string;
+  distinctAttemptedHosts?: string;
+  usableBodyEvidenceCount?: string;
+  usableFreshBodyEvidenceCount?: string;
+  currentDate?: string;
+  freshnessWindowDays?: string;
+  freshnessGateStatus?: string;
+  freshnessFailureReason?: string;
+  freshEvidenceCount?: string;
+  staleEvidenceCount?: string;
+  unknownDateEvidenceCount?: string;
+  rejectedByFreshnessCount?: string;
+  evidenceGateStatus?: string;
+  bodyEvidenceRatio?: string;
+  coveredFacets?: string;
+  missingFacets?: string;
+  candidateShortage?: string;
+  sourcePortfolioSummary?: string;
+  concurrentReaderSummary?: string;
   ruleFallbackUsed: boolean;
   directDiscoveryScheduled: boolean;
   directDiscoveryAttempted: boolean;
@@ -214,6 +242,34 @@ export const formatSearchPreparationDiagnostics = (diagnostics: SearchPreparatio
   `plannerStarted=${diagnostics.plannerStarted ? "yes" : "no"}`,
   `plannerTimedOut=${diagnostics.plannerTimedOut ? "yes" : "no"}`,
   diagnostics.plannerFailedReason ? `plannerFailedReason=${encodeDebugValue(diagnostics.plannerFailedReason)}` : undefined,
+  diagnostics.llmPlannerStarted ? `llmPlannerStarted=${encodeDebugValue(diagnostics.llmPlannerStarted)}` : undefined,
+  diagnostics.llmPlannerSucceeded ? `llmPlannerSucceeded=${encodeDebugValue(diagnostics.llmPlannerSucceeded)}` : undefined,
+  diagnostics.llmPlannerFailedReason ? `llmPlannerFailedReason=${encodeDebugValue(diagnostics.llmPlannerFailedReason)}` : undefined,
+  diagnostics.plannerIntent ? `plannerIntent=${encodeDebugValue(diagnostics.plannerIntent)}` : undefined,
+  diagnostics.coveragePlanIntent ? `coveragePlanIntent=${encodeDebugValue(diagnostics.coveragePlanIntent)}` : undefined,
+  diagnostics.coverageFacets ? `coverageFacets=${encodeDebugValue(diagnostics.coverageFacets)}` : undefined,
+  diagnostics.targetReadCount ? `targetReadCount=${encodeDebugValue(diagnostics.targetReadCount)}` : undefined,
+  diagnostics.attemptedReadCount ? `attemptedReadCount=${encodeDebugValue(diagnostics.attemptedReadCount)}` : undefined,
+  diagnostics.readerConcurrency ? `readerConcurrency=${encodeDebugValue(diagnostics.readerConcurrency)}` : undefined,
+  diagnostics.globalReaderBudgetMs ? `globalReaderBudgetMs=${encodeDebugValue(diagnostics.globalReaderBudgetMs)}` : undefined,
+  diagnostics.distinctAttemptedHosts ? `distinctAttemptedHosts=${encodeDebugValue(diagnostics.distinctAttemptedHosts)}` : undefined,
+  diagnostics.usableBodyEvidenceCount ? `usableBodyEvidenceCount=${encodeDebugValue(diagnostics.usableBodyEvidenceCount)}` : undefined,
+  diagnostics.usableFreshBodyEvidenceCount ? `usableFreshBodyEvidenceCount=${encodeDebugValue(diagnostics.usableFreshBodyEvidenceCount)}` : undefined,
+  diagnostics.currentDate ? `currentDate=${encodeDebugValue(diagnostics.currentDate)}` : undefined,
+  diagnostics.freshnessWindowDays ? `freshnessWindowDays=${encodeDebugValue(diagnostics.freshnessWindowDays)}` : undefined,
+  diagnostics.freshnessGateStatus ? `freshnessGateStatus=${encodeDebugValue(diagnostics.freshnessGateStatus)}` : undefined,
+  diagnostics.freshnessFailureReason ? `freshnessFailureReason=${encodeDebugValue(diagnostics.freshnessFailureReason)}` : undefined,
+  diagnostics.freshEvidenceCount ? `freshEvidenceCount=${encodeDebugValue(diagnostics.freshEvidenceCount)}` : undefined,
+  diagnostics.staleEvidenceCount ? `staleEvidenceCount=${encodeDebugValue(diagnostics.staleEvidenceCount)}` : undefined,
+  diagnostics.unknownDateEvidenceCount ? `unknownDateEvidenceCount=${encodeDebugValue(diagnostics.unknownDateEvidenceCount)}` : undefined,
+  diagnostics.rejectedByFreshnessCount ? `rejectedByFreshnessCount=${encodeDebugValue(diagnostics.rejectedByFreshnessCount)}` : undefined,
+  diagnostics.evidenceGateStatus ? `evidenceGateStatus=${encodeDebugValue(diagnostics.evidenceGateStatus)}` : undefined,
+  diagnostics.bodyEvidenceRatio ? `bodyEvidenceRatio=${encodeDebugValue(diagnostics.bodyEvidenceRatio)}` : undefined,
+  diagnostics.coveredFacets ? `coveredFacets=${encodeDebugValue(diagnostics.coveredFacets)}` : undefined,
+  diagnostics.missingFacets ? `missingFacets=${encodeDebugValue(diagnostics.missingFacets)}` : undefined,
+  diagnostics.candidateShortage ? `candidateShortage=${encodeDebugValue(diagnostics.candidateShortage)}` : undefined,
+  diagnostics.sourcePortfolioSummary ? `sourcePortfolioSummary=${encodeDebugValue(diagnostics.sourcePortfolioSummary)}` : undefined,
+  diagnostics.concurrentReaderSummary ? `concurrentReaderSummary=${encodeDebugValue(diagnostics.concurrentReaderSummary)}` : undefined,
   `ruleFallbackUsed=${diagnostics.ruleFallbackUsed ? "yes" : "no"}`,
   `directDiscoveryScheduled=${diagnostics.directDiscoveryScheduled ? "yes" : "no"}`,
   `directDiscoveryAttempted=${diagnostics.directDiscoveryAttempted ? "yes" : "no"}`,
@@ -394,6 +450,34 @@ export const parseSearchPreparationDiagnostics = (raw: string): SearchPreparatio
     plannerStarted: lookupDebugField(parts, "plannerStarted") === "yes",
     plannerTimedOut: lookupDebugField(parts, "plannerTimedOut") === "yes",
     plannerFailedReason: lookupDebugField(parts, "plannerFailedReason"),
+    llmPlannerStarted: lookupDebugField(parts, "llmPlannerStarted"),
+    llmPlannerSucceeded: lookupDebugField(parts, "llmPlannerSucceeded"),
+    llmPlannerFailedReason: lookupDebugField(parts, "llmPlannerFailedReason"),
+    plannerIntent: lookupDebugField(parts, "plannerIntent"),
+    coveragePlanIntent: lookupDebugField(parts, "coveragePlanIntent"),
+    coverageFacets: lookupDebugField(parts, "coverageFacets"),
+    targetReadCount: lookupDebugField(parts, "targetReadCount"),
+    attemptedReadCount: lookupDebugField(parts, "attemptedReadCount"),
+    readerConcurrency: lookupDebugField(parts, "readerConcurrency"),
+    globalReaderBudgetMs: lookupDebugField(parts, "globalReaderBudgetMs"),
+    distinctAttemptedHosts: lookupDebugField(parts, "distinctAttemptedHosts"),
+    usableBodyEvidenceCount: lookupDebugField(parts, "usableBodyEvidenceCount"),
+    usableFreshBodyEvidenceCount: lookupDebugField(parts, "usableFreshBodyEvidenceCount"),
+    currentDate: lookupDebugField(parts, "currentDate"),
+    freshnessWindowDays: lookupDebugField(parts, "freshnessWindowDays"),
+    freshnessGateStatus: lookupDebugField(parts, "freshnessGateStatus"),
+    freshnessFailureReason: lookupDebugField(parts, "freshnessFailureReason"),
+    freshEvidenceCount: lookupDebugField(parts, "freshEvidenceCount"),
+    staleEvidenceCount: lookupDebugField(parts, "staleEvidenceCount"),
+    unknownDateEvidenceCount: lookupDebugField(parts, "unknownDateEvidenceCount"),
+    rejectedByFreshnessCount: lookupDebugField(parts, "rejectedByFreshnessCount"),
+    evidenceGateStatus: lookupDebugField(parts, "evidenceGateStatus"),
+    bodyEvidenceRatio: lookupDebugField(parts, "bodyEvidenceRatio"),
+    coveredFacets: lookupDebugField(parts, "coveredFacets"),
+    missingFacets: lookupDebugField(parts, "missingFacets"),
+    candidateShortage: lookupDebugField(parts, "candidateShortage"),
+    sourcePortfolioSummary: lookupDebugField(parts, "sourcePortfolioSummary"),
+    concurrentReaderSummary: lookupDebugField(parts, "concurrentReaderSummary"),
     ruleFallbackUsed: lookupDebugField(parts, "ruleFallbackUsed") === "yes",
     directDiscoveryScheduled: lookupDebugField(parts, "directDiscoveryScheduled") === "yes",
     directDiscoveryAttempted: lookupDebugField(parts, "directDiscoveryAttempted") === "yes",
@@ -700,6 +784,34 @@ export const formatSearchPreparationDiagnosticsForDisplay = (raw: string): strin
     `plannerStarted：${diagnostics.plannerStarted ? "yes" : "no"}`,
     `plannerTimedOut：${diagnostics.plannerTimedOut ? "yes" : "no"}`,
     diagnostics.plannerFailedReason ? `plannerFailedReason：${diagnostics.plannerFailedReason}` : undefined,
+    diagnostics.llmPlannerStarted ? `llmPlannerStarted: ${diagnostics.llmPlannerStarted}` : undefined,
+    diagnostics.llmPlannerSucceeded ? `llmPlannerSucceeded: ${diagnostics.llmPlannerSucceeded}` : undefined,
+    diagnostics.llmPlannerFailedReason ? `llmPlannerFailedReason: ${diagnostics.llmPlannerFailedReason}` : undefined,
+    diagnostics.plannerIntent ? `plannerIntent: ${diagnostics.plannerIntent}` : undefined,
+    diagnostics.coveragePlanIntent ? `coveragePlanIntent: ${diagnostics.coveragePlanIntent}` : undefined,
+    diagnostics.coverageFacets ? `coverageFacets: ${diagnostics.coverageFacets}` : undefined,
+    diagnostics.targetReadCount ? `targetReadCount: ${diagnostics.targetReadCount}` : undefined,
+    diagnostics.attemptedReadCount ? `attemptedReadCount: ${diagnostics.attemptedReadCount}` : undefined,
+    diagnostics.readerConcurrency ? `readerConcurrency: ${diagnostics.readerConcurrency}` : undefined,
+    diagnostics.globalReaderBudgetMs ? `globalReaderBudgetMs: ${diagnostics.globalReaderBudgetMs}` : undefined,
+    diagnostics.distinctAttemptedHosts ? `distinctAttemptedHosts: ${diagnostics.distinctAttemptedHosts}` : undefined,
+    diagnostics.usableBodyEvidenceCount ? `usableBodyEvidenceCount: ${diagnostics.usableBodyEvidenceCount}` : undefined,
+    diagnostics.usableFreshBodyEvidenceCount ? `usableFreshBodyEvidenceCount: ${diagnostics.usableFreshBodyEvidenceCount}` : undefined,
+    diagnostics.currentDate ? `currentDate: ${diagnostics.currentDate}` : undefined,
+    diagnostics.freshnessWindowDays ? `freshnessWindowDays: ${diagnostics.freshnessWindowDays}` : undefined,
+    diagnostics.freshnessGateStatus ? `freshnessGateStatus: ${diagnostics.freshnessGateStatus}` : undefined,
+    diagnostics.freshnessFailureReason ? `freshnessFailureReason: ${diagnostics.freshnessFailureReason}` : undefined,
+    diagnostics.freshEvidenceCount ? `freshEvidenceCount: ${diagnostics.freshEvidenceCount}` : undefined,
+    diagnostics.staleEvidenceCount ? `staleEvidenceCount: ${diagnostics.staleEvidenceCount}` : undefined,
+    diagnostics.unknownDateEvidenceCount ? `unknownDateEvidenceCount: ${diagnostics.unknownDateEvidenceCount}` : undefined,
+    diagnostics.rejectedByFreshnessCount ? `rejectedByFreshnessCount: ${diagnostics.rejectedByFreshnessCount}` : undefined,
+    diagnostics.evidenceGateStatus ? `evidenceGateStatus: ${diagnostics.evidenceGateStatus}` : undefined,
+    diagnostics.bodyEvidenceRatio ? `bodyEvidenceRatio: ${diagnostics.bodyEvidenceRatio}` : undefined,
+    diagnostics.coveredFacets ? `coveredFacets: ${diagnostics.coveredFacets}` : undefined,
+    diagnostics.missingFacets ? `missingFacets: ${diagnostics.missingFacets}` : undefined,
+    diagnostics.candidateShortage ? `candidateShortage: ${diagnostics.candidateShortage}` : undefined,
+    diagnostics.sourcePortfolioSummary ? `sourcePortfolioSummary: ${diagnostics.sourcePortfolioSummary}` : undefined,
+    diagnostics.concurrentReaderSummary ? `concurrentReaderSummary: ${diagnostics.concurrentReaderSummary}` : undefined,
     `ruleFallbackUsed：${diagnostics.ruleFallbackUsed ? "yes" : "no"}`,
     `directDiscoveryScheduled：${diagnostics.directDiscoveryScheduled ? "yes" : "no"}`,
     `directDiscoveryAttempted：${diagnostics.directDiscoveryAttempted ? "yes" : "no"}`,

@@ -194,6 +194,22 @@ const researchEngineDiagnosticText = (
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
 };
 
+const researchEngineDiagnosticJsonText = (
+  diagnosticsSnapshot: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const keyless = researchEngineKeylessDiagnostics(diagnosticsSnapshot);
+  const bridge = researchEngineBridgeDiagnostics(diagnosticsSnapshot);
+  const value = keyless?.[key] ?? bridge?.[key] ?? diagnosticsSnapshot?.[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return truncate(JSON.stringify(value), 360);
+  } catch {
+    return undefined;
+  }
+};
+
 const researchEngineRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
@@ -2461,6 +2477,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Error kind", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "errorKind") ?? "none"],
                   ["Stage", researchEngineStageSummary(researchEngineRealShadowRun.diagnosticsSnapshot)],
                   ["Bridge queries", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "bridgeQueries") ?? "none"],
+                  ["LLM planner", `${researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "llmPlannerStarted") ?? "false"} / ${researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "llmPlannerSucceeded") ?? "false"}`],
+                  ["Planner intent", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "plannerIntent") ?? "none"],
+                  ["Coverage intent", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "coveragePlanIntent") ?? "none"],
+                  ["Coverage facets", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "coverageFacets") ?? "none"],
+                  ["Target reads", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "targetReadCount") ?? "none"],
+                  ["Attempted reads", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "attemptedReadCount") ?? String(researchEngineRealShadowRun.readAttempts.length)],
+                  ["Reader concurrency", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "readerConcurrency") ?? "none"],
+                  ["Reader budget", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "globalReaderBudgetMs") ?? "none"],
+                  ["Attempted hosts", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "distinctAttemptedHosts") ?? "none"],
                   ["News mode", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "newsQueryMode") ?? "none"],
                   ["News stage", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "newsStageUsed") ?? "false"],
                   ["Global timeout", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "providerGlobalTimeoutMs") ?? "none"],
@@ -2477,10 +2502,34 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   ["Candidate hosts", researchEngineDistributionText(researchEngineRealShadowRun.diagnosticsSnapshot, "candidateHostDistribution") ?? "none"],
                   ["Portfolio hosts", researchEngineDistributionText(researchEngineRealShadowRun.diagnosticsSnapshot, "portfolioHostDistribution") ?? "none"],
                   ["Evidence hosts", researchEngineDistributionText(researchEngineRealShadowRun.diagnosticsSnapshot, "evidenceHostDistribution") ?? "none"],
-                  ["Usable evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "usableEvidenceCount") ?? "none"],
+                  ["Usable body evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "usableBodyEvidenceCount") ?? researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "usableEvidenceCount") ?? "none"],
+                  ["Usable fresh evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "usableFreshBodyEvidenceCount") ?? "none"],
+                  ["Current date", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "currentDate") ?? "none"],
+                  ["Freshness window", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "freshnessWindowDays") ?? "none"],
+                  ["Freshness gate", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "freshnessGateStatus") ?? "none"],
+                  ["Freshness failure", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "freshnessFailureReason") ?? "none"],
+                  ["Fresh evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "freshEvidenceCount") ?? "none"],
+                  ["Stale evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "staleEvidenceCount") ?? "none"],
+                  ["Unknown-date evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "unknownDateEvidenceCount") ?? "none"],
+                  ["Rejected by freshness", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "rejectedByFreshnessCount") ?? "none"],
+                  ["Body evidence ratio", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "bodyEvidenceRatio") ?? "none"],
+                  ["Covered facets", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "coveredFacetCount") ?? "none"],
+                  ["Missing facets", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "missingFacets") ?? "none"],
+                  ["Candidate shortage", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "candidateShortage") ?? "false"],
+                  ["Portfolio summary", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "sourcePortfolioSummary") ?? "none"],
+                  ["Reader summary", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "concurrentReaderSummary") ?? "none"],
                   ["Usable hosts", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "usableEvidenceHostCount") ?? "none"],
                   ["Evidence gate", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "evidenceGateStatus") ?? "none"],
                   ["Gate reason", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "evidenceGateReason") ?? "none"],
+                  ["Evidence quality", researchEngineDiagnosticJsonText(researchEngineRealShadowRun.diagnosticsSnapshot, "evidenceQualityDistribution") ?? "none"],
+                  ["Selected by facet", researchEngineDiagnosticJsonText(researchEngineRealShadowRun.diagnosticsSnapshot, "selectedEvidenceByFacet") ?? "none"],
+                  ["Concrete news evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "concreteNewsEvidenceCount") ?? "none"],
+                  ["Background evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "backgroundEvidenceCount") ?? "none"],
+                  ["Downgraded evidence", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "downgradedEvidenceCount") ?? "none"],
+                  ["Missing evidence facets", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "missingEvidenceFacets") ?? "none"],
+                  ["Synthesis items", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "synthesisPlanItemCount") ?? "none"],
+                  ["Answer mode", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "answerMode") ?? "none"],
+                  ["Limitations", researchEngineDiagnosticJsonText(researchEngineRealShadowRun.diagnosticsSnapshot, "limitations") ?? "none"],
                   ["Source diversity", researchEngineDiagnosticText(researchEngineRealShadowRun.diagnosticsSnapshot, "sourceDiversitySatisfied") ?? "unknown"],
                   ["Top quality", researchEngineQualityPreviewText(researchEngineRealShadowRun.diagnosticsSnapshot) ?? "none"],
                   ["Candidates", researchEngineRealShadowRun.candidateCount],
@@ -2503,7 +2552,8 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
                   {researchEngineRealShadowRun.readAttempts.map((attempt, index) => (
                     <div key={`real-shadow-read-${attempt.candidate.id}-${attempt.candidate.url}-${attempt.status}-${index}`} className="grid min-w-0 gap-1 rounded-sm border border-border/70 bg-background/30 px-3 py-2">
                       <div className="min-w-0 break-words text-sm text-foreground">{attempt.candidate.title}</div>
-                      <div className="min-w-0 break-words text-xs text-muted-foreground">{attempt.candidate.host} · {attempt.status} · quality={attempt.readerQuality?.quality ?? "none"} · passages={attempt.selectedPassageCount}</div>
+                      <div className="min-w-0 break-words text-xs text-muted-foreground">evidenceQuality={attempt.evidenceQualityTier ?? "none"}/{attempt.sourceRole ?? "none"}; selected={String(attempt.synthesisSelected ?? false)}; score={attempt.evidenceQualityScore ?? "none"}; date={attempt.publishedDate ?? attempt.dateSignal ?? "none"}; ageDays={attempt.ageDays ?? "none"}; freshness={attempt.freshnessStatus ?? "none"}</div>
+                      <div className="min-w-0 break-words text-xs text-muted-foreground">{attempt.candidate.host} · {attempt.status} · facet={attempt.facet ?? "none"} · evidence={attempt.evidenceTextLevel ?? "none"} · quality={attempt.readerQuality?.quality ?? "none"} · passages={attempt.selectedPassageCount}</div>
                     </div>
                   ))}
                 </div>

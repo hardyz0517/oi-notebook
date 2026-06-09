@@ -1,14 +1,21 @@
 import type { WebSearchConfig } from "@/lib/aiWebSearch";
 import { buildAnswerContract } from "./answerContract";
 import { buildCandidatePool } from "./candidatePool";
+import { runConcurrentReader } from "./concurrentReader";
 import { buildEvidencePacket } from "./evidencePacket";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
+import { evaluateEvidencePortfolioGate } from "./evidencePortfolioGate";
+import { assessEvidenceQuality, summarizeEvidenceQuality, type EvidenceQualityTier, type EvidenceSourceRole } from "./evidenceQuality";
+import { buildFreshnessWindowPolicy, type DateConfidence, type DateSignalSource, type FreshnessStatus } from "./dateSignals";
+import { evaluateFreshnessGate } from "./freshnessGate";
 import { runKeylessBingProvider } from "./keylessBingProvider";
-import { evaluateNewsEvidenceGate } from "./newsEvidenceGate";
+import { runLlmResearchPlanner } from "./llmResearchPlanner";
+import { buildNewsSynthesisPlan, type NewsSynthesisItemConfidence } from "./newsSynthesisPlan";
 import { normalizeRealProviderPayload } from "./providerResponseNormalizer";
 import { buildQueryPlan } from "./queryPlanner";
 import { runBrowserProviderSmokeRequest, type BrowserProviderRedactedRequest } from "./browserProviderTransport";
-import { runResearchEngineRealUrlReaderSmoke, type ResearchEngineRealUrlReaderSmokeResult } from "./realUrlReaderSmoke";
+import type { ResearchEngineRealUrlReaderSmokeResult } from "./realUrlReaderSmoke";
+import { buildSearchCoveragePlan } from "./searchCoveragePlanner";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import { buildSourcePortfolio, canonicalizePortfolioHost, type SourcePortfolioQueryMode } from "./sourcePortfolio";
 import type { AnswerMode, EvidenceItemBuildInput, EvidenceSummary } from "./evidenceTypes";
@@ -37,11 +44,13 @@ export type ResearchEngineRealShadowRunOptions = {
   maxReadAttempts?: number;
   providerTimeoutMs?: number;
   readerTimeoutMs?: number;
+  providerId?: string;
+  modelId?: string;
   abortSignal?: AbortSignal;
 };
 
 export type ResearchEngineRealShadowRunStage = {
-  stage: "provider" | "normalize" | "candidate_pool" | "source_portfolio" | "reader" | "evidence" | "contract" | "abort";
+  stage: "planner" | "provider" | "normalize" | "candidate_pool" | "source_portfolio" | "reader" | "evidence" | "contract" | "abort";
   status: "completed" | "partial" | "failed" | "skipped" | "aborted";
   message: string;
   elapsedMs?: number;
@@ -59,12 +68,38 @@ export type ResearchEngineRealShadowRunCandidate = {
 export type ResearchEngineRealShadowRunReadAttempt = {
   candidate: ResearchEngineRealShadowRunCandidate;
   status: ResearchEngineRealUrlReaderSmokeResult["status"] | "skipped" | "aborted";
+  evidenceId?: string;
   whyRead?: string;
   whySkipped?: string;
   httpStatus?: number;
   contentType?: string;
   readerTransport?: string;
   readerQuality?: ResearchEngineRealUrlReaderSmokeResult["qualitySummary"];
+  facet?: string;
+  evidenceTextLevel?: "body_excerpt" | "snippet_only" | "title_only" | "none";
+  evidenceQualityScore?: number;
+  evidenceQualityTier?: EvidenceQualityTier;
+  sourceRole?: EvidenceSourceRole;
+  hasConcreteEvent?: boolean;
+  hasDateSignal?: boolean;
+  dateSignal?: string;
+  publishedDate?: string;
+  dateSignalSource?: DateSignalSource;
+  dateConfidence?: DateConfidence;
+  ageDays?: number;
+  freshnessStatus?: FreshnessStatus;
+  freshnessReason?: string;
+  rejectedByFreshness?: boolean;
+  facetFitScore?: number;
+  whyQualityAccepted?: string[];
+  whyQualityDowngraded?: string[];
+  synthesisSelected?: boolean;
+  synthesisItemTitle?: string;
+  synthesisSummaryHint?: string;
+  synthesisConfidence?: NewsSynthesisItemConfidence;
+  errorKind?: string;
+  excerptLength?: number;
+  elapsedMs?: number;
   selectedPassageCount: number;
   excerptPreview?: string;
   warnings: string[];
@@ -94,15 +129,10 @@ export type ResearchEngineRealShadowRunResult = {
 
 const DEFAULT_QUERY = "OpenAI latest news";
 const DEFAULT_PROVIDER_TIMEOUT_MS = 8_000;
-const DEFAULT_READER_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_CANDIDATES = 24;
 const DEFAULT_READ_TOP_N = 2;
 const MAX_READ_TOP_N = 3;
-const DEFAULT_NEWS_EVIDENCE_TARGET = 4;
-const DEFAULT_BROAD_NEWS_EVIDENCE_TARGET = 5;
-const DEFAULT_NEWS_MAX_READ_ATTEMPTS = 10;
-const DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS = 12;
-const MAX_READ_ATTEMPTS = 12;
+const MAX_READ_ATTEMPTS = 36;
 const NEWS_PER_HOST_EVIDENCE_LIMIT = 1;
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const EXCERPT_PREVIEW_MAX_CHARS = 1200;
@@ -111,14 +141,21 @@ const elapsedMsSince = (startedAt: number): number => Math.max(0, Math.round(per
 
 const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)));
 
+const recordFromUnknown = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+const firstString = (...values: unknown[]): string | undefined => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
 const previewText = (value: string | undefined, maxChars: number): string | undefined => {
   if (!value) return undefined;
   const compact = value.replace(/\s+/g, " ").trim();
   return compact.length > maxChars ? `${compact.slice(0, maxChars)}...` : compact;
 };
-
-const isShadowProviderName = (value: string | undefined): value is ShadowProviderName =>
-  value === "bing" || value === "bocha" || value === "brave";
 
 const configForShadowRun = (
   config: WebSearchConfig | null,
@@ -132,7 +169,7 @@ const configForShadowRun = (
   mode: "keyless_bing" | "api";
 } | undefined => {
   if (!config || !config.enabled || !config.publicSearchConsent) return undefined;
-  const selectedProvider = providerName ?? (isShadowProviderName(config.provider) ? config.provider : undefined);
+  const selectedProvider = providerName ?? "bing";
   if (selectedProvider === "bing") {
     return {
       providerName: "bing",
@@ -170,14 +207,14 @@ const unconfiguredWarningsFor = (
   if (!config) return ["Web search config is unavailable; real shadow run was not started."];
   if (!config.enabled) return ["Public web search is disabled; real shadow run was not started."];
   if (!config.publicSearchConsent) return ["Public search consent is disabled; real shadow run was not started."];
-  const selectedProvider = providerName ?? config.provider;
+  const selectedProvider = providerName ?? "bing";
   if (selectedProvider === "bing") {
     return [
       "Bing public search should use the Research Engine keyless Bing provider; real shadow run was not started because base web search config is unavailable.",
     ];
   }
-  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Bocha API key is missing; API providers are optional. Research Engine mainline should use a no-key public provider such as Bing."];
-  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Brave Search API key is missing; API providers are optional. Research Engine mainline should use a no-key public provider such as Bing."];
+  if (selectedProvider === "bocha" && !config.bochaApiKey.trim()) return ["Optional API provider is unavailable. Research Engine mainline remains no-key public search."];
+  if (selectedProvider === "brave" && !config.braveApiKey.trim()) return ["Optional API provider is unavailable. Research Engine mainline remains no-key public search."];
   return [
     "Only Bing keyless public search or configured optional API providers are supported for the real shadow run.",
   ];
@@ -236,27 +273,11 @@ const clampReadTopN = (value: number | undefined): number =>
   Math.max(1, Math.min(value ?? DEFAULT_READ_TOP_N, MAX_READ_TOP_N));
 
 const clampMaxCandidates = (value: number | undefined, newsMode = false, broadNewsDigest = false): number => {
-  const defaultValue = broadNewsDigest ? 24 : newsMode ? 16 : DEFAULT_MAX_CANDIDATES;
+  const defaultValue = broadNewsDigest ? 30 : newsMode ? 30 : DEFAULT_MAX_CANDIDATES;
   const requested = value ?? defaultValue;
-  const minimum = broadNewsDigest ? 24 : newsMode ? 16 : 1;
-  return Math.max(minimum, Math.min(requested, broadNewsDigest ? 24 : newsMode ? 16 : DEFAULT_MAX_CANDIDATES));
+  const minimum = broadNewsDigest ? 30 : newsMode ? 30 : 1;
+  return Math.max(minimum, Math.min(requested, broadNewsDigest || newsMode ? 36 : DEFAULT_MAX_CANDIDATES));
 };
-
-const clampMaxReadAttempts = (
-  value: number | undefined,
-  readTopN: number,
-  newsMode: boolean,
-  broadNewsDigest: boolean,
-): number => {
-  const defaultValue = broadNewsDigest ? DEFAULT_BROAD_NEWS_MAX_READ_ATTEMPTS : newsMode ? DEFAULT_NEWS_MAX_READ_ATTEMPTS : readTopN;
-  return Math.max(readTopN, Math.min(value ?? defaultValue, MAX_READ_ATTEMPTS));
-};
-
-const evidenceTargetFor = (readTopN: number, newsMode: boolean, broadNewsDigest: boolean): number =>
-  broadNewsDigest ? DEFAULT_BROAD_NEWS_EVIDENCE_TARGET : newsMode ? DEFAULT_NEWS_EVIDENCE_TARGET : readTopN;
-
-const sourcePortfolioQueryModeFor = (newsMode: boolean, broadNewsDigest: boolean): SourcePortfolioQueryMode =>
-  broadNewsDigest ? "broad_news_digest" : newsMode ? "entity_news" : "normal";
 
 const isBroadNewsDigestQuery = (query: string): boolean =>
   /\b(world news|international news|global news|major world events|world events|what happened in the world)\b/i.test(query) ||
@@ -269,18 +290,6 @@ const hostCount = (items: EvidenceItemBuildInput[]): Record<string, number> =>
     return { ...acc, [host]: (acc[host] ?? 0) + 1 };
   }, {} as Record<string, number>);
 
-const evidenceHostCount = (items: EvidenceItemBuildInput[]): number => Object.keys(hostCount(items)).length;
-
-const shouldStopReadingNews = (
-  evidenceItems: EvidenceItemBuildInput[],
-  queryMode: SourcePortfolioQueryMode,
-  evidenceTarget: number,
-): boolean => {
-  if (queryMode === "normal") return evidenceItems.length >= evidenceTarget;
-  const hostTarget = queryMode === "broad_news_digest" ? 4 : 3;
-  return evidenceItems.length >= evidenceTarget && evidenceHostCount(evidenceItems) >= hostTarget;
-};
-
 const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowRunCandidate => ({
   id: candidate.id,
   title: candidate.title,
@@ -289,6 +298,20 @@ const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowR
   sourceType: candidate.sourceType,
   score: candidate.score,
 });
+
+const candidateDateHint = (candidate: CandidateSource | undefined): string | undefined => {
+  const extensions = recordFromUnknown(candidate?.extensions);
+  const phase3 = recordFromUnknown(extensions?.phase3);
+  const canonical = recordFromUnknown(phase3?.canonical);
+  const phase17 = recordFromUnknown(extensions?.phase17KeylessBingProvider);
+  return firstString(
+    canonical?.dateHint,
+    phase17?.publishedAt,
+    phase17?.sourcePublishedAt,
+    phase17?.dateHint,
+    phase17?.freshnessSignal,
+  );
+};
 
 const makeRequestContext = (
   query: string,
@@ -315,6 +338,13 @@ const makeRequestContext = (
   const queryPlan = buildQueryPlan(request, policy);
   return { request, policy, queryPlan };
 };
+
+const shouldRunLlmResearchPlanner = (policy: SearchPolicyDecision): boolean =>
+  policy.mode === "news_recent" ||
+  policy.freshness === "current" ||
+  policy.freshness === "latest" ||
+  policy.freshness === "recent" ||
+  policy.vertical === "general_web";
 
 const sourceTypeFromExpected = (sourceType: ExpectedSourceType | "seo_aggregator" | "unknown"): SourceType => {
   if (sourceType === "documentation") return "docs";
@@ -479,6 +509,9 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
     `- usableEvidenceHostCount: ${result.diagnosticsSnapshot.usableEvidenceHostCount ?? "none"}`,
     `- evidenceGateStatus: ${result.diagnosticsSnapshot.evidenceGateStatus ?? "none"}`,
     `- evidenceGateReason: ${result.diagnosticsSnapshot.evidenceGateReason ?? "none"}`,
+    `- evidenceQualityDistribution: ${JSON.stringify(result.diagnosticsSnapshot.evidenceQualityDistribution ?? {})}`,
+    `- synthesisPlanItemCount: ${result.diagnosticsSnapshot.synthesisPlanItemCount ?? "none"}`,
+    `- answerMode: ${result.diagnosticsSnapshot.answerMode ?? "none"}`,
     `- successfulReads: ${result.successfulReads}`,
     `- failedReads: ${result.failedReads}`,
     `- answerContractMode: ${result.answerContractMode ?? "none"}`,
@@ -498,6 +531,9 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
         `- httpStatus: ${attempt.httpStatus ?? "none"}`,
         `- contentType: ${attempt.contentType ?? "none"}`,
         `- quality: ${attempt.readerQuality?.quality ?? "none"}`,
+        `- evidenceQualityTier: ${attempt.evidenceQualityTier ?? "none"}`,
+        `- sourceRole: ${attempt.sourceRole ?? "none"}`,
+        `- synthesisSelected: ${attempt.synthesisSelected ?? false}`,
         `- selectedPassageCount: ${attempt.selectedPassageCount}`,
         `- excerptPreview: ${attempt.excerptPreview ?? "none"}`,
       ].join("\n"))
@@ -549,8 +585,9 @@ export const runResearchEngineRealShadowRun = async (
   options: ResearchEngineRealShadowRunOptions,
 ): Promise<ResearchEngineRealShadowRunResult> => {
   const query = options.query.trim() || DEFAULT_QUERY;
+  const currentDate = new Date().toISOString().slice(0, 10);
   const readTopN = clampReadTopN(options.readTopN);
-  const requestedProvider = options.providerName ?? (options.webSearchConfig?.provider as RealDiscoveryProviderName | undefined) ?? "none";
+  const requestedProvider = options.providerName ?? "bing";
   const timeline: ResearchEngineRealShadowRunStage[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -620,14 +657,78 @@ export const runResearchEngineRealShadowRun = async (
   }
 
   const { request, policy, queryPlan } = makeRequestContext(query);
-  const broadNewsDigest = isBroadNewsDigestQuery(query);
-  const newsMode = policy.mode === "news_recent";
-  const maxCandidates = clampMaxCandidates(options.maxCandidates, newsMode, broadNewsDigest);
-  const hostDiversityApplied = newsMode || broadNewsDigest;
-  const maxReadAttempts = clampMaxReadAttempts(options.maxReadAttempts, readTopN, newsMode, broadNewsDigest);
-  const evidenceTarget = evidenceTargetFor(readTopN, newsMode, broadNewsDigest);
-  const sourcePortfolioQueryMode = sourcePortfolioQueryModeFor(newsMode, broadNewsDigest);
-  const plannedQuery = queryPlan.queries[0] ?? {
+  const plannerStartedAt = performance.now();
+  const plannerEligible = shouldRunLlmResearchPlanner(policy);
+  const llmPlanner = plannerEligible
+    ? await runLlmResearchPlanner({
+      userQuery: query,
+      locale: policy.locale,
+      searchMode: policy.mode === "news_recent" ? "news_recent" : policy.mode === "docs_technical" ? "docs_technical" : policy.mode === "oi_algorithm" ? "oi_algorithm" : "general_web",
+      freshness: policy.freshness,
+      ruleIntent: policy.mode,
+      rulePlannedQueries: queryPlan.queries,
+      currentDate,
+      currentDateText: new Date().toLocaleDateString(),
+      publicSearchConstraints: [
+        "public web only",
+        "credentials omitted",
+        "no cookies",
+        "no Authorization header",
+        "no CAPTCHA, login, or paywall bypass",
+      ],
+      noKeyProviderConstraints: [
+        "Bing public search bridge",
+        "no search API key",
+        "queries must be concise",
+        "candidate pages must be publicly readable",
+      ],
+      providerId: options.providerId,
+      modelId: options.modelId,
+    })
+    : {
+      plan: undefined,
+      diagnostics: {
+        llmPlannerStarted: false,
+        llmPlannerSucceeded: false,
+        llmPlannerFailedReason: "planner_not_required_for_stable_reference_intent",
+        plannerSanitizationNotes: [],
+      },
+    };
+  const coveragePlan = buildSearchCoveragePlan({
+    userQuery: query,
+    policy,
+    searchMode: policy.mode === "news_recent" ? "news_recent" : policy.mode === "docs_technical" ? "docs_technical" : policy.mode === "oi_algorithm" ? "oi_algorithm" : "general_web",
+    freshness: policy.freshness,
+    rulePlannedQueries: queryPlan.queries,
+    llmPlan: llmPlanner.plan,
+    llmDiagnostics: llmPlanner.diagnostics,
+  });
+  mark(
+    "planner",
+    coveragePlan.diagnostics.llmPlannerSucceeded ? "completed" : coveragePlan.diagnostics.llmPlannerStarted ? "partial" : "skipped",
+    `intent=${coveragePlan.intent}; queries=${coveragePlan.queries.length}; targetReadCount=${coveragePlan.sourceRequirements.targetReadCount}`,
+    plannerStartedAt,
+  );
+  const freshnessPolicy = buildFreshnessWindowPolicy({
+    intent: coveragePlan.intent,
+    freshness: coveragePlan.freshness,
+    userQuery: query,
+    currentDate,
+  });
+  const executableQueryPlan = {
+    ...queryPlan,
+    maxQueries: coveragePlan.plannedQueries.length,
+    queries: coveragePlan.plannedQueries,
+    reason: `coverage_plan_${coveragePlan.intent}_${coveragePlan.plannedQueries.length}_queries`,
+  };
+  const broadNewsDigest = coveragePlan.intent === "broad_news_digest" || isBroadNewsDigestQuery(query);
+  const newsMode = coveragePlan.intent === "entity_news" || coveragePlan.intent === "broad_topic_news" || coveragePlan.intent === "broad_news_digest" || policy.mode === "news_recent";
+  const maxCandidates = Math.max(clampMaxCandidates(options.maxCandidates, newsMode, broadNewsDigest), coveragePlan.sourceRequirements.targetReadCount);
+  const hostDiversityApplied = newsMode;
+  const maxReadAttempts = Math.min(MAX_READ_ATTEMPTS, Math.max(options.maxReadAttempts ?? 0, coveragePlan.reading.maxReadAttempts));
+  const evidenceTarget = coveragePlan.sourceRequirements.minUsableBodyEvidence;
+  const sourcePortfolioQueryMode: SourcePortfolioQueryMode = newsMode ? coveragePlan.intent : "normal";
+  const plannedQuery = executableQueryPlan.queries[0] ?? {
     query,
     language: policy.locale,
     purpose: "recall" as const,
@@ -650,7 +751,8 @@ export const runResearchEngineRealShadowRun = async (
       rawUserQuery: query,
       queryPurpose: plannedQuery.purpose,
       queryLanguage: plannedQuery.language,
-      plannedQueries: queryPlan.queries,
+      plannedQueries: executableQueryPlan.queries,
+      coveragePlan,
       maxResults: maxCandidates,
       timeoutMs: options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
     });
@@ -720,7 +822,7 @@ export const runResearchEngineRealShadowRun = async (
           providerName: shadowConfig.providerName,
           payloadKind: shadowConfig.payloadKind ?? "unknown",
           payload,
-          request: { request, policy, queryPlan, query: plannedQuery },
+          request: { request, policy, queryPlan: executableQueryPlan, query: plannedQuery },
           providerPriority: shadowConfig.providerPriority,
           maxResults: maxCandidates,
         });
@@ -808,6 +910,15 @@ export const runResearchEngineRealShadowRun = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
+        ...coveragePlan.diagnostics,
+        plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
+        coveragePlanIntent: coveragePlan.intent,
+        coverageFacets: coveragePlan.facets.map((facet) => facet.id),
+        facetQueries: coveragePlan.diagnostics.facetQueries,
+        targetReadCount: coveragePlan.sourceRequirements.targetReadCount,
+        maxReadAttempts,
+        readerConcurrency: coveragePlan.reading.concurrency,
+        globalReaderBudgetMs: coveragePlan.reading.globalBudgetMs,
         providerStatus,
         redactedProviderRequest,
         providerBodyPreview,
@@ -825,7 +936,7 @@ export const runResearchEngineRealShadowRun = async (
   const candidatePool = buildCandidatePool({
     request,
     policy,
-    queryPlan,
+    queryPlan: executableQueryPlan,
     rawResults,
     config: {
       maxSelected: maxCandidates,
@@ -838,11 +949,30 @@ export const runResearchEngineRealShadowRun = async (
       },
     },
   });
+  const candidateFacetByUrl = rawResults.reduce<Record<string, string>>((acc, raw) => {
+    const phase = raw.extensions?.phase17KeylessBingProvider;
+    const facet = phase && typeof phase === "object" && !Array.isArray(phase) && typeof (phase as Record<string, unknown>).facet === "string"
+      ? (phase as Record<string, unknown>).facet as string
+      : coveragePlan.queryFacets[raw.query.toLocaleLowerCase()] ?? "primary";
+    acc[raw.url] = facet;
+    acc[raw.url.toLocaleLowerCase()] = facet;
+    try {
+      const parsed = new URL(raw.url);
+      parsed.hash = "";
+      acc[parsed.toString().replace(/\/$/, "")] = facet;
+    } catch {
+      // keep exact raw URL only
+    }
+    return acc;
+  }, {});
   const portfolioStartedAt = performance.now();
   const sourcePortfolio = buildSourcePortfolio(candidatePool.selectedCandidates, {
     queryMode: sourcePortfolioQueryMode,
-    plannedQueries: queryPlan.queries.map((item) => item.query),
+    plannedQueries: executableQueryPlan.queries.map((item) => item.query),
     maxCandidateCount: maxCandidates,
+    maxCandidatesInPortfolio: coveragePlan.sourceRequirements.targetReadCount,
+    coveragePlan,
+    candidateFacetByUrl,
   });
   const selectedCandidates = (hostDiversityApplied ? sourcePortfolio.portfolioCandidates : candidatePool.selectedCandidates).map(candidateSummary);
   mark("candidate_pool", candidatePool.selectedCount > 0 ? "completed" : "failed", `${candidatePool.selectedCount} selected candidates`, candidateStartedAt);
@@ -875,6 +1005,12 @@ export const runResearchEngineRealShadowRun = async (
         developerDiagnosticsOnly: true,
         oldSearchPathTouched: false,
         noteConversationTouched: false,
+        ...coveragePlan.diagnostics,
+        plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
+        coveragePlanIntent: coveragePlan.intent,
+        coverageFacets: coveragePlan.facets.map((facet) => facet.id),
+        facetQueries: coveragePlan.diagnostics.facetQueries,
+        globalReaderBudgetMs: coveragePlan.reading.globalBudgetMs,
         providerStatus: "no_candidate_url",
         redactedProviderRequest,
         providerBodyPreview,
@@ -900,66 +1036,105 @@ export const runResearchEngineRealShadowRun = async (
     });
   }
 
-  const readAttempts: ResearchEngineRealShadowRunReadAttempt[] = [];
+  const readQueue = (hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates).slice(0, maxReadAttempts);
+  const readerStartedAt = performance.now();
+  const concurrentReader = await runConcurrentReader({
+    readQueue,
+    maxReadAttempts,
+    concurrency: coveragePlan.reading.concurrency,
+    perUrlTimeoutMs: options.readerTimeoutMs ?? coveragePlan.reading.perUrlTimeoutMs,
+    globalBudgetMs: coveragePlan.reading.globalBudgetMs,
+    abortSignal: options.abortSignal,
+    whyRead: (candidate) => hostDiversityApplied
+      ? `source_portfolio:${canonicalizePortfolioHost(candidate.host)};facet=${candidateFacetByUrl[candidate.url] ?? "primary"}`
+      : "ranked_candidate_pool",
+  });
+  mark(
+    "reader",
+    concurrentReader.diagnostics.successfulReadCount > 0 ? "completed" : concurrentReader.diagnostics.abortedReadCount > 0 ? "aborted" : "failed",
+    concurrentReader.diagnostics.concurrentReaderSummary,
+    readerStartedAt,
+  );
+  const candidateByUrl = new Map(concurrentReader.attempts.map((attempt) => [attempt.candidate.url, attempt.candidate]));
+  const readAttempts: ResearchEngineRealShadowRunReadAttempt[] = concurrentReader.attempts.map((attempt, index) => ({
+    candidate: candidateSummary(attempt.candidate),
+    status: attempt.status,
+    evidenceId: `E${index + 1}`,
+    whyRead: attempt.whyRead,
+    whySkipped: attempt.whySkipped,
+    httpStatus: attempt.httpStatus,
+    contentType: attempt.contentType,
+    readerTransport: attempt.reader && typeof attempt.reader.diagnosticsSnapshot.readerTransport === "string" ? attempt.reader.diagnosticsSnapshot.readerTransport : undefined,
+    readerQuality: attempt.reader?.qualitySummary,
+    facet: candidateFacetByUrl[attempt.candidate.url] ?? "primary",
+    evidenceTextLevel: attempt.evidenceTextLevel,
+    errorKind: attempt.errorKind,
+    excerptLength: attempt.excerptLength,
+    elapsedMs: attempt.elapsedMs,
+    selectedPassageCount: attempt.reader?.selectedPassageCount ?? 0,
+    excerptPreview: previewText(attempt.reader?.excerptPreview, EXCERPT_PREVIEW_MAX_CHARS),
+    warnings: attempt.warnings,
+    errors: attempt.errors,
+  }));
+  const evidenceQualityAssessments = readAttempts.map((attempt) => {
+    const candidate = candidateByUrl.get(attempt.candidate.url);
+    return assessEvidenceQuality({
+      evidenceId: attempt.evidenceId ?? attempt.candidate.id,
+      url: attempt.candidate.url,
+      title: attempt.candidate.title,
+      snippet: candidate?.snippet,
+      host: attempt.candidate.host,
+      sourceType: attempt.candidate.sourceType,
+      facet: attempt.facet,
+      topic: coveragePlan.topic,
+      intent: coveragePlan.intent,
+      facets: coveragePlan.facets,
+      evidenceTextLevel: attempt.evidenceTextLevel,
+      excerpt: attempt.excerptPreview,
+      readerQuality: attempt.readerQuality?.quality,
+      dateHint: candidateDateHint(candidate),
+      currentDate: freshnessPolicy.currentDate,
+      freshnessWindowDays: freshnessPolicy.freshnessWindowDays,
+      freshnessRequired: freshnessPolicy.freshnessRequired,
+    });
+  });
+  const evidenceQualityById = Object.fromEntries(evidenceQualityAssessments.map((assessment) => [assessment.evidenceId, assessment]));
+  const evidenceQualityDiagnostics = summarizeEvidenceQuality(evidenceQualityAssessments);
+  for (const attempt of readAttempts) {
+    const assessment = attempt.evidenceId ? evidenceQualityById[attempt.evidenceId] : undefined;
+    if (!assessment) continue;
+    attempt.evidenceQualityScore = assessment.evidenceQualityScore;
+    attempt.evidenceQualityTier = assessment.evidenceQualityTier;
+    attempt.sourceRole = assessment.sourceRole;
+    attempt.hasConcreteEvent = assessment.hasConcreteEvent;
+    attempt.hasDateSignal = assessment.hasDateSignal;
+    attempt.dateSignal = assessment.dateSignal;
+    attempt.publishedDate = assessment.publishedDate;
+    attempt.dateSignalSource = assessment.dateSignalSource;
+    attempt.dateConfidence = assessment.dateConfidence;
+    attempt.ageDays = assessment.ageDays;
+    attempt.freshnessStatus = assessment.freshnessStatus;
+    attempt.freshnessReason = assessment.freshnessReason;
+    attempt.rejectedByFreshness = assessment.rejectedByFreshness;
+    attempt.facetFitScore = assessment.facetFitScore;
+    attempt.whyQualityAccepted = assessment.whyQualityAccepted;
+    attempt.whyQualityDowngraded = assessment.whyQualityDowngraded;
+  }
   const evidenceItems: EvidenceItemBuildInput[] = [];
   const skippedSameHostEvidence: string[] = [];
-  const candidatesToRead = (hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates).slice(0, maxReadAttempts);
-  for (const candidate of candidatesToRead) {
-    const summary = candidateSummary(candidate);
-    if (aborted()) {
-      readAttempts.push({
-        candidate: summary,
-        status: "aborted",
-        whyRead: "source_portfolio_read_queue",
-        selectedPassageCount: 0,
-        warnings: [],
-        errors: ["real shadow run aborted before this URL reader request"],
-      });
-      mark("abort", "aborted", "Shadow run aborted before starting the next URL reader request.");
-      break;
-    }
-    if (!candidate.url) {
-      readAttempts.push({
-        candidate: summary,
-        status: "skipped",
-        whySkipped: "no_candidate_url",
-        selectedPassageCount: 0,
-        warnings: ["no_candidate_url"],
-        errors: ["Candidate URL is empty."],
-      });
-      mark("reader", "skipped", `Skipped candidate without URL: ${candidate.id}`);
-      continue;
-    }
-    const readerStartedAt = performance.now();
-    const reader = await runResearchEngineRealUrlReaderSmoke({
-      url: candidate.url,
-      timeoutMs: options.readerTimeoutMs ?? DEFAULT_READER_TIMEOUT_MS,
-    });
-    const attempt: ResearchEngineRealShadowRunReadAttempt = {
-      candidate: summary,
-      status: reader.status,
-      whyRead: hostDiversityApplied ? `source_portfolio:${canonicalizePortfolioHost(candidate.host)}` : "ranked_candidate_pool",
-      httpStatus: reader.httpStatus,
-      contentType: reader.contentType,
-      readerTransport: typeof reader.diagnosticsSnapshot.readerTransport === "string" ? reader.diagnosticsSnapshot.readerTransport : undefined,
-      readerQuality: reader.qualitySummary,
-      selectedPassageCount: reader.selectedPassageCount,
-      excerptPreview: previewText(reader.excerptPreview, EXCERPT_PREVIEW_MAX_CHARS),
-      warnings: reader.warnings,
-      errors: reader.errors,
-    };
-    readAttempts.push(attempt);
-    mark("reader", reader.ok ? "completed" : reader.status === "validation_failed" ? "skipped" : "failed", `${candidate.host}: ${reader.status}`, readerStartedAt);
-    if (reader.ok) {
-      const candidateHost = canonicalizePortfolioHost(candidate.host);
-      const existingHostCount = hostCount(evidenceItems)[candidateHost] ?? 0;
-      if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
-        skippedSameHostEvidence.push(candidateHost);
-        attempt.warnings = unique([...attempt.warnings, "source_diversity_same_host_evidence_skipped"]);
-      } else {
-        evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan, candidate, reader }));
-      }
-      if (shouldStopReadingNews(evidenceItems, sourcePortfolioQueryMode, evidenceTarget)) break;
+  const packetCandidateIds = new Set<string>();
+  for (const attempt of concurrentReader.attempts) {
+    const reader = attempt.reader;
+    if (!reader?.ok || attempt.evidenceTextLevel !== "body_excerpt") continue;
+    const candidateHost = canonicalizePortfolioHost(attempt.candidate.host);
+    const existingHostCount = hostCount(evidenceItems)[candidateHost] ?? 0;
+    if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
+      skippedSameHostEvidence.push(candidateHost);
+      const mapped = readAttempts.find((item) => item.candidate.url === attempt.candidate.url);
+      if (mapped) mapped.warnings = unique([...mapped.warnings, "source_diversity_same_host_evidence_skipped"]);
+    } else {
+      evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan: executableQueryPlan, candidate: attempt.candidate, reader }));
+      packetCandidateIds.add(attempt.candidate.id);
     }
   }
 
@@ -968,26 +1143,93 @@ export const runResearchEngineRealShadowRun = async (
     packetId: "developer-real-shadow-run-evidence-packet",
     request,
     policy,
-    queryPlan,
+    queryPlan: executableQueryPlan,
     items: evidenceItems,
   });
   const evaluation = evaluateEvidencePacket({ packet });
-  const newsEvidenceGate = evaluateNewsEvidenceGate(sourcePortfolioQueryMode, packet.evidenceItems);
+  const readAttemptByUrl = new Map(readAttempts.map((attempt) => [attempt.candidate.url, attempt]));
+  const evidencePortfolioGate = evaluateEvidencePortfolioGate({
+    intent: coveragePlan.intent,
+    evidenceItems: packet.evidenceItems,
+    readSignals: concurrentReader.attempts.map((attempt) => ({
+      url: attempt.candidate.url,
+      host: attempt.candidate.host,
+      facet: candidateFacetByUrl[attempt.candidate.url] ?? "primary",
+      status: attempt.status,
+      evidenceTextLevel: attempt.evidenceTextLevel,
+      excerptLength: attempt.excerptLength,
+      freshnessStatus: readAttemptByUrl.get(attempt.candidate.url)?.freshnessStatus,
+      publishedDate: readAttemptByUrl.get(attempt.candidate.url)?.publishedDate,
+      ageDays: readAttemptByUrl.get(attempt.candidate.url)?.ageDays,
+      dateConfidence: readAttemptByUrl.get(attempt.candidate.url)?.dateConfidence,
+      isRecentEnough: readAttemptByUrl.get(attempt.candidate.url)?.freshnessStatus === "fresh",
+    })),
+    targetReadCount: coveragePlan.sourceRequirements.targetReadCount,
+    minDistinctHosts: coveragePlan.sourceRequirements.minDistinctHosts,
+    minCoveredFacets: coveragePlan.sourceRequirements.minCoveredFacets,
+    candidateShortage: sourcePortfolio.diagnostics.candidateShortage,
+    allowCautiousAnswer: coveragePlan.answerContract.allowCautiousAnswer,
+    freshnessRequired: freshnessPolicy.freshnessRequired,
+    freshnessWindowDays: freshnessPolicy.freshnessWindowDays,
+    currentDate: freshnessPolicy.currentDate,
+  });
+  const citeablePacketCandidateIds = new Set(packet.evidenceItems
+    .filter((item) => item.status === "usable" && item.canCite && item.excerptMarkdown.replace(/\s+/g, " ").trim().length >= 80)
+    .map((item) => item.candidateId));
+  const synthesisEligibleAssessments = evidenceQualityAssessments.filter((assessment) => {
+    const attempt = readAttempts.find((item) => item.evidenceId === assessment.evidenceId);
+    return Boolean(attempt && packetCandidateIds.has(attempt.candidate.id) && citeablePacketCandidateIds.has(attempt.candidate.id));
+  });
+  const freshnessGate = evaluateFreshnessGate({
+    intent: coveragePlan.intent,
+    assessments: synthesisEligibleAssessments,
+    currentDate: freshnessPolicy.currentDate,
+    freshnessWindowDays: freshnessPolicy.freshnessWindowDays,
+    freshnessRequired: freshnessPolicy.freshnessRequired,
+    allowCautiousAnswer: coveragePlan.answerContract.allowCautiousAnswer,
+  });
+  const synthesisPlan = buildNewsSynthesisPlan({
+    intent: coveragePlan.intent,
+    topic: coveragePlan.topic,
+    facets: coveragePlan.facets,
+    gateStatus: evidencePortfolioGate.evidenceGateStatus,
+    gateReason: evidencePortfolioGate.evidenceGateReason,
+    assessments: synthesisEligibleAssessments,
+    ...evidenceQualityDiagnostics,
+    freshEvidenceCount: freshnessGate.freshEvidenceCount,
+    staleEvidenceCount: freshnessGate.staleEvidenceCount,
+    unknownDateEvidenceCount: freshnessGate.unknownDateEvidenceCount,
+    backgroundOnlyCount: freshnessGate.backgroundOnlyCount,
+    freshnessLimitations: freshnessGate.freshnessLimitations,
+    candidateShortage: sourcePortfolio.diagnostics.candidateShortage,
+  });
+  const synthesisSelectedIds = new Set(synthesisPlan.selectedEvidenceIds);
+  for (const attempt of readAttempts) {
+    const evidenceId = attempt.evidenceId;
+    const synthesisItem = evidenceId
+      ? synthesisPlan.newsItems.find((item) => item.sources.includes(evidenceId))
+      : undefined;
+    attempt.synthesisSelected = evidenceId ? synthesisSelectedIds.has(evidenceId) : false;
+    attempt.synthesisItemTitle = synthesisItem?.eventTitle;
+    attempt.synthesisSummaryHint = synthesisItem?.summaryHint;
+    attempt.synthesisConfidence = synthesisItem?.confidence;
+  }
   mark(
     "evidence",
-    newsEvidenceGate.evidenceGateStatus === "failed" ? "failed" : evidenceItems.length > 0 ? "completed" : "failed",
-    `${evidenceItems.length} evidence items; gate=${newsEvidenceGate.evidenceGateStatus}`,
+    evidencePortfolioGate.evidenceGateStatus === "failed" || synthesisPlan.answerMode === "failed" ? "failed" : evidenceItems.length > 0 ? "completed" : "failed",
+    `${evidenceItems.length} body evidence items; fresh=${freshnessGate.freshEvidenceCount}; gate=${evidencePortfolioGate.evidenceGateStatus}`,
     evidenceStartedAt,
   );
 
   const contractStartedAt = performance.now();
   const answerContract = buildAnswerContract(evaluation);
-  const gatedAnswerMode: AnswerMode = newsEvidenceGate.evidenceGateStatus === "failed"
+  const synthesisFailed = synthesisPlan.answerMode === "failed";
+  const gatedAnswerMode: AnswerMode = evidencePortfolioGate.evidenceGateStatus === "failed" || synthesisFailed
     ? "insufficient_evidence"
-    : newsEvidenceGate.evidenceGateStatus === "cautious"
+    : evidencePortfolioGate.evidenceGateStatus === "cautious"
       ? "cautious"
       : answerContract.answerMode;
-  mark("contract", "completed", `answerMode=${gatedAnswerMode}; evidenceGate=${newsEvidenceGate.evidenceGateStatus}`, contractStartedAt);
+  mark("contract", "completed", `answerMode=${gatedAnswerMode}; evidenceGate=${evidencePortfolioGate.evidenceGateStatus}`, contractStartedAt);
 
   const successfulReads = readAttempts.filter((attempt) => attempt.status === "fetched" || attempt.status === "partial" || attempt.status === "body_too_large").length;
   const failedReads = readAttempts.filter((attempt) => attempt.status !== "fetched" && attempt.status !== "partial" && attempt.status !== "body_too_large").length;
@@ -1001,28 +1243,32 @@ export const runResearchEngineRealShadowRun = async (
     ...(maxReadAttempts > readTopN ? [`reader_continue_after_failure_enabled:maxReadAttempts=${maxReadAttempts}`] : []),
     ...(hostDiversityApplied ? ["host_diversity_applied:perHostEvidenceLimit=1"] : []),
     ...(hostDiversityApplied ? ["source_portfolio_enabled"] : []),
-    ...(newsEvidenceGate.evidenceGateStatus === "cautious" ? ["news_evidence_gate_cautious"] : []),
-    ...(newsEvidenceGate.evidenceGateStatus === "failed" ? [`news_evidence_gate_failed:${newsEvidenceGate.evidenceGateReason}`] : []),
+    ...(evidencePortfolioGate.evidenceGateStatus === "cautious" ? ["evidence_portfolio_gate_cautious"] : []),
+    ...(evidencePortfolioGate.evidenceGateStatus === "failed" ? [`evidence_portfolio_gate_failed:${evidencePortfolioGate.evidenceGateReason}`] : []),
+    ...(freshnessGate.freshnessGateStatus === "failed" ? [`freshness_gate_failed:${freshnessGate.freshnessFailureReason ?? "freshness_failed"}`] : []),
+    ...(synthesisFailed ? ["news_synthesis_failed:no_core_fresh_news_items"] : []),
     ...(broadNewsDigest ? ["news_query_mode:broad_news_digest"] : []),
     ...(skippedSameHostEvidence.length > 0 ? [`source_diversity_same_host_skipped:${unique(skippedSameHostEvidence).join(",")}`] : []),
   ]);
   const allErrors = unique([
     ...errors,
     ...readAttempts.flatMap((attempt) => attempt.errors),
-    ...(newsEvidenceGate.evidenceGateStatus === "failed" ? [`Research Engine news evidence gate failed: ${newsEvidenceGate.evidenceGateReason}; usableEvidence=${newsEvidenceGate.usableEvidenceCount}; usableHosts=${newsEvidenceGate.usableEvidenceHostCount}.`] : []),
+    ...(evidencePortfolioGate.evidenceGateStatus === "failed" ? [`Research Engine evidence portfolio gate failed: ${evidencePortfolioGate.evidenceGateReason}; usableBodyEvidence=${evidencePortfolioGate.usableBodyEvidenceCount}; usableHosts=${evidencePortfolioGate.usableEvidenceHostCount}.`] : []),
+    ...(freshnessGate.freshnessGateStatus === "failed" ? [`Research Engine freshness gate failed: ${freshnessGate.freshnessFailureReason ?? "freshness_failed"}; freshEvidence=${freshnessGate.freshEvidenceCount}; staleEvidence=${freshnessGate.staleEvidenceCount}; unknownDateEvidence=${freshnessGate.unknownDateEvidenceCount}.`] : []),
+    ...(synthesisFailed ? ["Research Engine news synthesis failed: no fresh concrete body-excerpt news item survived quality and freshness selection."] : []),
     ...(abortedRun ? ["real shadow run aborted"] : []),
   ]);
 
   const finalProviderStatus: ResearchEngineRealShadowRunResult["providerStatus"] = abortedRun
     ? "aborted"
-    : newsEvidenceGate.evidenceGateStatus === "failed" && successfulReads > 0
-      ? newsEvidenceGate.evidenceGateReason === "source_diversity_failed" ? "source_diversity_failed" : "insufficient_evidence"
+    : (evidencePortfolioGate.evidenceGateStatus === "failed" || synthesisFailed) && successfulReads > 0
+      ? evidencePortfolioGate.evidenceGateReason === "insufficient_distinct_body_evidence_hosts" ? "source_diversity_failed" : "insufficient_evidence"
     : successfulReads > 0
       ? discoveryStatusFromProviderStatus(providerStatus)
       : providerStatusFromReaderFailures(readAttempts);
 
   return finalize({
-    ok: successfulReads > 0 && !abortedRun && newsEvidenceGate.evidenceGateStatus !== "failed",
+    ok: successfulReads > 0 && !abortedRun && evidencePortfolioGate.evidenceGateStatus !== "failed" && !synthesisFailed,
     query,
     providerName: shadowConfig.providerName,
     providerStatus: finalProviderStatus,
@@ -1042,15 +1288,32 @@ export const runResearchEngineRealShadowRun = async (
       developerDiagnosticsOnly: true,
       oldSearchPathTouched: false,
       noteConversationTouched: false,
+      ...coveragePlan.diagnostics,
+      plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
+      coveragePlanIntent: coveragePlan.intent,
+      coverageFacets: coveragePlan.facets.map((facet) => facet.id),
+      facetQueries: coveragePlan.diagnostics.facetQueries,
       readTopN,
       evidenceTarget,
       maxReadAttempts,
-      newsQueryMode: broadNewsDigest ? "broad_news_digest" : newsMode ? "entity_news" : "not_news",
+      queryFreshnessHints: freshnessPolicy.queryFreshnessHints,
+      ...concurrentReader.diagnostics,
+      newsQueryMode: newsMode ? coveragePlan.intent : "not_news",
       hostDiversityApplied,
       perHostEvidenceLimit: hostDiversityApplied ? NEWS_PER_HOST_EVIDENCE_LIMIT : "none",
       evidenceHostDistribution: hostCount(evidenceItems),
       ...sourcePortfolio.diagnostics,
-      ...newsEvidenceGate,
+      ...evidencePortfolioGate,
+      ...evidenceQualityDiagnostics,
+      ...freshnessGate,
+      selectedEvidenceByFacet: synthesisPlan.selectedEvidenceByFacet,
+      missingEvidenceFacets: synthesisPlan.missingEvidenceFacets,
+      duplicateEventMergedCount: synthesisPlan.duplicateEventMergedCount,
+      synthesisPlanItemCount: synthesisPlan.synthesisPlanItemCount,
+      answerMode: synthesisPlan.answerMode,
+      limitations: synthesisPlan.limitations,
+      synthesisPlan,
+      evidenceQualityById,
       skippedSameHostEvidenceHosts: unique(skippedSameHostEvidence),
       maxCandidates,
       maxReadTopN: MAX_READ_TOP_N,
@@ -1077,7 +1340,7 @@ export const runResearchEngineRealShadowRun = async (
         summary: packet.evidenceSummary,
         missingEvidenceReasons: packet.missingEvidenceReasons,
         citationIds: Object.keys(packet.citationMap),
-        gate: newsEvidenceGate,
+        gate: evidencePortfolioGate,
       },
       contract: {
         answerMode: gatedAnswerMode,
