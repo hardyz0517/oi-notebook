@@ -641,6 +641,84 @@ const buildResearchEngineTakeoverFailureText = (
     ].join("\n");
   };
 
+const formatResearchEngineEvidenceCount = (value: number | undefined, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
+
+const buildResearchEngineEvidenceSummaryLine = ({
+  attemptedReadCount,
+  freshEvidenceCount,
+  staleEvidenceCount,
+  unknownDateEvidenceCount,
+  rejectedByFreshnessCount,
+  usableEvidenceHostCount,
+}: {
+  attemptedReadCount: number;
+  freshEvidenceCount?: number;
+  staleEvidenceCount?: number;
+  unknownDateEvidenceCount?: number;
+  rejectedByFreshnessCount?: number;
+  usableEvidenceHostCount?: number;
+}): string => [
+  `已尝试读取 ${formatResearchEngineEvidenceCount(attemptedReadCount)} 个来源`,
+  `近期正文证据 ${formatResearchEngineEvidenceCount(freshEvidenceCount)} 条`,
+  `旧资料 ${formatResearchEngineEvidenceCount(staleEvidenceCount)} 条`,
+  `日期不明资料 ${formatResearchEngineEvidenceCount(unknownDateEvidenceCount)} 条`,
+  `因时效性拒绝 ${formatResearchEngineEvidenceCount(rejectedByFreshnessCount)} 条`,
+  typeof usableEvidenceHostCount === "number" ? `可用证据来源 ${formatResearchEngineEvidenceCount(usableEvidenceHostCount)} 个` : undefined,
+].filter((item): item is string => Boolean(item)).join("；") + "。";
+
+const buildResearchEngineInsufficientEvidenceText = ({
+  providerName,
+  attemptedReadCount,
+  usableBodyEvidenceCount,
+  usableEvidenceHostCount,
+  freshEvidenceCount,
+  staleEvidenceCount,
+  unknownDateEvidenceCount,
+  rejectedByFreshnessCount,
+  freshnessWindowDays,
+  freshnessFailed,
+  gateReason,
+}: {
+  providerName: ResearchEngineRealShadowRunResult["providerName"] | WebSearchProvider | string | undefined;
+  attemptedReadCount: number;
+  usableBodyEvidenceCount: number;
+  usableEvidenceHostCount?: number;
+  freshEvidenceCount?: number;
+  staleEvidenceCount?: number;
+  unknownDateEvidenceCount?: number;
+  rejectedByFreshnessCount?: number;
+  freshnessWindowDays?: number;
+  freshnessFailed: boolean;
+  gateReason?: string;
+}): string => {
+  const providerLabel = getResearchEngineProviderLabel(providerName);
+  return [
+    "证据不足，暂不生成完整总结",
+    "",
+    freshnessFailed
+      ? "我已经联网搜索并尝试读取候选来源，但没有拿到足够近期、正文可读、且来自多个来源的证据。"
+      : "我已经联网搜索并尝试读取候选来源，但没有拿到足够正文可读、且来自多个来源的证据。",
+    "为了避免把旧新闻、日期不明的资料或单一来源内容当作可靠结论，我暂时不生成完整总结。",
+    "",
+    buildResearchEngineEvidenceSummaryLine({
+      attemptedReadCount,
+      freshEvidenceCount,
+      staleEvidenceCount,
+      unknownDateEvidenceCount,
+      rejectedByFreshnessCount,
+      usableEvidenceHostCount,
+    }),
+    freshnessFailed && typeof freshnessWindowDays === "number"
+      ? `本次按近 ${Math.max(1, Math.floor(freshnessWindowDays))} 天的时效窗口检查。`
+      : undefined,
+    usableBodyEvidenceCount > 0 ? `其中可读正文证据 ${usableBodyEvidenceCount} 条，但没有通过本次回答所需的时效性、覆盖面或综合选择。` : undefined,
+    gateReason ? `保守拒答原因：${gateReason}。` : undefined,
+    "",
+    `联网通道：${providerLabel}。Developer Mode 诊断里保留了完整门控字段。`,
+  ].filter((line): line is string => Boolean(line)).join("\n");
+};
+
 const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResult): string | undefined => {
   if (result.successfulReads > 0 && result.ok) return undefined;
   const primaryError = result.errors[0] ?? result.warnings[0];
@@ -670,16 +748,25 @@ const getResearchEngineFailureMessage = (result: ResearchEngineRealShadowRunResu
     const freshnessWindowDays = typeof result.diagnosticsSnapshot.freshnessWindowDays === "number"
       ? result.diagnosticsSnapshot.freshnessWindowDays
       : undefined;
-    if (gateReason === "freshness_failed" || result.diagnosticsSnapshot.freshnessGateStatus === "failed") {
-      return buildResearchEngineTakeoverFailureText(
-        `已找到可读来源，但没有足够近期正文证据。为避免把旧新闻当作最新动态，Research Engine 拒绝生成完整总结。attemptedReadCount=${attemptedReadCount}; usableBodyEvidence=${usableBodyEvidenceCount}; freshEvidence=${freshEvidenceCount ?? "none"}; staleEvidence=${staleEvidenceCount ?? "none"}; unknownDateEvidence=${unknownDateEvidenceCount ?? "none"}; freshnessWindowDays=${freshnessWindowDays ?? "none"}`,
-        result.providerName,
-      );
-    }
-    return buildResearchEngineTakeoverFailureText(
-      `已尝试读取 ${attemptedReadCount} 条候选，但正文证据 / 来源覆盖不足，不能可靠回答。usableBodyEvidence=${usableBodyEvidenceCount}; hosts=${hostText}; gate=${gateReason}`,
-      result.providerName,
-    );
+    const rejectedByFreshnessCount = typeof result.diagnosticsSnapshot.rejectedByFreshnessCount === "number"
+      ? result.diagnosticsSnapshot.rejectedByFreshnessCount
+      : undefined;
+    const usableEvidenceHostCount = typeof result.diagnosticsSnapshot.usableEvidenceHostCount === "number"
+      ? result.diagnosticsSnapshot.usableEvidenceHostCount
+      : selectedHosts.length > 0 ? selectedHosts.length : undefined;
+    return buildResearchEngineInsufficientEvidenceText({
+      providerName: result.providerName,
+      attemptedReadCount,
+      usableBodyEvidenceCount,
+      usableEvidenceHostCount,
+      freshEvidenceCount,
+      staleEvidenceCount,
+      unknownDateEvidenceCount,
+      rejectedByFreshnessCount,
+      freshnessWindowDays,
+      freshnessFailed: gateReason === "freshness_failed" || result.diagnosticsSnapshot.freshnessGateStatus === "failed",
+      gateReason: gateReason && gateReason !== result.providerStatus ? gateReason.replace(/_/g, " ") : hostText !== "none" ? `可用来源覆盖不足：${hostText}` : undefined,
+    });
   }
   if (result.providerStatus === "not_configured") {
     if (result.providerName === "bocha" || result.providerName === "brave") {
@@ -833,7 +920,7 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
     ? result.diagnosticsSnapshot.evidenceGateReason
     : undefined;
   const gateCaution = evidenceGateStatus === "cautious"
-    ? "当前证据有限，回答必须谨慎，不得声称全面。"
+    ? "我找到了一些可读来源，但覆盖面或正文证据有限。下面只能给出保守总结，并标明哪些部分缺少足够证据。"
     : undefined;
   const coverageIntent = typeof result.diagnosticsSnapshot.coveragePlanIntent === "string"
     ? result.diagnosticsSnapshot.coveragePlanIntent
@@ -868,8 +955,20 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
     const sourceRole = attempt.sourceRole ?? "weak_candidate";
     const evidenceQualityTier = attempt.evidenceQualityTier ?? "low";
     const staleLike = attempt.freshnessStatus === "stale" || attempt.freshnessStatus === "unknown" || attempt.freshnessStatus === "future_date_suspicious";
+    const unknownDateLike = attempt.freshnessStatus === "unknown";
+    const staleDateLike = attempt.freshnessStatus === "stale" || attempt.freshnessStatus === "future_date_suspicious";
     const backgroundLike = staleLike || sourceRole === "analysis_report" || sourceRole === "background_context" || sourceRole === "index_page";
     const qualityLabel = `${evidenceQualityTier}/${sourceRole}`;
+    const cautiousLike = answerMode === "cautious" || evidenceGateStatus === "cautious";
+    const evidenceDisplayLabel = usable
+      ? cautiousLike ? "有限证据 / 保守总结" : "近期正文证据"
+      : staleDateLike
+        ? "旧资料 / 仅作背景"
+        : unknownDateLike
+          ? "日期不明 / 不能作为最新新闻"
+          : backgroundLike
+            ? "背景 / 分析资料"
+            : "未用于回答";
     const synthesisContext = [
       `coverageIntent=${coverageIntent}`,
       `answerMode=${answerMode}`,
@@ -941,10 +1040,10 @@ const mapResearchEngineShadowRunToSources = (result: ResearchEngineRealShadowRun
       sourceStrength: usable ? evidenceQualityTier === "high" ? "strong" : evidenceQualityTier === "medium" ? "medium" : "weak" : "rejected",
       sourceType: getResearchEngineSourceType(attempt.candidate.sourceType),
       reliability: "unknown",
-      reliabilityLabel: staleLike ? "Research Engine old/background" : backgroundLike ? "Research Engine background/analysis" : "Research Engine evidence",
+      reliabilityLabel: evidenceDisplayLabel,
       reliabilityReason: "Developer Mode Research Engine Shadow Run; provider secrets and raw bodies are redacted.",
       relevance: usable ? "strong" : "candidate",
-      relevanceLabel: usable ? "selected fresh synthesis evidence" : staleLike ? "old/background candidate" : backgroundLike ? "background/analysis candidate" : "candidate not selected",
+      relevanceLabel: evidenceDisplayLabel,
       relevanceReason: usable
         ? `Research Engine selected candidate ${attempt.candidate.id} for synthesis; ${synthesisContext}. Summary hint is derived from the body excerpt only.`
         : `Research Engine candidate ${attempt.candidate.id}; reader status=${attempt.status}; quality=${qualityLabel}; synthesisSelected=${synthesisSelected}.`,
@@ -3192,15 +3291,15 @@ const shouldStopResearchEngineWithoutSources = (
 };
 
 const getResearchEngineNoSourceMessage = (searchError?: string): string =>
-  searchError?.trim().startsWith("Research Engine 搜索失败")
+  searchError?.trim().startsWith("证据不足，暂不生成完整总结") || searchError?.trim().startsWith("Research Engine 搜索失败")
     ? searchError.trim()
     : [
-      "Research Engine 搜索失败",
+      "证据不足，暂不生成完整总结",
       "",
-      "当前处于开发者模式，联网搜索已由 Research Engine 接管。",
-      searchError?.trim() ? `失败原因：${searchError.trim()}` : "失败原因：没有可用证据。",
+      "我已经联网搜索并尝试读取候选来源，但没有拿到足够可引用的正文证据。",
+      searchError?.trim() ? `补充说明：${searchError.trim()}` : "为了避免把证据不足的内容当作可靠结论，我暂时不生成完整总结。",
       "",
-      "旧 NoteX 搜索不会自动回退。关闭开发者模式后可使用旧搜索链路。",
+      "Developer Mode 诊断里保留了完整门控字段。",
     ].join("\n");
 
 const buildWebContextDecision = (
