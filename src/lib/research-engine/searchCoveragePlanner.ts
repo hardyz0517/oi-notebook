@@ -159,6 +159,18 @@ const expansionQueries = (intent: ResearchPlanIntent, topic: string): string[] =
       `${topic} API reference`,
     ];
   }
+  if (intent === "oi_problem") {
+    return [
+      topic,
+      `${topic} 题解`,
+      `${topic} editorial`,
+      `${topic} solution`,
+      `${topic} problem statement`,
+      `${topic} OI Wiki`,
+      `${topic} cp-algorithms`,
+      `${topic} implementation pitfalls`,
+    ];
+  }
   return [
     `${topic} official`,
     `${topic} overview`,

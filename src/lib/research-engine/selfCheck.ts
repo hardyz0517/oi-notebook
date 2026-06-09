@@ -17,6 +17,8 @@ import { selectPassages } from "./passageSelector";
 import { runDiscoveryPipelineOffline } from "./discoveryPipeline";
 import { buildQueryPlan } from "./queryPlanner";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
+import { evaluateEvidencePortfolioGate } from "./evidencePortfolioGate";
+import { assessEvidenceQuality } from "./evidenceQuality";
 import { evaluateReaderQuality } from "./readerQuality";
 import { evaluateReadinessGate } from "./readinessGate";
 import {
@@ -747,6 +749,204 @@ const phase6Cases = (): ResearchEngineSelfCheckResult[] => [
     ]);
     assertTrue(failures, "oi_answer_not_supported", fixture.evaluation.sufficient);
     assertTrue(failures, "formula_or_code_missing", fixture.packet.evidenceItems.some((item) => item.excerptMarkdown.includes("dist(u,v)") || item.excerptMarkdown.includes("up[v][k]")));
+  }),
+  phase2Result("evidence-oi-offtopic-google-support-rejected", "P3375 KMP 模板", (failures) => {
+    const context = phase3Context("evidence-oi-offtopic-google-support-rejected", "P3375 KMP 模板");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://support.google.com/translate/answer/2534559",
+      title: "Translate documents and websites - Google Help",
+      snippet: "Translate files, websites and captions.",
+      host: "support.google.com",
+      sourceType: "official",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["official"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "You can translate documents and websites in Chrome. Learn how to choose languages, upload files, and use Google Translate.",
+      currentDate: "2026-06-09",
+    });
+    assertTrue(failures, "sourceRole_should_be_bad_oi_evidence", assessment.sourceRole === "generic_or_offtopic" || assessment.sourceRole === "low_quality_seo");
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, false);
+    assertTrue(failures, "rejected_reason_missing", Boolean(assessment.oiTopicalityRejectedReason));
+  }),
+  phase2Result("evidence-oi-cpu-article-rejected-for-hld", "树链剖分 OI Wiki", (failures) => {
+    const context = phase3Context("evidence-oi-cpu-article-rejected-for-hld", "树链剖分 OI Wiki");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://www.geeksforgeeks.org/computer-organization-architecture/central-processing-unit-cpu/",
+      title: "Central Processing Unit (CPU) - GeeksforGeeks",
+      snippet: "CPU components and their functions.",
+      host: "geeksforgeeks.org",
+      sourceType: "seo_aggregator",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["documentation"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "The central processing unit consists of the arithmetic logic unit, control unit, registers, cache and buses. These CPU components execute instructions.",
+      currentDate: "2026-06-09",
+    });
+    assertEqual(failures, "sourceRole", assessment.sourceRole, "low_quality_seo");
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, false);
+    assertTrue(failures, "expected_missing_algorithm_or_offtopic", assessment.oiTopicalityRejectedReason === "low_quality_seo" || assessment.oiTopicalityRejectedReason === "missing_algorithm_term" || assessment.oiTopicalityRejectedReason === "oi_offtopic_body");
+  }),
+  phase2Result("evidence-oi-luogu-problem-accepted", "洛谷 P3803 FFT 题解", (failures) => {
+    const context = phase3Context("evidence-oi-luogu-problem-accepted", "洛谷 P3803 FFT 题解");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://www.luogu.com.cn/problem/P3803",
+      title: "P3803 【模板】多项式乘法（FFT） - 洛谷",
+      snippet: "P3803 FFT 题目描述与提交记录。",
+      host: "luogu.com.cn",
+      sourceType: "problem_statement",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["problem_statement"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "P3803 【模板】多项式乘法（FFT）。题目描述要求给定两个多项式，使用快速傅里叶变换完成卷积并输出系数。",
+      currentDate: "2026-06-09",
+    });
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, true);
+    assertTrue(failures, "problem_signal_missing", assessment.oiTopicalityMatchedSignals.includes("problem_id"));
+    assertTrue(failures, "algorithm_signal_missing", assessment.oiTopicalityMatchedSignals.includes("algorithm"));
+  }),
+  phase2Result("evidence-oi-atcoder-generic-blog-list-rejected", "AtCoder abc123_d editorial", (failures) => {
+    const context = phase3Context("evidence-oi-atcoder-generic-blog-list-rejected", "AtCoder abc123_d editorial");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://codeforces.com/blog/atcoder_official",
+      title: "Codeforces Blog entries - atcoder_official",
+      snippet: "Blog entries from atcoder_official on Codeforces.",
+      host: "codeforces.com",
+      sourceType: "forum",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["official"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "This page lists recent blog entries by atcoder_official and Codeforces community activity, contests, announcements, and comments.",
+      currentDate: "2026-06-09",
+    });
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, false);
+    assertEqual(failures, "oiTopicalityRejectedReason", assessment.oiTopicalityRejectedReason ?? "none", "missing_task_specific_signal");
+    assertTrue(failures, "task_specific_signal_should_be_absent", !assessment.oiTopicalityMatchedSignals.includes("problem_id"));
+  }),
+  phase2Result("evidence-oi-kmp-trusted-algorithm-reference-accepted", "P3375 KMP 模板", (failures) => {
+    const context = phase3Context("evidence-oi-kmp-trusted-algorithm-reference-accepted", "P3375 KMP 模板");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://cp-algorithms.com/string/prefix-function.html",
+      title: "Prefix function - Knuth-Morris-Pratt - Algorithms for Competitive Programming",
+      snippet: "The prefix function is used by the Knuth-Morris-Pratt string matching algorithm.",
+      host: "cp-algorithms.com",
+      sourceType: "documentation",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["documentation"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "The prefix function for a string stores the length of the longest proper prefix that is also a suffix. It is the core of the Knuth-Morris-Pratt algorithm for string matching and competitive programming implementations.",
+      currentDate: "2026-06-09",
+    });
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, true);
+    assertEqual(failures, "sourceRole", assessment.sourceRole, "algorithm_reference");
+    assertTrue(failures, "algorithm_signal_missing", assessment.oiTopicalityMatchedSignals.includes("algorithm"));
+    assertTrue(failures, "trusted_reference_signal_missing", assessment.oiTopicalityMatchedSignals.includes("trusted_reference"));
+  }),
+  phase2Result("evidence-oi-cses-shortest-routes-problem-signal-accepted", "CSES shortest routes solution", (failures) => {
+    const context = phase3Context("evidence-oi-cses-shortest-routes-problem-signal-accepted", "CSES shortest routes solution");
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://cses.fi/problemset/task/1671",
+      title: "CSES - Shortest Routes I",
+      snippet: "CSES Problem Set task for Shortest Routes I.",
+      host: "cses.fi",
+      sourceType: "official",
+      facet: "primary",
+      topic: context.request.userQuestion,
+      intent: "oi_problem",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "main answer coverage", queries: context.queryPlan.queries.map((query) => query.query), preferredSourceTypes: ["official"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "CSES Problem Set task 1671, Shortest Routes I. The problem statement asks you to process a graph and output routes from the first node. This is an official problemset task page.",
+      currentDate: "2026-06-09",
+    });
+    assertEqual(failures, "acceptedByOiEvidenceGate", assessment.acceptedByOiEvidenceGate, true);
+    assertTrue(failures, "cses_platform_signal_missing", assessment.oiTopicalityMatchedSignals.includes("platform"));
+    assertTrue(failures, "should_not_reject_missing_algorithm", assessment.oiTopicalityRejectedReason !== "missing_algorithm_term");
+  }),
+  phase2Result("evidence-oi-gate-fails-with-only-offtopic-body", "P3375 KMP 模板", (failures) => {
+    const gate = evaluateEvidencePortfolioGate({
+      intent: "oi_problem",
+      evidenceItems: [{
+        evidenceId: "E1",
+        candidateId: "google-translate",
+        url: "https://support.google.com/translate/answer/2534559",
+        title: "Translate documents and websites - Google Help",
+        host: "support.google.com",
+        sourceType: "official",
+        reliability: "very_high",
+        excerptMarkdown: "You can translate documents and websites in Chrome. Learn how to choose languages, upload files, and use Google Translate.",
+        readerQuality: "medium",
+        evidenceStrength: "strong",
+        relation: "mentions",
+        claimType: "oi_algorithm",
+        warnings: [],
+        canCite: true,
+        canSupportStrongClaim: true,
+        status: "usable",
+      }],
+      readSignals: [{
+        url: "https://support.google.com/translate/answer/2534559",
+        host: "support.google.com",
+        facet: "primary",
+        status: "fetched",
+        evidenceTextLevel: "body_excerpt",
+        excerptLength: 130,
+        acceptedByOiEvidenceGate: false,
+        sourceRole: "generic_or_offtopic",
+        oiTopicalityScore: 0,
+        oiTopicalityRejectedReason: "oi_offtopic_body",
+      }],
+      targetReadCount: 8,
+      minDistinctHosts: 1,
+      minCoveredFacets: 1,
+      candidateShortage: false,
+      allowCautiousAnswer: true,
+      freshnessRequired: false,
+    });
+    assertEqual(failures, "gateStatus", gate.evidenceGateStatus, "failed");
+    assertEqual(failures, "gateReason", gate.evidenceGateReason, "no_oi_topical_body_evidence");
+    assertEqual(failures, "oiRejectedEvidenceCount", gate.oiRejectedEvidenceCount, 1);
+  }),
+  phase2Result("evidence-openai-news-not-oi-topical-gated", "最近 OpenAI 有什么新闻", (failures) => {
+    const policy = buildSearchPolicyDecision({ requestId: "openai-news-not-oi", userQuestion: "最近 OpenAI 有什么新闻", locale: "auto" });
+    const assessment = assessEvidenceQuality({
+      evidenceId: "E1",
+      url: "https://openai.com/news/",
+      title: "OpenAI News",
+      snippet: "Latest OpenAI announcements.",
+      host: "openai.com",
+      sourceType: "official",
+      facet: "primary",
+      topic: "OpenAI news",
+      intent: "entity_news",
+      facets: [{ id: "primary", label: "Primary coverage", reason: "news", queries: ["OpenAI latest news"], preferredSourceTypes: ["official"], source: "expansion" }],
+      evidenceTextLevel: "body_excerpt",
+      excerpt: "OpenAI announced new research and product updates on June 8, 2026, with details from the company newsroom.",
+      currentDate: "2026-06-09",
+      freshnessRequired: true,
+      freshnessWindowDays: 45,
+    });
+    assertTrue(failures, "openai_misclassified_as_oi", policy.mode !== "oi_algorithm");
+    assertEqual(failures, "oiTopicalityApplicable", assessment.oiTopicality.applicable, false);
+  }),
+  phase2Result("policy-react-useeffect-official-docs-not-re-oi", "React useEffect 官方文档是什么", (failures) => {
+    const policy = buildSearchPolicyDecision({ requestId: "react-useeffect-not-re", userQuestion: "React useEffect 官方文档是什么", locale: "auto" });
+    assertEqual(failures, "mode", policy.mode, "docs_technical");
+    assertTrue(failures, "react_re_misclassified_as_oi", policy.mode !== "oi_algorithm");
   }),
   phase2Result("evidence-homepage-not-strong", "company latest version", (failures) => {
     const fixture = phase6Fixture("evidence-homepage-not-strong", "company latest version", [{

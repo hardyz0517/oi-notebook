@@ -2,6 +2,7 @@ import type { EvidenceItem } from "./evidenceTypes";
 import { canonicalizePortfolioHost } from "./sourcePortfolio";
 import type { EvidenceTextLevel } from "./concurrentReader";
 import type { ResearchPlanIntent } from "./researchPlanTypes";
+import type { EvidenceSourceRole, OiTopicalityAssessment, OiTopicalitySignal } from "./evidenceQuality";
 
 export type EvidencePortfolioGateStatus = "passed" | "cautious" | "failed" | "not_applicable";
 
@@ -17,6 +18,11 @@ export type EvidencePortfolioReadSignal = {
   ageDays?: number;
   dateConfidence?: string;
   isRecentEnough?: boolean;
+  sourceRole?: EvidenceSourceRole;
+  oiTopicalityScore?: number;
+  oiTopicalityMatchedSignals?: OiTopicalitySignal[];
+  oiTopicalityRejectedReason?: OiTopicalityAssessment["rejectedReason"];
+  acceptedByOiEvidenceGate?: boolean;
 };
 
 export type EvidencePortfolioGateInput = {
@@ -57,6 +63,12 @@ export type EvidencePortfolioGateResult = {
   staleEvidenceCount: number;
   unknownDateEvidenceCount: number;
   rejectedByFreshnessCount: number;
+  oiEvidenceGateRequired: boolean;
+  oiTopicalEvidenceCount: number;
+  oiStrongTopicalEvidenceCount: number;
+  oiRejectedEvidenceCount: number;
+  oiRejectedReasons: Record<string, number>;
+  oiAcceptedEvidenceHosts: string[];
   sourceDiversitySatisfied: boolean;
   selectedEvidenceHosts: string[];
   rejectedEvidenceHostDistribution: Record<string, number>;
@@ -96,11 +108,39 @@ const isBodyEvidence = (item: EvidenceItem): boolean =>
   item.canCite &&
   item.excerptMarkdown.replace(/\s+/g, " ").trim().length >= 80;
 
+const isOiRoleStrong = (role: EvidenceSourceRole | undefined): boolean =>
+  role === "problem_statement" ||
+  role === "official_editorial" ||
+  role === "community_solution" ||
+  role === "algorithm_reference" ||
+  role === "discussion_warning";
+
 export const evaluateEvidencePortfolioGate = (
   input: EvidencePortfolioGateInput,
 ): EvidencePortfolioGateResult => {
   const thresholds = thresholdsFor(input.intent);
   const usableBodyItems = input.evidenceItems.filter(isBodyEvidence);
+  const oiEvidenceGateRequired = input.intent === "oi_problem";
+  const acceptedOiUrls = new Set(input.readSignals
+    .filter((signal) =>
+      !oiEvidenceGateRequired ||
+      (
+        signal.acceptedByOiEvidenceGate === true &&
+        signal.evidenceTextLevel === "body_excerpt" &&
+        signal.excerptLength >= 80 &&
+        isOiRoleStrong(signal.sourceRole)
+      ))
+    .map((signal) => signal.url));
+  const oiAcceptedSignals = input.readSignals.filter((signal) =>
+    signal.acceptedByOiEvidenceGate === true &&
+    signal.evidenceTextLevel === "body_excerpt" &&
+    signal.excerptLength >= 80 &&
+    isOiRoleStrong(signal.sourceRole));
+  const oiRejectedSignals = input.readSignals.filter((signal) =>
+    oiEvidenceGateRequired &&
+    signal.evidenceTextLevel === "body_excerpt" &&
+    signal.excerptLength >= 80 &&
+    signal.acceptedByOiEvidenceGate === false);
   const freshnessRequired = input.freshnessRequired === true && (
     input.intent === "entity_news" ||
     input.intent === "broad_topic_news" ||
@@ -112,12 +152,16 @@ export const evaluateEvidencePortfolioGate = (
   const gateBodyItems = freshnessRequired
     ? usableBodyItems.filter((item) => freshSignalUrls.has(item.url))
     : usableBodyItems;
-  const usableHosts = Array.from(new Set(gateBodyItems.map((item) => canonicalizePortfolioHost(item.host))));
+  const topicalGateBodyItems = oiEvidenceGateRequired
+    ? gateBodyItems.filter((item) => acceptedOiUrls.has(item.url))
+    : gateBodyItems;
+  const usableHosts = Array.from(new Set(topicalGateBodyItems.map((item) => canonicalizePortfolioHost(item.host))));
   const allUsableHosts = Array.from(new Set(usableBodyItems.map((item) => canonicalizePortfolioHost(item.host))));
   const coveredFacets = Array.from(new Set(input.readSignals
     .filter((signal) =>
       signal.evidenceTextLevel === "body_excerpt" &&
       signal.excerptLength >= 80 &&
+      (!oiEvidenceGateRequired || signal.acceptedByOiEvidenceGate === true) &&
       (!freshnessRequired || (signal.freshnessStatus === "fresh" && signal.isRecentEnough !== false)))
     .map((signal) => signal.facet)
     .filter((facet): facet is string => Boolean(facet))));
@@ -130,10 +174,11 @@ export const evaluateEvidencePortfolioGate = (
   const rejectedByFreshnessCount = freshnessRequired ? staleEvidenceCount + unknownDateEvidenceCount : 0;
   const attemptedReadCount = input.readSignals.length;
   const passed = gateBodyItems.length >= thresholds.passedEvidence &&
+    topicalGateBodyItems.length >= thresholds.passedEvidence &&
     usableHosts.length >= Math.max(thresholds.passedHosts, input.minDistinctHosts) &&
     Math.max(coveredFacets.length, input.intent === "entity_news" || input.intent === "broad_news_digest" ? 1 : coveredFacets.length) >= thresholds.passedFacets;
   const cautious = input.allowCautiousAnswer &&
-    gateBodyItems.length >= thresholds.cautiousEvidence &&
+    topicalGateBodyItems.length >= thresholds.cautiousEvidence &&
     usableHosts.length >= thresholds.cautiousHosts &&
     Math.max(coveredFacets.length, input.intent === "entity_news" || input.intent === "broad_news_digest" ? 1 : coveredFacets.length) >= thresholds.cautiousFacets;
   const status: EvidencePortfolioGateStatus = passed ? "passed" : cautious ? "cautious" : "failed";
@@ -143,6 +188,10 @@ export const evaluateEvidencePortfolioGate = (
     ? "freshness_failed"
     : undefined;
   const rejectedSignals = input.readSignals.filter((signal) => signal.evidenceTextLevel !== "body_excerpt" || signal.excerptLength < 80);
+  const oiRejectedReasons = distribution(oiRejectedSignals.map((signal) => signal.oiTopicalityRejectedReason ?? "oi_offtopic_body"));
+  const oiAcceptedEvidenceHosts = Array.from(new Set(oiAcceptedSignals.map((signal) => canonicalizePortfolioHost(signal.host))));
+  const oiTopicalEvidenceCount = oiAcceptedSignals.length;
+  const oiStrongTopicalEvidenceCount = oiAcceptedSignals.filter((signal) => (signal.oiTopicalityScore ?? 0) >= 55 && isOiRoleStrong(signal.sourceRole)).length;
   return {
     evidenceGateStatus: status,
     evidenceGateReason: passed
@@ -151,13 +200,17 @@ export const evaluateEvidencePortfolioGate = (
         ? "body_evidence_portfolio_limited"
         : freshnessFailureReason
           ? freshnessFailureReason
+        : topicalGateBodyItems.length === 0 && oiEvidenceGateRequired
+          ? "no_oi_topical_body_evidence"
         : gateBodyItems.length === 0
           ? "no_usable_body_excerpt_evidence"
+          : oiEvidenceGateRequired && oiStrongTopicalEvidenceCount === 0
+            ? "no_strong_oi_topical_evidence"
           : !sourceDiversitySatisfied
             ? "insufficient_distinct_body_evidence_hosts"
             : "insufficient_body_evidence_or_facet_coverage",
     usableBodyEvidenceCount: usableBodyItems.length,
-    usableFreshBodyEvidenceCount: gateBodyItems.length,
+    usableFreshBodyEvidenceCount: topicalGateBodyItems.length,
     usableEvidenceHostCount: usableHosts.length,
     usableFreshEvidenceHostCount: usableHosts.length,
     coveredFacetCount: coveredFacets.length,
@@ -173,12 +226,18 @@ export const evaluateEvidencePortfolioGate = (
     currentDate: input.currentDate,
     freshnessGateStatus,
     freshnessFailureReason,
-    freshEvidenceCount: gateBodyItems.length,
+    freshEvidenceCount: topicalGateBodyItems.length,
     staleEvidenceCount,
     unknownDateEvidenceCount,
     rejectedByFreshnessCount,
+    oiEvidenceGateRequired,
+    oiTopicalEvidenceCount,
+    oiStrongTopicalEvidenceCount,
+    oiRejectedEvidenceCount: oiRejectedSignals.length,
+    oiRejectedReasons,
+    oiAcceptedEvidenceHosts,
     sourceDiversitySatisfied,
-    selectedEvidenceHosts: freshnessRequired ? usableHosts : allUsableHosts,
+    selectedEvidenceHosts: oiEvidenceGateRequired || freshnessRequired ? usableHosts : allUsableHosts,
     rejectedEvidenceHostDistribution: distribution(rejectedSignals.map((signal) => canonicalizePortfolioHost(signal.host))),
   };
 };

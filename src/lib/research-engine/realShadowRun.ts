@@ -5,7 +5,7 @@ import { runConcurrentReader } from "./concurrentReader";
 import { buildEvidencePacket } from "./evidencePacket";
 import { evaluateEvidencePacket } from "./evidenceEvaluator";
 import { evaluateEvidencePortfolioGate } from "./evidencePortfolioGate";
-import { assessEvidenceQuality, summarizeEvidenceQuality, type EvidenceQualityTier, type EvidenceSourceRole } from "./evidenceQuality";
+import { assessEvidenceQuality, summarizeEvidenceQuality, type EvidenceQualityTier, type EvidenceSourceRole, type OiTopicalityAssessment, type OiTopicalitySignal } from "./evidenceQuality";
 import { buildFreshnessWindowPolicy, type DateConfidence, type DateSignalSource, type FreshnessStatus } from "./dateSignals";
 import { evaluateFreshnessGate } from "./freshnessGate";
 import { runKeylessBingProvider } from "./keylessBingProvider";
@@ -80,6 +80,10 @@ export type ResearchEngineRealShadowRunReadAttempt = {
   evidenceQualityScore?: number;
   evidenceQualityTier?: EvidenceQualityTier;
   sourceRole?: EvidenceSourceRole;
+  oiTopicalityScore?: number;
+  oiTopicalityMatchedSignals?: OiTopicalitySignal[];
+  oiTopicalityRejectedReason?: OiTopicalityAssessment["rejectedReason"];
+  acceptedByOiEvidenceGate?: boolean;
   hasConcreteEvent?: boolean;
   hasDateSignal?: boolean;
   dateSignal?: string;
@@ -533,6 +537,10 @@ const buildMarkdownReport = (result: Omit<ResearchEngineRealShadowRunResult, "ma
         `- quality: ${attempt.readerQuality?.quality ?? "none"}`,
         `- evidenceQualityTier: ${attempt.evidenceQualityTier ?? "none"}`,
         `- sourceRole: ${attempt.sourceRole ?? "none"}`,
+        `- oiTopicalityScore: ${attempt.oiTopicalityScore ?? "none"}`,
+        `- oiTopicalityMatchedSignals: ${attempt.oiTopicalityMatchedSignals?.join(",") || "none"}`,
+        `- acceptedByOiEvidenceGate: ${attempt.acceptedByOiEvidenceGate ?? "none"}`,
+        `- oiTopicalityRejectedReason: ${attempt.oiTopicalityRejectedReason ?? "none"}`,
         `- synthesisSelected: ${attempt.synthesisSelected ?? false}`,
         `- selectedPassageCount: ${attempt.selectedPassageCount}`,
         `- excerptPreview: ${attempt.excerptPreview ?? "none"}`,
@@ -1106,6 +1114,10 @@ export const runResearchEngineRealShadowRun = async (
     attempt.evidenceQualityScore = assessment.evidenceQualityScore;
     attempt.evidenceQualityTier = assessment.evidenceQualityTier;
     attempt.sourceRole = assessment.sourceRole;
+    attempt.oiTopicalityScore = assessment.oiTopicalityScore;
+    attempt.oiTopicalityMatchedSignals = assessment.oiTopicalityMatchedSignals;
+    attempt.oiTopicalityRejectedReason = assessment.oiTopicalityRejectedReason;
+    attempt.acceptedByOiEvidenceGate = assessment.acceptedByOiEvidenceGate;
     attempt.hasConcreteEvent = assessment.hasConcreteEvent;
     attempt.hasDateSignal = assessment.hasDateSignal;
     attempt.dateSignal = assessment.dateSignal;
@@ -1126,11 +1138,15 @@ export const runResearchEngineRealShadowRun = async (
   for (const attempt of concurrentReader.attempts) {
     const reader = attempt.reader;
     if (!reader?.ok || attempt.evidenceTextLevel !== "body_excerpt") continue;
+    const mapped = readAttempts.find((item) => item.candidate.url === attempt.candidate.url);
+    if (coveragePlan.intent === "oi_problem" && mapped?.acceptedByOiEvidenceGate === false) {
+      mapped.warnings = unique([...mapped.warnings, mapped.oiTopicalityRejectedReason ?? "oi_offtopic_body"]);
+      continue;
+    }
     const candidateHost = canonicalizePortfolioHost(attempt.candidate.host);
     const existingHostCount = hostCount(evidenceItems)[candidateHost] ?? 0;
     if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
       skippedSameHostEvidence.push(candidateHost);
-      const mapped = readAttempts.find((item) => item.candidate.url === attempt.candidate.url);
       if (mapped) mapped.warnings = unique([...mapped.warnings, "source_diversity_same_host_evidence_skipped"]);
     } else {
       evidenceItems.push(evidenceInputFromRead({ request, policy, queryPlan: executableQueryPlan, candidate: attempt.candidate, reader }));
@@ -1163,6 +1179,11 @@ export const runResearchEngineRealShadowRun = async (
       ageDays: readAttemptByUrl.get(attempt.candidate.url)?.ageDays,
       dateConfidence: readAttemptByUrl.get(attempt.candidate.url)?.dateConfidence,
       isRecentEnough: readAttemptByUrl.get(attempt.candidate.url)?.freshnessStatus === "fresh",
+      sourceRole: readAttemptByUrl.get(attempt.candidate.url)?.sourceRole,
+      oiTopicalityScore: readAttemptByUrl.get(attempt.candidate.url)?.oiTopicalityScore,
+      oiTopicalityMatchedSignals: readAttemptByUrl.get(attempt.candidate.url)?.oiTopicalityMatchedSignals,
+      oiTopicalityRejectedReason: readAttemptByUrl.get(attempt.candidate.url)?.oiTopicalityRejectedReason,
+      acceptedByOiEvidenceGate: readAttemptByUrl.get(attempt.candidate.url)?.acceptedByOiEvidenceGate,
     })),
     targetReadCount: coveragePlan.sourceRequirements.targetReadCount,
     minDistinctHosts: coveragePlan.sourceRequirements.minDistinctHosts,

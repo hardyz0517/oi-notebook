@@ -40,6 +40,74 @@ const overlap = (left: string[], right: string[]): number => {
   return hits / Math.max(1, left.length);
 };
 
+const containsTerm = (text: string, term: string): boolean => {
+  const normalized = text.toLocaleLowerCase();
+  const lowerTerm = term.toLocaleLowerCase();
+  if (/^[a-z0-9_+-]+$/i.test(term)) {
+    return new RegExp(`(^|[^a-z0-9])${lowerTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(normalized);
+  }
+  return normalized.includes(lowerTerm);
+};
+
+const extractProblemIds = (text: string): string[] =>
+  Array.from(new Set([
+    ...(text.match(/\bP\d{3,6}\b/gi) ?? []),
+    ...(text.match(/\b(?:CF\s*)?\d{3,6}[A-Z]\d?\b/gi) ?? []),
+    ...(text.match(/\b(?:abc|arc|agc)\d{3}_[a-h]\b/gi) ?? []),
+  ].map((id) => id.replace(/\s+/g, "").toLocaleLowerCase())));
+
+const oiAlgorithmTerms = (text: string): string[] => {
+  const terms: Array<[string, RegExp]> = [
+    ["fft", /\bFFT\b|快速傅里叶|多项式乘法/i],
+    ["kmp", /\bKMP\b|prefix function|前缀函数|字符串匹配/i],
+    ["hld", /树链剖分|重链剖分|heavy light decomposition|\bHLD\b/i],
+    ["shortest routes", /shortest routes?|shortest path|最短路|dijkstra/i],
+    ["lca", /\bLCA\b|lowest common ancestor|最近公共祖先/i],
+    ["ntt", /\bNTT\b|数论变换/i],
+  ];
+  return terms.filter(([, pattern]) => pattern.test(text)).map(([term]) => term);
+};
+
+const oiTopicalBoost = (candidate: NormalizedCandidate, context: RankContext): { boost: number; penalty: number; reason: string } => {
+  if (context.policy.mode !== "oi_algorithm") return { boost: 0, penalty: 0, reason: "not oi mode" };
+  const queryText = `${context.queryPlan.userQuestion} ${context.queryPlan.queries.map((query) => query.query).join(" ")}`;
+  const candidateText = `${candidate.title} ${candidate.snippet ?? ""} ${candidate.url}`;
+  const host = candidate.canonical.normalizedHost;
+  const path = candidate.canonical.path.toLocaleLowerCase();
+  const queryProblemIds = extractProblemIds(queryText);
+  const candidateProblemIds = extractProblemIds(candidateText);
+  const problemHit = queryProblemIds.some((id) => candidateProblemIds.includes(id) || containsTerm(path, id));
+  const queryAlgorithms = oiAlgorithmTerms(queryText);
+  const candidateAlgorithms = oiAlgorithmTerms(candidateText);
+  const algorithmHit = queryAlgorithms.some((term) => candidateAlgorithms.includes(term));
+  const roleHit = /editorial|tutorial|solution|题解|statement|problemset|tasks|模板|实现|坑点/i.test(candidateText);
+  const trustedReference = host === "oi-wiki.org" || host.endsWith(".oi-wiki.org") || host === "cp-algorithms.com" || host.endsWith(".cp-algorithms.com") || host === "usaco.guide";
+  const officialProblemPath =
+    (host === "luogu.com.cn" && /\/problem\//.test(path)) ||
+    (host === "codeforces.com" && (/\/problemset\/problem\//.test(path) || /\/blog\/entry\//.test(path))) ||
+    (host === "atcoder.jp" && /\/contests\/[^/]+\/(?:tasks|editorial)\//.test(path)) ||
+    (host === "cses.fi" && /\/problemset\/task\//.test(path));
+  const genericPlatformPage = /^(?:\/)?$|\/(?:problemset|contests?|tasks|blog|login|home|about|help)\/?$/i.test(path);
+  const offTopicHost = /(?:support\.google\.com|google\.com|wikipedia\.org|baidu\.com|bbc\.co\.uk|mobile01\.com|computertechinfo\.com|techbloat\.com|geekchamp\.com|thecrazyprogrammer\.com|completeera\.com|softonic\.com)$/i.test(host);
+  const lowQualityHost = /(?:csdn\.net|geeksforgeeks\.org|programmerall\.com|educba\.com|jianshu\.com|51cto\.com)$/i.test(host);
+
+  let boost = 0;
+  let penalty = 0;
+  const reasons: string[] = [];
+  if (problemHit) { boost += 0.9; reasons.push("problem id match"); }
+  if (algorithmHit) { boost += 0.55; reasons.push("algorithm term match"); }
+  if (roleHit) { boost += 0.35; reasons.push("solution/editorial/statement term"); }
+  if (officialProblemPath) { boost += 0.75; reasons.push("official problem/editorial path"); }
+  if (trustedReference && (algorithmHit || queryAlgorithms.length > 0)) { boost += 0.7; reasons.push("trusted algorithm reference topical"); }
+  if (offTopicHost) { penalty += 1.1; reasons.push("known off-topic generic host for oi"); }
+  if (lowQualityHost && queryProblemIds.length > 0) { penalty += 0.75; reasons.push("low quality source for concrete problem"); }
+  if (genericPlatformPage && !problemHit && !algorithmHit) { penalty += 0.85; reasons.push("generic platform page"); }
+  if (queryProblemIds.length > 0 && !problemHit && !roleHit && !officialProblemPath) { penalty += 0.7; reasons.push("missing concrete problem signal"); }
+  if (queryAlgorithms.length > 0 && !algorithmHit && !trustedReference) { penalty += 0.55; reasons.push("missing algorithm signal"); }
+
+  return { boost, penalty, reason: reasons.join("; ") || "no oi topical adjustment" };
+};
+
 const expectedSourceTypes = (context: RankContext): SourceType[] => {
   if (context.policy.mode === "docs_technical") return ["official", "docs", "tech_media", "community"];
   if (context.policy.mode === "oi_algorithm") return ["official", "docs", "community", "forum", "tech_media"];
@@ -98,8 +166,9 @@ export const scoreCandidate = (
   const queryPurposeMatch = context.queryPlan.queries.some((query) => query.purpose === candidate.queryPurpose) ? 1 : 0.35;
   const sourceTypeMatch = expectedSourceTypes(context).includes(candidate.sourceType) ? 1 : 0.2;
   const hostBoost = oiHostBoost(candidate, context);
-  const officialBoost = Math.max(candidate.sourceType === "official" || candidate.sourceType === "docs" ? 1 : 0, hostBoost.boost);
-  const seoPenalty = Math.max(candidate.sourceType === "seo_aggregator" ? 1 : 0, hostBoost.boost < 0 ? Math.abs(hostBoost.boost) : 0);
+  const topicalBoost = oiTopicalBoost(candidate, context);
+  const officialBoost = Math.max(candidate.sourceType === "official" || candidate.sourceType === "docs" ? 1 : 0, hostBoost.boost, topicalBoost.boost);
+  const seoPenalty = Math.max(candidate.sourceType === "seo_aggregator" ? 1 : 0, hostBoost.boost < 0 ? Math.abs(hostBoost.boost) : 0, topicalBoost.penalty);
   const duplicatePenalty = context.duplicateKeys?.has(candidate.dedupeKey.canonicalUrl) || context.duplicateKeys?.has(candidate.dedupeKey.titleHost) ? 1 : 0;
 
   const weights = {
@@ -118,8 +187,8 @@ export const scoreCandidate = (
     feature("freshnessHint", freshnessHint, weights.freshnessHint, candidate.canonical.dateHint ? "date hint present" : "no date hint"),
     feature("queryPurposeMatch", queryPurposeMatch, weights.queryPurposeMatch, `purpose ${candidate.queryPurpose}`),
     feature("sourceTypeMatch", sourceTypeMatch, weights.sourceTypeMatch, `source type ${candidate.sourceType}`),
-    feature("officialBoost", officialBoost, weights.officialBoost, hostBoost.boost !== 0 ? hostBoost.reason : "official/docs boost"),
-    feature("seoPenalty", seoPenalty, weights.seoPenalty, hostBoost.boost < 0 ? hostBoost.reason : "SEO aggregator penalty"),
+    feature("officialBoost", officialBoost, weights.officialBoost, topicalBoost.boost > 0 ? topicalBoost.reason : hostBoost.boost !== 0 ? hostBoost.reason : "official/docs boost"),
+    feature("seoPenalty", seoPenalty, weights.seoPenalty, topicalBoost.penalty > 0 ? topicalBoost.reason : hostBoost.boost < 0 ? hostBoost.reason : "SEO aggregator penalty"),
     feature("duplicatePenalty", duplicatePenalty, weights.duplicatePenalty, "duplicate already observed"),
   ];
 
