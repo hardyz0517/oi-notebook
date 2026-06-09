@@ -53,6 +53,13 @@ const PHASE_1_CASES: ResearchEngineSelfCheckCase[] = [
   { id: "recent-word-translation", question: "最近这个词英语怎么说", expectedNeedSearch: false, expectedMode: "no_search", expectedRisk: "low", expectedFreshness: "stable" },
   { id: "p3379-lca", question: "P3379 LCA 实现坑", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "centroid-tree", question: "点分树常见实现坑", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "luogu-p3803-fft", question: "洛谷 P3803 FFT 题解", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "p3375-kmp-template", question: "P3375 KMP 模板", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "codeforces-1900c-editorial", question: "Codeforces 1900C editorial", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "atcoder-abc123d-editorial", question: "AtCoder abc123_d editorial", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "cses-shortest-routes", question: "CSES shortest routes solution", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "hld-oi-wiki", question: "树链剖分 OI Wiki", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "recent-atcoder-announcement", question: "最近 AtCoder 比赛公告", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "recent" },
   { id: "polish-text", question: "帮我润色这段文字", expectedNeedSearch: false, expectedMode: "no_search", expectedRisk: "low", expectedFreshness: "stable" },
   { id: "currency-current", question: "今天美元兑人民币汇率", expectedNeedSearch: true, expectedMode: "general_web", expectedRisk: "medium", expectedFreshness: "current" },
   { id: "tauri-command", question: "Tauri command 怎么写", expectedNeedSearch: true, expectedMode: "docs_technical", expectedRisk: "medium", expectedFreshness: "stable" },
@@ -88,6 +95,32 @@ const phase1Result = (testCase: ResearchEngineSelfCheckCase): ResearchEngineSelf
   if (!testCase.expectedNeedSearch && plan.queries.length > 0) failures.push("no_search_case_generated_queries");
   if (testCase.id === "react-docs" && policy.mode === "oi_algorithm") failures.push("react_misclassified_as_oi_re");
   if (testCase.id === "recent-word-translation" && policy.mode === "news_recent") failures.push("translation_recent_word_misclassified_as_news");
+  const queryText = plan.queries.map((query) => query.query).join(" | ").toLocaleLowerCase();
+  if (testCase.id === "openai-news" && policy.mode === "oi_algorithm") failures.push("openai_news_misclassified_as_oi");
+  if (testCase.id === "luogu-p3803-fft") {
+    assertTrue(failures, "p3803_query_missing_luogu", queryText.includes("洛谷 p3803") || queryText.includes("luogu p3803"));
+    assertTrue(failures, "p3803_query_missing_solution", queryText.includes("题解") || queryText.includes("solution"));
+    assertTrue(failures, "p3803_query_missing_algorithm_reference", queryText.includes("oi wiki") || queryText.includes("cp-algorithms"));
+  }
+  if (testCase.id === "p3375-kmp-template") {
+    assertTrue(failures, "kmp_query_missing", queryText.includes("kmp"));
+    assertTrue(failures, "kmp_query_missing_reference", queryText.includes("oi wiki") || queryText.includes("题解"));
+  }
+  if (testCase.id === "codeforces-1900c-editorial") {
+    assertTrue(failures, "cf_query_missing_codeforces", queryText.includes("codeforces 1900c"));
+    assertTrue(failures, "cf_query_missing_editorial_solution", queryText.includes("editorial") && queryText.includes("solution"));
+  }
+  if (testCase.id === "atcoder-abc123d-editorial") {
+    assertTrue(failures, "atcoder_query_missing", queryText.includes("atcoder") && queryText.includes("abc123_d"));
+    assertTrue(failures, "atcoder_query_missing_editorial", queryText.includes("editorial"));
+  }
+  if (testCase.id === "cses-shortest-routes") {
+    assertTrue(failures, "cses_query_missing", queryText.includes("cses"));
+    assertTrue(failures, "cses_query_missing_solution", queryText.includes("solution"));
+  }
+  if (testCase.id === "hld-oi-wiki") {
+    assertTrue(failures, "hld_query_missing_oi_wiki", queryText.includes("树链剖分 oi wiki"));
+  }
 
   return {
     id: testCase.id,

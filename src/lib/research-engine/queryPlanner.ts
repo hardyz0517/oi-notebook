@@ -88,29 +88,132 @@ const buildDocsQueries = (request: ResearchSearchRequest, entity: string): Plann
   ];
 };
 
+const compact = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+const extractFirst = (text: string, pattern: RegExp): string | undefined => text.match(pattern)?.[0]?.trim();
+
+const extractLuoguProblemId = (text: string): string | undefined =>
+  extractFirst(text, /\bP\d{3,6}\b/i)?.toUpperCase();
+
+const extractCodeforcesId = (text: string): string | undefined => {
+  const explicit = text.match(/\b(?:CF|Codeforces)\s*(?:Round\s*)?(\d{3,6}[A-Z]\d?)\b/i)?.[1];
+  if (explicit) return explicit.toUpperCase();
+  return text.match(/\b(\d{3,6}[A-Z]\d?)\b(?=.*\b(?:Codeforces|CF|editorial|solution|tutorial)\b)/i)?.[1]?.toUpperCase();
+};
+
+const extractAtCoderTask = (text: string): string | undefined => {
+  const task = text.match(/\b((?:abc|arc|agc)\d{3}_[a-h])\b/i)?.[1];
+  if (task) return task.toLowerCase();
+  const contestTask = text.match(/\b((?:ABC|ARC|AGC)\s*\d{3}[A-H]?)\b/i)?.[1];
+  return contestTask ? compact(contestTask).toUpperCase() : undefined;
+};
+
+const algorithmPatterns: Array<{ canonical: string; patterns: RegExp[] }> = [
+  { canonical: "FFT", patterns: [/\bFFT\b/i, /快速傅里叶|多项式乘法/] },
+  { canonical: "NTT", patterns: [/\bNTT\b/i, /快速数论变换/] },
+  { canonical: "KMP", patterns: [/\bKMP\b/i, /字符串匹配|前缀函数/] },
+  { canonical: "AC 自动机", patterns: [/AC\s*自动机/i, /Aho[- ]?Corasick/i] },
+  { canonical: "树链剖分", patterns: [/树链剖分|重链剖分|\bHLD\b/i] },
+  { canonical: "点分治", patterns: [/点分治|点分树|centroid decomposition/i] },
+  { canonical: "LCA", patterns: [/\bLCA\b/i, /最近公共祖先|倍增/] },
+  { canonical: "线段树", patterns: [/线段树|segment tree/i] },
+  { canonical: "树状数组", patterns: [/树状数组|Fenwick|\bBIT\b/i] },
+  { canonical: "最短路", patterns: [/最短路|shortest routes?|Dijkstra/i] },
+  { canonical: "网络流", patterns: [/网络流|最大流|Dinic|flow/i] },
+  { canonical: "并查集", patterns: [/并查集|\bDSU\b|disjoint set/i] },
+  { canonical: "动态规划", patterns: [/动态规划|\bDP\b/i] },
+];
+
+const extractAlgorithmKeywords = (text: string): string[] => {
+  const keywords: string[] = [];
+  for (const item of algorithmPatterns) {
+    if (item.patterns.some((pattern) => pattern.test(text))) keywords.push(item.canonical);
+  }
+  return uniqueQueries(keywords.map((keyword) => planned(keyword, "mixed", "recall", 1, ["documentation"]))).map((item) => item.query);
+};
+
+const hasDebugSignal = (text: string): boolean =>
+  /\b(?:WA|TLE|RE|MLE|Hack)\b|坑点|实现坑|常见坑|讨论|警示后人|corner cases?/i.test(text);
+
+const pushOiAlgorithmQueries = (queries: PlannedQuery[], algorithms: string[], basePriority: number): void => {
+  for (const keyword of algorithms.slice(0, 2)) {
+    queries.push(
+      planned(`${keyword} OI Wiki`, "mixed", "docs", basePriority, ["documentation", "official"], ["oi-wiki.org"]),
+      planned(`${keyword} cp-algorithms`, "mixed", "docs", basePriority - 2, ["documentation", "official"], ["cp-algorithms.com"]),
+      planned(`${keyword} 模板 题解`, "zh", "recall", basePriority - 6, ["community_solution", "technical_blog"]),
+      planned(`${keyword} implementation pitfalls`, "en", "recall", basePriority - 10, ["documentation", "technical_blog"]),
+    );
+  }
+};
+
 const buildOiQueries = (request: ResearchSearchRequest, entity: string): PlannedQuery[] => {
   const question = request.userQuestion.trim();
-  const hasP3379 = /\bP3379\b/i.test(question);
-  const hasLca = /LCA|最近公共祖先|倍增/i.test(question);
-  const hasCentroid = /点分树|重心分治|centroid/i.test(question);
+  const haystack = `${question} ${entity}`;
+  const luoguProblemId = extractLuoguProblemId(haystack);
+  const codeforcesId = extractCodeforcesId(haystack);
+  const atcoderTask = extractAtCoderTask(haystack);
+  const isAtCoderDp = /\bAtCoder\s+DP\s+contest\b|\bEducational DP\b/i.test(haystack);
+  const csesTopic = /\bCSES\b/i.test(haystack)
+    ? compact(question.replace(/\bCSES\b/ig, "").replace(/\b(?:problem|solution|editorial)\b/ig, "")) || entity
+    : "";
+  const algorithms = extractAlgorithmKeywords(haystack);
+  const debugLike = hasDebugSignal(haystack);
   const queries: PlannedQuery[] = [
-    planned(question, "mixed", "exact_problem", 100, ["community_solution", "problem_statement", "forum"]),
+    planned(question, "mixed", "exact_problem", 100, ["problem_statement", "community_solution", "forum"]),
   ];
-  if (hasP3379 || hasLca) {
+
+  if (luoguProblemId) {
     queries.push(
-      planned("P3379 最近公共祖先 题解", "zh", "exact_problem", 96, ["problem_statement", "community_solution"]),
-      planned("LCA 倍增 实现坑", "mixed", "recall", 88, ["technical_blog", "community_solution", "forum"]),
+      planned(`洛谷 ${luoguProblemId} 题解`, "zh", "exact_problem", 98, ["problem_statement", "community_solution"], ["luogu.com.cn"]),
+      planned(`Luogu ${luoguProblemId} solution`, "en", "exact_problem", 94, ["problem_statement", "community_solution"], ["luogu.com.cn"]),
+      planned(`${luoguProblemId} 题解`, "zh", "exact_problem", 90, ["community_solution", "forum"]),
+      planned(`${luoguProblemId} 实现 坑点`, "zh", "recall", 84, ["community_solution", "forum"]),
     );
   }
-  if (hasCentroid) {
+
+  if (codeforcesId) {
     queries.push(
-      planned("点分树 常见实现坑", "zh", "recall", 96, ["community_solution", "technical_blog"]),
-      planned("centroid decomposition implementation pitfalls", "en", "recall", 82, ["documentation", "technical_blog"]),
+      planned(`Codeforces ${codeforcesId} editorial`, "en", "exact_problem", 98, ["official", "community_solution"], ["codeforces.com"]),
+      planned(`CF ${codeforcesId} solution`, "en", "exact_problem", 94, ["community_solution", "forum"], ["codeforces.com"]),
+      planned(`${codeforcesId} Codeforces tutorial`, "en", "recall", 90, ["official", "community_solution"], ["codeforces.com"]),
+      planned(`${codeforcesId} Codeforces blog`, "en", "recall", 86, ["forum", "community_solution"], ["codeforces.com"]),
     );
   }
-  if (!hasP3379 && !hasLca && !hasCentroid && entity) {
+
+  if (atcoderTask || isAtCoderDp) {
+    const task = atcoderTask ?? "AtCoder DP contest";
+    const contest = atcoderTask?.match(/^(abc|arc|agc)\d{3}/i)?.[0] ?? task;
+    queries.push(
+      planned(`AtCoder ${task} editorial`, "en", "exact_problem", 98, ["official", "community_solution"], ["atcoder.jp"]),
+      planned(`${task} solution`, "en", "exact_problem", 92, ["community_solution", "forum"], ["atcoder.jp"]),
+      planned(`${contest} editorial`, "en", "recall", 88, ["official", "community_solution"], ["atcoder.jp"]),
+    );
+  }
+
+  if (csesTopic) {
+    queries.push(
+      planned(`CSES ${csesTopic} solution`, "en", "exact_problem", 96, ["problem_statement", "community_solution"], ["cses.fi"]),
+      planned(`CSES ${csesTopic} editorial`, "en", "recall", 90, ["community_solution", "technical_blog"]),
+      planned(`CSES ${csesTopic} cp-algorithms`, "en", "docs", 84, ["documentation", "technical_blog"], ["cp-algorithms.com"]),
+    );
+  }
+
+  pushOiAlgorithmQueries(queries, algorithms, luoguProblemId || codeforcesId || atcoderTask || csesTopic ? 82 : 98);
+
+  const debugTarget = luoguProblemId ?? codeforcesId ?? atcoderTask ?? (csesTopic || undefined) ?? algorithms[0] ?? entity;
+  if (debugTarget && debugLike) {
+    queries.push(
+      planned(`${debugTarget} WA TLE 坑点`, "mixed", "recall", 78, ["community_solution", "forum"]),
+      planned(`${debugTarget} 讨论`, "zh", "recall", 74, ["forum", "community_solution"]),
+      planned(`${debugTarget} 警示后人`, "zh", "recall", 70, ["forum", "community_solution"]),
+      planned(`${debugTarget} corner cases`, "en", "recall", 66, ["technical_blog", "community_solution"]),
+    );
+  }
+
+  if (!luoguProblemId && !codeforcesId && !atcoderTask && !isAtCoderDp && !csesTopic && algorithms.length === 0 && entity) {
     queries.push(planned(`${entity} 题解 实现坑`, "zh", "recall", 88, ["community_solution", "forum"]));
   }
+
   return queries;
 };
 

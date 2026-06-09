@@ -101,7 +101,10 @@ const classifyUrlSource = (host: string, path: string, hint?: SourceType): { sou
   if (/(^|\.)oi-wiki\.org$|(^|\.)cp-algorithms\.com$|(^|\.)usaco\.guide$/i.test(host)) {
     return { sourceType: "docs", reliability: "high" };
   }
-  if (/(^|\.)luogu\.com\.cn$|(^|\.)codeforces\.com$/i.test(host)) {
+  if (/(^|\.)atcoder\.jp$|(^|\.)cses\.fi$/i.test(host)) {
+    return { sourceType: "official", reliability: "very_high" };
+  }
+  if (/(^|\.)luogu\.com\.cn$|(^|\.)codeforces\.com$|(^|\.)nowcoder\.com$/i.test(host)) {
     return { sourceType: "community", reliability: "high" };
   }
   if (/(^|\.)openai\.com$|(^|\.)microsoft\.com$|(^|\.)google\.com$|(^|\.)github\.com$/i.test(host)) {
@@ -110,13 +113,13 @@ const classifyUrlSource = (host: string, path: string, hint?: SourceType): { sou
   if (/(^|\.)reuters\.com$|(^|\.)apnews\.com$|(^|\.)bbc\.com$|(^|\.)nytimes\.com$|(^|\.)thepaper\.cn$|(^|\.)xinhuanet\.com$/i.test(host)) {
     return { sourceType: "mainstream_news", reliability: "high" };
   }
-  if (/(^|\.)infoq\.cn$|(^|\.)36kr\.com$|(^|\.)theverge\.com$|(^|\.)techcrunch\.com$/i.test(host)) {
+  if (/(^|\.)infoq\.cn$|(^|\.)36kr\.com$|(^|\.)theverge\.com$|(^|\.)techcrunch\.com$|(^|\.)cnblogs\.com$|(^|\.)github\.io$/i.test(host)) {
     return { sourceType: "tech_media", reliability: "medium" };
   }
   if (/(^|\.)zhihu\.com$|(^|\.)juejin\.cn$|(^|\.)stackoverflow\.com$|(^|\.)segmentfault\.com$/i.test(host)) {
     return { sourceType: "forum", reliability: "medium" };
   }
-  if (/csdn\.net$|jianshu\.com$|51cto\.com$|educba\.com$|geeksforgeeks\.org$/i.test(host) || (host === "cloud.tencent.com" && path.startsWith("/developer"))) {
+  if (/csdn\.net$|jianshu\.com$|51cto\.com$|educba\.com$|geeksforgeeks\.org$|programmerall\.com$|topic\.algo\.monster$|hydro\.ac$/i.test(host) || (host === "cloud.tencent.com" && path.startsWith("/developer"))) {
     return { sourceType: "seo_aggregator", reliability: "low" };
   }
   return { sourceType: "unknown", reliability: "unknown" };

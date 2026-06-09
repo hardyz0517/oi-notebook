@@ -17,7 +17,22 @@ const TRANSLATION_PATTERN = /英语怎么说|英文怎么说|怎么翻译|翻译
 const OFFLINE_ONLY_PATTERN = /不用联网|不要联网|离线解释|只要离线|凭常识|不要搜索|no web|offline only/i;
 const RUMOR_PATTERN = /死了吗|去世了吗|死亡|去世|辟谣|传闻|谣言|被抓|刑事|犯罪|确诊|重病|医疗事故|暴雷|诈骗|破产|逮捕|逝世|died|dead|death|rumou?r|fact.?check|arrested|criminal|medical|bankrupt/i;
 const CURRENT_FACT_PATTERN = /价格|汇率|版本|政策|法规|赛事|比分|公司动态|发布会|财报|融资|收购|裁员|price|exchange rate|version|policy|regulation|score|earnings|acquisition|layoff/i;
-const OI_PATTERN = /(?:^|\b)(?:P\d{3,6}|CF\d+[A-Z]?|AT_[A-Z0-9_]+)(?:\b|$)|洛谷|题号|题解|复杂度|边界情况|实现坑|常见坑|倍增|最近公共祖先|点分树|树剖|线段树|树状数组|最短路|网络流|动态规划|背包|LCA|WA|TLE|MLE|AC 自动机/i;
+const OI_RECENT_PATTERN = /最近.{0,24}(?:比赛|题解|讨论|公告|赛后|补题)|最新.{0,24}(?:比赛|题解|讨论|公告|赛后|补题)|recent\s+.{0,40}(?:contest|editorial|discussion|announcement)|latest\s+.{0,40}(?:contest|editorial|discussion|announcement)/i;
+const OI_PROBLEM_ID_PATTERN = /\bP\d{3,6}\b/i;
+const CODEFORCES_PATTERN = /\b(?:Codeforces|CF)\s*(?:Round\s*)?\d{3,6}[A-Z]\d?\b|\bCF\d{3,6}[A-Z]\d?\b|\b\d{3,6}[A-Z]\d?\b(?=.*\b(?:Codeforces|CF|editorial|solution|tutorial)\b)/i;
+const ATCODER_PATTERN = /\bAtCoder\b|\b(?:ABC|ARC|AGC)\s*\d{3}[A-H]?\b|\b(?:abc|arc|agc)\d{3}_[a-h]\b|\bAtCoder\s+DP\s+contest\b/i;
+const CSES_PATTERN = /\bCSES\b/i;
+const OI_REFERENCE_PATTERN = /OI\s*Wiki|oi-wiki|cp-algorithms|USACO\s*Guide|算法竞赛|competitive programming/i;
+const OI_ALGORITHM_PATTERN = /题号|题解|模板|复杂度|边界情况|实现坑|常见坑|坑点|讨论|警示后人|倍增|最近公共祖先|树链剖分|重链剖分|点分治|点分树|线段树|树状数组|最短路|网络流|动态规划|背包|多项式|FFT|NTT|KMP|AC 自动机|LCA|DSU|并查集|Dijkstra|SPFA|Tarjan|SCC|HLD|\b(?:WA|TLE|RE|MLE|Hack)\b/i;
+const OI_PATTERN = new RegExp([
+  OI_PROBLEM_ID_PATTERN.source,
+  CODEFORCES_PATTERN.source,
+  ATCODER_PATTERN.source,
+  CSES_PATTERN.source,
+  OI_REFERENCE_PATTERN.source,
+  OI_ALGORITHM_PATTERN.source,
+  "洛谷|Luogu|Codeforces|AtCoder|Nowcoder|牛客|Hydro",
+].join("|"), "i");
 const TECH_DOC_PATTERN = /React|useEffect|Vite|Tauri|command|Rust crate|crate API|API 文档|配置|config|TypeScript|JavaScript|Node\.?js|Next\.?js|Vue|Svelte|Cargo|serde|reqwest/i;
 const STABLE_EXPLANATION_PATTERN = /是什么|解释|概念|原理|为什么|举例|证明|what is|explain|meaning of/i;
 
@@ -55,10 +70,10 @@ const extractFocusEntities = (question: string, mode: SearchMode): string[] => {
   const url = question.match(URL_PATTERN)?.[0];
   if (url) return [url];
 
-  const problemIds = question.match(/\b(?:P\d{3,6}|CF\d+[A-Z]?|AT_[A-Z0-9_]+)\b/gi) ?? [];
+  const problemIds = question.match(/\b(?:P\d{3,6}|CF\s*\d{3,6}[A-Z]\d?|CF\d{3,6}[A-Z]\d?|(?:ABC|ARC|AGC)\s*\d{3}[A-H]?|(?:abc|arc|agc)\d{3}_[a-h])\b/gi) ?? [];
   const latinNames = question.match(/\b[A-Z][A-Za-z0-9.+#-]{1,30}(?:\s+[A-Z][A-Za-z0-9.+#-]{1,30}){0,2}\b/g) ?? [];
   const cjkNames = question.match(/[\u4e00-\u9fff]{2,8}(?=死了吗|去世了吗|死亡|去世|最新|新闻|消息|公司|版本|汇率|价格|实现坑|题解|怎么写|是什么|$)/g) ?? [];
-  const oiTerms = question.match(/LCA|点分树|最近公共祖先|倍增|Tauri command|React useEffect|useEffect/gi) ?? [];
+  const oiTerms = question.match(/OI Wiki|cp-algorithms|CSES|Luogu|洛谷|Codeforces|AtCoder|LCA|FFT|NTT|KMP|AC 自动机|树链剖分|点分治|点分树|最近公共祖先|倍增|Tauri command|React useEffect|useEffect/gi) ?? [];
 
   const candidates = unique([...problemIds, ...oiTerms, ...latinNames, ...cjkNames].map(cleanFocusEntity));
   if (candidates.length > 0) return candidates.slice(0, 6);
@@ -160,14 +175,19 @@ export const buildSearchPolicyDecision = (request: ResearchSearchRequest): Searc
 
   const oiLike = OI_PATTERN.test(question);
   if (oiLike) {
+    const freshness: FreshnessRequirement = OI_RECENT_PATTERN.test(question) ? "recent" : "stable";
     return decision(request, {
       needSearch: true,
       mode: "oi_algorithm",
       risk: "medium",
-      freshness: "stable",
+      freshness,
       vertical: "oi_algorithm",
       reason: "oi_algorithm_or_problem_discussion",
-      guards: ["oi_terms_before_general_web", "short_re_token_requires_word_boundary"],
+      guards: [
+        "oi_terms_before_general_web",
+        "short_re_token_requires_word_boundary",
+        freshness === "recent" ? "oi_recent_signal_allows_freshness" : "stable_oi_knowledge_freshness_bypass",
+      ],
       confidence: 0.88,
     });
   }

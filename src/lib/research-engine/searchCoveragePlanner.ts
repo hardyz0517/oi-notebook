@@ -76,6 +76,9 @@ const inferIntent = (input: CoveragePlannerInput): ResearchPlanIntent => {
 };
 
 const freshnessFor = (intent: ResearchPlanIntent, input: CoveragePlannerInput): ResearchPlanFreshness => {
+  if (intent === "oi_problem") {
+    return input.policy.freshness === "recent" || input.policy.freshness === "latest" || input.policy.freshness === "current" ? "recent" : "stable";
+  }
   if (input.llmPlan?.freshness) return input.llmPlan.freshness;
   if (intent === "entity_news" || intent === "broad_news_digest" || intent === "broad_topic_news") return "current";
   if (input.policy.freshness === "current" || input.policy.freshness === "latest") return "current";
@@ -234,9 +237,10 @@ const answerContractFor = (llm?: ResearchPlanAnswerContract): ResearchPlanAnswer
 export const buildSearchCoveragePlan = (input: CoveragePlannerInput): ExecutableCoveragePlan => {
   const intent = inferIntent(input);
   const topic = topicFrom(input);
+  const effectiveFreshness = intent === "oi_problem" && input.policy.freshness === "stable" ? "stable" : input.freshness;
   const freshnessPolicy = buildFreshnessWindowPolicy({
     intent,
-    freshness: input.freshness,
+    freshness: effectiveFreshness,
     userQuery: input.userQuery,
   });
   const llmFacets: CoverageFacet[] = (input.llmPlan?.facets ?? []).map((facet) => ({ ...facet, source: "llm" }));
