@@ -3,6 +3,13 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { renderMarkdown } from "@/lib/markdown";
 import { resolveNoteAssetUrl } from "@/lib/api";
+import {
+  markPreviewCommit,
+  markPreviewEffectStart,
+  markPreviewHtmlReady,
+  markPreviewSchedule,
+  markPreviewStaleRender,
+} from "@/lib/previewPerf";
 import { cn } from "@/lib/utils";
 
 interface MarkdownPreviewProps {
@@ -27,15 +34,32 @@ function MarkdownPreview({
   const [renderedHtml, setRenderedHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const renderVersionRef = useRef(0);
+  const pendingRenderRef = useRef<{
+    scheduledAt: number;
+    finishedAt: number;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const renderVersion = renderVersionRef.current + 1;
+    renderVersionRef.current = renderVersion;
+    const scheduledAt = markPreviewEffectStart(markdown.length);
+
+    markPreviewSchedule(markdown.length);
 
     renderMarkdown(markdown)
       .then((html) => rewritePreviewImageSources(html, noteRelativePath))
       .then((html) => {
-        if (!cancelled) {
+        if (!cancelled && renderVersionRef.current === renderVersion) {
+          markPreviewHtmlReady();
+          pendingRenderRef.current = {
+            scheduledAt,
+            finishedAt: now(),
+          };
           setRenderedHtml(html);
+        } else {
+          markPreviewStaleRender();
         }
       });
 
@@ -43,6 +67,19 @@ function MarkdownPreview({
       cancelled = true;
     };
   }, [markdown, noteRelativePath]);
+
+  useLayoutEffect(() => {
+    const pendingRender = pendingRenderRef.current;
+    if (!pendingRender) return;
+
+    const committedAt = now();
+    markPreviewCommit({
+      commitMs: committedAt - pendingRender.finishedAt,
+      totalPreviewMs: committedAt - pendingRender.scheduledAt,
+      scheduleDelayMs: pendingRender.finishedAt - pendingRender.scheduledAt,
+    });
+    pendingRenderRef.current = null;
+  }, [renderedHtml]);
 
   useEffect(() => {
     onScrollApiChange?.({
@@ -457,6 +494,10 @@ async function rewritePreviewImageSources(
   );
 
   return doc.body.innerHTML;
+}
+
+function now() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function setCodeCopyButtonIcon(button: HTMLButtonElement, icon: "copy" | "check") {

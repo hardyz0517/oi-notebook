@@ -47,6 +47,15 @@ import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsS
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
 import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import {
+  getPreviewPerfStats,
+  markCommittedMarkdownSchedule,
+  markCommittedMarkdownSet,
+  markDeferredMarkdownSeen,
+  markPreviewEditorChange,
+  markPreviewScrollSync,
+  markPreviewStaleRender,
+} from "@/lib/previewPerf";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
@@ -2499,6 +2508,21 @@ function getDashboardNoteCategory(path: string): string {
   }
 }
 
+function getCommittedMarkdownSyncDelayMs(docLength: number): number {
+  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
+
+  if (docLength <= 2_000 && lastParseMs < 40) {
+    return 50;
+  }
+  if (docLength <= 15_000 && lastParseMs < 90) {
+    return 90;
+  }
+  if (docLength >= 25_000 || lastParseMs >= 120) {
+    return 160;
+  }
+  return 120;
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
@@ -2647,6 +2671,7 @@ export default function App() {
 
     scrollSyncRafRef.current = window.requestAnimationFrame(() => {
       scrollSyncRafRef.current = null;
+      markPreviewScrollSync();
 
       const targetPane = source === "editor" ? "preview" : "editor";
       const targetApi = source === "editor" ? previewScrollApiRef.current : editorScrollApiRef.current;
@@ -3049,6 +3074,7 @@ export default function App() {
   const lastCommittedVersionRef = useRef(0);
   const pendingCommitTimerRef = useRef<number | null>(null);
   const pendingCommitRafRef = useRef<number | null>(null);
+  const pendingCommitVersionRef = useRef<number | null>(null);
   const pendingChangeQueueRef = useRef<Array<{ version: number; length: number }>>([]);
   const [committedMarkdownVersion, setCommittedMarkdownVersion] = useState(0);
   const [externalDocVersion, setExternalDocVersion] = useState(0);
@@ -3091,23 +3117,37 @@ export default function App() {
     };
   }, []);
 
-  const cancelPendingCommittedSync = useCallback(() => {
+  const cancelPendingCommittedSync = useCallback((markStale = false) => {
+    let cancelledPendingCommit = false;
     if (pendingCommitRafRef.current !== null) {
       window.cancelAnimationFrame(pendingCommitRafRef.current);
       pendingCommitRafRef.current = null;
+      cancelledPendingCommit = true;
     }
     if (pendingCommitTimerRef.current !== null) {
       window.clearTimeout(pendingCommitTimerRef.current);
       pendingCommitTimerRef.current = null;
+      cancelledPendingCommit = true;
+    }
+    if (cancelledPendingCommit) {
+      pendingCommitVersionRef.current = null;
+      if (markStale) {
+        markPreviewStaleRender();
+      }
     }
   }, []);
 
   const commitMarkdownSnapshot = useCallback((nextMarkdown: string, version: number) => {
     lastCommittedVersionRef.current = version;
     pendingChangeQueueRef.current = [];
+    if (committedMarkdown === nextMarkdown) {
+      setCommittedMarkdownVersion(version);
+      return;
+    }
     setCommittedMarkdown(nextMarkdown);
+    markCommittedMarkdownSet(nextMarkdown.length);
     setCommittedMarkdownVersion(version);
-  }, []);
+  }, [committedMarkdown]);
 
   const flushCommittedMarkdownSync = useCallback(() => {
     cancelPendingCommittedSync();
@@ -3115,20 +3155,33 @@ export default function App() {
   }, [cancelPendingCommittedSync, commitMarkdownSnapshot]);
 
   const scheduleCommittedMarkdownSync = useCallback(() => {
-    if (pendingCommitRafRef.current !== null) return;
+    if (lastCommittedVersionRef.current === editorDocVersionRef.current) return;
+    if (pendingCommitRafRef.current !== null || pendingCommitTimerRef.current !== null) {
+      cancelPendingCommittedSync(true);
+    }
 
+    markCommittedMarkdownSchedule(markdownLiveRef.current.length);
+    pendingCommitVersionRef.current = editorDocVersionRef.current;
     pendingCommitRafRef.current = window.requestAnimationFrame(() => {
       pendingCommitRafRef.current = null;
       if (pendingCommitTimerRef.current !== null) {
         window.clearTimeout(pendingCommitTimerRef.current);
+        markPreviewStaleRender();
       }
+      const scheduledVersion = pendingCommitVersionRef.current;
+      const delayMs = getCommittedMarkdownSyncDelayMs(markdownLiveRef.current.length);
       pendingCommitTimerRef.current = window.setTimeout(() => {
         pendingCommitTimerRef.current = null;
+        pendingCommitVersionRef.current = null;
+        if (scheduledVersion !== editorDocVersionRef.current) {
+          markPreviewStaleRender();
+          return;
+        }
         if (lastCommittedVersionRef.current === editorDocVersionRef.current) return;
         commitMarkdownSnapshot(markdownLiveRef.current, editorDocVersionRef.current);
-      }, 140);
+      }, delayMs);
     });
-  }, [commitMarkdownSnapshot]);
+  }, [cancelPendingCommittedSync, commitMarkdownSnapshot]);
 
   const replaceEditorDocument = useCallback((nextMarkdown: string, path: string | null, nextFrontmatterPrefix: string) => {
     cancelPendingCommittedSync();
@@ -3139,6 +3192,7 @@ export default function App() {
     pendingChangeQueueRef.current = [];
     lastCommittedVersionRef.current = editorDocVersionRef.current;
     setFrontmatterPrefix(nextFrontmatterPrefix);
+    markCommittedMarkdownSet(nextMarkdown.length);
     setCommittedMarkdown(nextMarkdown);
     setCommittedMarkdownVersion(editorDocVersionRef.current);
     setExternalDocVersion(externalDocVersionRef.current);
@@ -6344,6 +6398,7 @@ export default function App() {
   };
 
   const handleEditorChange = useCallback((value: string) => {
+    markPreviewEditorChange(value.length);
     markdownLiveRef.current = value;
     editorDocVersionRef.current += 1;
     pendingChangeQueueRef.current.push({
@@ -6361,6 +6416,10 @@ export default function App() {
     }
     scheduleCommittedMarkdownSync();
   }, [currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync]);
+
+  useEffect(() => {
+    markDeferredMarkdownSeen(deferredMarkdown.length);
+  }, [deferredMarkdown]);
 
   const handleEditorSelectionChange = useCallback((selectedText: string, range: MarkdownEditorSelectionRange | null, cursorOffset: number | null) => {
     startTransition(() => {

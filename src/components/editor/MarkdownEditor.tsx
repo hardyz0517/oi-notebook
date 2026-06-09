@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { markPreviewEditorDocChanged } from "@/lib/previewPerf";
 
 // ref 杞彂璇存槑锛堜负浠€涔堜笉鐢?forwardRef锛夛細
 // React 19 宸茬粡鎶?ref 鏀规垚鏅€?prop锛屼笉鍐嶉渶瑕?forwardRef 鍖呰銆?// 褰撳墠闃舵娌℃湁璋冪敤鍛戒护寮?API 鐨勯渶姹傦紙插入图片绛夊姛鑳藉湪鍚庣画杩唬鍐嶅仛锛夛紝
@@ -870,6 +871,7 @@ export default function MarkdownEditor({
             if (update.docChanged) {
               const newValue = update.state.doc.toString();
 
+              markPreviewEditorDocChanged(newValue.length);
               editorOwnValue.current = newValue;
               if (isApplyingExternalValueRef.current) return;
               onChangeFn.current(newValue);
