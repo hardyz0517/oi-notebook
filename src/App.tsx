@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
@@ -52,6 +52,9 @@ import {
   markCommittedMarkdownSchedule,
   markCommittedMarkdownSet,
   markDeferredMarkdownSeen,
+  markPreviewMarkdownSchedule,
+  markPreviewMarkdownSet,
+  markPreviewScheduleCancelled,
   markPreviewEditorChange,
   markPreviewScrollSync,
   markPreviewStaleRender,
@@ -2523,6 +2526,21 @@ function getCommittedMarkdownSyncDelayMs(docLength: number): number {
   return 120;
 }
 
+function getPreviewMarkdownSyncDelayMs(docLength: number): number {
+  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
+
+  if (docLength < 3_000) {
+    return 25;
+  }
+  if (docLength < 12_000) {
+    return lastParseMs >= 90 ? 90 : 65;
+  }
+  if (docLength >= 25_000 || lastParseMs >= 120) {
+    return 150;
+  }
+  return 120;
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
@@ -3010,7 +3028,7 @@ export default function App() {
   const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
-  const deferredMarkdown = useDeferredValue(committedMarkdown);
+  const [previewMarkdown, setPreviewMarkdown] = useState(INITIAL_MARKDOWN);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsCenterHostRef = useRef<SettingsCenterHostHandle>(null);
   const settingsCenterOpenRef = useRef(false);
@@ -3075,8 +3093,12 @@ export default function App() {
   const pendingCommitTimerRef = useRef<number | null>(null);
   const pendingCommitRafRef = useRef<number | null>(null);
   const pendingCommitVersionRef = useRef<number | null>(null);
+  const pendingPreviewTimerRef = useRef<number | null>(null);
+  const pendingPreviewRafRef = useRef<number | null>(null);
+  const pendingPreviewVersionRef = useRef<number | null>(null);
+  const lastPreviewMarkdownRef = useRef(INITIAL_MARKDOWN);
+  const lastPreviewVersionRef = useRef(0);
   const pendingChangeQueueRef = useRef<Array<{ version: number; length: number }>>([]);
-  const [committedMarkdownVersion, setCommittedMarkdownVersion] = useState(0);
   const [externalDocVersion, setExternalDocVersion] = useState(0);
   useEffect(() => {
     aiConfigRef.current = aiConfig;
@@ -3114,8 +3136,66 @@ export default function App() {
       if (pendingCommitTimerRef.current !== null) {
         window.clearTimeout(pendingCommitTimerRef.current);
       }
+      if (pendingPreviewRafRef.current !== null) {
+        window.cancelAnimationFrame(pendingPreviewRafRef.current);
+      }
+      if (pendingPreviewTimerRef.current !== null) {
+        window.clearTimeout(pendingPreviewTimerRef.current);
+      }
     };
   }, []);
+
+  const cancelPendingPreviewSync = useCallback((markStale = false) => {
+    let cancelledPendingPreview = false;
+    if (pendingPreviewRafRef.current !== null) {
+      window.cancelAnimationFrame(pendingPreviewRafRef.current);
+      pendingPreviewRafRef.current = null;
+      cancelledPendingPreview = true;
+    }
+    if (pendingPreviewTimerRef.current !== null) {
+      window.clearTimeout(pendingPreviewTimerRef.current);
+      pendingPreviewTimerRef.current = null;
+      cancelledPendingPreview = true;
+    }
+    if (cancelledPendingPreview) {
+      pendingPreviewVersionRef.current = null;
+      markPreviewScheduleCancelled();
+      if (markStale) {
+        markPreviewStaleRender();
+      }
+    }
+  }, []);
+
+  const setPreviewMarkdownSnapshot = useCallback((nextMarkdown: string, version: number) => {
+    lastPreviewVersionRef.current = version;
+    if (lastPreviewMarkdownRef.current === nextMarkdown) {
+      return;
+    }
+    lastPreviewMarkdownRef.current = nextMarkdown;
+    markPreviewMarkdownSet(nextMarkdown.length);
+    setPreviewMarkdown(nextMarkdown);
+  }, []);
+
+  const schedulePreviewMarkdownSync = useCallback((nextMarkdown: string, version: number) => {
+    if (lastPreviewVersionRef.current === version && lastPreviewMarkdownRef.current === nextMarkdown) return;
+    if (pendingPreviewRafRef.current !== null || pendingPreviewTimerRef.current !== null) {
+      cancelPendingPreviewSync(true);
+    }
+
+    markPreviewMarkdownSchedule(nextMarkdown.length);
+    pendingPreviewVersionRef.current = version;
+    const scheduledVersion = pendingPreviewVersionRef.current;
+    const delayMs = getPreviewMarkdownSyncDelayMs(nextMarkdown.length);
+    pendingPreviewTimerRef.current = window.setTimeout(() => {
+      pendingPreviewTimerRef.current = null;
+      pendingPreviewVersionRef.current = null;
+      if (scheduledVersion !== editorDocVersionRef.current || scheduledVersion !== version) {
+        markPreviewStaleRender();
+        return;
+      }
+      setPreviewMarkdownSnapshot(nextMarkdown, version);
+    }, delayMs);
+  }, [cancelPendingPreviewSync, setPreviewMarkdownSnapshot]);
 
   const cancelPendingCommittedSync = useCallback((markStale = false) => {
     let cancelledPendingCommit = false;
@@ -3141,12 +3221,10 @@ export default function App() {
     lastCommittedVersionRef.current = version;
     pendingChangeQueueRef.current = [];
     if (committedMarkdown === nextMarkdown) {
-      setCommittedMarkdownVersion(version);
       return;
     }
     setCommittedMarkdown(nextMarkdown);
     markCommittedMarkdownSet(nextMarkdown.length);
-    setCommittedMarkdownVersion(version);
   }, [committedMarkdown]);
 
   const flushCommittedMarkdownSync = useCallback(() => {
@@ -3185,6 +3263,7 @@ export default function App() {
 
   const replaceEditorDocument = useCallback((nextMarkdown: string, path: string | null, nextFrontmatterPrefix: string) => {
     cancelPendingCommittedSync();
+    cancelPendingPreviewSync();
     activeFileKeyRef.current = path;
     markdownLiveRef.current = nextMarkdown;
     editorDocVersionRef.current += 1;
@@ -3194,9 +3273,9 @@ export default function App() {
     setFrontmatterPrefix(nextFrontmatterPrefix);
     markCommittedMarkdownSet(nextMarkdown.length);
     setCommittedMarkdown(nextMarkdown);
-    setCommittedMarkdownVersion(editorDocVersionRef.current);
+    setPreviewMarkdownSnapshot(nextMarkdown, editorDocVersionRef.current);
     setExternalDocVersion(externalDocVersionRef.current);
-  }, [cancelPendingCommittedSync]);
+  }, [cancelPendingCommittedSync, cancelPendingPreviewSync, setPreviewMarkdownSnapshot]);
 
   const getLiveFullMarkdown = useCallback(() => (
     currentFilePathRef.current === null
@@ -3208,8 +3287,8 @@ export default function App() {
     setEditorSelectedTextLength(null);
   }, [currentFilePath, editorViewMode]);
   const deferredFullMarkdown = useMemo(
-    () => (currentFilePath === null ? deferredMarkdown : combineMarkdown(frontmatterPrefix, deferredMarkdown)),
-    [committedMarkdownVersion, currentFilePath, deferredMarkdown, frontmatterPrefix],
+    () => (currentFilePath === null ? previewMarkdown : combineMarkdown(frontmatterPrefix, previewMarkdown)),
+    [currentFilePath, previewMarkdown, frontmatterPrefix],
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(deferredFullMarkdown), [deferredFullMarkdown]);
@@ -4126,8 +4205,8 @@ export default function App() {
     [activeWorkspaceTabId, openReviewTabs],
   );
   const currentParagraphContext = useMemo(
-    () => currentFilePath === null ? null : extractCursorParagraph(deferredMarkdown, editorCursorOffset),
-    [currentFilePath, deferredMarkdown, editorCursorOffset],
+    () => currentFilePath === null ? null : extractCursorParagraph(committedMarkdown, editorCursorOffset),
+    [currentFilePath, committedMarkdown, editorCursorOffset],
   );
   const aiSidebarContext = useMemo<AiSidebarNoteContext>(() => {
     const fallbackTitle = activeNoteFile?.name.replace(/\.md$/i, "") ?? currentFilePath?.split("/").pop()?.replace(/\.md$/i, "") ?? "";
@@ -4136,8 +4215,8 @@ export default function App() {
     return {
       filePath: currentFilePath,
       title: hasOpenNote ? frontmatter.fields.title.trim() || fallbackTitle || "未命名笔记" : "未选择笔记",
-      bodyLength: hasOpenNote ? deferredMarkdown.length : 0,
-      hasBody: hasOpenNote && deferredMarkdown.trim().length > 0,
+      bodyLength: hasOpenNote ? committedMarkdown.length : 0,
+      hasBody: hasOpenNote && committedMarkdown.trim().length > 0,
       tags: hasOpenNote ? frontmatter.fields.tags : [],
       summary: hasOpenNote ? frontmatter.fields.summary : "",
       selectedText: hasOpenNote ? editorSelectedText : "",
@@ -4152,10 +4231,10 @@ export default function App() {
       currentParagraphLength: currentParagraphText ? currentParagraphText.length : null,
       currentParagraphStatus: hasOpenNote ? currentParagraphText ? "available" : "empty" : "unavailable",
       currentParagraphIsCode: currentParagraphContext?.isCode ?? false,
-      markdownBody: hasOpenNote ? deferredMarkdown : "",
+      markdownBody: hasOpenNote ? committedMarkdown : "",
       bodyStartLine: hasOpenNote ? bodyStartLine : null,
     };
-  }, [activeNoteFile, aiContextSelectionRange, bodyStartLine, currentFilePath, currentParagraphContext, deferredMarkdown, editorSelectedText, editorSelectedTextLength, frontmatter.fields]);
+  }, [activeNoteFile, aiContextSelectionRange, bodyStartLine, currentFilePath, currentParagraphContext, committedMarkdown, editorSelectedText, editorSelectedTextLength, frontmatter.fields]);
   const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
@@ -6408,6 +6487,7 @@ export default function App() {
     if (pendingChangeQueueRef.current.length > 64) {
       pendingChangeQueueRef.current.splice(0, pendingChangeQueueRef.current.length - 64);
     }
+    schedulePreviewMarkdownSync(value, editorDocVersionRef.current);
 
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, value);
     if (isDirtyRef.current !== nextDirty) {
@@ -6415,11 +6495,11 @@ export default function App() {
       setIsDirty(nextDirty);
     }
     scheduleCommittedMarkdownSync();
-  }, [currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync]);
+  }, [currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync, schedulePreviewMarkdownSync]);
 
   useEffect(() => {
-    markDeferredMarkdownSeen(deferredMarkdown.length);
-  }, [deferredMarkdown]);
+    markDeferredMarkdownSeen(previewMarkdown.length);
+  }, [previewMarkdown]);
 
   const handleEditorSelectionChange = useCallback((selectedText: string, range: MarkdownEditorSelectionRange | null, cursorOffset: number | null) => {
     startTransition(() => {
@@ -10627,7 +10707,7 @@ export default function App() {
                   onWheelCapture={handleContentWheel}
                 >
                   <MarkdownPreview
-                    markdown={deferredMarkdown}
+                    markdown={previewMarkdown}
                     noteRelativePath={currentFilePath}
                     onScroll={handlePreviewScroll}
                     onScrollApiChange={handlePreviewScrollApiChange}

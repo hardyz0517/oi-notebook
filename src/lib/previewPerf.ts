@@ -5,6 +5,9 @@ export interface PreviewPerfStats {
   committedMarkdownScheduleCount: number;
   committedMarkdownSetCount: number;
   deferredMarkdownSeenCount: number;
+  previewMarkdownScheduleCount: number;
+  previewMarkdownSetCount: number;
+  cancelledPreviewScheduleCount: number;
   previewEffectStartCount: number;
   previewEffectCommitCount: number;
   previewScheduleCount: number;
@@ -24,12 +27,17 @@ export interface PreviewPerfStats {
   lastAppEditorChangeAt: number;
   lastCommittedScheduleAt: number;
   lastCommittedSetAt: number;
+  lastPreviewStateScheduleAt: number;
+  lastPreviewStateSetAt: number;
   lastPreviewEffectStartAt: number;
   lastPreviewHtmlReadyAt: number;
   lastPreviewDomCommitAt: number;
   lastEditorToAppMs: number;
   lastAppChangeToCommittedSetMs: number;
   lastCommittedSetToPreviewEffectMs: number;
+  lastCommittedSetToPreviewStateMs: number;
+  lastPreviewStateDelayMs: number;
+  lastPreviewStateToEffectMs: number;
   lastEditorToPreviewEffectMs: number;
   lastEditorToPreviewCommitMs: number;
   lastCommittedToPreviewCommitMs: number;
@@ -59,6 +67,9 @@ const createPreviewPerfStats = (): PreviewPerfStats => ({
   committedMarkdownScheduleCount: 0,
   committedMarkdownSetCount: 0,
   deferredMarkdownSeenCount: 0,
+  previewMarkdownScheduleCount: 0,
+  previewMarkdownSetCount: 0,
+  cancelledPreviewScheduleCount: 0,
   previewEffectStartCount: 0,
   previewEffectCommitCount: 0,
   previewScheduleCount: 0,
@@ -78,12 +89,17 @@ const createPreviewPerfStats = (): PreviewPerfStats => ({
   lastAppEditorChangeAt: 0,
   lastCommittedScheduleAt: 0,
   lastCommittedSetAt: 0,
+  lastPreviewStateScheduleAt: 0,
+  lastPreviewStateSetAt: 0,
   lastPreviewEffectStartAt: 0,
   lastPreviewHtmlReadyAt: 0,
   lastPreviewDomCommitAt: 0,
   lastEditorToAppMs: 0,
   lastAppChangeToCommittedSetMs: 0,
   lastCommittedSetToPreviewEffectMs: 0,
+  lastCommittedSetToPreviewStateMs: 0,
+  lastPreviewStateDelayMs: 0,
+  lastPreviewStateToEffectMs: 0,
   lastEditorToPreviewEffectMs: 0,
   lastEditorToPreviewCommitMs: 0,
   lastCommittedToPreviewCommitMs: 0,
@@ -102,13 +118,23 @@ const createPreviewPerfStats = (): PreviewPerfStats => ({
 
 const now = () => (typeof performance === "undefined" ? Date.now() : performance.now());
 
+function ensurePreviewPerfStatsShape(stats: PreviewPerfStats): PreviewPerfStats {
+  const defaults = createPreviewPerfStats();
+  for (const [key, value] of Object.entries(defaults) as Array<[keyof PreviewPerfStats, number]>) {
+    if (typeof stats[key] !== "number" || Number.isNaN(stats[key])) {
+      stats[key] = value;
+    }
+  }
+  return stats;
+}
+
 export function getPreviewPerfStats(): PreviewPerfStats | null {
   if (!import.meta.env.DEV || typeof window === "undefined") {
     return null;
   }
 
   window.__OINB_PREVIEW_PERF__ ??= createPreviewPerfStats();
-  return window.__OINB_PREVIEW_PERF__;
+  return ensurePreviewPerfStatsShape(window.__OINB_PREVIEW_PERF__);
 }
 
 export function markPreviewEditorChange(docLength: number): void {
@@ -163,9 +189,42 @@ export function markDeferredMarkdownSeen(docLength: number): void {
 
   stats.deferredMarkdownSeenCount += 1;
   stats.lastDocLength = docLength;
-  if (stats.lastCommittedSetAt > 0) {
-    stats.lastDeferredDelayMs = now() - stats.lastCommittedSetAt;
+  stats.lastDeferredDelayMs = 0;
+}
+
+export function markPreviewMarkdownSchedule(docLength: number): void {
+  const stats = getPreviewPerfStats();
+  if (!stats) return;
+
+  stats.previewMarkdownScheduleCount += 1;
+  stats.lastDocLength = docLength;
+  stats.lastPreviewStateScheduleAt = now();
+}
+
+export function markPreviewMarkdownSet(docLength: number): void {
+  const stats = getPreviewPerfStats();
+  if (!stats) return;
+
+  const setAt = now();
+  stats.previewMarkdownSetCount += 1;
+  stats.lastDocLength = docLength;
+  stats.lastPreviewStateSetAt = setAt;
+  stats.lastDeferredDelayMs = 0;
+  if (stats.lastCommittedSetAt >= stats.lastPreviewStateScheduleAt && stats.lastCommittedSetAt > 0) {
+    stats.lastCommittedSetToPreviewStateMs = setAt - stats.lastCommittedSetAt;
+  } else {
+    stats.lastCommittedSetToPreviewStateMs = 0;
   }
+  if (stats.lastPreviewStateScheduleAt > 0) {
+    stats.lastPreviewStateDelayMs = setAt - stats.lastPreviewStateScheduleAt;
+  }
+}
+
+export function markPreviewScheduleCancelled(): void {
+  const stats = getPreviewPerfStats();
+  if (!stats) return;
+
+  stats.cancelledPreviewScheduleCount += 1;
 }
 
 export function markPreviewSchedule(docLength: number): void {
@@ -184,8 +243,13 @@ export function markPreviewEffectStart(docLength: number): number {
   stats.previewEffectStartCount += 1;
   stats.lastDocLength = docLength;
   stats.lastPreviewEffectStartAt = startedAt;
-  if (stats.lastCommittedSetAt > 0) {
+  if (stats.lastCommittedSetAt >= stats.lastPreviewStateScheduleAt && stats.lastCommittedSetAt > 0) {
     stats.lastCommittedSetToPreviewEffectMs = startedAt - stats.lastCommittedSetAt;
+  } else {
+    stats.lastCommittedSetToPreviewEffectMs = 0;
+  }
+  if (stats.lastPreviewStateSetAt > 0) {
+    stats.lastPreviewStateToEffectMs = startedAt - stats.lastPreviewStateSetAt;
   }
   if (stats.lastEditorDocChangedAt > 0) {
     stats.lastEditorToPreviewEffectMs = startedAt - stats.lastEditorDocChangedAt;

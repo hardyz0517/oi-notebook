@@ -115,6 +115,7 @@ function MarkdownPreview({
   useLayoutEffect(() => {
     const root = contentRef.current;
     if (!root) return;
+    if (!/<pre(?:\s|>)/i.test(renderedHtml)) return;
 
     const timeoutIds = new Set<number>();
     let animationFrameId: number | null = null;
@@ -204,6 +205,7 @@ function MarkdownPreview({
   useEffect(() => {
     const root = containerRef.current?.querySelector<HTMLElement>("[data-markdown-preview-content]");
     if (!root) return;
+    if (!renderedHtml.includes("oi-callout")) return;
 
     for (const callout of root.querySelectorAll<HTMLElement>(
       ".oi-callout[data-callout-collapsible='true']",
@@ -268,6 +270,7 @@ function MarkdownPreview({
   useEffect(() => {
     const root = contentRef.current;
     if (!root) return;
+    if (!/<a(?:\s|>)/i.test(renderedHtml)) return;
 
     const handleClick = (event: MouseEvent) => {
       if (
@@ -474,6 +477,8 @@ async function rewritePreviewImageSources(
   noteRelativePath?: string | null,
 ): Promise<string> {
   if (!noteRelativePath) return html;
+  if (!/<img(?:\s|>)/i.test(html)) return html;
+  if (!/assets/i.test(html)) return html;
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
