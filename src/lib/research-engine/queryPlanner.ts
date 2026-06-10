@@ -7,6 +7,7 @@ import type {
   ResearchSearchRequest,
   SearchPolicyDecision,
 } from "./types";
+import { cleanSearchCommandNoise, normalizeOiSearchQuery } from "./oiDiscovery";
 
 const DEFAULT_MAX_QUERIES = 6;
 
@@ -43,12 +44,13 @@ const primaryEntity = (request: ResearchSearchRequest, policy: SearchPolicyDecis
   if (policy.focusEntities.length > 0) {
     const first = policy.focusEntities[0];
     if (/^https?:\/\//i.test(first)) return first;
-    return first;
+    return cleanSearchCommandNoise(first);
   }
-  return request.userQuestion
+  const cleanedQuestion = cleanSearchCommandNoise(request.userQuestion);
+  return cleanedQuestion
     .replace(/最近|最新|今天|昨天|现在|新闻|消息|有什么|是什么|怎么写|实现坑|死了吗|去世了吗|版本/g, " ")
     .replace(/\s+/g, " ")
-    .trim() || request.userQuestion.trim();
+    .trim() || cleanedQuestion;
 };
 
 const officialDomainsFor = (entity: string): string[] | undefined => {
@@ -147,7 +149,7 @@ const pushOiAlgorithmQueries = (queries: PlannedQuery[], algorithms: string[], b
 };
 
 const buildOiQueries = (request: ResearchSearchRequest, entity: string): PlannedQuery[] => {
-  const question = request.userQuestion.trim();
+  const question = normalizeOiSearchQuery(request.userQuestion.trim());
   const haystack = `${question} ${entity}`;
   const luoguProblemId = extractLuoguProblemId(haystack);
   const codeforcesId = extractCodeforcesId(haystack);

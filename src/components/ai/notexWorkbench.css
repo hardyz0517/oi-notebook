@@ -921,7 +921,7 @@ html[data-theme="light"] .notex-workbench {
 
 .notex-bottom-spacer {
   width: 100%;
-  height: var(--notex-composer-avoid-height, 200px);
+  height: calc(var(--notex-composer-avoid-height, 200px) + var(--notex-composer-safe-gap, 24px));
   min-height: 0;
   flex: 0 0 auto;
   border: 0;
@@ -939,7 +939,7 @@ html[data-theme="light"] .notex-workbench {
 }
 
 .notex-scroll-jump {
-  bottom: calc(var(--notex-composer-avoid-height, 200px) + 8px);
+  bottom: calc(var(--notex-composer-avoid-height, 200px) + var(--notex-composer-safe-gap, 24px) + 8px);
 }
 
 .notex-message {

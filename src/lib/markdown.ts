@@ -7,6 +7,7 @@ import remarkRehype from "remark-rehype";
 import rehypeKatex from "rehype-katex";
 import rehypeShiki from "@shikijs/rehype";
 import rehypeStringify from "rehype-stringify";
+import { visit } from "unist-util-visit";
 import type { Element, Root } from "hast";
 import type { BuiltinLanguage, ShikiTransformer } from "shiki";
 import { remarkLuoguCallouts } from "./markdownCallouts";
@@ -95,13 +96,43 @@ const rehypeHighlightPerfEnd = () => (_tree: Root, file: { data: Record<string, 
   file.data.oinbHighlightMs = typeof start === "number" ? now() - start : 0;
 };
 
+const dangerousHtmlTags = new Set([
+  "script",
+  "iframe",
+  "object",
+  "embed",
+  "style",
+  "link",
+  "meta",
+  "base",
+  "form",
+  "input",
+  "button",
+]);
+
+const urlPropertyNames = new Set(["href", "src"]);
+
+const rehypeSanitizeMarkdownHtml = () => (tree: Root) => {
+  visit(tree, "element", (node, index, parent) => {
+    if (dangerousHtmlTags.has(node.tagName)) {
+      if (parent && typeof index === "number") {
+        parent.children.splice(index, 1);
+        return index;
+      }
+      return;
+    }
+
+    sanitizeElementProperties(node);
+  });
+};
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkDirective)
   .use(remarkLuoguCallouts)
   .use(remarkMath)
-  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(remarkRehype)
   .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeHighlightPerfStart)
@@ -118,7 +149,8 @@ const processor = unified()
     cache: shikiHighlightCache,
   })
   .use(rehypeHighlightPerfEnd)
-  .use(rehypeStringify, { allowDangerousHtml: true })
+  .use(rehypeSanitizeMarkdownHtml)
+  .use(rehypeStringify)
   .freeze();
 
 const lightThemeProcessor = unified()
@@ -127,7 +159,7 @@ const lightThemeProcessor = unified()
   .use(remarkDirective)
   .use(remarkLuoguCallouts)
   .use(remarkMath)
-  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(remarkRehype)
   .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeHighlightPerfStart)
@@ -140,7 +172,8 @@ const lightThemeProcessor = unified()
     transformers: [luoguCodeLineTransformer],
   })
   .use(rehypeHighlightPerfEnd)
-  .use(rehypeStringify, { allowDangerousHtml: true })
+  .use(rehypeSanitizeMarkdownHtml)
+  .use(rehypeStringify)
   .freeze();
 
 const darkThemeProcessor = unified()
@@ -149,7 +182,7 @@ const darkThemeProcessor = unified()
   .use(remarkDirective)
   .use(remarkLuoguCallouts)
   .use(remarkMath)
-  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(remarkRehype)
   .use(rehypeKatex, katexOptions)
   .use(rehypeTableMerge)
   .use(rehypeHighlightPerfStart)
@@ -162,7 +195,8 @@ const darkThemeProcessor = unified()
     transformers: [luoguCodeLineTransformer],
   })
   .use(rehypeHighlightPerfEnd)
-  .use(rehypeStringify, { allowDangerousHtml: true })
+  .use(rehypeSanitizeMarkdownHtml)
+  .use(rehypeStringify)
   .freeze();
 
 export async function renderMarkdown(md: string): Promise<string> {
@@ -225,6 +259,54 @@ function stripFrontmatter(markdown: string): string {
 
 function countFencedCodeBlocks(markdown: string): number {
   return markdown.match(/(^|\n)(`{3,}|~{3,})/g)?.length ?? 0;
+}
+
+function sanitizeElementProperties(node: Element) {
+  const properties = node.properties;
+  if (!properties) return;
+
+  for (const propertyName of Object.keys(properties)) {
+    const normalizedName = propertyName.toLowerCase();
+    const value = properties[propertyName];
+
+    if (normalizedName.startsWith("on") || normalizedName === "srcdoc") {
+      delete properties[propertyName];
+      continue;
+    }
+
+    if (urlPropertyNames.has(normalizedName) && !isSafeMarkdownUrl(node.tagName, value)) {
+      delete properties[propertyName];
+    }
+  }
+}
+
+function isSafeMarkdownUrl(tagName: string, value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.every((item) => isSafeMarkdownUrl(tagName, item));
+  }
+  if (typeof value !== "string") return true;
+
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("#")) return true;
+  if (isRelativeUrl(trimmed)) return true;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (tagName === "a") {
+      return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:";
+    }
+    if (tagName === "img") {
+      return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "asset:" || parsed.protocol === "tauri:";
+    }
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isRelativeUrl(value: string): boolean {
+  return !/^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith("//");
 }
 
 function parseCodeMeta(metaString: string, _node: Element): CodeMeta | undefined {

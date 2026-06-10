@@ -135,6 +135,22 @@ const facetForCandidate = (candidate: CandidateSource, config: SourcePortfolioCo
   return byUrl[candidate.url] ?? byUrl[candidate.url.toLocaleLowerCase()] ?? "primary";
 };
 
+const directDiscoveryRoleFor = (candidate: CandidateSource): string | undefined => {
+  const direct = candidate.extensions?.directDiscovery;
+  if (!direct || typeof direct !== "object" || Array.isArray(direct)) return undefined;
+  const role = (direct as Record<string, unknown>).sourceRole;
+  return typeof role === "string" && role.trim() ? role.trim() : undefined;
+};
+
+const portfolioDiversityKeyFor = (candidate: CandidateSource, config: SourcePortfolioConfig): string => {
+  const host = canonicalizePortfolioHost(candidate.host);
+  if (config.queryMode === "oi_problem" && host === "luogu.com.cn") {
+    const role = directDiscoveryRoleFor(candidate);
+    if (role) return `${host}:${role}`;
+  }
+  return host;
+};
+
 export const buildSourcePortfolio = (
   candidates: CandidateSource[],
   config: SourcePortfolioConfig,
@@ -179,7 +195,7 @@ export const buildSourcePortfolio = (
       deferred.push(candidate);
       continue;
     }
-    const host = canonicalizePortfolioHost(candidate.host);
+    const host = portfolioDiversityKeyFor(candidate, config);
     const hostCount = selectedHostCounts.get(host) ?? 0;
     if (hostCount >= maxPerHost) {
       rejectedByHostDiversityCount += 1;

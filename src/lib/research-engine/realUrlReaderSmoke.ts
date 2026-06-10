@@ -8,6 +8,7 @@ import {
   type TauriUrlReaderRedactedRequest,
   type TauriUrlReaderTransportErrorKind,
 } from "./tauriUrlReaderTransport";
+import { runLuoguReaderRequest } from "./luoguReaderTransport";
 import type {
   ExcerptBuildResult,
   ExtractedContentBlock,
@@ -234,6 +235,35 @@ const makeRequestContext = (
     },
   };
   return { request, policy, queryPlan, candidate };
+};
+
+const updateCandidateForLuoguReader = (
+  candidate: CandidateSource,
+  input: { title: string; sourceRole: string },
+): CandidateSource => {
+  const sourceType = input.sourceRole === "problem_statement"
+    ? "problem_statement"
+    : input.sourceRole === "discussion_warning" || input.sourceRole === "discussion"
+      ? "forum"
+      : input.sourceRole === "community_solution"
+        ? "community_solution"
+        : candidate.sourceType;
+  return {
+    ...candidate,
+    title: input.title || candidate.title,
+    sourceType,
+    priority: input.sourceRole === "problem_statement" ? "core" : candidate.priority,
+    evidence: {
+      ...candidate.evidence,
+      reliable: true,
+    },
+    extensions: {
+      ...candidate.extensions,
+      luoguReader: {
+        sourceRole: input.sourceRole,
+      },
+    },
+  };
 };
 
 const cleanText = (value: string): string =>
@@ -521,6 +551,153 @@ export const runResearchEngineRealUrlReaderSmoke = async (
 
   const { request, policy, queryPlan, candidate } = makeRequestContext(validation.url);
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const luoguReader = await runLuoguReaderRequest(validation.url.toString());
+  if (luoguReader) {
+    if (!luoguReader.ok) {
+      return failureResult({
+        ok: false,
+        url: luoguReader.url,
+        status: luoguReader.permissionRequired ? "blocked_or_captcha" : luoguReader.status === "http_non_2xx" ? "http_non_2xx" : "parse_failed",
+        blockCounts: { total: 0 },
+        selectedPassageCount: 0,
+        excerptLength: 0,
+        warnings: luoguReader.warnings,
+        errors: [luoguReader.message],
+        diagnosticsSnapshot: {
+          developerDiagnosticsOnly: true,
+          readerTransport: "tauri_backend_luogu",
+          backendBridgeName: "read_luogu_problem_content",
+          frontendUrlSafetyValidation: true,
+          backendUrlSafetyValidation: true,
+          dnsRebindingProtectionGuaranteed: true,
+          credentials: luoguReader.luoguCookieUsed ? "configured_luogu_cookie" : "omit",
+          cookiesUsed: luoguReader.luoguCookieUsed,
+          luoguCookieUsed: luoguReader.luoguCookieUsed,
+          luoguCookieAvailable: luoguReader.luoguCookieAvailable,
+          permissionRequired: luoguReader.permissionRequired,
+          authorizationUsed: false,
+          browserFetchUsed: false,
+          browserCorsNotApplicable: true,
+          oldSearchPathTouched: false,
+          noteConversationTouched: false,
+          transportStatus: luoguReader.status,
+          luoguReaderKind: luoguReader.target.kind,
+          luoguProblemId: luoguReader.target.problemId,
+          sourceRole: luoguReader.sourceRole,
+        },
+      });
+    }
+
+    const luoguCandidate = updateCandidateForLuoguReader(candidate, {
+      title: luoguReader.title,
+      sourceRole: luoguReader.sourceRole,
+    });
+    const extracted = extractedDocumentFromBody({
+      bodyText: luoguReader.bodyText,
+      contentType: "text/plain; source=luogu_reader",
+      url: validation.url,
+      candidate: luoguCandidate,
+    });
+    const readerResult: UrlReaderResult = {
+      request: { request, policy, queryPlan, candidate: luoguCandidate },
+      candidate: luoguCandidate,
+      status: extracted.status,
+      document: extracted.document,
+      error: extracted.errors.length > 0
+        ? {
+          kind: extracted.status === "needs_js" ? "js_required" : extracted.status === "unsupported" ? "unsupported_content_type" : "extraction_failed",
+          message: extracted.errors.join("; "),
+          recoverable: true,
+        }
+        : undefined,
+      diagnostics: {
+        phase13RealUrlReaderSmoke: true,
+        readerTransport: "tauri_backend_luogu",
+        contentType: "text/plain; source=luogu_reader",
+        bodyBytes: luoguReader.bodyBytes,
+        bodyTruncated: false,
+        browserFetchUsed: false,
+        browserCorsNotApplicable: true,
+        luoguCookieUsed: luoguReader.luoguCookieUsed,
+      },
+    };
+    const quality = evaluateReaderQuality(readerResult);
+    const selection = selectPassages({
+      request,
+      policy,
+      queryPlan,
+      readerResult,
+      quality,
+      budget: { maxChars: 2000, maxBlocks: 10, reserveForMetadata: 180 },
+    });
+    const excerpt: ExcerptBuildResult = buildExcerpt({
+      selection,
+      quality,
+      readerResult,
+      budget: { maxChars: 2200, maxBlocks: 10, reserveForMetadata: 220 },
+    });
+    const warnings = Array.from(new Set([
+      ...luoguReader.warnings,
+      ...extracted.warnings,
+      ...quality.warnings,
+      ...selection.warnings,
+      ...excerpt.warnings,
+      "tauri_backend_luogu_reader",
+    ]));
+    const ok = extracted.errors.length === 0 && quality.canSupportAnswer;
+    return failureResult({
+      ok,
+      url: luoguReader.url,
+      status: urlReaderStatusToSmokeStatus(readerResult.status),
+      contentType: "text/plain; source=luogu_reader",
+      bodyBytes: luoguReader.bodyBytes,
+      bodyPreview: luoguReader.bodyPreview,
+      qualitySummary: {
+        quality: quality.quality,
+        canSupportAnswer: quality.canSupportAnswer,
+        canSupportStrongClaim: quality.canSupportStrongClaim,
+        reasons: quality.reasons,
+      },
+      blockCounts: blockCountsFor(quality),
+      selectedPassageCount: selection.selectedPassages.length,
+      excerptLength: excerpt.excerptMarkdown.length,
+      excerptPreview: previewText(excerpt.excerptMarkdown, EXCERPT_PREVIEW_MAX_CHARS),
+      warnings,
+      errors: extracted.errors,
+      diagnosticsSnapshot: {
+        developerDiagnosticsOnly: true,
+        readerTransport: "tauri_backend_luogu",
+        backendBridgeName: "read_luogu_problem_content",
+        frontendUrlSafetyValidation: true,
+        backendUrlSafetyValidation: true,
+        dnsRebindingProtectionGuaranteed: true,
+        credentials: luoguReader.luoguCookieUsed ? "configured_luogu_cookie" : "omit",
+        cookiesUsed: luoguReader.luoguCookieUsed,
+        luoguCookieUsed: luoguReader.luoguCookieUsed,
+        luoguCookieAvailable: luoguReader.luoguCookieAvailable,
+        permissionRequired: false,
+        authorizationUsed: false,
+        browserFetchUsed: false,
+        browserCorsNotApplicable: true,
+        oldSearchPathTouched: false,
+        noteConversationTouched: false,
+        requestId: request.requestId,
+        contentType: "text/plain; source=luogu_reader",
+        bodyBytes: luoguReader.bodyBytes,
+        bodyPreview: luoguReader.bodyPreview,
+        bodyPreviewLength: luoguReader.bodyPreview.length,
+        readerStatus: readerResult.status,
+        readerQuality: quality.quality,
+        blockCounts: quality.blockStats,
+        passageSelection: selection.coverage,
+        excerptLength: excerpt.excerptMarkdown.length,
+        luoguReaderKind: luoguReader.target.kind,
+        luoguProblemId: luoguReader.target.problemId,
+        sourceRole: luoguReader.sourceRole,
+      },
+    });
+  }
+
   const transport = await runTauriUrlReaderRequest({
     url: validation.url.toString(),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,

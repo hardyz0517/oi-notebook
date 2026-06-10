@@ -1,8 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { renderMarkdown } from "@/lib/markdown";
-import { resolveNoteAssetUrl } from "@/lib/api";
+import { isSafeExternalUrl, openExternalUrl, resolveNoteAssetUrl } from "@/lib/api";
 import {
   markPreviewCommit,
   markPreviewEffectStart,
@@ -293,7 +292,7 @@ function MarkdownPreview({
       const rawHref = anchor.getAttribute("href")?.trim();
       if (!rawHref || rawHref.startsWith("#")) return;
 
-      if (isHttpUrl(rawHref) || isMailtoUrl(rawHref)) {
+      if (isSafeExternalUrl(rawHref)) {
         event.preventDefault();
         void openExternalPreviewLink(rawHref);
         return;
@@ -435,21 +434,13 @@ function normalizeShikiCodeLines(code: HTMLElement) {
   }
 }
 
-function isHttpUrl(href: string): boolean {
-  return /^https?:\/\//i.test(href);
-}
-
-function isMailtoUrl(href: string): boolean {
-  return /^mailto:/i.test(href);
-}
-
 function isRelativePreviewHref(href: string): boolean {
   return !/^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
 async function openExternalPreviewLink(href: string) {
   try {
-    await openUrl(href);
+    await openExternalUrl(href);
   } catch (error) {
     console.warn("Open preview link failed:", error);
     toast.error("Failed to open external link.");

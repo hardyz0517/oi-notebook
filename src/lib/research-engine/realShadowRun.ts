@@ -18,6 +18,7 @@ import type { ResearchEngineRealUrlReaderSmokeResult } from "./realUrlReaderSmok
 import { buildSearchCoveragePlan } from "./searchCoveragePlanner";
 import { buildSearchPolicyDecision } from "./searchPolicy";
 import { buildSourcePortfolio, canonicalizePortfolioHost, type SourcePortfolioQueryMode } from "./sourcePortfolio";
+import { buildDirectOiDiscoveryResults, normalizeOiSearchQuery } from "./oiDiscovery";
 import type { AnswerMode, EvidenceItemBuildInput, EvidenceSummary } from "./evidenceTypes";
 import type { ExcerptBuildResult, ExcerptWarning, ExtractedDocument, ReaderQualityEvaluation, UrlReaderResult, UrlReaderStatus } from "./readerTypes";
 import type { RealDiscoveryProviderName, RealDiscoveryTransportError, RealProviderPayloadKind } from "./realProviderTypes";
@@ -293,6 +294,80 @@ const hostCount = (items: EvidenceItemBuildInput[]): Record<string, number> =>
     if (!host) return acc;
     return { ...acc, [host]: (acc[host] ?? 0) + 1 };
   }, {} as Record<string, number>);
+
+const directDiscoveryRoleForCandidate = (candidate: CandidateSource | undefined): string | undefined => {
+  const direct = candidate?.extensions?.directDiscovery;
+  if (!direct || typeof direct !== "object" || Array.isArray(direct)) return undefined;
+  const role = (direct as Record<string, unknown>).sourceRole;
+  return typeof role === "string" && role.trim() ? role.trim() : undefined;
+};
+
+const evidenceDiversityKeyForCandidate = (candidate: CandidateSource | undefined, intent: string): string => {
+  const host = canonicalizePortfolioHost(candidate?.host);
+  if (intent === "oi_problem" && host === "luogu.com.cn") {
+    const role = directDiscoveryRoleForCandidate(candidate);
+    if (role) return `${host}:${role}`;
+  }
+  return host;
+};
+
+const candidateFromDirectLuoguResult = (
+  raw: DiscoveryRawResult,
+  jobId: string,
+): CandidateSource | undefined => {
+  const direct = raw.extensions?.directDiscovery;
+  if (!direct || typeof direct !== "object" || Array.isArray(direct)) return undefined;
+  const role = (direct as Record<string, unknown>).sourceRole;
+  if (role !== "problem_statement" && role !== "community_solution" && role !== "discussion_warning") return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.url);
+  } catch {
+    return undefined;
+  }
+  const sourceType: CandidateSource["sourceType"] = role === "problem_statement"
+    ? "problem_statement"
+    : role === "community_solution"
+      ? "community_solution"
+      : "forum";
+  return {
+    id: raw.id ?? `direct:luogu:${parsed.toString()}`,
+    jobId,
+    url: parsed.toString().replace(/^https:\/\/www\./i, "https://"),
+    title: raw.title,
+    snippet: raw.snippet,
+    sourceType,
+    priority: role === "problem_statement" ? "core" : "preferred",
+    host: parsed.hostname.toLocaleLowerCase().replace(/^www\./, ""),
+    language: raw.queryLanguage ?? "mixed",
+    queryPurpose: raw.queryPurpose,
+    status: "discovered",
+    readState: "not_started",
+    evidence: { level: "none", reliable: true, fresh: false },
+    discoveredAt: raw.discoveredAt ?? Date.now(),
+    score: raw.providerPriority,
+    extensions: raw.extensions,
+  };
+};
+
+const mergeDirectLuoguReadQueue = (
+  queue: CandidateSource[],
+  directResults: DiscoveryRawResult[],
+  jobId: string,
+): CandidateSource[] => {
+  const directCandidates = directResults
+    .map((raw) => candidateFromDirectLuoguResult(raw, jobId))
+    .filter((candidate): candidate is CandidateSource => Boolean(candidate));
+  const seen = new Set<string>();
+  const output: CandidateSource[] = [];
+  for (const candidate of [...directCandidates, ...queue]) {
+    const key = candidate.url.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(candidate);
+  }
+  return output;
+};
 
 const candidateSummary = (candidate: CandidateSource): ResearchEngineRealShadowRunCandidate => ({
   id: candidate.id,
@@ -732,16 +807,35 @@ export const runResearchEngineRealShadowRun = async (
   const broadNewsDigest = coveragePlan.intent === "broad_news_digest" || isBroadNewsDigestQuery(query);
   const newsMode = coveragePlan.intent === "entity_news" || coveragePlan.intent === "broad_topic_news" || coveragePlan.intent === "broad_news_digest" || policy.mode === "news_recent";
   const maxCandidates = Math.max(clampMaxCandidates(options.maxCandidates, newsMode, broadNewsDigest), coveragePlan.sourceRequirements.targetReadCount);
-  const hostDiversityApplied = newsMode;
+  const portfolioMode = newsMode || coveragePlan.intent === "oi_problem";
+  const hostDiversityApplied = portfolioMode;
   const maxReadAttempts = Math.min(MAX_READ_ATTEMPTS, Math.max(options.maxReadAttempts ?? 0, coveragePlan.reading.maxReadAttempts));
   const evidenceTarget = coveragePlan.sourceRequirements.minUsableBodyEvidence;
-  const sourcePortfolioQueryMode: SourcePortfolioQueryMode = newsMode ? coveragePlan.intent : "normal";
+  const sourcePortfolioQueryMode: SourcePortfolioQueryMode = portfolioMode ? coveragePlan.intent : "normal";
   const plannedQuery = executableQueryPlan.queries[0] ?? {
-    query,
+    query: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
     language: policy.locale,
     purpose: "recall" as const,
     priority: 100,
     expectedSourceTypes: ["official" as const, "mainstream_news" as const],
+  };
+  const directDiscoveryResults = coveragePlan.intent === "oi_problem"
+    ? buildDirectOiDiscoveryResults({
+      rawUserQuery: query,
+      plannedQueries: executableQueryPlan.queries,
+    })
+    : [];
+  const directDiscoveryDiagnostics = {
+    directDiscoveryAttempted: coveragePlan.intent === "oi_problem",
+    directDiscoveryCandidateCount: directDiscoveryResults.length,
+    directDiscoveryReasons: directDiscoveryResults
+      .map((result) => {
+        const direct = result.extensions?.directDiscovery;
+        return direct && typeof direct === "object" && !Array.isArray(direct)
+          ? String((direct as Record<string, unknown>).reason ?? "direct_discovery")
+          : "direct_discovery";
+      }),
+    directDiscoveryUrls: directDiscoveryResults.map((result) => result.url),
   };
   const providerStartedAt = performance.now();
   let providerStatus: ResearchEngineRealShadowRunResult["providerStatus"] = "failed";
@@ -752,8 +846,11 @@ export const runResearchEngineRealShadowRun = async (
   let redactedProviderRequest: BrowserProviderRedactedRequest | undefined;
   let providerBodyPreview: string | undefined;
   let keylessProviderDiagnostics: Record<string, unknown> | undefined;
+  let providerSearchAttempted = false;
+  let providerSearchSkippedReason: string | undefined;
 
   if (shadowConfig.mode === "keyless_bing") {
+    providerSearchAttempted = true;
     const keyless = await runKeylessBingProvider({
       query: plannedQuery.query,
       rawUserQuery: query,
@@ -774,6 +871,7 @@ export const runResearchEngineRealShadowRun = async (
     providerStatus = providerStatusFromKeylessBingStatus(keyless.status);
     mark("provider", keyless.ok ? "completed" : "failed", `Keyless Bing public search: ${keyless.status}; results=${rawResults.length}`, providerStartedAt);
   } else {
+    providerSearchAttempted = true;
     const providerTransport = await runBrowserProviderSmokeRequest({
       providerName: shadowConfig.providerName as Extract<ShadowProviderName, "bocha" | "brave">,
       endpoint: shadowConfig.endpoint ?? "",
@@ -789,7 +887,7 @@ export const runResearchEngineRealShadowRun = async (
       providerStatus = providerStatusFromError(providerTransport.error);
       errors.push(providerTransport.error.message);
       mark("provider", "failed", providerTransport.error.message, providerStartedAt);
-      return finalize({
+      if (directDiscoveryResults.length === 0) return finalize({
         ok: false,
         query,
         providerName: shadowConfig.providerName,
@@ -808,6 +906,13 @@ export const runResearchEngineRealShadowRun = async (
           developerDiagnosticsOnly: true,
           oldSearchPathTouched: false,
           noteConversationTouched: false,
+          providerSearchScheduled: true,
+          providerSearchAttempted,
+          providerSearchSkippedReason,
+          cleanedQuery: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
+          actualProviderQuery: plannedQuery.query,
+          actualProviderQueries: keylessProviderDiagnostics?.bridgeQueries ?? [plannedQuery.query],
+          ...directDiscoveryDiagnostics,
           providerStatus,
           redactedProviderRequest,
           providerBodyPreview,
@@ -815,11 +920,14 @@ export const runResearchEngineRealShadowRun = async (
           maxCandidates,
         },
       });
+      warnings.push("provider_failed_direct_discovery_candidates_available");
     }
-    mark("provider", "completed", `Provider HTTP ${providerTransport.statusCode}`, providerStartedAt);
+    if (providerTransport.ok) mark("provider", "completed", `Provider HTTP ${providerTransport.statusCode}`, providerStartedAt);
 
     const normalizeStartedAt = performance.now();
-    if (!providerTransport.bodyText.trim()) {
+    if (!providerTransport.ok) {
+      mark("normalize", "skipped", "Provider transport failed; direct discovery candidates will be used.", normalizeStartedAt);
+    } else if (!providerTransport.bodyText.trim()) {
       providerStatus = "empty_result";
       errors.push("provider response body is empty");
       mark("normalize", "failed", "Provider response body is empty.", normalizeStartedAt);
@@ -854,6 +962,8 @@ export const runResearchEngineRealShadowRun = async (
     }
   }
 
+  rawResults = [...directDiscoveryResults, ...rawResults];
+
   if (aborted()) {
     mark("abort", "aborted", "Shadow run aborted after provider response; no URL reader requests were started.");
     return finalize({
@@ -876,6 +986,13 @@ export const runResearchEngineRealShadowRun = async (
         oldSearchPathTouched: false,
         noteConversationTouched: false,
         aborted: true,
+        providerSearchScheduled: true,
+        providerSearchAttempted,
+        providerSearchSkippedReason,
+        cleanedQuery: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
+        actualProviderQuery: plannedQuery.query,
+        actualProviderQueries: keylessProviderDiagnostics?.bridgeQueries ?? [plannedQuery.query],
+        ...directDiscoveryDiagnostics,
         redactedProviderRequest,
         providerBodyPreview,
         keylessProviderDiagnostics,
@@ -886,7 +1003,7 @@ export const runResearchEngineRealShadowRun = async (
   }
 
   if (
-    rawResults.length === 0 ||
+    (rawResults.length === 0 && directDiscoveryResults.length === 0) ||
     providerStatus === "malformed_response" ||
     providerStatus === "empty_result" ||
     providerStatus === "parse_failed" ||
@@ -899,7 +1016,7 @@ export const runResearchEngineRealShadowRun = async (
     providerStatus === "unsupported_environment" ||
     providerStatus === "unknown_error"
   ) {
-    return finalize({
+    if (directDiscoveryResults.length === 0) return finalize({
       ok: false,
       query,
       providerName: shadowConfig.providerName,
@@ -919,6 +1036,13 @@ export const runResearchEngineRealShadowRun = async (
         oldSearchPathTouched: false,
         noteConversationTouched: false,
         ...coveragePlan.diagnostics,
+        providerSearchScheduled: true,
+        providerSearchAttempted,
+        providerSearchSkippedReason,
+        cleanedQuery: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
+        actualProviderQuery: plannedQuery.query,
+        actualProviderQueries: keylessProviderDiagnostics?.bridgeQueries ?? [plannedQuery.query],
+        ...directDiscoveryDiagnostics,
         plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
         coveragePlanIntent: coveragePlan.intent,
         coverageFacets: coveragePlan.facets.map((facet) => facet.id),
@@ -982,7 +1106,18 @@ export const runResearchEngineRealShadowRun = async (
     coveragePlan,
     candidateFacetByUrl,
   });
-  const selectedCandidates = (hostDiversityApplied ? sourcePortfolio.portfolioCandidates : candidatePool.selectedCandidates).map(candidateSummary);
+  const directLuoguReadQueue = coveragePlan.intent === "oi_problem"
+    ? mergeDirectLuoguReadQueue(
+      hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates,
+      directDiscoveryResults,
+      request.requestId ?? "developer-real-shadow-run",
+    )
+    : hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates;
+  const selectedCandidates = mergeDirectLuoguReadQueue(
+    hostDiversityApplied ? sourcePortfolio.portfolioCandidates : candidatePool.selectedCandidates,
+    coveragePlan.intent === "oi_problem" ? directDiscoveryResults : [],
+    request.requestId ?? "developer-real-shadow-run",
+  ).map(candidateSummary);
   mark("candidate_pool", candidatePool.selectedCount > 0 ? "completed" : "failed", `${candidatePool.selectedCount} selected candidates`, candidateStartedAt);
   mark(
     "source_portfolio",
@@ -1014,6 +1149,13 @@ export const runResearchEngineRealShadowRun = async (
         oldSearchPathTouched: false,
         noteConversationTouched: false,
         ...coveragePlan.diagnostics,
+        providerSearchScheduled: true,
+        providerSearchAttempted,
+        providerSearchSkippedReason,
+        cleanedQuery: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
+        actualProviderQuery: plannedQuery.query,
+        actualProviderQueries: keylessProviderDiagnostics?.bridgeQueries ?? [plannedQuery.query],
+        ...directDiscoveryDiagnostics,
         plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
         coveragePlanIntent: coveragePlan.intent,
         coverageFacets: coveragePlan.facets.map((facet) => facet.id),
@@ -1042,9 +1184,10 @@ export const runResearchEngineRealShadowRun = async (
         },
       },
     });
+    warnings.push(`provider_${providerStatus}_direct_discovery_candidates_available`);
   }
 
-  const readQueue = (hostDiversityApplied ? sourcePortfolio.readQueue : candidatePool.selectedCandidates).slice(0, maxReadAttempts);
+  const readQueue = directLuoguReadQueue.slice(0, maxReadAttempts);
   const readerStartedAt = performance.now();
   const concurrentReader = await runConcurrentReader({
     readQueue,
@@ -1143,8 +1286,9 @@ export const runResearchEngineRealShadowRun = async (
       mapped.warnings = unique([...mapped.warnings, mapped.oiTopicalityRejectedReason ?? "oi_offtopic_body"]);
       continue;
     }
-    const candidateHost = canonicalizePortfolioHost(attempt.candidate.host);
-    const existingHostCount = hostCount(evidenceItems)[candidateHost] ?? 0;
+    const candidateHost = evidenceDiversityKeyForCandidate(attempt.candidate, coveragePlan.intent);
+    const existingHostCount = evidenceItems.reduce((count, item) =>
+      count + (evidenceDiversityKeyForCandidate(item.candidate, coveragePlan.intent) === candidateHost ? 1 : 0), 0);
     if (hostDiversityApplied && existingHostCount >= NEWS_PER_HOST_EVIDENCE_LIMIT) {
       skippedSameHostEvidence.push(candidateHost);
       if (mapped) mapped.warnings = unique([...mapped.warnings, "source_diversity_same_host_evidence_skipped"]);
@@ -1284,6 +1428,8 @@ export const runResearchEngineRealShadowRun = async (
     ? "aborted"
     : (evidencePortfolioGate.evidenceGateStatus === "failed" || synthesisFailed) && successfulReads > 0
       ? evidencePortfolioGate.evidenceGateReason === "insufficient_distinct_body_evidence_hosts" ? "source_diversity_failed" : "insufficient_evidence"
+    : successfulReads > 0 && directDiscoveryResults.length > 0 && providerStatus !== "available" && providerStatus !== "partial"
+      ? "partial"
     : successfulReads > 0
       ? discoveryStatusFromProviderStatus(providerStatus)
       : providerStatusFromReaderFailures(readAttempts);
@@ -1310,6 +1456,13 @@ export const runResearchEngineRealShadowRun = async (
       oldSearchPathTouched: false,
       noteConversationTouched: false,
       ...coveragePlan.diagnostics,
+      providerSearchScheduled: true,
+      providerSearchAttempted,
+      providerSearchSkippedReason,
+      cleanedQuery: coveragePlan.intent === "oi_problem" ? normalizeOiSearchQuery(query) : query,
+      actualProviderQuery: plannedQuery.query,
+      actualProviderQueries: keylessProviderDiagnostics?.bridgeQueries ?? [plannedQuery.query],
+      ...directDiscoveryDiagnostics,
       plannerIntent: coveragePlan.diagnostics.plannerIntent ?? coveragePlan.intent,
       coveragePlanIntent: coveragePlan.intent,
       coverageFacets: coveragePlan.facets.map((facet) => facet.id),

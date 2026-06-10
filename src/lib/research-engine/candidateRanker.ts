@@ -90,6 +90,7 @@ const oiTopicalBoost = (candidate: NormalizedCandidate, context: RankContext): {
   const genericPlatformPage = /^(?:\/)?$|\/(?:problemset|contests?|tasks|blog|login|home|about|help)\/?$/i.test(path);
   const offTopicHost = /(?:support\.google\.com|google\.com|wikipedia\.org|baidu\.com|bbc\.co\.uk|mobile01\.com|computertechinfo\.com|techbloat\.com|geekchamp\.com|thecrazyprogrammer\.com|completeera\.com|softonic\.com)$/i.test(host);
   const lowQualityHost = /(?:csdn\.net|geeksforgeeks\.org|programmerall\.com|educba\.com|jianshu\.com|51cto\.com)$/i.test(host);
+  const dictionaryHost = /(?:hanyuguoxue\.com|zdic\.net|cidian|zidian|dictionary)$/i.test(host);
 
   let boost = 0;
   let penalty = 0;
@@ -100,6 +101,7 @@ const oiTopicalBoost = (candidate: NormalizedCandidate, context: RankContext): {
   if (officialProblemPath) { boost += 0.75; reasons.push("official problem/editorial path"); }
   if (trustedReference && (algorithmHit || queryAlgorithms.length > 0)) { boost += 0.7; reasons.push("trusted algorithm reference topical"); }
   if (offTopicHost) { penalty += 1.1; reasons.push("known off-topic generic host for oi"); }
+  if (dictionaryHost) { penalty += 1.4; reasons.push("dictionary source is off-topic for oi discovery"); }
   if (lowQualityHost && queryProblemIds.length > 0) { penalty += 0.75; reasons.push("low quality source for concrete problem"); }
   if (genericPlatformPage && !problemHit && !algorithmHit) { penalty += 0.85; reasons.push("generic platform page"); }
   if (queryProblemIds.length > 0 && !problemHit && !roleHit && !officialProblemPath) { penalty += 0.7; reasons.push("missing concrete problem signal"); }

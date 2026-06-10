@@ -948,7 +948,7 @@ const runBridgeQueries = async (
       errors: [],
       providerGlobalTimeoutMs: input.providerGlobalTimeoutMs,
       perQueryTimeoutMs: input.providerGlobalTimeoutMs,
-      completedQueryCount: 1,
+      completedQueryCount: input.bridgeQueries.length,
       failedQueryCount: 0,
       timedOutQueryCount: 0,
       partialResultsUsed: false,
@@ -957,11 +957,11 @@ const runBridgeQueries = async (
       earlyStop: false,
       distinctHostCountAtStop: Object.keys(distribution(hostsFromSources(sources))).length,
       candidateCountAtStop: sources.length,
-      perQueryElapsedMs: { [input.query]: elapsedMsSince(startedAt) },
-      perQueryResultCount: { [input.query]: sources.length },
+      perQueryElapsedMs: Object.fromEntries(input.bridgeQueries.map((query) => [query, elapsedMsSince(startedAt)])),
+      perQueryResultCount: Object.fromEntries(input.bridgeQueries.map((query) => [query, 0])),
       perFacetResultCount: {},
-      perQueryHostPreview: { [input.query]: unique(hostsFromSources(sources)).slice(0, 6) },
-      candidateShortage: false,
+      perQueryHostPreview: Object.fromEntries(input.bridgeQueries.map((query) => [query, unique(hostsFromSources(sources)).slice(0, 6)])),
+      candidateShortage: (input.coveragePlan?.sourceRequirements.targetReadCount ?? 0) > 0 && sources.length < (input.coveragePlan?.sourceRequirements.targetReadCount ?? 0),
     };
   }
 

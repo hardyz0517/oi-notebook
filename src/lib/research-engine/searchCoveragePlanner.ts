@@ -17,6 +17,7 @@ import {
 } from "./researchPlanTypes";
 import { buildFreshnessWindowPolicy } from "./dateSignals";
 import type { PlannedQuery, SearchPolicyDecision } from "./types";
+import { cleanSearchCommandNoise, normalizeOiSearchQuery } from "./oiDiscovery";
 
 export type CoveragePlannerInput = {
   userQuery: string;
@@ -44,7 +45,10 @@ const topicFrom = (input: CoveragePlannerInput): string => {
   const llmTopic = compact(input.llmPlan?.topic ?? "");
   if (llmTopic) return llmTopic;
   const firstRule = compact(input.rulePlannedQueries[0]?.query ?? "");
-  return firstRule || compact(input.userQuery) || "current topic";
+  const fallbackTopic = firstRule || cleanSearchCommandNoise(input.userQuery) || "current topic";
+  return input.policy.mode === "oi_algorithm" || input.searchMode === "oi_algorithm"
+    ? normalizeOiSearchQuery(fallbackTopic)
+    : fallbackTopic;
 };
 
 const isBroadDigest = (query: string): boolean =>

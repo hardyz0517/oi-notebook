@@ -33,6 +33,8 @@ import { buildSearchPolicyDecision } from "./searchPolicy";
 import { summarizeResearchEngineSelfCheck } from "./selfCheckReporter";
 import { verifyGeneratedAnswer } from "./postGenerationVerifier";
 import { createSchedulerSnapshot, scheduleCandidates, simulateSchedulerStep } from "./scheduler";
+import { buildSearchCoveragePlan } from "./searchCoveragePlanner";
+import { buildDirectOiDiscoveryResults, normalizeOiSearchQuery } from "./oiDiscovery";
 import type {
   CandidatePriority,
   CandidateSource,
@@ -57,6 +59,11 @@ const PHASE_1_CASES: ResearchEngineSelfCheckCase[] = [
   { id: "centroid-tree", question: "点分树常见实现坑", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "luogu-p3803-fft", question: "洛谷 P3803 FFT 题解", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "p3375-kmp-template", question: "P3375 KMP 模板", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "luogu-p1001-command", question: "搜一下洛谷P1001", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "luogu-p1001-spaced", question: "洛谷 P1001", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "p1001-solution", question: "P1001 题解", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "p1001-help-search", question: "帮我搜一下 P1001", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
+  { id: "hld-oi-wiki-command", question: "搜一下树链剖分 OI Wiki", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "codeforces-1900c-editorial", question: "Codeforces 1900C editorial", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "atcoder-abc123d-editorial", question: "AtCoder abc123_d editorial", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
   { id: "cses-shortest-routes", question: "CSES shortest routes solution", expectedNeedSearch: true, expectedMode: "oi_algorithm", expectedRisk: "medium", expectedFreshness: "stable" },
@@ -123,6 +130,18 @@ const phase1Result = (testCase: ResearchEngineSelfCheckCase): ResearchEngineSelf
   if (testCase.id === "hld-oi-wiki") {
     assertTrue(failures, "hld_query_missing_oi_wiki", queryText.includes("树链剖分 oi wiki"));
   }
+  if (testCase.id === "luogu-p1001-command") {
+    assertTrue(failures, "p1001_query_missing_luogu", queryText.includes("洛谷 p1001") || queryText.includes("luogu p1001"));
+    assertTrue(failures, "command_noise_should_not_be_primary_query", !plan.queries[0]?.query.startsWith("搜"));
+  }
+  if (testCase.id === "p1001-help-search") {
+    assertTrue(failures, "help_search_noise_should_be_removed", !queryText.includes("帮我搜"));
+    assertTrue(failures, "p1001_query_missing", queryText.includes("p1001"));
+  }
+  if (testCase.id === "hld-oi-wiki-command") {
+    assertTrue(failures, "hld_command_noise_should_be_removed", !plan.queries[0]?.query.startsWith("搜"));
+    assertTrue(failures, "hld_command_missing_oi_wiki", queryText.includes("树链剖分 oi wiki"));
+  }
 
   return {
     id: testCase.id,
@@ -175,6 +194,47 @@ const phase2Result = (
 };
 
 const phase2Cases = (): ResearchEngineSelfCheckResult[] => [
+  phase2Result("oi-command-cleanup-direct-luogu", "搜一下洛谷P1001", (failures) => {
+    const context = phase3Context("oi-command-cleanup-direct-luogu", "搜一下洛谷P1001");
+    const coverage = buildSearchCoveragePlan({
+      userQuery: context.request.userQuestion,
+      policy: context.policy,
+      searchMode: "oi_algorithm",
+      freshness: context.policy.freshness,
+      rulePlannedQueries: context.queryPlan.queries,
+      llmDiagnostics: {
+        llmPlannerStarted: false,
+        llmPlannerSucceeded: false,
+        llmPlannerFailedReason: "planner_not_required_for_stable_reference_intent",
+        plannerSanitizationNotes: [],
+      },
+    });
+    const direct = buildDirectOiDiscoveryResults({
+      rawUserQuery: context.request.userQuestion,
+      plannedQueries: coverage.plannedQueries,
+      nowMs: 0,
+    });
+    assertEqual(failures, "policyMode", context.policy.mode, "oi_algorithm");
+    assertEqual(failures, "coverageIntent", coverage.intent, "oi_problem");
+    assertEqual(failures, "cleanedQuery", normalizeOiSearchQuery(context.request.userQuestion), "洛谷 P1001");
+    assertTrue(failures, "planned_queries_should_not_start_with_command", coverage.plannedQueries.every((query) => !query.query.startsWith("搜")));
+    assertTrue(failures, "coverage_queries_should_use_p1001", coverage.queries.some((query) => query.toLocaleLowerCase().includes("p1001")));
+    assertTrue(failures, "direct_luogu_missing", direct.some((result) => result.url === "https://www.luogu.com.cn/problem/P1001"));
+    assertEqual(failures, "direct_source_type", direct[0]?.sourceTypeHint ?? "unknown", "official");
+    assertEqual(failures, "direct_query_purpose", direct[0]?.queryPurpose ?? "recall", "exact_problem");
+  }),
+  phase2Result("oi-dictionary-host-demoted", "洛谷 P1001", (failures) => {
+    const context = phase3Context("oi-dictionary-host-demoted", "洛谷 P1001");
+    const pool = buildCandidatePool({
+      ...context,
+      rawResults: [
+        rawResult("dict-sou", { url: "https://www.zdic.net/hans/%E6%90%9C", title: "搜 sōu", snippet: "字典解释", resultIndex: 0 }),
+        rawResult("luogu-p1001", { url: "https://www.luogu.com.cn/problem/P1001", title: "P1001 A+B Problem - 洛谷", snippet: "problem statement", resultIndex: 1, sourceTypeHint: "official" }),
+      ],
+    });
+    assertEqual(failures, "topHost", pool.selectedCandidates[0]?.host ?? "missing", "luogu.com.cn");
+    assertTrue(failures, "dictionary_should_not_be_first", pool.selectedCandidates[0]?.host !== "www.zdic.net");
+  }),
   phase2Result("scheduler-priority-barrier-waits", "official slow low quality fast", (failures) => {
     const candidates = [
       candidate("official-doc", { priority: "core", sourceType: "documentation", readState: "reading", status: "reading", score: 20 }),

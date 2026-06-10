@@ -11,8 +11,26 @@ export interface SaveNoteAssetResult {
   assetRelativePath: string;
 }
 
+const safeExternalProtocols = new Set(["http:", "https:", "mailto:"]);
+
+export function isSafeExternalUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+
+  try {
+    return safeExternalProtocols.has(new URL(trimmed).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
-  await openUrl(url);
+  const trimmed = url.trim();
+  if (!isSafeExternalUrl(trimmed)) {
+    throw new Error("Unsupported external URL protocol.");
+  }
+
+  await openUrl(trimmed);
 }
 
 export interface NoteSearchResult {
@@ -27,6 +45,27 @@ export interface NoteSearchResult {
 export interface ImportLuoguInsightResult {
   relativePath: string;
   aiModel: string;
+}
+
+export interface ReadLuoguProblemContentInput {
+  problemId: string;
+  kind: "problem" | "solution" | "discussion" | string;
+}
+
+export interface ReadLuoguProblemContentResult {
+  problemId: string;
+  kind: string;
+  url: string;
+  fetched: boolean;
+  status: string;
+  title: string;
+  excerpt: string;
+  excerptChars: number;
+  sourceRole: string;
+  luoguCookieUsed: boolean;
+  luoguCookieAvailable: boolean;
+  permissionRequired: boolean;
+  error: string | null;
 }
 
 export interface LuoguConfig {
@@ -652,6 +691,16 @@ export async function updateLuoguLastSubmissionId(
 export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> {
   try {
     return await invoke<TestLuoguConnectionResult>("test_luogu_connection");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function readLuoguProblemContent(
+  input: ReadLuoguProblemContentInput,
+): Promise<ReadLuoguProblemContentResult> {
+  try {
+    return await invoke<ReadLuoguProblemContentResult>("read_luogu_problem_content", { input });
   } catch (e) {
     throw toError(e);
   }

@@ -50,6 +50,12 @@ export type SearchPreparationDiagnostics = {
   candidateShortage?: string;
   sourcePortfolioSummary?: string;
   concurrentReaderSummary?: string;
+  cleanedQuery?: string;
+  actualProviderQuery?: string;
+  actualProviderQueries?: string;
+  providerSearchSkippedReason?: string;
+  directDiscoveryUrls?: string;
+  directDiscoveryReasons?: string;
   ruleFallbackUsed: boolean;
   directDiscoveryScheduled: boolean;
   directDiscoveryAttempted: boolean;
@@ -270,11 +276,17 @@ export const formatSearchPreparationDiagnostics = (diagnostics: SearchPreparatio
   diagnostics.candidateShortage ? `candidateShortage=${encodeDebugValue(diagnostics.candidateShortage)}` : undefined,
   diagnostics.sourcePortfolioSummary ? `sourcePortfolioSummary=${encodeDebugValue(diagnostics.sourcePortfolioSummary)}` : undefined,
   diagnostics.concurrentReaderSummary ? `concurrentReaderSummary=${encodeDebugValue(diagnostics.concurrentReaderSummary)}` : undefined,
+  diagnostics.cleanedQuery ? `cleanedQuery=${encodeDebugValue(diagnostics.cleanedQuery)}` : undefined,
+  diagnostics.actualProviderQuery ? `actualProviderQuery=${encodeDebugValue(diagnostics.actualProviderQuery)}` : undefined,
+  diagnostics.actualProviderQueries ? `actualProviderQueries=${encodeDebugValue(diagnostics.actualProviderQueries)}` : undefined,
+  diagnostics.directDiscoveryUrls ? `directDiscoveryUrls=${encodeDebugValue(diagnostics.directDiscoveryUrls)}` : undefined,
+  diagnostics.directDiscoveryReasons ? `directDiscoveryReasons=${encodeDebugValue(diagnostics.directDiscoveryReasons)}` : undefined,
   `ruleFallbackUsed=${diagnostics.ruleFallbackUsed ? "yes" : "no"}`,
   `directDiscoveryScheduled=${diagnostics.directDiscoveryScheduled ? "yes" : "no"}`,
   `directDiscoveryAttempted=${diagnostics.directDiscoveryAttempted ? "yes" : "no"}`,
   `providerSearchScheduled=${diagnostics.providerSearchScheduled ? "yes" : "no"}`,
   `providerSearchAttempted=${diagnostics.providerSearchAttempted ? "yes" : "no"}`,
+  diagnostics.providerSearchSkippedReason ? `providerSearchSkippedReason=${encodeDebugValue(diagnostics.providerSearchSkippedReason)}` : undefined,
   `downgradedToNormalAnswer=${diagnostics.downgradedToNormalAnswer ? "yes" : "no"}`,
   diagnostics.downgradeReason ? `downgradeReason=${encodeDebugValue(diagnostics.downgradeReason)}` : undefined,
 ].filter((part): part is string => Boolean(part)).join("; ");
@@ -478,6 +490,12 @@ export const parseSearchPreparationDiagnostics = (raw: string): SearchPreparatio
     candidateShortage: lookupDebugField(parts, "candidateShortage"),
     sourcePortfolioSummary: lookupDebugField(parts, "sourcePortfolioSummary"),
     concurrentReaderSummary: lookupDebugField(parts, "concurrentReaderSummary"),
+    cleanedQuery: lookupDebugField(parts, "cleanedQuery"),
+    actualProviderQuery: lookupDebugField(parts, "actualProviderQuery"),
+    actualProviderQueries: lookupDebugField(parts, "actualProviderQueries"),
+    providerSearchSkippedReason: lookupDebugField(parts, "providerSearchSkippedReason"),
+    directDiscoveryUrls: lookupDebugField(parts, "directDiscoveryUrls"),
+    directDiscoveryReasons: lookupDebugField(parts, "directDiscoveryReasons"),
     ruleFallbackUsed: lookupDebugField(parts, "ruleFallbackUsed") === "yes",
     directDiscoveryScheduled: lookupDebugField(parts, "directDiscoveryScheduled") === "yes",
     directDiscoveryAttempted: lookupDebugField(parts, "directDiscoveryAttempted") === "yes",
@@ -812,6 +830,11 @@ export const formatSearchPreparationDiagnosticsForDisplay = (raw: string): strin
     diagnostics.candidateShortage ? `candidateShortage: ${diagnostics.candidateShortage}` : undefined,
     diagnostics.sourcePortfolioSummary ? `sourcePortfolioSummary: ${diagnostics.sourcePortfolioSummary}` : undefined,
     diagnostics.concurrentReaderSummary ? `concurrentReaderSummary: ${diagnostics.concurrentReaderSummary}` : undefined,
+    diagnostics.cleanedQuery ? `cleanedQuery: ${diagnostics.cleanedQuery}` : undefined,
+    diagnostics.actualProviderQuery ? `actualProviderQuery: ${diagnostics.actualProviderQuery}` : undefined,
+    diagnostics.actualProviderQueries ? `actualProviderQueries: ${diagnostics.actualProviderQueries}` : undefined,
+    diagnostics.directDiscoveryUrls ? `directDiscoveryUrls: ${diagnostics.directDiscoveryUrls}` : undefined,
+    diagnostics.directDiscoveryReasons ? `directDiscoveryReasons: ${diagnostics.directDiscoveryReasons}` : undefined,
     `ruleFallbackUsed：${diagnostics.ruleFallbackUsed ? "yes" : "no"}`,
     `directDiscoveryScheduled：${diagnostics.directDiscoveryScheduled ? "yes" : "no"}`,
     `directDiscoveryAttempted：${diagnostics.directDiscoveryAttempted ? "yes" : "no"}`,

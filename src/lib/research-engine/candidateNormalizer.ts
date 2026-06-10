@@ -260,6 +260,19 @@ export const normalizeDiscoveryResult = (
 export const normalizeDiscoveryResults = (rawResults: DiscoveryRawResult[]): NormalizedCandidate[] =>
   rawResults.map((raw, index) => normalizeDiscoveryResult(raw, index));
 
+const expectedSourceTypeForCandidate = (
+  candidate: NormalizedCandidate,
+): ExpectedSourceType | "seo_aggregator" | "unknown" => {
+  const directDiscovery = candidate.raw.extensions?.directDiscovery;
+  if (directDiscovery && typeof directDiscovery === "object" && !Array.isArray(directDiscovery)) {
+    const sourceRole = (directDiscovery as Record<string, unknown>).sourceRole;
+    if (sourceRole === "problem_statement") return "problem_statement";
+    if (sourceRole === "community_solution") return "community_solution";
+    if (sourceRole === "discussion_warning" || sourceRole === "discussion") return "forum";
+  }
+  return sourceToExpected[candidate.sourceType];
+};
+
 export const toCandidateSource = (
   candidate: NormalizedCandidate,
   jobId: string,
@@ -269,7 +282,7 @@ export const toCandidateSource = (
   url: candidate.canonicalUrl,
   title: candidate.title,
   snippet: candidate.snippet,
-  sourceType: sourceToExpected[candidate.sourceType],
+  sourceType: expectedSourceTypeForCandidate(candidate),
   priority: candidate.sourceType === "official" || candidate.sourceType === "docs"
     ? "core"
     : candidate.reliability === "high"
@@ -286,6 +299,7 @@ export const toCandidateSource = (
   discoveredAt: candidate.discoveredAt,
   score: candidate.rank?.total,
   extensions: {
+    ...candidate.raw.extensions,
     phase3: {
       sourceType: candidate.sourceType,
       reliability: candidate.reliability,

@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import type { AiPolishPreview, AiSidebarNoteContext, AiSidebarProps } from "@/components/ai/types";
 import { getMarkdownRenderCacheKey, readMarkdownRenderCache, writeMarkdownRenderCache } from "@/components/ai/markdownCache";
 import {
+  isSafeExternalUrl,
   openExternalUrl,
   fetchWebSourceExcerpts,
   planSearchQueries,
@@ -327,6 +328,7 @@ const AI_COMPRESSED_CONTEXT_MAX_CHARS = 4000;
 const AI_COMPRESSION_INPUT_MAX_CHARS = 18000;
 const AI_COMPRESSION_MESSAGE_MAX_CHARS = 1400;
 const AI_SCROLL_BOTTOM_THRESHOLD = 24;
+const AI_POST_SEND_BREATHING_GAP_RATIO = 0.7;
 const AI_CONVERSATION_PERSIST_DEBOUNCE_MS = 500;
 const AI_HYDRATION_CHUNK_BUDGET_MS = 7;
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
@@ -875,6 +877,14 @@ const formatResearchEngineSearchDebug = (result: ResearchEngineRealShadowRunResu
     `candidateShortage=${encodeDebugValue(String(result.diagnosticsSnapshot.candidateShortage ?? false))}`,
     `sourcePortfolioSummary=${encodeDebugValue(String(result.diagnosticsSnapshot.sourcePortfolioSummary ?? "none"))}`,
     `concurrentReaderSummary=${encodeDebugValue(String(result.diagnosticsSnapshot.concurrentReaderSummary ?? "none"))}`,
+    `providerSearchScheduled=${encodeDebugValue(String(result.diagnosticsSnapshot.providerSearchScheduled ?? true))}`,
+    `providerSearchAttempted=${encodeDebugValue(String(result.diagnosticsSnapshot.providerSearchAttempted ?? Boolean(result.diagnosticsSnapshot.keylessProviderDiagnostics)))}`,
+    `providerSearchSkippedReason=${encodeDebugValue(String(result.diagnosticsSnapshot.providerSearchSkippedReason ?? "none"))}`,
+    `cleanedQuery=${encodeDebugValue(String(result.diagnosticsSnapshot.cleanedQuery ?? "none"))}`,
+    `actualProviderQuery=${encodeDebugValue(String(result.diagnosticsSnapshot.actualProviderQuery ?? "none"))}`,
+    `actualProviderQueries=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.actualProviderQueries) ? result.diagnosticsSnapshot.actualProviderQueries.join("|") : "none")}`,
+    `directDiscoveryUrls=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.directDiscoveryUrls) ? result.diagnosticsSnapshot.directDiscoveryUrls.join("|") : "none")}`,
+    `directDiscoveryReasons=${encodeDebugValue(Array.isArray(result.diagnosticsSnapshot.directDiscoveryReasons) ? result.diagnosticsSnapshot.directDiscoveryReasons.join("|") : "none")}`,
     `rawResultCount=${result.rawResultCount}`,
     `normalizedResultCount=${result.normalizedResultCount}`,
     `candidateCount=${result.candidateCount}`,
@@ -2502,8 +2512,6 @@ const decorateAiCodeBlocks = (html: string): string => {
   return template.innerHTML;
 };
 
-const isHttpUrl = (href: string): boolean => /^https?:\/\//i.test(href);
-
 const getCitationStatusLabel = (citation: WebSourceCitation): string => {
   if (citation.isConstructed && citation.excerptStatus !== "fetched") return "公开资料入口";
   if (citation.excerptStatus === "fetched" && (citation.excerptQuality === "partial" || citation.excerptQuality === "medium")) return "已读取部分正文";
@@ -2803,7 +2811,7 @@ function AiMarkdownMessage({
       if (!anchor || !root.contains(anchor)) return;
 
       const rawHref = anchor.getAttribute("href")?.trim();
-      if (!rawHref || !isHttpUrl(rawHref)) return;
+      if (!rawHref || !isSafeExternalUrl(rawHref)) return;
 
       event.preventDefault();
       try {
@@ -3907,6 +3915,8 @@ export default function AiSidebar({
   const isAtBottomRef = useRef(true);
   const userPinnedToBottomRef = useRef(true);
   const pendingMessagesScrollFrameRef = useRef<number | null>(null);
+  const pendingPostSendAlignmentFrameRef = useRef<number | null>(null);
+  const pendingPostSendAlignmentMessageIdRef = useRef<string | null>(null);
   const pendingResizeScrollStateRef = useRef(false);
   const resizeStartedPinnedToBottomRef = useRef(true);
   const selectedProviderLabelRef = useRef("");
@@ -4453,6 +4463,9 @@ export default function AiSidebar({
       if (Number.isFinite(nextHeight) && nextHeight > 0) {
         setComposerFlowHeight((current) => (Math.abs(current - nextHeight) <= 1 ? current : nextHeight));
       }
+      if (userPinnedToBottomRef.current) {
+        scheduleMessagesScrollToBottom();
+      }
     };
     const scheduleMeasure = () => {
       if (frameId !== null) return;
@@ -4498,6 +4511,55 @@ export default function AiSidebar({
     }
     element.scrollTo({ top: element.scrollHeight, behavior });
     setShowScrollToBottom(false);
+  };
+
+  const alignMessageAfterSend = (messageId: string) => {
+    const element = messagesScrollRef.current;
+    if (!element || isResizing) return;
+    const target = element.querySelector<HTMLElement>(`[data-notex-message-id="${messageId}"]`);
+    if (!target) return;
+
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    if (maxScrollTop <= 0) {
+      userPinnedToBottomRef.current = true;
+      isAtBottomRef.current = true;
+      setShowScrollToBottom(false);
+      return;
+    }
+
+    const viewportHeight = element.clientHeight;
+    const desiredGap = Math.round(viewportHeight * AI_POST_SEND_BREATHING_GAP_RATIO);
+    const containerRect = element.getBoundingClientRect();
+    const composerTop = composerWrapRef.current?.getBoundingClientRect().top ?? containerRect.bottom;
+    const visibleBottom = Math.min(containerRect.bottom, composerTop);
+    const targetBottom = target.getBoundingClientRect().bottom;
+    const currentGap = visibleBottom - targetBottom;
+    const nextScrollTop = Math.min(maxScrollTop, Math.max(0, element.scrollTop + desiredGap - currentGap));
+
+    if (Math.abs(nextScrollTop - element.scrollTop) > 1) {
+      element.scrollTo({ top: nextScrollTop, behavior: "auto" });
+    }
+    const isNearBottom = isMessagesNearBottom();
+    isAtBottomRef.current = isNearBottom;
+    userPinnedToBottomRef.current = isNearBottom;
+    setShowScrollToBottom(!isNearBottom);
+  };
+
+  const cancelScheduledPostSendAlignment = () => {
+    if (pendingPostSendAlignmentFrameRef.current === null) return;
+    window.cancelAnimationFrame(pendingPostSendAlignmentFrameRef.current);
+    pendingPostSendAlignmentFrameRef.current = null;
+  };
+
+  const schedulePostSendMessageAlignment = (messageId: string) => {
+    pendingPostSendAlignmentMessageIdRef.current = null;
+    cancelScheduledPostSendAlignment();
+    pendingPostSendAlignmentFrameRef.current = window.requestAnimationFrame(() => {
+      pendingPostSendAlignmentFrameRef.current = window.requestAnimationFrame(() => {
+        pendingPostSendAlignmentFrameRef.current = null;
+        alignMessageAfterSend(messageId);
+      });
+    });
   };
 
   const cancelScheduledMessagesScroll = () => {
@@ -4723,6 +4785,22 @@ export default function AiSidebar({
         preparationDiagnostics.candidateShortage = String(result.diagnosticsSnapshot.candidateShortage ?? false);
         preparationDiagnostics.sourcePortfolioSummary = String(result.diagnosticsSnapshot.sourcePortfolioSummary ?? "none");
         preparationDiagnostics.concurrentReaderSummary = String(result.diagnosticsSnapshot.concurrentReaderSummary ?? "none");
+        preparationDiagnostics.providerSearchAttempted = Boolean(result.diagnosticsSnapshot.providerSearchAttempted ?? result.diagnosticsSnapshot.keylessProviderDiagnostics);
+        preparationDiagnostics.providerSearchSkippedReason = typeof result.diagnosticsSnapshot.providerSearchSkippedReason === "string" ? result.diagnosticsSnapshot.providerSearchSkippedReason : undefined;
+        preparationDiagnostics.directDiscoveryAttempted = Boolean(result.diagnosticsSnapshot.directDiscoveryAttempted ?? result.diagnosticsSnapshot.directDiscoveryCandidateCount);
+        preparationDiagnostics.cleanedQuery = String(result.diagnosticsSnapshot.cleanedQuery ?? "none");
+        preparationDiagnostics.actualProviderQuery = String(result.diagnosticsSnapshot.actualProviderQuery ?? "none");
+        preparationDiagnostics.actualProviderQueries = Array.isArray(result.diagnosticsSnapshot.actualProviderQueries)
+          ? result.diagnosticsSnapshot.actualProviderQueries.join("|")
+          : Array.isArray((result.diagnosticsSnapshot.keylessProviderDiagnostics as Record<string, unknown> | undefined)?.bridgeQueries)
+            ? ((result.diagnosticsSnapshot.keylessProviderDiagnostics as Record<string, unknown>).bridgeQueries as unknown[]).filter((item): item is string => typeof item === "string").join("|")
+            : undefined;
+        preparationDiagnostics.directDiscoveryUrls = Array.isArray(result.diagnosticsSnapshot.directDiscoveryUrls)
+          ? result.diagnosticsSnapshot.directDiscoveryUrls.filter((item): item is string => typeof item === "string").join("|")
+          : undefined;
+        preparationDiagnostics.directDiscoveryReasons = Array.isArray(result.diagnosticsSnapshot.directDiscoveryReasons)
+          ? result.diagnosticsSnapshot.directDiscoveryReasons.filter((item): item is string => typeof item === "string").join("|")
+          : undefined;
         const sources = mapResearchEngineShadowRunToSources(result);
         const searchDebug = mergeSearchDebug(formatSearchPreparationDiagnostics(preparationDiagnostics), formatResearchEngineSearchDebug(result));
         const hasUsableResearchEngineSources = getPromptCitationCandidates(sources ?? []).length > 0;
@@ -5750,11 +5828,23 @@ export default function AiSidebar({
   useEffect(() => {
     if (!isOpenShellSettled && !hasLoadedConversationStateRef.current) return;
     if (!isOpen) return;
-    if (userPinnedToBottomRef.current) {
+    const latestMessage = messages[messages.length - 1] ?? null;
+    const shouldAlignNewTurn =
+      userPinnedToBottomRef.current &&
+      latestMessage !== null &&
+      (latestMessage.role === "user" || latestMessage.role === "system" || latestMessage.state === "loading");
+    if (pendingPostSendAlignmentMessageIdRef.current) {
+      schedulePostSendMessageAlignment(pendingPostSendAlignmentMessageIdRef.current);
+      return;
+    }
+    if (shouldAlignNewTurn) {
       scheduleMessagesScrollToBottom();
       return;
     }
-    setShowScrollToBottom(true);
+    const isNearBottom = isMessagesNearBottom();
+    isAtBottomRef.current = isNearBottom;
+    userPinnedToBottomRef.current = isNearBottom;
+    setShowScrollToBottom(!isNearBottom);
   }, [isOpen, isOpenShellSettled, messages]);
 
   useEffect(() => {
@@ -5778,9 +5868,10 @@ export default function AiSidebar({
         return;
       }
       lastHeight = nextHeight;
-      if (userPinnedToBottomRef.current) {
-        scheduleMessagesScrollToBottom();
-      }
+      const isNearBottom = isMessagesNearBottom();
+      isAtBottomRef.current = isNearBottom;
+      userPinnedToBottomRef.current = isNearBottom;
+      setShowScrollToBottom(!isNearBottom);
     });
     observer.observe(messagesList);
 
@@ -5810,6 +5901,7 @@ export default function AiSidebar({
 
   useEffect(() => () => {
     cancelScheduledMessagesScroll();
+    cancelScheduledPostSendAlignment();
   }, []);
 
   const buildChatContext = (
@@ -6062,6 +6154,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
     userPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
+    pendingPostSendAlignmentMessageIdRef.current = userMessage.id;
     appendMessages(conversationId, userMessage, assistantMessage);
     clearComposerInput();
     setActiveCommandIndex(0);
@@ -6693,9 +6786,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     if (!isAiConfigured) {
       userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
+      const userMessage = createMessage({ role: "user", text: userFacingText, state: "done" });
+      pendingPostSendAlignmentMessageIdRef.current = userMessage.id;
       appendMessages(
         conversationId,
-        createMessage({ role: "user", text: userFacingText, state: "done" }),
+        userMessage,
         createMessage({ role: "system", text: "AI is not configured. Open settings first.", state: "done" }),
       );
       clearComposerInput();
@@ -6704,9 +6799,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
     if (!selectedProviderId || !selectedModelId) {
       userPinnedToBottomRef.current = true;
       setShowScrollToBottom(false);
+      const userMessage = createMessage({ role: "user", text: userFacingText, state: "done" });
+      pendingPostSendAlignmentMessageIdRef.current = userMessage.id;
       appendMessages(
         conversationId,
-        createMessage({ role: "user", text: userFacingText, state: "done" }),
+        userMessage,
         createMessage({
           role: "system",
           text: "当前对话使用的模型不可用，请在顶部模型选择器里重新选择模型。",
@@ -8060,7 +8157,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                   ? highlightedLocalCitationId.slice(message.id.length + 1)
                   : null;
                 return (
-                  <div key={message.id} className="notex-message notex-message-assistant mr-auto grid w-full max-w-[94%] gap-2 py-1.5 text-foreground">
+                  <div
+                    key={message.id}
+                    className="notex-message notex-message-assistant mr-auto grid w-full max-w-[94%] gap-2 py-1.5 text-foreground"
+                    data-notex-message-id={message.id}
+                  >
                     {timingLabel && (
                       <div className={cn(
                         "notex-message-meta text-muted-foreground/75",
@@ -8203,7 +8304,11 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
 
               if (message.role === "user") {
                 return (
-                  <div key={message.id} className="notex-message notex-message-user notex-user-message ml-auto">
+                  <div
+                    key={message.id}
+                    className="notex-message notex-message-user notex-user-message ml-auto"
+                    data-notex-message-id={message.id}
+                  >
                     <div data-app-context-menu-text="true" className="notex-user-bubble whitespace-pre-wrap break-words">
                       {message.text}
                     </div>
@@ -8215,6 +8320,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
                 <div
                   key={message.id}
                   className="notex-message notex-message-system mx-auto flex max-w-[92%] items-start gap-2 rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-muted-foreground"
+                  data-notex-message-id={message.id}
                 >
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                   <div data-app-context-menu-text="true" className="min-w-0 whitespace-pre-wrap break-words">{message.text}</div>
