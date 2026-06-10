@@ -2541,6 +2541,17 @@ function getPreviewMarkdownSyncDelayMs(docLength: number): number {
   return 120;
 }
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target instanceof HTMLInputElement) {
+    const inputType = target.type.toLowerCase();
+    return !["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"].includes(inputType);
+  }
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest('[contenteditable="true"], .cm-editor'));
+}
+
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
@@ -4451,7 +4462,7 @@ export default function App() {
     }
   };
 
-  const getDefaultTreeCreateParent = () => {
+  const getSelectedTreeCreateParent = () => {
     if (activeTreeDirectoryPath !== null) return activeTreeDirectoryPath;
     if (activeTreeFilePath) {
       const slashIndex = activeTreeFilePath.lastIndexOf("/");
@@ -4460,17 +4471,9 @@ export default function App() {
     return "";
   };
 
-  const openCreateDialogAt = (parentPath: string) => {
-    setDialogMode("create");
-    setDialogValue("");
-    setNewNoteLocationOption(parentPath ? "custom" : "root");
-    setNewNoteCustomDirectory(parentPath);
-    setNewNoteTags([]);
-    setFolderParentDirectory(parentPath);
-  };
-
-  const openCreateDialog = () => {
-    openCreateDialogAt(getDefaultTreeCreateParent());
+  const getDefaultNewNoteCreateParent = () => {
+    if (activeTreeDirectoryPath !== null || activeTreeFilePath) return getSelectedTreeCreateParent();
+    return currentNoteDirectory;
   };
 
   const openCreateFolderDialog = () => {
@@ -4481,7 +4484,7 @@ export default function App() {
   };
 
   const getDefaultFolderCreateParent = () => {
-    return getDefaultTreeCreateParent();
+    return getSelectedTreeCreateParent();
   };
 
   const requestInlineCreateFolderAt = (parentPath: string) => {
@@ -4499,6 +4502,22 @@ export default function App() {
   const requestInlineCreateFolder = () => {
     requestInlineCreateFolderAt(getDefaultFolderCreateParent());
   };
+
+  const requestInlineCreateFile = () => {
+    requestInlineCreateFileAt(getDefaultNewNoteCreateParent());
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "n" || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      if (isEditableShortcutTarget(event.target)) return;
+      requestInlineCreateFile();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   const handleSelectTreeDirectory = useCallback((path: string) => {
     setActiveTreeDirectoryPath(path);
@@ -8079,7 +8098,7 @@ export default function App() {
     <AppContextMenu
       developerModeEnabled={developerModeEnabled}
       actions={{
-        createNote: (parentPath) => parentPath === undefined ? openCreateDialog() : requestInlineCreateFileAt(parentPath),
+        createNote: (parentPath) => parentPath === undefined ? requestInlineCreateFile() : requestInlineCreateFileAt(parentPath),
         createFolder: (parentPath) => parentPath === undefined ? requestInlineCreateFolder() : requestInlineCreateFolderAt(parentPath),
         openFile: (path) => { handleSelectFile(path); },
         renameTreeItem: openRenameDialog,
@@ -10191,7 +10210,7 @@ export default function App() {
                     variant="ghost"
                     size="icon"
                     className="app-notes-sidebar-action h-6 w-6"
-                    onClick={openCreateDialog}
+                    onClick={requestInlineCreateFile}
                     title="新建笔记"
                     aria-label="新建笔记"
                   >
@@ -10286,7 +10305,7 @@ export default function App() {
                       继续整理 OI 笔记、复盘题解，或从洛谷导入新的训练记录。
                     </p>
                     <div className="mt-5 flex flex-wrap gap-2">
-                      <Button className="gap-2" onClick={openCreateDialog}>
+                      <Button className="gap-2" onClick={requestInlineCreateFile}>
                         <Plus className="h-4 w-4" />
                         新建笔记
                       </Button>
