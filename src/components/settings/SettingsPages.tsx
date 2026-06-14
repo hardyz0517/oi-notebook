@@ -352,7 +352,7 @@ export function AboutVersionSettingsPage({
       <SettingRow title="OI Notebook" description="面向 OI 训练场景的本地笔记、博客、洛谷整理和 AI 辅助工作台。">
         <span className="text-sm text-muted-foreground">版本：0.1.0</span>
       </SettingRow>
-      <SettingRow title="开发者模式" description="显示 Git、诊断、自检和底层调试入口。">
+      <SettingRow title="开发者模式" description="显示诊断、自检和底层调试入口。">
         <button type="button" className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", developerModeEnabled ? "border-primary/70 bg-primary" : "border-border bg-muted")} onClick={onToggleDeveloperMode} role="switch" aria-checked={developerModeEnabled} aria-label="启用开发者模式">
           <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", developerModeEnabled && "translate-x-5")} />
         </button>

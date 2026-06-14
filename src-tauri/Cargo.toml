@@ -1,6 +1,6 @@
 [package]
 name = "oi-notebook"
-version = "1.0.0"
+version = "1.0.1"
 description = "OI Notebook desktop workspace for Markdown notes, NoteX AI assistance, and local blog preview"
 authors = ["OI Notebook contributors"]
 edition = "2021"

@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-export type SettingsCategory = "appearance" | "ai" | "luogu" | "blog" | "data" | "about" | "diagnostics" | "git" | "editor";
+export type SettingsCategory = "appearance" | "ai" | "luogu" | "blog" | "data" | "about" | "diagnostics" | "editor";
 
 export type SettingsSection =
   | "appearance-theme"
@@ -19,8 +19,7 @@ export type SettingsSection =
   | "about-version"
   | "about-markdown"
   | "about-privacy"
-  | "diagnostics-search"
-  | "git-sync";
+  | "diagnostics-search";
 
 export type SettingsGroupId = Exclude<SettingsCategory, "editor">;
 

@@ -4,8 +4,6 @@ import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode,
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
-export type CommitNoteStatus = "committed" | "noChanges";
-
 export interface SaveNoteAssetResult {
   markdownPath: string;
   assetRelativePath: string;
@@ -142,6 +140,7 @@ export interface LuoguSubmissionPreview {
   submissionId: string;
   problemId: string;
   problemTitle: string;
+  difficulty: string;
   status: string;
   submitTime: string;
 }
@@ -155,6 +154,7 @@ export interface PreviewLuoguSubmission {
   submissionId: string;
   problemId: string;
   problemTitle: string;
+  difficulty: string;
   status: string;
   isAc: boolean;
   submitTime: string;
@@ -200,6 +200,7 @@ export interface PrepareLuoguSubmissionNoteResult {
   submissionId: string;
   problemId: string;
   problemTitle: string;
+  difficulty: string;
   suggestedRelativePath: string;
   markdown: string;
   sourceCode: string;
@@ -214,6 +215,7 @@ export interface PrepareLuoguSubmissionNoteResult {
 export interface LuoguPrepareRules {
   requireAc: boolean;
   allowRawDraftWithoutInsight: boolean;
+  includeSourceCode?: boolean;
 }
 
 export interface WriteLuoguPreparedNoteResult {
@@ -567,50 +569,6 @@ export async function writeNote(
 }
 
 /**
- * 自动提交刚保存的单个 notes 文件。
- * 对应 Rust 命令：commit_note
- *
- * @param relativePath - 相对于 notes/ 的路径，如 "tricks/qpow.md"
- */
-export async function commitNote(
-  relativePath: string,
-  extraPaths?: string[],
-): Promise<CommitNoteStatus> {
-  try {
-    return await invoke<CommitNoteStatus>("commit_note", { relativePath, extraPaths });
-  } catch (e) {
-    throw toError(e);
-  }
-}
-
-/**
- * 自动提交已经删除的单个 notes 文件。
- * 对应 Rust 命令：commit_deleted_note
- */
-export async function commitDeletedNote(relativePath: string): Promise<CommitNoteStatus> {
-  try {
-    return await invoke<CommitNoteStatus>("commit_deleted_note", { relativePath });
-  } catch (e) {
-    throw toError(e);
-  }
-}
-
-/**
- * 自动提交已经重命名的单个 notes 文件。
- * 对应 Rust 命令：commit_renamed_note
- */
-export async function commitRenamedNote(
-  oldPath: string,
-  newPath: string,
-): Promise<void> {
-  try {
-    await invoke<void>("commit_renamed_note", { oldPath, newPath });
-  } catch (e) {
-    throw toError(e);
-  }
-}
-
-/**
  * 保存粘贴图片到 notes/assets/，并返回当前笔记可用的 Markdown 链接路径。
  * 对应 Rust 命令：save_note_asset
  */
@@ -728,7 +686,7 @@ export async function previewLuoguSubmissionPage(
 
 export async function importLuoguSubmission(
   submissionId: string,
-  autoCommit = true,
+  autoCommit = false,
 ): Promise<ImportLuoguSubmissionResult> {
   try {
     return await invoke<ImportLuoguSubmissionResult>("import_luogu_submission", {
@@ -757,7 +715,7 @@ export async function prepareLuoguSubmissionNote(
 export async function writeLuoguPreparedNote(
   relativePath: string,
   markdown: string,
-  autoCommit = true,
+  autoCommit = false,
   writeMode: "createNew" | "overwrite" = "createNew",
 ): Promise<WriteLuoguPreparedNoteResult> {
   try {
@@ -1150,18 +1108,6 @@ export async function polishAiPromptTemplate(
 ): Promise<PolishedAiPromptTemplate> {
   try {
     return await invoke<PolishedAiPromptTemplate>("polish_ai_prompt_template", { fileName, content });
-  } catch (e) {
-    throw toError(e);
-  }
-}
-
-/**
- * 手动执行 git push origin main。
- * 对应 Rust 命令：push_git
- */
-export async function pushGit(): Promise<void> {
-  try {
-    await invoke<void>("push_git");
   } catch (e) {
     throw toError(e);
   }

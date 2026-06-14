@@ -830,6 +830,7 @@ export default function MarkdownEditor({
           }),
           oneDark,
           EditorView.lineWrapping,
+          EditorView.contentAttributes.of({ autocorrect: null as unknown as string }),
 
           history(),
           Prec.highest(keymap.of([

@@ -45,7 +45,6 @@ interface AiConfigManagerProps {
   filteredModels: AiProvider["models"];
   onSelectProvider: (provider: AiProvider) => void;
   onCreateProvider: (draft: CreateProviderPayload) => AiProvider | null;
-  onFillDeepSeekDefaults: () => string | null;
   onUpdateProvider: (providerId: string, patch: Partial<AiProvider>) => void;
   onSetDefaultProvider: (providerId: string) => void;
   onSetDefaultModel: (providerId: string, modelId: string) => void;
@@ -137,7 +136,6 @@ export default function AiConfigManager({
   filteredModels,
   onSelectProvider,
   onCreateProvider,
-  onFillDeepSeekDefaults,
   onUpdateProvider,
   onSetDefaultProvider,
   onSetDefaultModel,
@@ -197,17 +195,6 @@ export default function AiConfigManager({
     setCreateError("");
     setCreateFeedback(null);
     setView("create");
-  };
-
-  const handleFillDeepSeek = () => {
-    if (!activeProvider) {
-      openCreatePage("deepseek");
-      return;
-    }
-    const providerId = onFillDeepSeekDefaults();
-    const provider = providerId ? (config?.providers ?? []).find((item) => item.id === providerId) : null;
-    if (provider) onSelectProvider(provider);
-    if (providerId) setView("detail");
   };
 
   const updateCreateDraft = (patch: Partial<CreateProviderDraft>) => {
@@ -398,9 +385,6 @@ export default function AiConfigManager({
                     <Button type="button" size="sm" onClick={() => openCreatePage()}>
                       <Plus className="h-3.5 w-3.5" />
                       新建供应商
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={handleFillDeepSeek}>
-                      填入 DeepSeek 默认配置
                     </Button>
                   </div>
                 </div>

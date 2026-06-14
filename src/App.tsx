@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, Upload, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import AppContextMenu from "@/components/common/AppContextMenu";
@@ -46,7 +46,7 @@ import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, commitNote, commitDeletedNote, commitRenamedNote, pushGit, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -97,8 +97,6 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com";
-const DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash";
 const THEME_STORAGE_KEY = "oi-notebook.theme";
 const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
 const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
@@ -627,6 +625,7 @@ type LuoguScanResultVisibility = "hideSkipped" | "showAll";
 type LuoguDefaultSaveLocation = "luogu" | "problems" | "custom";
 type LuoguWriteStrategy = "createNew" | "askOnConflict" | "overwrite";
 type LuoguDefaultDraftStatus = "draft" | "published";
+type LuoguIncludeSourceCode = "no" | "yes";
 type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type LuoguPrepareProgress = {
@@ -973,7 +972,6 @@ const SETTINGS_TREE: Array<{
     ],
   },
   { id: "diagnostics", label: "诊断", developerOnly: true, children: [{ id: "diagnostics-search", label: "搜索自检" }] },
-  { id: "git", label: "Git", developerOnly: true, children: [{ id: "git-sync", label: "进阶同步入口" }] },
 ];
 const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
   appearance: "appearance-theme",
@@ -983,7 +981,6 @@ const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
   data: "data-storage",
   about: "about-version",
   diagnostics: "diagnostics-search",
-  git: "git-sync",
   editor: "about-markdown",
 };
 const SETTINGS_SECTION_LABELS = SETTINGS_TREE.reduce((labels, group) => {
@@ -1028,6 +1025,7 @@ interface LuoguImportRules {
   customSaveDirectory: string;
   writeStrategy: LuoguWriteStrategy;
   defaultDraftStatus: LuoguDefaultDraftStatus;
+  includeSourceCode: boolean;
 }
 
 interface LuoguSubmissionCandidateState {
@@ -1066,6 +1064,7 @@ const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
   customSaveDirectory: "",
   writeStrategy: "createNew",
   defaultDraftStatus: "draft",
+  includeSourceCode: false,
 };
 
 function normalizeLuoguImportRules(value: Partial<LuoguImportRules> | null | undefined): LuoguImportRules {
@@ -1084,6 +1083,7 @@ function normalizeLuoguImportRules(value: Partial<LuoguImportRules> | null | und
     keepLatestAcOnly: sameProblemStrategy === "latestAc",
     missingInsightStrategy: value?.missingInsightStrategy ?? DEFAULT_LUOGU_IMPORT_RULES.missingInsightStrategy,
     customSaveDirectory: typeof value?.customSaveDirectory === "string" ? value.customSaveDirectory : DEFAULT_LUOGU_IMPORT_RULES.customSaveDirectory,
+    includeSourceCode: value?.includeSourceCode === true,
   };
 }
 
@@ -1804,7 +1804,7 @@ function getLuoguCandidateDisplayState({
   if (writeResult) {
     if (writeResult.skipped) return { label: "写入跳过", detail: writeResult.skipReason ?? "写入阶段跳过", tone: "muted", output: writeResult.relativePath ?? "—" };
     if (writeResult.failed) return { label: "写入失败", detail: writeResult.error ?? "写入阶段失败", tone: "danger", output: writeResult.relativePath ?? "—" };
-    if (writeResult.relativePath) return { label: "已写入", detail: writeResult.commitStatus === "failed" ? "笔记已写入，Git 提交失败" : "笔记已写入", tone: "success", output: writeResult.relativePath };
+    if (writeResult.relativePath) return { label: "已写入", detail: "笔记已写入", tone: "success", output: writeResult.relativePath };
     return { label: "已写入", detail: "写入完成", tone: "success", output: "—" };
   }
 
@@ -2937,7 +2937,6 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameTargetIsDirectory, setRenameTargetIsDirectory] = useState(false);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
-  const [isPushingGit, setIsPushingGit] = useState(false);
   const [isLuoguDialogOpen, setIsLuoguDialogOpen] = useState(false);
   const [isLuoguSettingsOpen, setIsLuoguSettingsOpen] = useState(false);
   const [isLoadingLuoguConfig, setIsLoadingLuoguConfig] = useState(false);
@@ -3038,7 +3037,7 @@ export default function App() {
   const [luoguProblemTitle, setLuoguProblemTitle] = useState("");
   const [luoguSubmissionId, setLuoguSubmissionId] = useState("");
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
-  const [pendingAssetsByFile, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
+  const [, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const [previewMarkdown, setPreviewMarkdown] = useState(INITIAL_MARKDOWN);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsCenterHostRef = useRef<SettingsCenterHostHandle>(null);
@@ -4013,13 +4012,23 @@ export default function App() {
         { value: "published", label: "写入为正式笔记" },
       ],
     },
+    {
+      id: "includeSourceCode",
+      title: "导入时包含源代码",
+      description: "默认只生成复盘笔记；开启后在文末附上完整提交代码。",
+      value: luoguImportRules.includeSourceCode ? "yes" : "no",
+      onChange: (value: string) => updateLuoguImportRules({ includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" }),
+      options: [
+        { value: "no", label: "不包含" },
+        { value: "yes", label: "包含源代码" },
+      ],
+    },
   ];
   const luoguImportCenterAccountLabel =
     isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已连接" : "未配置";
   const luoguImportCenterAiLabel =
     isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置";
   const luoguImportCenterRangeLabel = getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
-  const gitStatusLabel = isPushingGit ? "同步中" : "同步入口";
   const visibleSettingsTree = useMemo(
     () => SETTINGS_TREE.filter((group) => developerModeEnabled || !group.developerOnly),
     [developerModeEnabled],
@@ -4509,9 +4518,10 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "n" || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-      event.preventDefault();
+      if (event.isComposing || event.key === "Process" || event.key === "Unidentified") return;
+      if (event.key.toLowerCase() !== "n" || (!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
       if (isEditableShortcutTarget(event.target)) return;
+      event.preventDefault();
       requestInlineCreateFile();
     };
 
@@ -4696,18 +4706,12 @@ export default function App() {
         await renameNoteFolder(renameTarget, newPath);
       } else {
         await renameNote(renameTarget, newPath);
-        try {
-          await commitRenamedNote(renameTarget, newPath);
-          toast.success("已重命名并提交");
-        } catch (commitError) {
-          toast.warning(`重命名成功，Git 提交失败：${getErrorMessage(commitError)}`);
-        }
       }
       const updated = await listNotes();
       updatePathReferences(renameTarget, newPath, renameTargetIsDirectory);
       setFiles(updated);
       closeDialog();
-      if (renameTargetIsDirectory) toast.success("已重命名文件夹");
+      toast.success(renameTargetIsDirectory ? "已重命名文件夹" : "已重命名笔记");
     } catch (e) {
       toast.error(`重命名失败: ${getErrorMessage(e)}`);
     }
@@ -4726,12 +4730,6 @@ export default function App() {
         await deleteNoteFolder(path);
       } else {
         await deleteNote(path);
-        try {
-          const commitStatus = await commitDeletedNote(path);
-          toast.success(commitStatus === "committed" ? "已删除并提交" : "已删除");
-        } catch (commitError) {
-          toast.warning(`删除成功，Git 提交失败：${getErrorMessage(commitError)}`);
-        }
       }
       const updated = await listNotes();
       setFiles(updated);
@@ -4745,7 +4743,7 @@ export default function App() {
         setActiveWorkspaceTabId(null);
         setIsDirty(false);
       }
-      if (isDirectory) toast.success("已删除文件夹");
+      toast.success(isDirectory ? "已删除文件夹" : "已删除笔记");
     } catch (e) {
       toast.error(`删除失败: ${getErrorMessage(e)}`);
     }
@@ -4793,18 +4791,6 @@ export default function App() {
     }
   };
 
-  const handlePushGit = async () => {
-    setIsPushingGit(true);
-    try {
-      await pushGit();
-      toast.success("Git 已同步");
-    } catch (e) {
-      toast.error(`Git 同步失败：${e}`);
-    } finally {
-      setIsPushingGit(false);
-    }
-  };
-
   const loadLuoguSettingsConfig = async () => {
     setIsLoadingLuoguConfig(true);
     try {
@@ -4826,8 +4812,10 @@ export default function App() {
     }
   };
 
-  const openLuoguSettings = async () => {
-    setIsLuoguSettingsOpen(true);
+  const openLuoguAccountSettingsFromDialog = async () => {
+    setIsLuoguDialogOpen(false);
+    setLuoguDialogReturnTarget(null);
+    openSettingsSection("luogu-account");
     await loadLuoguSettingsConfig();
   };
 
@@ -5255,64 +5243,6 @@ export default function App() {
     const requestedTarget = options?.target ?? { type: "page", page: SETTINGS_SECTION_FALLBACK.ai };
     settingsCenterHostRef.current?.openTarget(requestedTarget);
     await ensureAiConfigLoadedForSettings();
-  };
-
-  const handleFillDeepSeekDefaults = (): string | null => {
-    if (!selectedAiProvider) {
-      const provider = {
-        ...createAiProviderDraft(),
-        name: "DeepSeek",
-        base_url: DEEPSEEK_DEFAULT_BASE_URL,
-        default_model: DEEPSEEK_DEFAULT_MODEL,
-        models: [createAiModelDraft(DEEPSEEK_DEFAULT_MODEL)],
-      };
-      setAiConfigDraft((current) => {
-        const base = current ?? aiConfig ?? {
-          base_url: "",
-          api_key: "",
-          model: "",
-          chat_response_style: "",
-          providers: [],
-          default_provider_id: null,
-          default_model_id: null,
-          web_search: DEFAULT_WEB_SEARCH_CONFIG,
-        };
-        const next = {
-          ...cloneAiConfig(base),
-          providers: [...base.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model })) })), provider],
-          default_provider_id: base.default_provider_id ?? provider.id,
-          default_model_id: base.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
-        };
-        pendingAutoSaveDraftRef.current = next;
-        return next;
-      });
-      setSelectedAiProviderId(provider.id);
-      setAiModelSearchQuery("");
-      scheduleAutoSave();
-      toast.info("已填入 DeepSeek 默认 Base URL 和模型，请填写 API Key");
-      return provider.id;
-    }
-    updateAiProviderDraft(selectedAiProvider.id, (provider) => ({
-      ...provider,
-      base_url: DEEPSEEK_DEFAULT_BASE_URL,
-      default_model: provider.default_model || DEEPSEEK_DEFAULT_MODEL,
-      models: provider.models.some((model) => model.id === DEEPSEEK_DEFAULT_MODEL)
-        ? provider.models
-        : [...provider.models, createAiModelDraft(DEEPSEEK_DEFAULT_MODEL)],
-      updated_at: Date.now(),
-    }));
-    setAiConfigDraft((current) => {
-      if (!current) return current;
-      const next = {
-        ...current,
-        default_provider_id: current.default_provider_id ?? selectedAiProvider.id,
-        default_model_id: current.default_model_id ?? DEEPSEEK_DEFAULT_MODEL,
-      };
-      pendingAutoSaveDraftRef.current = next;
-      return next;
-    });
-    toast.info("已填入 DeepSeek 默认 Base URL 和模型，请填写 API Key");
-    return selectedAiProvider.id;
   };
 
   const updateAiConfigDraft = (update: (config: AiConfig) => AiConfig) => {
@@ -6208,6 +6138,7 @@ export default function App() {
           const prepared = await prepareLuoguSubmissionNote(submission.submissionId, {
             requireAc: luoguImportRules.requireAc,
             allowRawDraftWithoutInsight: luoguImportRules.missingInsightStrategy !== "skip",
+            includeSourceCode: luoguImportRules.includeSourceCode,
           });
           const preparedWithRules = applyLuoguPreparedRules(prepared, luoguImportRules);
           const latestRun = luoguPrepareRunRef.current;
@@ -6316,7 +6247,6 @@ export default function App() {
     setIsWritingPreparedLuogu(true);
     setLuoguWriteProgress({ current: 0, total: preparedNotesToWrite.length });
     let writtenCount = 0;
-    let commitFailedCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
     let lastWrittenPath: string | null = null;
@@ -6329,7 +6259,7 @@ export default function App() {
 
         try {
           const initialWriteMode: LuoguWriteMode = luoguImportRules.writeStrategy === "overwrite" ? "overwrite" : "createNew";
-          let result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, true, initialWriteMode);
+          let result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, false, initialWriteMode);
           if (
             luoguImportRules.writeStrategy === "askOnConflict" &&
             result.skipped &&
@@ -6342,7 +6272,7 @@ export default function App() {
               danger: true,
             });
             if (shouldOverwrite) {
-              result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, true, "overwrite");
+              result = await writeLuoguPreparedNote(prepared.suggestedRelativePath, prepared.markdown, false, "overwrite");
             }
           }
           setLuoguWriteResultsById((current) => ({
@@ -6351,10 +6281,6 @@ export default function App() {
           }));
           if (result.skipped) {
             skippedCount += 1;
-          } else if (result.failed && result.relativePath && result.commitStatus === "failed") {
-            writtenCount += 1;
-            commitFailedCount += 1;
-            lastWrittenPath = result.relativePath;
           } else if (result.failed) {
             failedCount += 1;
           } else {
@@ -6387,7 +6313,7 @@ export default function App() {
         }
       }
 
-      toast.success(`写入完成：成功 ${writtenCount}，Git 提交失败 ${commitFailedCount}，跳过 ${skippedCount}，失败 ${failedCount}`);
+      toast.success(`写入完成：成功 ${writtenCount}，跳过 ${skippedCount}，失败 ${failedCount}`);
     } finally {
       setCurrentlyWritingLuoguId(null);
       setLuoguWriteProgress(null);
@@ -6468,14 +6394,6 @@ export default function App() {
         luoguSourceCode,
       );
 
-      let commitSucceeded = true;
-      try {
-        await commitNote(imported.relativePath);
-      } catch (commitError) {
-        commitSucceeded = false;
-        toast.warning(`洛谷笔记已导入，AI 整理：是，模型：${imported.aiModel}，Git 提交失败：${commitError}`);
-      }
-
       const updated = await listNotes();
       setFiles(updated);
       setCurrentFilePath(imported.relativePath);
@@ -6485,9 +6403,7 @@ export default function App() {
       setLuoguProblemTitle("");
       setLuoguSubmissionId("");
       setLuoguSourceCode("");
-      if (commitSucceeded) {
-        toast.success(`洛谷笔记已导入并提交，AI 整理：是，模型：${imported.aiModel}`);
-      }
+      toast.success(`洛谷笔记已导入，AI 整理：是，模型：${imported.aiModel}`);
     } catch (e) {
       toast.error(`洛谷导入失败：${e}`);
     } finally {
@@ -6715,7 +6631,7 @@ export default function App() {
       `将合并 ${selectedTagNormalizationScanStats.duplicateCount} 个重复标签。`,
       `unknown/free-form 标签不会被改写。`,
       "只修改 frontmatter.tags，不会改正文。",
-      "建议在批量应用前确认 Git 工作区状态，便于回滚。",
+      "建议在批量应用前确认改动范围，便于回滚。",
       "",
       "确认应用所选规范化？",
     ].join("\n");
@@ -7129,28 +7045,13 @@ export default function App() {
           markdown: liveMarkdown,
         };
       }
-      try {
-        const pendingAssets = pendingAssetsByFile[currentFilePath] ?? [];
-        const commitStatus = await commitNote(currentFilePath, pendingAssets);
-        if (commitStatus === "committed") {
-          showSavedToast("已保存并提交", warning);
-        } else {
-          showSavedToast("已保存", warning);
-        }
-        setPendingAssetsByFile((prev) => {
-          if (!prev[currentFilePath]) return prev;
-          const next = { ...prev };
-          delete next[currentFilePath];
-          return next;
-        });
-      } catch (commitError) {
-        const message = `已保存，Git 提交失败：${commitError}`;
-        if (warning) {
-          toast.warning(`${message}（${warning}）`);
-        } else {
-          toast.warning(message);
-        }
-      }
+      showSavedToast("已保存", warning);
+      setPendingAssetsByFile((prev) => {
+        if (!prev[currentFilePath]) return prev;
+        const next = { ...prev };
+        delete next[currentFilePath];
+        return next;
+      });
       setIsDirty(false);
     } catch (err) {
       toast.error(`保存失败: ${err}`);
@@ -8478,7 +8379,7 @@ export default function App() {
           <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
             <div>需要从浏览器洛谷 Cookie 中复制 _uid 和 __client_id。</div>
             <div>路径：F12 - Application/应用 - Cookies - https://www.luogu.com.cn。</div>
-            <div>不要把 __client_id 发给别人，也不要提交到 Git。</div>
+            <div>不要把 __client_id 发给别人，也不要上传到公共位置。</div>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="luogu-config-uid">UID</Label>
@@ -8658,7 +8559,7 @@ export default function App() {
                     variant="outline"
                     size="sm"
                     className="h-7 border-amber-500/50 bg-transparent px-2 text-xs text-amber-100 hover:bg-amber-500/10 hover:text-amber-50"
-                    onClick={() => void openLuoguSettings()}
+                    onClick={() => void openLuoguAccountSettingsFromDialog()}
                   >
                     去设置
                   </Button>
@@ -8893,7 +8794,7 @@ export default function App() {
                           )}
                           <div className="min-h-0 flex-1 overflow-auto dark:bg-[#242424]">
                             <div className="min-w-0">
-                              <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[42px_minmax(260px,1fr)_86px_136px_132px] gap-2 border-b border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-[0_1px_0_0_hsl(var(--border))]">
+                              <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[42px_minmax(240px,1fr)_104px_86px_136px_132px] gap-2 border-b border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-[0_1px_0_0_hsl(var(--border))]">
                                 <div className="flex items-center" onClick={(event) => event.stopPropagation()}>
                                   <input
                                     ref={luoguSelectAllCheckboxRef}
@@ -8906,6 +8807,7 @@ export default function App() {
                                   />
                                 </div>
                                 <div>题目</div>
+                                <div>难度</div>
                                 <div>状态</div>
                                 <div>提交时间</div>
                                 <div>处理建议</div>
@@ -8936,7 +8838,7 @@ export default function App() {
                                   <div
                                     key={submission.submissionId}
                                     className={cn(
-                                      "grid min-w-0 grid-cols-[42px_minmax(260px,1fr)_86px_136px_132px] gap-2 border-b border-border/60 px-3 py-1.5 text-sm transition-colors last:border-0 hover:bg-muted/20",
+                                      "grid min-w-0 grid-cols-[42px_minmax(240px,1fr)_104px_86px_136px_132px] gap-2 border-b border-border/60 px-3 py-1.5 text-sm transition-colors last:border-0 hover:bg-muted/20",
                                       selectedLuoguSubmissionIds.has(submission.submissionId) && "bg-primary/5",
                                       canOpenPreview && "cursor-pointer",
                                     )}
@@ -8955,6 +8857,10 @@ export default function App() {
                                         aria-label={`选择提交 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguSubmissionSelection(submission)}
                                       />
+                                    </div>
+
+                                    <div className="min-w-0 truncate text-xs leading-5 text-muted-foreground" title={`难度：${submission.difficulty || "未获取"}`}>
+                                      难度：<span className="text-foreground">{submission.difficulty || "未获取"}</span>
                                     </div>
 
                                     <div className="min-w-0">
@@ -9116,6 +9022,7 @@ export default function App() {
                                       <span className="font-mono">{activeLuoguPreparedPreview.problemId || "未知题号"}</span>
                                       <span> 路 {activeLuoguPreparedPreview.problemTitle || "未读取到标题"}</span>
                                     </div>
+                                    <div className="mt-0.5 text-xs text-muted-foreground">难度：{activeLuoguPreparedPreview.difficulty || "未获取"}</div>
                                   </div>
                                   <div className="flex shrink-0 items-center gap-2">
                                     <span className={cn(
@@ -9469,7 +9376,6 @@ export default function App() {
           filteredModels={filteredAiProviderModels}
           onSelectProvider={selectAiProviderForEdit}
           onCreateProvider={handleCreateAiProviderDraft}
-          onFillDeepSeekDefaults={handleFillDeepSeekDefaults}
           onUpdateProvider={patchAiProviderDraft}
           onSetDefaultProvider={handleSetDefaultAiProvider}
           onSetDefaultModel={handleSetDefaultAiModel}
@@ -9579,7 +9485,6 @@ export default function App() {
                         filteredModels={filteredAiProviderModels}
                         onSelectProvider={selectAiProviderForEdit}
                         onCreateProvider={handleCreateAiProviderDraft}
-                        onFillDeepSeekDefaults={handleFillDeepSeekDefaults}
                         onUpdateProvider={patchAiProviderDraft}
                         onSetDefaultProvider={handleSetDefaultAiProvider}
                         onSetDefaultModel={handleSetDefaultAiModel}
@@ -10030,14 +9935,6 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {developerModeEnabled && shouldRenderSettingsPage("git-sync", activePageKey, activeTarget) && (
-                    <SettingsSectionAnchor id="git-sync">
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 text-base font-semibold text-foreground">进阶同步入口</div>
-                      <SettingRow title="Git 同步" description="整理完本地改动后再使用。"><Button variant="outline" onClick={handlePushGit} disabled={isPushingGit}><Upload className="h-3.5 w-3.5" />{isPushingGit ? "同步中..." : "同步 Git"}</Button></SettingRow>
-                    </section>
-                    </SettingsSectionAnchor>
-                  )}
         </>
       )}
     />
@@ -10419,14 +10316,6 @@ export default function App() {
                             打开本地目录
                           </Button>
                         </div>
-                        {developerModeEnabled && (
-                          <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                            <span className="text-muted-foreground">版本同步</span>
-                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => void handlePushGit()}>
-                              {gitStatusLabel}
-                            </Button>
-                          </div>
-                        )}
                       </div>
                     </section>
 
@@ -10814,17 +10703,6 @@ export default function App() {
             </button>
           </div>
           <div className="app-status-group flex min-w-0 flex-wrap items-center justify-end gap-y-1">
-            {developerModeEnabled && (
-              <button
-                type="button"
-                className="app-status-item app-status-button truncate whitespace-nowrap rounded px-1.5 py-0.5 transition-colors"
-                onClick={() => void handlePushGit()}
-                disabled={isPushingGit}
-                title="同步 Git"
-              >
-                Git：{gitStatusLabel}
-              </button>
-            )}
             <span className="app-status-item whitespace-nowrap">视图：{editorViewModeLabel}</span>
             <span className="app-status-item whitespace-nowrap">界面：{appZoomLabel}</span>
             <span className="app-status-item whitespace-nowrap">内容：{contentZoomLabel}</span>

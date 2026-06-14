@@ -13,7 +13,6 @@ use serde_yaml::{Mapping, Value as YamlValue};
 
 use crate::ai::{organize_luogu_insight, OrganizeLuoguInsightInput, OrganizedLuoguInsight};
 use crate::frontmatter;
-use crate::git::{commit_note, CommitNoteStatus};
 use crate::paths;
 
 const LUOGU_SYNC_MAX_PAGES: u32 = 5;
@@ -184,6 +183,7 @@ pub struct LuoguSubmissionPreview {
     pub submission_id: String,
     pub problem_id: String,
     pub problem_title: String,
+    pub difficulty: String,
     pub status: String,
     pub submit_time: String,
 }
@@ -201,6 +201,7 @@ pub struct PreviewLuoguSubmission {
     pub submission_id: String,
     pub problem_id: String,
     pub problem_title: String,
+    pub difficulty: String,
     pub status: String,
     pub is_ac: bool,
     pub submit_time: String,
@@ -275,6 +276,7 @@ pub struct PrepareLuoguSubmissionNoteResult {
     pub submission_id: String,
     pub problem_id: String,
     pub problem_title: String,
+    pub difficulty: String,
     pub suggested_relative_path: String,
     pub markdown: String,
     pub source_code: String,
@@ -291,6 +293,7 @@ pub struct PrepareLuoguSubmissionNoteResult {
 pub struct LuoguPrepareRules {
     pub require_ac: bool,
     pub allow_raw_draft_without_insight: bool,
+    pub include_source_code: Option<bool>,
 }
 
 impl Default for LuoguPrepareRules {
@@ -298,6 +301,7 @@ impl Default for LuoguPrepareRules {
         Self {
             require_ac: true,
             allow_raw_draft_without_insight: true,
+            include_source_code: Some(false),
         }
     }
 }
@@ -319,6 +323,7 @@ struct LuoguSubmissionRecord {
     submission_id: u64,
     problem_id: String,
     problem_title: String,
+    difficulty: String,
     status: String,
     submit_time: String,
 }
@@ -468,6 +473,47 @@ fn value_to_string(value: &JsonValue) -> Option<String> {
     None
 }
 
+fn luogu_difficulty_label(value: Option<&JsonValue>) -> String {
+    let Some(value) = value else {
+        return "未获取".to_string();
+    };
+
+    if let Some(number) = value.as_i64().or_else(|| value.as_u64().map(|item| item as i64)) {
+        return match number {
+            0 => "暂无评定",
+            1 => "入门",
+            2 => "普及-",
+            3 => "普及/提高-",
+            4 => "普及+/提高",
+            5 => "提高+/省选-",
+            6 => "省选/NOI-",
+            7 => "NOI/NOI+/CTSC",
+            _ => "未获取",
+        }
+        .to_string();
+    }
+
+    let text = value.as_str().unwrap_or("").trim();
+    if text.is_empty() {
+        "未获取".to_string()
+    } else if let Ok(number) = text.parse::<i64>() {
+        luogu_difficulty_label(Some(&JsonValue::from(number)))
+    } else {
+        text.to_string()
+    }
+}
+
+fn extract_luogu_problem_difficulty(problem: &JsonValue) -> String {
+    luogu_difficulty_label(
+        problem
+            .get("difficulty")
+            .or_else(|| problem.get("difficultyName"))
+            .or_else(|| problem.get("difficulty_label"))
+            .or_else(|| problem.get("level"))
+            .or_else(|| problem.pointer("/contenu/difficulty")),
+    )
+}
+
 fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionRecord, String> {
     let submission_id_text = record
         .get("id")
@@ -492,6 +538,7 @@ fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionRe
         .and_then(JsonValue::as_str)
         .unwrap_or("")
         .to_string();
+    let difficulty = extract_luogu_problem_difficulty(problem);
 
     let status = record
         .get("status")
@@ -508,6 +555,7 @@ fn parse_luogu_submission_record(record: &JsonValue) -> Result<LuoguSubmissionRe
         submission_id,
         problem_id,
         problem_title,
+        difficulty,
         status,
         submit_time,
     })
@@ -532,6 +580,7 @@ fn submission_preview(record: &LuoguSubmissionRecord) -> LuoguSubmissionPreview 
         submission_id: record.submission_id.to_string(),
         problem_id: record.problem_id.clone(),
         problem_title: record.problem_title.clone(),
+        difficulty: record.difficulty.clone(),
         status: record.status.clone(),
         submit_time: record.submit_time.clone(),
     }
@@ -979,6 +1028,7 @@ fn submission_scan_preview(
         submission_id: record.submission_id.to_string(),
         problem_id: record.problem_id.clone(),
         problem_title: record.problem_title.clone(),
+        difficulty: record.difficulty.clone(),
         status: record.status.clone(),
         is_ac: is_ac_status(&record.status),
         submit_time: record.submit_time.clone(),
@@ -1305,11 +1355,49 @@ fn tags_yaml(tags: &[String]) -> String {
     }
 }
 
+fn luogu_problem_display_name(problem_id: &str, problem_title: &str) -> String {
+    let title = problem_title.trim();
+    if title.is_empty() {
+        problem_id.trim().to_string()
+    } else {
+        format!("{} {}", problem_id.trim(), title)
+    }
+}
+
+fn append_luogu_submission_info(
+    markdown: &mut String,
+    problem_id: &str,
+    problem_title: &str,
+    submission_id: &str,
+    difficulty: &str,
+) {
+    let difficulty = if difficulty.trim().is_empty() {
+        "未获取"
+    } else {
+        difficulty.trim()
+    };
+    markdown.push_str("\n---\n\n## 提交信息\n\n");
+    markdown.push_str(&format!("- 提交编号：{}\n", submission_id.trim()));
+    markdown.push_str(&format!(
+        "- 题目：{}\n",
+        luogu_problem_display_name(problem_id, problem_title)
+    ));
+    markdown.push_str(&format!("- 难度：{difficulty}\n"));
+    markdown.push_str(&format!(
+        "- 题目链接：https://www.luogu.com.cn/problem/{problem_id}\n"
+    ));
+    markdown.push_str(&format!(
+        "- 提交链接：https://www.luogu.com.cn/record/{}\n",
+        submission_id.trim()
+    ));
+}
+
 #[allow(dead_code)]
 fn build_note_markdown(
     problem_id: &str,
     problem_title: &str,
     submission_id: &str,
+    record_difficulty: &str,
     insight: InsightBlock,
 ) -> String {
     let title = insight
@@ -1338,20 +1426,20 @@ fn build_note_markdown(
         markdown.push_str("\n\n");
     }
 
-    markdown.push_str("## Links\n\n");
-    markdown.push_str(&format!(
-        "- Original problem: https://www.luogu.com.cn/problem/{problem_id}\n"
-    ));
-    markdown.push_str(&format!(
-        "- AC submission: https://www.luogu.com.cn/record/{}\n",
-        submission_id.trim()
-    ));
+    append_luogu_submission_info(
+        &mut markdown,
+        problem_id,
+        problem_title,
+        submission_id,
+        if difficulty.trim().is_empty() { record_difficulty } else { difficulty },
+    );
 
     markdown
 }
 
 fn build_ai_note_markdown(
     problem_id: &str,
+    problem_title: &str,
     submission_id: &str,
     insight: &OrganizedLuoguInsight,
     ai_model: &str,
@@ -1381,20 +1469,20 @@ fn build_ai_note_markdown(
         markdown.push_str("\n\n");
     }
 
-    markdown.push_str("## Links\n\n");
-    markdown.push_str(&format!(
-        "- Original problem: https://www.luogu.com.cn/problem/{problem_id}\n"
-    ));
-    markdown.push_str(&format!(
-        "- AC submission: https://www.luogu.com.cn/record/{}\n",
-        submission_id.trim()
-    ));
+    append_luogu_submission_info(
+        &mut markdown,
+        problem_id,
+        problem_title,
+        submission_id,
+        insight.difficulty.trim(),
+    );
 
     markdown
 }
 
 fn build_ai_prepared_luogu_note(
     problem_id: &str,
+    problem_title: &str,
     submission_id: &str,
     insight: &OrganizedLuoguInsight,
     ai_model: &str,
@@ -1402,7 +1490,7 @@ fn build_ai_prepared_luogu_note(
     let problem_id = normalize_problem_id(problem_id)?;
     let safe_title = safe_title_for_filename(insight.title.trim(), &problem_id);
     let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
-    let markdown = build_ai_note_markdown(&problem_id, submission_id, insight, ai_model);
+    let markdown = build_ai_note_markdown(&problem_id, problem_title, submission_id, insight, ai_model);
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
         return Err(format!(
@@ -1422,6 +1510,7 @@ fn build_ai_prepared_luogu_note(
 fn write_ai_luogu_note_to_notes_dir(
     notes_dir: &Path,
     problem_id: &str,
+    problem_title: &str,
     submission_id: &str,
     insight: &OrganizedLuoguInsight,
     ai_model: &str,
@@ -1436,7 +1525,7 @@ fn write_ai_luogu_note_to_notes_dir(
         })?;
     }
 
-    let markdown = build_ai_note_markdown(problem_id, submission_id, insight, ai_model);
+    let markdown = build_ai_note_markdown(problem_id, problem_title, submission_id, insight, ai_model);
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
         return Err(format!(
@@ -1470,58 +1559,41 @@ fn build_raw_luogu_draft_markdown(
     problem_title: &str,
     submission_id: &str,
     source_code: &str,
-    fallback_reason: &str,
+    difficulty: &str,
+    include_source_code: bool,
 ) -> String {
     let candidate_comment = extract_luogu_ai_candidate_comment(source_code)
         .or_else(|| extract_oinb_insight(source_code).ok());
-    let title = if problem_title.trim().is_empty() {
-        format!("{problem_id} raw Luogu draft")
-    } else {
-        format!("{problem_id} - {} raw Luogu draft", problem_title.trim())
-    };
+    let title = luogu_problem_display_name(problem_id, problem_title);
 
     let mut markdown = format!(
-        "---\ntitle: {}\ntags: [洛谷, 待整理]\ndifficulty: \"\"\nsource: {}\nsummary: {}\ndraft: true\nluogu_submission: {}\nai_generated: false\nai_status: {}\n---\n\n",
+        "---\ntitle: {}\ntags: [洛谷, 待整理]\ndifficulty: {}\nsource: {}\nsummary: {}\ndraft: true\nluogu_submission: {}\nai_generated: false\n---\n\n",
         yaml_quote(&title),
+        yaml_quote(difficulty.trim()),
         yaml_quote(&format!("luogu-{problem_id}")),
-        yaml_quote("AI was unavailable or did not produce an organized note; this is a raw draft."),
+        yaml_quote("待补充题目理解、解题思路和复盘启示。"),
         yaml_quote(submission_id.trim()),
-        yaml_quote("raw_draft_fallback"),
     );
 
-    markdown.push_str("# Raw Luogu Draft\n\n");
-    markdown.push_str("## Submission\n\n");
-    markdown.push_str(&format!("- Submission ID: {}\n", submission_id.trim()));
-    markdown.push_str(&format!("- Problem: {problem_id}"));
-    if !problem_title.trim().is_empty() {
-        markdown.push_str(&format!(" - {}", problem_title.trim()));
-    }
-    markdown.push('\n');
-    markdown.push_str(&format!(
-        "- Problem URL: https://www.luogu.com.cn/problem/{problem_id}\n"
-    ));
-    markdown.push_str(&format!(
-        "- Submission URL: https://www.luogu.com.cn/record/{}\n\n",
-        submission_id.trim()
-    ));
-
-    markdown.push_str("## AI Status\n\n");
-    markdown.push_str(fallback_reason.trim());
-    markdown.push_str("\n\n");
-
-    markdown.push_str("## Raw @oinb-insight Candidate\n\n");
+    markdown.push_str(&format!("# {title}\n\n"));
+    markdown.push_str("## 题目理解\n\n待补充。\n\n");
+    markdown.push_str("## 解题思路\n\n待补充。\n\n");
+    markdown.push_str("## 复盘启示\n\n");
     if let Some(candidate_comment) = candidate_comment {
-        markdown.push_str("```text\n");
         markdown.push_str(candidate_comment.trim());
-        markdown.push_str("\n```\n\n");
+        markdown.push_str("\n\n");
     } else {
-        markdown.push_str("No @oinb-insight or reusable tail comment candidate was found.\n\n");
+        markdown.push_str("未找到。\n\n");
     }
 
-    markdown.push_str("## Source Code\n\n");
-    markdown.push_str("```cpp\n");
-    markdown.push_str(source_code.trim());
-    markdown.push_str("\n```\n");
+    if include_source_code {
+        markdown.push_str("## 提交代码\n\n");
+        markdown.push_str("```cpp\n");
+        markdown.push_str(source_code.trim());
+        markdown.push_str("\n```\n\n");
+    }
+
+    append_luogu_submission_info(&mut markdown, problem_id, problem_title, submission_id, difficulty);
 
     markdown
 }
@@ -1531,6 +1603,8 @@ fn build_raw_prepared_luogu_note(
     problem_title: &str,
     submission_id: &str,
     source_code: &str,
+    difficulty: &str,
+    include_source_code: bool,
     fallback_reason: &str,
 ) -> Result<PreparedLuoguNote, String> {
     let problem_id = normalize_problem_id(problem_id)?;
@@ -1541,7 +1615,8 @@ fn build_raw_prepared_luogu_note(
         problem_title,
         submission_id,
         source_code,
-        fallback_reason,
+        difficulty,
+        include_source_code,
     );
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
@@ -1565,7 +1640,8 @@ fn write_raw_luogu_draft_to_notes_dir(
     problem_title: &str,
     submission_id: &str,
     source_code: &str,
-    fallback_reason: &str,
+    difficulty: &str,
+    _fallback_reason: &str,
 ) -> Result<ImportLuoguInsightResult, String> {
     let problem_id = normalize_problem_id(problem_id)?;
     let safe_title = safe_title_for_filename(problem_title.trim(), "raw-draft");
@@ -1583,7 +1659,8 @@ fn write_raw_luogu_draft_to_notes_dir(
         problem_title,
         submission_id,
         source_code,
-        fallback_reason,
+        difficulty,
+        false,
     );
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
@@ -1720,6 +1797,7 @@ fn prepare_luogu_submission_record_note(
             submission_id: record.submission_id.to_string(),
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
+            difficulty: record.difficulty.clone(),
             suggested_relative_path: String::new(),
             markdown: String::new(),
             source_code: String::new(),
@@ -1737,6 +1815,7 @@ fn prepare_luogu_submission_record_note(
             submission_id: record.submission_id.to_string(),
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
+            difficulty: record.difficulty.clone(),
             suggested_relative_path: String::new(),
             markdown: String::new(),
             source_code: String::new(),
@@ -1763,6 +1842,7 @@ fn prepare_luogu_submission_record_note(
                     submission_id: record.submission_id.to_string(),
                     problem_id: record.problem_id.clone(),
                     problem_title: record.problem_title.clone(),
+                    difficulty: record.difficulty.clone(),
                     suggested_relative_path: String::new(),
                     markdown: String::new(),
                     source_code: String::new(),
@@ -1783,6 +1863,7 @@ fn prepare_luogu_submission_record_note(
             submission_id: record.submission_id.to_string(),
             problem_id: record.problem_id.clone(),
             problem_title: record.problem_title.clone(),
+            difficulty: record.difficulty.clone(),
             suggested_relative_path: String::new(),
             markdown: String::new(),
             source_code,
@@ -1800,6 +1881,8 @@ fn prepare_luogu_submission_record_note(
         &record.problem_title,
         &record.submission_id.to_string(),
         &source_code,
+        &record.difficulty,
+        rules.include_source_code.unwrap_or(false),
         ai_config,
     ) {
         Ok(prepared) => prepared,
@@ -1808,6 +1891,7 @@ fn prepare_luogu_submission_record_note(
                 submission_id: record.submission_id.to_string(),
                 problem_id: record.problem_id.clone(),
                 problem_title: record.problem_title.clone(),
+                difficulty: record.difficulty.clone(),
                 suggested_relative_path: String::new(),
                 markdown: String::new(),
                 source_code: source_code.clone(),
@@ -1826,6 +1910,7 @@ fn prepare_luogu_submission_record_note(
         submission_id: record.submission_id.to_string(),
         problem_id: record.problem_id.clone(),
         problem_title: record.problem_title.clone(),
+        difficulty: record.difficulty.clone(),
         suggested_relative_path: prepared.relative_path,
         markdown: prepared.markdown,
         source_code,
@@ -1843,6 +1928,8 @@ fn prepare_ai_first_luogu_note(
     problem_title: &str,
     submission_id: &str,
     source_code: &str,
+    difficulty: &str,
+    include_source_code: bool,
     ai_config: &AiConfigFields,
 ) -> Result<PreparedLuoguNote, String> {
     let problem_id = normalize_problem_id(problem_id)?;
@@ -1859,6 +1946,8 @@ fn prepare_ai_first_luogu_note(
             problem_title,
             submission_id,
             source_code,
+            difficulty,
+            include_source_code,
             "没有找到 @oinb-insight 候选内容，已生成待整理源码草稿。",
         );
     };
@@ -1874,6 +1963,7 @@ fn prepare_ai_first_luogu_note(
     ) {
         Ok(insight) if insight.should_import => build_ai_prepared_luogu_note(
             &problem_id,
+            problem_title,
             submission_id,
             &insight,
             ai_config.model.trim(),
@@ -1883,6 +1973,8 @@ fn prepare_ai_first_luogu_note(
             problem_title,
             submission_id,
             source_code,
+            difficulty,
+            include_source_code,
             "AI 判断这条注释暂不适合结构化导入，已生成待整理源码草稿。",
         ),
         Err(error) if should_fallback_to_raw_draft(&error) => build_raw_prepared_luogu_note(
@@ -1890,7 +1982,9 @@ fn prepare_ai_first_luogu_note(
             problem_title,
             submission_id,
             source_code,
-            &format!("AI 未整理原因：{error}"),
+            difficulty,
+            include_source_code,
+            &format!("AI 整理失败：{error}"),
         ),
         Err(error) => Err(error),
     }
@@ -1933,6 +2027,7 @@ fn import_luogu_insight_to_notes_dir(
     write_ai_luogu_note_to_notes_dir(
         notes_dir,
         &problem_id,
+        problem_title,
         submission_id,
         &insight,
         ai_config.model.trim(),
@@ -2031,6 +2126,7 @@ fn import_luogu_submission_record(
                 &record.problem_title,
                 &record.submission_id.to_string(),
                 &source_code,
+                &record.difficulty,
                 "没有找到 @oinb-insight 候选内容，已生成待整理源码草稿。",
             ) {
                 Ok(imported) => imported,
@@ -2066,7 +2162,8 @@ fn import_luogu_submission_record(
                 &record.problem_title,
                 &record.submission_id.to_string(),
                 &source_code,
-                &format!("AI 未整理原因：{error}"),
+                &record.difficulty,
+                &format!("AI 整理失败：{error}"),
             ) {
                 Ok(imported) => imported,
                 Err(error) if error.contains("already exists") => {
@@ -2096,61 +2193,19 @@ fn import_luogu_submission_record(
         }
     };
 
-    if !auto_commit {
-        return ImportLuoguSubmissionResult {
-            submission_id: record.submission_id.to_string(),
-            problem_id: record.problem_id.clone(),
-            problem_title: record.problem_title.clone(),
-            relative_path: Some(imported.relative_path),
-            draft_fallback,
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: false,
-            commit_status: "skipped".to_string(),
-        };
-    }
-
-    match commit_note(imported.relative_path.clone(), None) {
-        Ok(CommitNoteStatus::Committed) => ImportLuoguSubmissionResult {
-            submission_id: record.submission_id.to_string(),
-            problem_id: record.problem_id.clone(),
-            problem_title: record.problem_title.clone(),
-            relative_path: Some(imported.relative_path),
-            draft_fallback,
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: true,
-            commit_status: "committed".to_string(),
-        },
-        Ok(CommitNoteStatus::NoChanges) => ImportLuoguSubmissionResult {
-            submission_id: record.submission_id.to_string(),
-            problem_id: record.problem_id.clone(),
-            problem_title: record.problem_title.clone(),
-            relative_path: Some(imported.relative_path),
-            draft_fallback,
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: false,
-            commit_status: "noChanges".to_string(),
-        },
-        Err(error) => {
-            let mut result = luogu_submission_import_failed(
-                &record.submission_id.to_string(),
-                &record.problem_id,
-                &record.problem_title,
-                Some(imported.relative_path),
-                format!("Git 提交失败：{error}"),
-                "failed",
-            );
-            result.draft_fallback = draft_fallback;
-            result
-        }
+    let _auto_commit_disabled = auto_commit;
+    ImportLuoguSubmissionResult {
+        submission_id: record.submission_id.to_string(),
+        problem_id: record.problem_id.clone(),
+        problem_title: record.problem_title.clone(),
+        relative_path: Some(imported.relative_path),
+        draft_fallback,
+        skipped: false,
+        skip_reason: None,
+        failed: false,
+        error: None,
+        committed: false,
+        commit_status: "skipped".to_string(),
     }
 }
 #[tauri::command]
@@ -2236,7 +2291,7 @@ pub fn import_luogu_submission(
         &notes_dir,
         &config.ai,
         &record,
-        auto_commit.unwrap_or(true),
+        auto_commit.unwrap_or(false),
     ))
 }
 
@@ -2362,47 +2417,16 @@ pub fn write_luogu_prepared_note(
         });
     }
 
-    if !auto_commit.unwrap_or(true) {
-        return Ok(WriteLuoguPreparedNoteResult {
-            relative_path: Some(relative_path),
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: false,
-            commit_status: "skipped".to_string(),
-        });
-    }
-
-    match commit_note(relative_path.clone(), None) {
-        Ok(CommitNoteStatus::Committed) => Ok(WriteLuoguPreparedNoteResult {
-            relative_path: Some(relative_path),
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: true,
-            commit_status: "committed".to_string(),
-        }),
-        Ok(CommitNoteStatus::NoChanges) => Ok(WriteLuoguPreparedNoteResult {
-            relative_path: Some(relative_path),
-            skipped: false,
-            skip_reason: None,
-            failed: false,
-            error: None,
-            committed: false,
-            commit_status: "noChanges".to_string(),
-        }),
-        Err(error) => Ok(WriteLuoguPreparedNoteResult {
-            relative_path: Some(relative_path),
-            skipped: false,
-            skip_reason: None,
-            failed: true,
-            error: Some(format!("Git 提交失败：{error}")),
-            committed: false,
-            commit_status: "failed".to_string(),
-        }),
-    }
+    let _auto_commit_disabled = auto_commit;
+    Ok(WriteLuoguPreparedNoteResult {
+        relative_path: Some(relative_path),
+        skipped: false,
+        skip_reason: None,
+        failed: false,
+        error: None,
+        committed: false,
+        commit_status: "skipped".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -2635,25 +2659,6 @@ pub fn sync_luogu_insights() -> Result<SyncLuoguInsightsResult, String> {
             }
         };
 
-        match commit_note(imported.relative_path.clone(), None) {
-            Ok(CommitNoteStatus::Committed) => {}
-            Ok(CommitNoteStatus::NoChanges) => {
-                warnings.push(format!(
-                    "Luogu sync warning: generated note had no Git diff: {}",
-                    imported.relative_path
-                ));
-            }
-            Err(error) => {
-                failed_count += 1;
-                warnings.push(format!(
-                    "Luogu sync failed: Git commit failed for {}: {error}",
-                    imported.relative_path
-                ));
-                imported_paths.push(imported.relative_path);
-                continue;
-            }
-        }
-
         imported_count += 1;
         ai_imported_count += 1;
         imported_paths.push(imported.relative_path);
@@ -2866,7 +2871,7 @@ Keep one sentinel item to avoid special casing.
     fn generated_frontmatter_uses_insight_fields() {
         let insight =
             split_insight_frontmatter(&extract_oinb_insight(&sample_source()).unwrap()).unwrap();
-        let markdown = build_note_markdown("P1234", "Fallback", "987654", insight);
+        let markdown = build_note_markdown("P1234", "Fallback", "987654", "提高+/省选-", insight);
 
         assert!(markdown.contains("title: Interval Coverage"));
         assert!(markdown.contains("tags: [difference, construction]"));
@@ -2891,7 +2896,7 @@ Keep one sentinel item to avoid special casing.
             body: "## Insight\n\nUse a difference array.".to_string(),
         };
 
-        let markdown = build_ai_note_markdown("P1234", "987654", &insight, "deepseek-chat");
+        let markdown = build_ai_note_markdown("P1234", "AI Interval Coverage", "987654", &insight, "deepseek-chat");
 
         assert!(markdown.contains("title: AI Interval Coverage"));
         assert!(markdown.contains("tags: [difference, pitfall]"));
@@ -2914,18 +2919,19 @@ Keep one sentinel item to avoid special casing.
             "Interval Coverage",
             "987654",
             &sample_source(),
-            "AI unavailable",
+            "提高+/省选-",
+            true,
         );
 
         assert!(markdown.contains("tags: [洛谷, 待整理]"));
         assert!(markdown.contains("draft: true"));
-        assert!(markdown.contains("ai_status: raw_draft_fallback"));
-        assert!(markdown.contains("Submission ID: 987654"));
-        assert!(markdown.contains("Problem: P1234 - Interval Coverage"));
-        assert!(markdown.contains("AI unavailable"));
-        assert!(markdown.contains("## Raw @oinb-insight Candidate"));
-        assert!(markdown.contains("title: Interval Coverage"));
-        assert!(markdown.contains("## Source Code"));
+        assert!(!markdown.contains("ai_status"));
+        assert!(markdown.contains("- 提交编号：987654"));
+        assert!(markdown.contains("- 题目：P1234 Interval Coverage"));
+        assert!(markdown.contains("- 难度：提高+/省选-"));
+        assert!(markdown.contains("## 复盘启示"));
+        assert!(markdown.contains("title: P1234 Interval Coverage"));
+        assert!(markdown.contains("## 提交代码"));
         assert!(markdown.contains("int main() { return 0; }"));
     }
 
@@ -2936,12 +2942,14 @@ Keep one sentinel item to avoid special casing.
             "A+B Problem",
             "123456",
             "int main() { return 0; }",
-            "No candidate",
+            "未获取",
+            false,
         );
 
         assert!(markdown.contains("tags: [洛谷, 待整理]"));
-        assert!(markdown.contains("No @oinb-insight or reusable tail comment candidate was found."));
-        assert!(markdown.contains("```cpp\nint main() { return 0; }\n```"));
+        assert!(markdown.contains("## 复盘启示\n\n未找到。"));
+        assert!(!markdown.contains("## 提交代码"));
+        assert!(!markdown.contains("```cpp\nint main() { return 0; }\n```"));
     }
 
     #[test]
@@ -2961,6 +2969,7 @@ Keep one sentinel item to avoid special casing.
         let first = write_ai_luogu_note_to_notes_dir(
             notes_dir,
             "P1234",
+            "Interval Coverage",
             "987654",
             &insight,
             "deepseek-chat",
@@ -2972,6 +2981,7 @@ Keep one sentinel item to avoid special casing.
         let second = write_ai_luogu_note_to_notes_dir(
             notes_dir,
             "P1234",
+            "Interval Coverage",
             "987654",
             &insight,
             "deepseek-chat",
@@ -3092,6 +3102,7 @@ Keep one sentinel item to avoid special casing.
                 submission_id: "123456".to_string(),
                 problem_id: "P1000".to_string(),
                 problem_title: "A+B Problem".to_string(),
+                difficulty: "未获取".to_string(),
                 status: "12".to_string(),
                 submit_time: "1777777777".to_string(),
             }
