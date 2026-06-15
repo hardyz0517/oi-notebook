@@ -294,7 +294,7 @@ pub fn run() {
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
                 let toggle_shortcut_clone = toggle_shortcut;
 
-                app.handle().plugin(
+                if let Err(e) = app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, shortcut, event| {
                             if shortcut == &toggle_shortcut_clone
@@ -320,10 +320,14 @@ pub fn run() {
                             }
                         })
                         .build(),
-                )?;
-
-                let _ = app.global_shortcut().unregister(toggle_shortcut);
-                app.global_shortcut().register(toggle_shortcut)?;
+                ) {
+                    eprintln!("warning: 全局快捷键插件注册失败: {e}");
+                } else {
+                    let _ = app.global_shortcut().unregister(toggle_shortcut);
+                    if let Err(e) = app.global_shortcut().register(toggle_shortcut) {
+                        eprintln!("warning: 全局快捷键 Ctrl+Alt+Space 注册失败，可能已被其他软件占用: {e}");
+                    }
+                }
 
                 let show_main =
                     MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>)?;
