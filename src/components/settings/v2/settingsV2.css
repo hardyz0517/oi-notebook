@@ -935,7 +935,6 @@ html[data-theme="light"] .settings-v2 {
   white-space: nowrap;
 }
 
-.settings-v2-button,
 .settings-v2-pill,
 .settings-v2-pill--readonly,
 .settings-v2-pill--status,
@@ -1214,13 +1213,11 @@ html[data-theme="light"] .settings-v2 {
   color: var(--settings-text);
 }
 
-.settings-v2-button,
 .settings-v2-action-button {
   cursor: pointer;
   font-family: inherit;
 }
 
-.settings-v2 .settings-v2-button,
 .settings-v2 .settings-v2-pill,
 .settings-v2 .settings-v2-pill--readonly,
 .settings-v2 .settings-v2-pill--status,
@@ -1235,15 +1232,13 @@ html[data-theme="light"] .settings-v2 {
   line-height: var(--settings-control-line-height);
 }
 
-.settings-v2-button:hover,
 .settings-v2-action-button:hover {
   border-color: var(--settings-v2-focus);
   background: var(--settings-v2-control-hover);
   color: var(--settings-text);
 }
 
-.settings-v2-action-button:disabled,
-.settings-v2-button:disabled {
+.settings-v2-action-button:disabled {
   cursor: default;
   opacity: 0.5;
 }
@@ -1656,11 +1651,6 @@ html[data-theme="light"] .settings-v2-diff-preview {
 
 .settings-v2-page :where(.text-muted-foreground, .text-muted, .settings-v2-row-description) {
   color: var(--settings-control-text) !important;
-}
-
-.settings-v2-page .settings-v2-button {
-  height: var(--settings-control-small-height);
-  min-height: var(--settings-control-small-height);
 }
 
 .settings-v2-page :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),

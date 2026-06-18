@@ -2,7 +2,6 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NavItem } from "@/components/ui/nav-item";
-import { cn } from "@/lib/utils";
 
 import type { SettingsGroupId, SettingsNavigationGroup } from "../../settingsTypes";
 import { SETTINGS_V2_GROUPS, SETTINGS_V2_ICONS } from "../settingsNav";
@@ -54,7 +53,7 @@ export function SettingsSidebar({
                     icon={Icon}
                     label={group.label}
                     selected={isActive}
-                    className={cn("settings-v2-nav-item")}
+                    className="settings-v2-nav-item"
                     onClick={() => onOpenGroup(group.id)}
                   />
                 );

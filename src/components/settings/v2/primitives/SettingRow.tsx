@@ -38,7 +38,6 @@ export function SettingRow({
       className={cn("settings-v2-row", className)}
       contentClassName="settings-v2-row-copy"
       controlClassName="settings-v2-row-control"
-      data-variant={resolvedVariant}
     >
       {children}
     </UiSettingRow>
