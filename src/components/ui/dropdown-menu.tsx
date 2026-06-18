@@ -30,12 +30,12 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         className={cn(
-          "z-80 min-w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-[var(--motion-dropdown-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-top-[var(--motion-dropdown-y)]",
+          "z-80 min-w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-1 text-popover-foreground shadow-lg outline-none duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-[var(--ui-motion-enter-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-top-[var(--ui-motion-enter-y)]",
           className
         )}
         style={
           {
-            "--tw-duration": "var(--motion-duration-base)",
+            "--tw-duration": "var(--ui-motion-duration-base)",
             minWidth: "max(var(--radix-dropdown-menu-trigger-width, 9rem), 9rem)",
             ...style,
           } as React.CSSProperties
@@ -58,7 +58,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-inset={inset ? "true" : undefined}
       className={cn(
-        "relative flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none transition-[background-color,color,opacity] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] hover:bg-[var(--color-background-hover)] focus:bg-[var(--color-background-hover)] data-[highlighted]:bg-[var(--color-background-hover)] data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[inset=true]:pl-7",
+        "relative flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-[var(--ui-radius-item)] px-2 py-1.5 text-xs outline-none transition-[background-color,color,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus:bg-[var(--ui-state-hover)] data-[highlighted]:bg-[var(--ui-state-hover)] data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:text-[var(--ui-disabled-foreground)] data-[disabled]:opacity-[var(--ui-disabled-opacity)] data-[inset=true]:pl-7",
         className
       )}
       {...props}
@@ -77,7 +77,7 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       checked={checked}
       className={cn(
-        "relative flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-7 text-xs outline-none transition-[background-color,color,opacity] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] hover:bg-[var(--color-background-hover)] focus:bg-[var(--color-background-hover)] data-[highlighted]:bg-[var(--color-background-hover)] data-[state=checked]:bg-[var(--color-background-active)] data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+        "relative flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-[var(--ui-radius-item)] py-1.5 pr-2 pl-7 text-xs outline-none transition-[background-color,color,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus:bg-[var(--ui-state-hover)] data-[highlighted]:bg-[var(--ui-state-hover)] data-[state=checked]:bg-[var(--ui-state-selected)] data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:text-[var(--ui-disabled-foreground)] data-[disabled]:opacity-[var(--ui-disabled-opacity)]",
         className
       )}
       {...props}

@@ -61,7 +61,7 @@ function SegmentedControl<TValue extends string>({
       data-slot="segmented-control"
       role="radiogroup"
       aria-label={ariaLabel}
-      className={cn("inline-flex items-center gap-0.5 rounded-full bg-muted p-0.5", className)}
+      className={cn("inline-flex items-center gap-0.5 rounded-[var(--ui-radius-control)] bg-muted p-0.5", className)}
       onKeyDown={onKeyDown}
     >
       {options.map((option, index) => {
@@ -84,7 +84,7 @@ function SegmentedControl<TValue extends string>({
             tabIndex={checked || (!options.some((item) => item.value === value) && index === 0) ? 0 : -1}
             disabled={itemDisabled}
             className={cn(
-              "inline-flex h-6 min-w-0 items-center justify-center rounded-full px-2 text-xs font-medium text-muted-foreground outline-none transition-[background-color,color,box-shadow,opacity] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-background data-[state=checked]:text-foreground data-[state=checked]:shadow-sm",
+              "inline-flex h-6 min-w-0 items-center justify-center rounded-[var(--ui-radius-item)] px-2 text-xs font-medium text-muted-foreground outline-none transition-[background-color,color,box-shadow,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] disabled:cursor-not-allowed disabled:opacity-[var(--ui-disabled-opacity)] data-[state=checked]:bg-[var(--ui-state-selected)] data-[state=checked]:text-[var(--ui-state-selected-foreground)] data-[state=checked]:shadow-sm",
               resolvedItemClassName
             )}
             onClick={() => changeValue(option.value)}
