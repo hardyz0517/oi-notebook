@@ -2009,14 +2009,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   };
 
   return (
-    <section className="grid min-w-0 gap-5">
-      <div className="grid gap-1 border-b border-border/80 pb-4">
-        <div className="text-base font-semibold text-foreground">搜索自检</div>
-        <div className="max-w-4xl text-sm leading-6 text-muted-foreground">
+    <section className="settings-v2-diagnostics-panel grid min-w-0">
+      <div className="settings-v2-legacy-section-header grid">
+        <div className="settings-v2-legacy-section-title text-base font-semibold text-foreground">搜索自检</div>
+        <div className="settings-v2-legacy-section-description max-w-4xl text-sm leading-6 text-muted-foreground">
           检查搜索决策、搜索服务、本地索引、缓存和引用渲染。默认自检不读取浏览器数据，不修改笔记，也不会上传本地笔记或 API Key。
         </div>
       </div>
 
+      <div className="grid min-w-0 gap-5 border-t border-border/80 pt-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
           {isRunningCore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
@@ -2849,6 +2850,7 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
             </div>
           </details>
         ))}
+      </div>
       </div>
     </section>
   );

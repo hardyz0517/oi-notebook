@@ -1,8 +1,20 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-export type SettingsCategory = "appearance" | "ai" | "luogu" | "blog" | "data" | "about" | "diagnostics" | "editor";
+export type SettingsCategory =
+  | "general"
+  | "appearance"
+  | "ai"
+  | "luogu"
+  | "blog"
+  | "data"
+  | "keyboard"
+  | "advanced"
+  | "about"
+  | "diagnostics"
+  | "editor";
 
 export type SettingsSection =
+  | "general-basics"
   | "appearance-theme"
   | "ai-api"
   | "ai-local-notes"
@@ -16,6 +28,8 @@ export type SettingsSection =
   | "blog-info"
   | "blog-preview"
   | "data-storage"
+  | "keyboard-shortcuts"
+  | "advanced-developer"
   | "about-version"
   | "about-markdown"
   | "about-privacy"

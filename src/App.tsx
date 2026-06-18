@@ -24,16 +24,30 @@ import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from 
 import AiConfigManager from "@/components/settings/AiConfigManager";
 import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
 import SettingsCenterHost, { type SettingsCenterHostHandle } from "@/components/settings/SettingsCenterHost";
+import { SettingsPageLayout as SettingsV2PageLayout } from "@/components/settings/v2/components/SettingsPageLayout";
+import { SettingsCard as SettingsV2Card, SettingsSection as SettingsV2Section } from "@/components/settings/v2/primitives/SettingsCard";
+import { SettingRow as SettingsV2Row } from "@/components/settings/v2/primitives/SettingRow";
+import { ReadonlyPill as SettingsV2ReadonlyPill } from "@/components/settings/v2/primitives/ReadonlyPill";
 import {
-  AboutMarkdownSettingsPage,
-  AboutPrivacySettingsPage,
-  AboutVersionSettingsPage,
-  AppearanceSettingsPage,
   BlogPreviewSettingsPage,
   BlogTagManagerSettingsPage,
   DataStorageSettingsPage,
   SettingRow,
 } from "@/components/settings/SettingsPages";
+import { AboutSettingsPage } from "@/components/settings/v2/pages/AboutSettingsPage";
+import { AdvancedSettingsPage } from "@/components/settings/v2/pages/AdvancedSettingsPage";
+import {
+  AppearanceSettingsPage,
+  type DiffMarkerMode,
+  type ReducedMotionMode,
+  type ThemeMode,
+} from "@/components/settings/v2/pages/AppearanceSettingsPage";
+import { getSettingsThemeCssVariables } from "@/components/settings/v2/theme/settingsThemeApply";
+import { normalizeSettingsThemeState } from "@/components/settings/v2/theme/settingsThemeCodec";
+import { DEFAULT_SETTINGS_THEME_STATE } from "@/components/settings/v2/theme/settingsThemePresets";
+import type { SettingsThemeState } from "@/components/settings/v2/theme/settingsThemeTypes";
+import { GeneralSettingsPage } from "@/components/settings/v2/pages/GeneralSettingsPage";
+import { KeyboardSettingsPage } from "@/components/settings/v2/pages/KeyboardSettingsPage";
 import {
   LuoguAccountSettingsPage,
   LuoguImportCenterSettingsPage,
@@ -115,6 +129,13 @@ const PREVIEW_FONT_SIZE_STORAGE_KEY = "oi-notebook.previewFontSize";
 const READING_DENSITY_STORAGE_KEY = "oi-notebook.readingDensity";
 const TOOLBAR_FONT_SIZE_STORAGE_KEY = "oi-notebook.toolbarFontSize";
 const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
+const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.settingsV2.accentColor";
+const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.settingsV2.translucentSidebar";
+const CONTRAST_STORAGE_KEY = "oi-notebook.settingsV2.contrast";
+const SETTINGS_THEME_V1_STORAGE_KEY = "oi-notebook.settingsThemeV1";
+const POINTER_CURSOR_STORAGE_KEY = "oi-notebook.settingsV2.pointerCursor";
+const REDUCED_MOTION_STORAGE_KEY = "oi-notebook.settingsV2.reducedMotion";
+const DIFF_MARKER_MODE_STORAGE_KEY = "oi-notebook.settingsV2.diffMarkerMode";
 const DEVELOPER_MODE_STORAGE_KEY = "oi-notebook.developerMode";
 const FONT_SIZE_MIN = 13;
 const FONT_SIZE_MAX = 20;
@@ -635,7 +656,7 @@ type LuoguPrepareProgress = {
   failed: number;
   skipped: number;
 };
-type AppTheme = "dark" | "light";
+type AppTheme = ThemeMode;
 type ReadingDensity = "compact" | "standard" | "comfortable";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
@@ -884,10 +905,6 @@ const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
 const LUOGU_PREPARE_CONCURRENCY = 2;
 const LUOGU_IMPORT_RULES_STORAGE_KEY = "oi-notebook.luoguImportRules";
-const THEME_OPTIONS: Array<{ id: AppTheme; label: string; description: string }> = [
-  { id: "dark", label: "黑色主题", description: "保持当前深色工作台视觉，适合长时间编辑。" },
-  { id: "light", label: "白色主题", description: "切换到浅色界面，适合明亮环境和投屏演示。" },
-];
 const READING_DENSITY_OPTIONS: Array<{
   id: ReadingDensity;
   label: string;
@@ -931,7 +948,8 @@ const SETTINGS_TREE: Array<{
   developerOnly?: boolean;
   children: Array<{ id: SettingsSection; label: string }>;
 }> = [
-  { id: "appearance", label: "外观", children: [{ id: "appearance-theme", label: "主题与字号" }] },
+  { id: "general", label: "常规", children: [{ id: "general-basics", label: "基础偏好" }] },
+  { id: "appearance", label: "外观", children: [{ id: "appearance-theme", label: "主题" }] },
   {
     id: "ai",
     label: "AI",
@@ -962,26 +980,33 @@ const SETTINGS_TREE: Array<{
     ],
   },
   { id: "data", label: "数据与存储", children: [{ id: "data-storage", label: "目录与缓存" }] },
+  { id: "keyboard", label: "键盘快捷键", children: [{ id: "keyboard-shortcuts", label: "快捷键" }] },
+  {
+    id: "advanced",
+    label: "高级 / 开发者",
+    children: [
+      { id: "advanced-developer", label: "开发者" },
+      { id: "diagnostics-search", label: "搜索自检" },
+    ],
+  },
   {
     id: "about",
     label: "关于",
-    children: [
-      { id: "about-version", label: "版本与说明" },
-      { id: "about-markdown", label: "Markdown 支持" },
-      { id: "about-privacy", label: "数据与隐私" },
-    ],
+    children: [{ id: "about-version", label: "关于 OI Notebook" }],
   },
-  { id: "diagnostics", label: "诊断", developerOnly: true, children: [{ id: "diagnostics-search", label: "搜索自检" }] },
 ];
 const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
+  general: "general-basics",
   appearance: "appearance-theme",
   ai: "ai-api",
   luogu: "luogu-account",
   blog: "blog-info",
   data: "data-storage",
+  keyboard: "keyboard-shortcuts",
+  advanced: "advanced-developer",
   about: "about-version",
   diagnostics: "diagnostics-search",
-  editor: "about-markdown",
+  editor: "about-version",
 };
 const SETTINGS_SECTION_LABELS = SETTINGS_TREE.reduce((labels, group) => {
   for (const child of group.children) labels[child.id] = { group: group.label, groupId: group.id, section: child.label };
@@ -2012,7 +2037,7 @@ function getInitialEditorPreviewRatio(): number {
 }
 
 function isAppTheme(value: string | null): value is AppTheme {
-  return value === "dark" || value === "light";
+  return value === "dark" || value === "light" || value === "system";
 }
 
 function getInitialAppTheme(): AppTheme {
@@ -2027,6 +2052,75 @@ function isReadingDensity(value: string | null): value is ReadingDensity {
 function getInitialReadingDensity(): ReadingDensity {
   const stored = window.localStorage.getItem(READING_DENSITY_STORAGE_KEY);
   return isReadingDensity(stored) ? stored : "standard";
+}
+
+function isHexColor(value: string | null): value is string {
+  return /^#[0-9a-fA-F]{6}$/.test(value ?? "");
+}
+
+function getInitialAccentColor(): string {
+  const stored = window.localStorage.getItem(ACCENT_COLOR_STORAGE_KEY);
+  return isHexColor(stored) ? stored.toUpperCase() : "#0169CC";
+}
+
+function getInitialBooleanSetting(storageKey: string, defaultValue: boolean): boolean {
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return defaultValue;
+}
+
+function getInitialContrast(): number {
+  const rawValue = window.localStorage.getItem(CONTRAST_STORAGE_KEY);
+  if (rawValue === null) return 56;
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? clampNumberRange(parsed, 0, 100) : 56;
+}
+
+function getInitialSettingsThemeState(): SettingsThemeState {
+  try {
+    const rawValue = window.localStorage.getItem(SETTINGS_THEME_V1_STORAGE_KEY);
+    if (rawValue) {
+      return normalizeSettingsThemeState(JSON.parse(rawValue));
+    }
+  } catch {
+    // Fall through to the legacy setting bridge.
+  }
+
+  const variant = getInitialAppTheme();
+  const resolvedVariant = variant === "system" ? getInitialSystemTheme() : variant;
+  const initialState = normalizeSettingsThemeState({
+    ...DEFAULT_SETTINGS_THEME_STATE,
+    mode: variant,
+  });
+  return {
+    ...initialState,
+    [resolvedVariant]: {
+      ...initialState[resolvedVariant],
+      theme: {
+        ...initialState[resolvedVariant].theme,
+        accent: getInitialAccentColor(),
+        contrast: getInitialContrast(),
+        ink: resolvedVariant === "dark" ? "#F3F4F6" : "#0D0D0D",
+        opaqueWindows: getInitialBooleanSetting(TRANSLUCENT_SIDEBAR_STORAGE_KEY, false),
+        surface: resolvedVariant === "dark" ? "#1D1D1D" : "#F7F7F5",
+      },
+    },
+  };
+}
+
+function getInitialReducedMotion(): ReducedMotionMode {
+  const stored = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
+  return stored === "on" || stored === "off" || stored === "system" ? stored : "system";
+}
+
+function getInitialDiffMarkerMode(): DiffMarkerMode {
+  const stored = window.localStorage.getItem(DIFF_MARKER_MODE_STORAGE_KEY);
+  return stored === "symbols" ? "symbols" : "color";
+}
+
+function getInitialSystemTheme(): "dark" | "light" {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function getInitialDeveloperMode(): boolean {
@@ -2583,7 +2677,9 @@ export default function App() {
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [editorCursorOffset, setEditorCursorOffset] = useState<number | null>(null);
   const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
-  const [appTheme, setAppTheme] = useState<AppTheme>(getInitialAppTheme);
+  const [settingsThemeState, setSettingsThemeState] = useState(getInitialSettingsThemeState);
+  const [appTheme, setAppTheme] = useState<AppTheme>(settingsThemeState.mode);
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getInitialSystemTheme);
   const [appZoom, setAppZoom] = useState(getInitialAppZoom);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const contentZoomRef = useRef(contentZoom);
@@ -2604,15 +2700,15 @@ export default function App() {
   const aiSidebarWidthRef = useRef(aiSidebarWidth);
   const aiSidebarDragWidthRef = useRef(aiSidebarWidth);
   const aiSidebarResizeRafRef = useRef<number | null>(null);
-  const [uiScale, setUiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
+  const [uiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
     getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
   );
   const [previewFontSize, setPreviewFontSize] = useState(() =>
     getInitialFontSize(PREVIEW_FONT_SIZE_STORAGE_KEY, PREVIEW_FONT_SIZE_DEFAULT),
   );
-  const [readingDensity, setReadingDensity] = useState<ReadingDensity>(getInitialReadingDensity);
-  const [toolbarFontSize, setToolbarFontSize] = useState(() =>
+  const [readingDensity] = useState<ReadingDensity>(getInitialReadingDensity);
+  const [toolbarFontSize] = useState(() =>
     getInitialNumberRange(
       TOOLBAR_FONT_SIZE_STORAGE_KEY,
       TOOLBAR_FONT_SIZE_DEFAULT,
@@ -2628,6 +2724,23 @@ export default function App() {
       SETTINGS_FONT_SIZE_MAX,
     ),
   );
+  const [accentColor, setAccentColor] = useState(() => {
+    const initialTheme = settingsThemeState.mode === "light" ? settingsThemeState.light : settingsThemeState.dark;
+    return initialTheme.theme.accent;
+  });
+  const [translucentSidebar, setTranslucentSidebar] = useState(() => {
+    const initialTheme = settingsThemeState.mode === "light" ? settingsThemeState.light : settingsThemeState.dark;
+    return initialTheme.theme.opaqueWindows;
+  });
+  const [appearanceContrast, setAppearanceContrast] = useState(() => {
+    const initialTheme = settingsThemeState.mode === "light" ? settingsThemeState.light : settingsThemeState.dark;
+    return initialTheme.theme.contrast;
+  });
+  const [pointerCursor, setPointerCursor] = useState(() =>
+    getInitialBooleanSetting(POINTER_CURSOR_STORAGE_KEY, true),
+  );
+  const [reducedMotion, setReducedMotion] = useState<ReducedMotionMode>(getInitialReducedMotion);
+  const [diffMarkerMode, setDiffMarkerMode] = useState<DiffMarkerMode>(getInitialDiffMarkerMode);
   const [tagTaxonomyConfig, setTagTaxonomyConfig] = useState<UserTagTaxonomyConfig | null>(null);
   const [tagTaxonomyConfigError, setTagTaxonomyConfigError] = useState<string | null>(null);
   const [isLoadingTagTaxonomyConfig, setIsLoadingTagTaxonomyConfig] = useState(false);
@@ -3044,7 +3157,7 @@ export default function App() {
   const settingsCenterOpenRef = useRef(false);
   const settingsCenterMaximizedRef = useRef(false);
   const aiSidebarOpenRef = useRef(false);
-  const settingsCenterActivePageRef = useRef<SettingsSection>(SETTINGS_SECTION_FALLBACK.appearance);
+  const settingsCenterActivePageRef = useRef<SettingsSection>(SETTINGS_SECTION_FALLBACK.general);
   const settingsCenterViewRef = useRef<SettingsView>("main");
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const hasRequestedPromptTemplatesRef = useRef(false);
@@ -4040,7 +4153,14 @@ export default function App() {
         : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
     return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeGroupId;
   };
-  const settingsPageSectionClass = "grid min-w-0 gap-0 px-6 py-5";
+  const shouldRenderSettingsGroup = (groupId: SettingsGroupId, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
+    const activeGroupId =
+      activeTarget.type === "category"
+        ? activeTarget.category
+        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
+    return activeGroupId === groupId;
+  };
+  const settingsPageSectionClass = "settings-v2-legacy-page grid min-w-0 gap-0";
   const promptTemplateRows = useMemo(
     () => promptTemplates.map((prompt) => ({
       ...prompt,
@@ -4068,13 +4188,16 @@ export default function App() {
     (isSettingsCenterOpenForRender && SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId === "ai");
   const appZoomLabel = `${Math.round(appZoom * 100)}%`;
   const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
-  const uiScaleLabel = `${Math.round(uiScale * 100)}%`;
   const selectedPromptUsage = useMemo(
     () => getPromptUsageInfo(selectedPromptFileName),
     [selectedPromptFileName],
   );
   const chromeZoom = 1 + (appZoom - 1) * 0.45;
-  const appThemeLabel = appTheme === "dark" ? "黑色主题" : "白色主题";
+  const resolvedTheme = appTheme === "system" ? systemTheme : appTheme;
+  const activeSettingsTheme = resolvedTheme === "light" ? settingsThemeState.light : settingsThemeState.dark;
+  const appearanceBackgroundColor = activeSettingsTheme.theme.surface;
+  const appearanceForegroundColor = activeSettingsTheme.theme.ink;
+  const settingsThemeVariables = useMemo(() => getSettingsThemeCssVariables(activeSettingsTheme), [activeSettingsTheme]);
   const activeReadingDensity =
     READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
   const appearanceStyle = {
@@ -4082,6 +4205,16 @@ export default function App() {
     "--chrome-zoom": chromeZoom,
     "--md-content-zoom": contentZoom,
     "--app-ui-scale": uiScale,
+    ...settingsThemeVariables,
+    "--settings-accent-color": accentColor,
+    "--settings-surface-color": appearanceBackgroundColor,
+    "--settings-ink-color": appearanceForegroundColor,
+    "--settings-diff-added-color": activeSettingsTheme.theme.semanticColors.diffAdded,
+    "--settings-diff-removed-color": activeSettingsTheme.theme.semanticColors.diffRemoved,
+    "--settings-skill-color": activeSettingsTheme.theme.semanticColors.skill,
+    "--settings-contrast": activeSettingsTheme.theme.contrast,
+    "--primary": accentColor,
+    "--ring": accentColor,
     "--editor-font-size": `${editorFontSize * appZoom}px`,
     "--preview-font-size": `${previewFontSize * appZoom}px`,
     "--toolbar-font-size": `${toolbarFontSize * appZoom}px`,
@@ -4310,28 +4443,30 @@ export default function App() {
     });
   };
 
-  const updateUiScale = (nextScale: number) => {
-    setUiScale(clampScale(nextScale));
-  };
-
-  const updateEditorFontSize = (nextSize: number) => {
-    setEditorFontSize(clampFontSize(nextSize));
-  };
-
-  const updatePreviewFontSize = (nextSize: number) => {
-    setPreviewFontSize(clampFontSize(nextSize));
-  };
-
-  const updateReadingDensity = (nextDensity: ReadingDensity) => {
-    setReadingDensity(nextDensity);
-  };
-
-  const updateToolbarFontSize = (nextSize: number) => {
-    setToolbarFontSize(clampNumberRange(nextSize, TOOLBAR_FONT_SIZE_MIN, TOOLBAR_FONT_SIZE_MAX));
-  };
-
   const updateSettingsFontSize = (nextSize: number) => {
     setSettingsFontSize(clampNumberRange(nextSize, SETTINGS_FONT_SIZE_MIN, SETTINGS_FONT_SIZE_MAX));
+  };
+
+  const applySettingsThemeState = (nextThemeState: SettingsThemeState) => {
+    const normalizedState = normalizeSettingsThemeState(nextThemeState);
+    const nextResolvedTheme = normalizedState.mode === "system" ? systemTheme : normalizedState.mode;
+    const nextActiveTheme = nextResolvedTheme === "light" ? normalizedState.light : normalizedState.dark;
+    setSettingsThemeState(normalizedState);
+    setAppTheme(normalizedState.mode);
+    setAccentColor(nextActiveTheme.theme.accent);
+    setAppearanceContrast(nextActiveTheme.theme.contrast);
+    setTranslucentSidebar(nextActiveTheme.theme.opaqueWindows);
+  };
+
+  const updateAppTheme = (nextTheme: AppTheme) => {
+    setAppTheme(nextTheme);
+    setSettingsThemeState((current) => normalizeSettingsThemeState({ ...current, mode: nextTheme }));
+  };
+
+  const updateCodeFontSize = (nextSize: number) => {
+    const clampedSize = clampFontSize(nextSize);
+    setEditorFontSize(clampedSize);
+    setPreviewFontSize(clampedSize);
   };
 
   const handleContentWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -7540,11 +7675,40 @@ export default function App() {
   }, [appZoom]);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mediaQuery) return;
+
+    const updateSystemTheme = () => {
+      setSystemTheme(mediaQuery.matches ? "dark" : "light");
+    };
+
+    updateSystemTheme();
+    mediaQuery.addEventListener?.("change", updateSystemTheme);
+    return () => mediaQuery.removeEventListener?.("change", updateSystemTheme);
+  }, []);
+
+  useEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = appTheme;
-    root.classList.toggle("dark", appTheme === "dark");
+    root.dataset.theme = resolvedTheme;
+    root.dataset.themeMode = appTheme;
+    root.classList.toggle("dark", resolvedTheme === "dark");
     window.localStorage.setItem(THEME_STORAGE_KEY, appTheme);
-  }, [appTheme]);
+  }, [appTheme, resolvedTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const entries = Object.entries(settingsThemeVariables);
+
+    for (const [name, value] of entries) {
+      root.style.setProperty(name, String(value));
+    }
+
+    return () => {
+      for (const [name] of entries) {
+        root.style.removeProperty(name);
+      }
+    };
+  }, [settingsThemeVariables]);
 
   useEffect(() => {
     window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
@@ -7586,6 +7750,56 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_FONT_SIZE_STORAGE_KEY, String(settingsFontSize));
   }, [settingsFontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem(ACCENT_COLOR_STORAGE_KEY, accentColor);
+  }, [accentColor]);
+
+  useEffect(() => {
+    setAccentColor(activeSettingsTheme.theme.accent);
+    setAppearanceContrast(activeSettingsTheme.theme.contrast);
+    setTranslucentSidebar(activeSettingsTheme.theme.opaqueWindows);
+  }, [activeSettingsTheme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SETTINGS_THEME_V1_STORAGE_KEY, JSON.stringify(settingsThemeState));
+    } catch {
+      // A storage failure should not prevent Settings Center from opening.
+    }
+  }, [settingsThemeState]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("app-translucent-sidebar", translucentSidebar);
+    window.localStorage.setItem(TRANSLUCENT_SIDEBAR_STORAGE_KEY, String(translucentSidebar));
+  }, [translucentSidebar]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CONTRAST_STORAGE_KEY, String(appearanceContrast));
+  }, [appearanceContrast]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("app-pointer-cursor", pointerCursor);
+    window.localStorage.setItem(POINTER_CURSOR_STORAGE_KEY, String(pointerCursor));
+  }, [pointerCursor]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const mediaQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const updateReducedMotionClass = () => {
+      const shouldReduceMotion = reducedMotion === "on" || (reducedMotion === "system" && Boolean(mediaQuery?.matches));
+      root.classList.toggle("app-reduced-motion", shouldReduceMotion);
+    };
+
+    updateReducedMotionClass();
+    mediaQuery?.addEventListener?.("change", updateReducedMotionClass);
+    window.localStorage.setItem(REDUCED_MOTION_STORAGE_KEY, reducedMotion);
+    return () => mediaQuery?.removeEventListener?.("change", updateReducedMotionClass);
+  }, [reducedMotion]);
+
+  useEffect(() => {
+    window.localStorage.setItem(DIFF_MARKER_MODE_STORAGE_KEY, diffMarkerMode);
+  }, [diffMarkerMode]);
 
   useEffect(() => {
     window.localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, developerModeEnabled ? "true" : "false");
@@ -7995,7 +8209,7 @@ export default function App() {
 
   return (
     <>
-    <Toaster theme={appTheme} position="bottom-right" />
+    <Toaster theme={resolvedTheme} position="bottom-right" />
     <AppContextMenu
       developerModeEnabled={developerModeEnabled}
       actions={{
@@ -9241,7 +9455,7 @@ export default function App() {
       contentRef={settingsContentRef}
       style={settingsCenterStyle}
       isMaximized={isSettingsCenterMaximized}
-      defaultPage={SETTINGS_SECTION_FALLBACK.appearance}
+      defaultPage={SETTINGS_SECTION_FALLBACK.general}
       sectionFallback={SETTINGS_SECTION_FALLBACK}
       sectionLabels={SETTINGS_SECTION_LABELS}
       visibleSettingsTree={visibleSettingsTree}
@@ -9421,162 +9635,149 @@ export default function App() {
       renderActivePage={(activePageKey, activeTarget) => (
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
-                  {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
-                    <SettingsSectionAnchor id="appearance-theme">
-                    <AppearanceSettingsPage
-                      className={settingsPageSectionClass}
-                      appTheme={appTheme}
-                      appThemeLabel={appThemeLabel}
-                      themeOptions={THEME_OPTIONS}
-                      onThemeChange={(value) => setAppTheme(value as AppTheme)}
-                      uiScale={uiScale}
-                      uiScaleLabel={uiScaleLabel}
-                      uiScaleMin={0.9}
-                      uiScaleMax={1.3}
-                      onUiScaleChange={updateUiScale}
-                      appZoom={appZoom}
-                      appZoomLabel={appZoomLabel}
-                      appZoomMin={APP_ZOOM_MIN}
-                      appZoomMax={APP_ZOOM_MAX}
-                      onAppZoomChange={updateAppZoom}
-                      settingsFontSize={settingsFontSize}
-                      settingsFontSizeMin={SETTINGS_FONT_SIZE_MIN}
-                      settingsFontSizeMax={SETTINGS_FONT_SIZE_MAX}
-                      onSettingsFontSizeChange={updateSettingsFontSize}
-                      contentZoom={contentZoom}
-                      contentZoomLabel={contentZoomLabel}
-                      contentZoomMin={CONTENT_ZOOM_MIN}
-                      contentZoomMax={CONTENT_ZOOM_MAX}
-                      onContentZoomChange={updateContentZoom}
-                      toolbarFontSize={toolbarFontSize}
-                      toolbarFontSizeMin={TOOLBAR_FONT_SIZE_MIN}
-                      toolbarFontSizeMax={TOOLBAR_FONT_SIZE_MAX}
-                      onToolbarFontSizeChange={updateToolbarFontSize}
-                      editorFontSize={editorFontSize}
-                      previewFontSize={previewFontSize}
-                      fontSizeMin={FONT_SIZE_MIN}
-                      fontSizeMax={FONT_SIZE_MAX}
-                      onEditorFontSizeChange={updateEditorFontSize}
-                      onPreviewFontSizeChange={updatePreviewFontSize}
-                      readingDensity={readingDensity}
-                      readingDensityOptions={READING_DENSITY_OPTIONS}
-                      activeReadingDensityDescription={activeReadingDensity.description}
-                      onReadingDensityChange={(value) => updateReadingDensity(value as ReadingDensity)}
-                    />
+                  {shouldRenderSettingsPage("general-basics", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="general-basics">
+                      <GeneralSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
+                  {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="appearance-theme">
+                      <AppearanceSettingsPage
+                        appTheme={appTheme}
+                        resolvedTheme={resolvedTheme}
+                        themeState={settingsThemeState}
+                        uiFontSize={settingsFontSize}
+                        uiFontSizeMin={SETTINGS_FONT_SIZE_MIN}
+                        uiFontSizeMax={SETTINGS_FONT_SIZE_MAX}
+                        codeFontSize={editorFontSize}
+                        codeFontSizeMin={FONT_SIZE_MIN}
+                        codeFontSizeMax={FONT_SIZE_MAX}
+                        pointerCursor={pointerCursor}
+                        reducedMotion={reducedMotion}
+                        diffMarkerMode={diffMarkerMode}
+                        onThemeChange={updateAppTheme}
+                        onThemeStateChange={applySettingsThemeState}
+                        onUiFontSizeChange={updateSettingsFontSize}
+                        onCodeFontSizeChange={updateCodeFontSize}
+                        onPointerCursorChange={setPointerCursor}
+                        onReducedMotionChange={setReducedMotion}
+                        onDiffMarkerModeChange={setDiffMarkerMode}
+                      />
+                    </SettingsSectionAnchor>
+                  )}
+
+                  {shouldRenderSettingsGroup("ai", activePageKey, activeTarget) && (
+                    <SettingsV2PageLayout title="AI">
                   {shouldRenderSettingsPage("ai-api", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-api">
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">AI 供应商</div>
-                      </div>
-                      <AiConfigManager
-                        mode="entry"
-                        config={aiConfigDraft}
-                        selectedProvider={selectedAiProvider}
-                        isLoading={isLoadingAiConfig}
-                        isSaving={isSavingAiConfig}
-                        onOpenManager={() => settingsCenterHostRef.current?.openAiConfigManager()}
-                        busyProviderId={aiProviderBusyId}
-                        modelSearchQuery={aiModelSearchQuery}
-                        manualModelId={aiManualModelId}
-                        filteredModels={filteredAiProviderModels}
-                        onSelectProvider={selectAiProviderForEdit}
-                        onCreateProvider={handleCreateAiProviderDraft}
-                        onUpdateProvider={patchAiProviderDraft}
-                        onSetDefaultProvider={handleSetDefaultAiProvider}
-                        onSetDefaultModel={handleSetDefaultAiModel}
-                        onDeleteProvider={handleDeleteAiProvider}
-                        onTestProvider={handleTestAiProvider}
-                        onSyncProviderModels={handleSyncAiProviderModels}
-                        onTestCreateProvider={handleTestCreateAiProviderDraft}
-                        onSyncCreateProviderModels={handleSyncCreateAiProviderModels}
-                        onModelSearchChange={setAiModelSearchQuery}
-                        onManualModelIdChange={setAiManualModelId}
-                        onAddModel={handleAddAiProviderModel}
-                        onDeleteModel={handleDeleteAiProviderModel}
-                        onReorderProviders={handleReorderAiProviders}
-                      />
-                    </section>
+                        <SettingsV2Section title="模型与 API">
+                          <SettingsV2Card>
+                            <SettingsV2Row title="当前供应商" description="当前 NoteX 使用的供应商与可用模型。">
+                              <SettingsV2ReadonlyPill>
+                                {isLoadingAiConfig
+                                  ? "读取中"
+                                  : selectedAiProvider
+                                    ? `${selectedAiProvider.name || selectedAiProvider.id} · ${selectedAiProvider.models.length} 个模型`
+                                    : "未配置"}
+                              </SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                            <SettingsV2Row title="供应商" description="已配置的供应商数量。">
+                              <SettingsV2ReadonlyPill>
+                                {isLoadingAiConfig ? "读取中" : `${aiConfigDraft?.providers.length ?? 0} 个供应商`}
+                              </SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                            <SettingsV2Row title={aiConfigDraft?.providers.length ? "供应商管理" : "新建供应商"} description="管理供应商、模型和 API Key。">
+                              <button type="button" className="settings-v2-action-button" onClick={() => settingsCenterHostRef.current?.openAiConfigManager()}>
+                                {aiConfigDraft?.providers.length ? "打开管理中心" : "新建供应商"}
+                              </button>
+                            </SettingsV2Row>
+                          </SettingsV2Card>
+                        </SettingsV2Section>
                     </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-local-notes">
-                    <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1"><div className="text-base font-semibold text-foreground">本地笔记索引</div><div className="text-xs leading-5 text-muted-foreground">用于让 NoteX 更快、更准确地从你的 Markdown 笔记中检索相关段落，只保存在本机。</div></div>
-                      <SettingRow title="本地索引状态" description="显示本地笔记是否已经建立索引；读取状态不会触发重建。" align="start">
-                        <div className="grid gap-2 text-sm">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={cn(
-                              "inline-flex rounded-sm border px-2 py-0.5 text-xs",
-                              isRebuildingLocalIndex
-                                ? "border-sky-300/60 bg-sky-500/10 text-sky-700 dark:text-sky-200"
-                                : localIndexStatus?.status === "ready"
-                                  ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                                  : localIndexStatus?.status === "error"
-                                    ? "border-red-300/60 bg-red-500/10 text-red-700 dark:text-red-200"
-                                    : "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200",
-                            )}>{getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}</span>
-                            {isLoadingLocalIndexStatus && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />读取中</span>}
-                          </div>
-                          <div className="grid gap-1 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
-                            <span>索引版本：{localIndexStatus?.version ?? "尚未建立"} / 当前 {localIndexStatus?.currentVersion ?? 3}</span>
-                            <span>笔记数：{localIndexStatus?.noteCount ?? 0}</span>
-                            <span>片段数：{localIndexStatus?.chunkCount ?? 0}</span>
-                            <span>上次更新时间：{getLocalIndexUpdatedLabel(localIndexStatus)}</span>
-                          </div>
-                          {localIndexMessage && <div className="text-xs leading-5 text-muted-foreground">{localIndexMessage}</div>}
-                          {localIndexStatus && (
-                            <div className="grid gap-1 border-t border-border/60 pt-2 text-xs leading-5 text-muted-foreground">
-                              <div className="grid gap-0.5">
-                                <span>存储：<code className="rounded-sm bg-muted/25 px-1 py-0.5 font-mono text-[11px] text-foreground/75">{localIndexStatus.pathLabel}</code></span>
-                                <span>大小：{formatLocalIndexSize(localIndexStatus.approxSizeBytes)}</span>
-                                <span>权限：{getLocalIndexAccessLabel(localIndexStatus)}</span>
-                              </div>
-                              {developerModeEnabled && (
-                                <div className="min-w-0 text-[11px] leading-5 text-muted-foreground/80">
-                                  <span className="mr-1">开发信息：</span>
-                                  <code className="inline-block max-w-full truncate align-bottom font-mono text-[11px] text-foreground/65">{localIndexStatus.pathLabel}</code>
-                                  <span className="mx-1">·</span>
-                                  <span>{localIndexStatus.approxSizeBytes.toLocaleString()} bytes</span>
-                                  <span className="mx-1">·</span>
-                                  <span>{localIndexStatus.readable ? "可读" : "不可读"}</span>
-                                  <span className="mx-1">·</span>
-                                  <span>{localIndexStatus.writable ? "可写" : "不可写"}</span>
-                                  {localIndexStatus.lastError && (
-                                    <div className="truncate text-red-600 dark:text-red-300">最近错误：{localIndexStatus.lastError}</div>
-                                  )}
-                                </div>
-                              )}
-                              {!developerModeEnabled && localIndexStatus.lastError && (
-                                <div className="truncate text-red-600 dark:text-red-300">最近错误：{localIndexStatus.lastError}</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </SettingRow>
-                      <SettingRow title="重建本地笔记索引" description="用于笔记较多、搜索结果不准或刚升级索引版本后。不会修改笔记正文。">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}><RefreshCw className="h-3.5 w-3.5" />刷新状态</Button>
-                          <Button variant="outline" size="sm" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
-                            {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                            {isRebuildingLocalIndex ? "正在建立..." : "重建本地笔记索引"}
-                          </Button>
-                        </div>
-                      </SettingRow>
-                    </section>
+                        <SettingsV2Section title="索引">
+                          <SettingsV2Card>
+                            <SettingsV2Row title="状态" description="本地笔记索引当前是否可用。">
+                              <span className={cn(
+                                "settings-v2-status-badge",
+                                isRebuildingLocalIndex
+                                  ? "settings-v2-status-badge-info"
+                                  : localIndexStatus?.status === "ready"
+                                    ? "settings-v2-status-badge-success"
+                                    : localIndexStatus?.status === "error"
+                                      ? "settings-v2-status-badge-danger"
+                                      : "settings-v2-status-badge-warning",
+                              )}>
+                                {getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}
+                              </span>
+                            </SettingsV2Row>
+                            <SettingsV2Row title="笔记数量" description="已纳入索引的 Markdown 笔记数量。">
+                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.noteCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                            <SettingsV2Row title="片段数量" description="可供检索的文本片段数量。">
+                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.chunkCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                            <SettingsV2Row title="上次更新" description="索引最近一次刷新时间。">
+                              <SettingsV2ReadonlyPill>{getLocalIndexUpdatedLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                          </SettingsV2Card>
+                        </SettingsV2Section>
+
+                        <SettingsV2Section title="高级信息">
+                          <SettingsV2Card>
+                            <SettingsV2Row title="索引版本">
+                              <SettingsV2ReadonlyPill>{localIndexStatus ? `${localIndexStatus.version ?? "尚未建立"} / 当前 ${localIndexStatus.currentVersion ?? 3}` : "未获取"}</SettingsV2ReadonlyPill>
+                            </SettingsV2Row>
+                            {localIndexStatus && (
+                              <>
+                                <SettingsV2Row title="存储位置">
+                                  <SettingsV2ReadonlyPill title={localIndexStatus.pathLabel}>{localIndexStatus.pathLabel}</SettingsV2ReadonlyPill>
+                                </SettingsV2Row>
+                                <SettingsV2Row title="索引大小">
+                                  <SettingsV2ReadonlyPill>{formatLocalIndexSize(localIndexStatus.approxSizeBytes)}</SettingsV2ReadonlyPill>
+                                </SettingsV2Row>
+                                <SettingsV2Row title="权限">
+                                  <SettingsV2ReadonlyPill>{getLocalIndexAccessLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                                </SettingsV2Row>
+                              </>
+                            )}
+                            {localIndexMessage && (
+                              <SettingsV2Row title="消息">
+                                <span className="settings-v2-readonly-value">{localIndexMessage}</span>
+                              </SettingsV2Row>
+                            )}
+                          </SettingsV2Card>
+                        </SettingsV2Section>
+
+                        <SettingsV2Section title="维护">
+                          <SettingsV2Card>
+                            <SettingsV2Row title="刷新状态" description="重新读取当前本地索引状态。">
+                              <button type="button" className="settings-v2-action-button" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                                {isLoadingLocalIndexStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                刷新状态
+                              </button>
+                            </SettingsV2Row>
+                            <SettingsV2Row title="重建本地笔记索引" description="当搜索不准确或索引版本更新时重建。不会修改笔记正文。">
+                              <button type="button" className="settings-v2-action-button" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                                {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                                {isRebuildingLocalIndex ? "正在建立..." : "重建索引"}
+                              </button>
+                            </SettingsV2Row>
+                          </SettingsV2Card>
+                        </SettingsV2Section>
                     </SettingsSectionAnchor>
                   )}
 
                   {shouldRenderSettingsPage("ai-web-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-web-search">
                     <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">联网搜索</div>
-                        <div className="text-xs leading-5 text-muted-foreground">配置 NoteX 的搜索服务、网页读取授权和缓存。</div>
+                      <div className="settings-v2-legacy-section-header">
+                        <div className="settings-v2-legacy-section-title">联网搜索</div>
+                        <div className="settings-v2-legacy-section-description">配置 NoteX 的搜索服务、网页读取授权和缓存。</div>
                       </div>
                       <SettingRow title="启用联网搜索" description="关闭后 NoteX 不会主动发起公开网页检索。">
                         <button
@@ -9682,9 +9883,9 @@ export default function App() {
                   {shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-prompts">
                     <section className={settingsPageSectionClass}>
-                      <div className="mb-3 grid gap-1">
-                        <div className="text-base font-semibold text-foreground">提示词模板</div>
-                        <div className="text-xs leading-5 text-muted-foreground">管理本地 AI 提示词模板。打开编辑器后可保存、润色并查看变量说明。</div>
+                      <div className="settings-v2-legacy-section-header">
+                        <div className="settings-v2-legacy-section-title">提示词模板</div>
+                        <div className="settings-v2-legacy-section-description">管理本地 AI 提示词模板。打开编辑器后可保存、润色并查看变量说明。</div>
                       </div>
                       <div className="grid gap-4 border-b border-border/60 py-4">
                         <div className="grid gap-1">
@@ -9749,11 +9950,16 @@ export default function App() {
                     </section>
                     </SettingsSectionAnchor>
                   )}
+                    </SettingsV2PageLayout>
+                  )}
 
+                  {shouldRenderSettingsGroup("luogu", activePageKey, activeTarget) && (
+                    <SettingsV2PageLayout title="洛谷">
                   {shouldRenderSettingsPage("luogu-account", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-account">
                     <LuoguAccountSettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       configured={luoguConfigured}
                       statusLabel={luoguStatusLabel}
                       statusDescription={luoguSettingsStatusDescription}
@@ -9772,6 +9978,7 @@ export default function App() {
                     <SettingsSectionAnchor id="luogu-rules">
                     <LuoguRulesSettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       rows={luoguRuleSettingRows}
                       expandedRuleId={expandedLuoguRuleId}
                       onExpandedRuleChange={setExpandedLuoguRuleId}
@@ -9787,6 +9994,7 @@ export default function App() {
                     <SettingsSectionAnchor id="luogu-import-center">
                     <LuoguImportCenterSettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       accountLabel={luoguImportCenterAccountLabel}
                       aiLabel={luoguImportCenterAiLabel}
                       rangeLabel={luoguImportCenterRangeLabel}
@@ -9795,10 +10003,15 @@ export default function App() {
                     />
                     </SettingsSectionAnchor>
                   )}
+                    </SettingsV2PageLayout>
+                  )}
 
+                  {shouldRenderSettingsGroup("blog", activePageKey, activeTarget) && (
+                    <SettingsV2PageLayout title="博客">
                   {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
                     <BlogPreviewSettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       blogTitle={blogInfoDraft.title}
                       blogSubtitle={blogInfoDraft.subtitle}
                       blogConfigError={blogConfigError}
@@ -9817,6 +10030,7 @@ export default function App() {
                     <SettingsSectionAnchor id="blog-tag-taxonomy">
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       isLoadingTagTaxonomyConfig={isLoadingTagTaxonomyConfig}
                       tagTaxonomyConfigError={tagTaxonomyConfigError}
                       tagTaxonomyStats={tagTaxonomyStats}
@@ -9882,6 +10096,7 @@ export default function App() {
                     <SettingsSectionAnchor id="blog-tag-manager">
                     <BlogTagManagerSettingsPage
                       className={settingsPageSectionClass}
+                      embedded
                       availableCandidateCount={tagManagerAvailableCandidateCount}
                       entriesCount={tagTaxonomyStats.entriesCount}
                       aliasesCount={tagTaxonomyStats.aliasesCount}
@@ -9889,6 +10104,8 @@ export default function App() {
                       onOpenTagManager={() => openTagManagerWorkspace()}
                     />
                     </SettingsSectionAnchor>
+                  )}
+                    </SettingsV2PageLayout>
                   )}
 
                   {shouldRenderSettingsPage("data-storage", activePageKey, activeTarget) && (
@@ -9902,36 +10119,37 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
-                    <SettingsSectionAnchor id="about-version">
-                    <AboutVersionSettingsPage
-                      className={settingsPageSectionClass}
-                      developerModeEnabled={developerModeEnabled}
-                      onToggleDeveloperMode={() => setDeveloperModeEnabled((enabled) => !enabled)}
-                    />
+                  {shouldRenderSettingsPage("keyboard-shortcuts", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="keyboard-shortcuts">
+                      <KeyboardSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("about-markdown", activePageKey, activeTarget) && (
-                    <SettingsSectionAnchor id="about-markdown">
-                    <AboutMarkdownSettingsPage
-                      className={settingsPageSectionClass}
-                      capabilities={MARKDOWN_CAPABILITIES}
-                    />
+                  {shouldRenderSettingsGroup("advanced", activePageKey, activeTarget) && (
+                    <SettingsV2PageLayout title="高级 / 开发者">
+                  {shouldRenderSettingsPage("advanced-developer", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="advanced-developer">
+                      <AdvancedSettingsPage
+                        embedded
+                        developerModeEnabled={developerModeEnabled}
+                        onToggleDeveloperMode={() => setDeveloperModeEnabled((enabled) => !enabled)}
+                        onOpenSearchDiagnostics={() => settingsCenterHostRef.current?.openPage("diagnostics-search")}
+                      />
                     </SettingsSectionAnchor>
                   )}
-
-                  {shouldRenderSettingsPage("about-privacy", activePageKey, activeTarget) && (
-                    <SettingsSectionAnchor id="about-privacy">
-                    <AboutPrivacySettingsPage className={settingsPageSectionClass} />
-                    </SettingsSectionAnchor>
-                  )}
-
-                  {developerModeEnabled && shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="diagnostics-search">
                     <section className={settingsPageSectionClass}>
                       <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
                     </section>
+                    </SettingsSectionAnchor>
+                  )}
+                    </SettingsV2PageLayout>
+                  )}
+
+                  {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
+                    <SettingsSectionAnchor id="about-version">
+                      <AboutSettingsPage capabilities={MARKDOWN_CAPABILITIES} />
                     </SettingsSectionAnchor>
                   )}
 
@@ -10000,6 +10218,7 @@ export default function App() {
 
       {/* Main workspace */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div id="settings-center-content-root" className="pointer-events-none absolute inset-0 z-[60]" />
         <nav
           className="app-activity-bar flex w-13 shrink-0 flex-col items-center justify-between border-r border-border/80 bg-muted/10 py-2.5"
           aria-label="主活动栏"
@@ -10472,7 +10691,7 @@ export default function App() {
                               >
                                 <span
                                   className="min-w-0 truncate"
-                                  style={{ color: getDifficultyOptionTextColor(frontmatter.fields.difficulty, appTheme) }}
+                                  style={{ color: getDifficultyOptionTextColor(frontmatter.fields.difficulty, resolvedTheme) }}
                                 >
                                   {frontmatter.fields.difficulty.trim() || "无"}
                                 </span>
@@ -10522,7 +10741,7 @@ export default function App() {
                                       >
                                         <span
                                           className="min-w-0 truncate"
-                                          style={{ color: getDifficultyOptionTextColor(option.value, appTheme) }}
+                                          style={{ color: getDifficultyOptionTextColor(option.value, resolvedTheme) }}
                                         >
                                           {option.label}
                                         </span>

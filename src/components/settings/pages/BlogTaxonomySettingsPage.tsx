@@ -9,6 +9,8 @@ import type { TagTaxonomyConfigImportResult } from "@/components/tag-manager/tag
 import { cn } from "@/lib/utils";
 import type { TagNormalizationReason, TagNormalizationSuggestion, TagTaxonomyEntry } from "@/lib/tagTaxonomy";
 
+import { SettingsPageLayout } from "../v2/components/SettingsPageLayout";
+
 interface TagTaxonomyStats {
   statusLabel: string;
   userConfigItemCount: number;
@@ -53,6 +55,7 @@ interface TagNormalizationApplyResult {
 
 export interface BlogTaxonomySettingsPageProps {
   className: string;
+  embedded?: boolean;
   isLoadingTagTaxonomyConfig: boolean;
   tagTaxonomyConfigError: string | null;
   tagTaxonomyStats: TagTaxonomyStats;
@@ -169,10 +172,11 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
   const selectedCount = props.selectedTagNormalizationScanPaths.size;
 
   return (
+    <SettingsPageLayout title="博客" embedded={props.embedded}>
     <section className={props.className}>
-      <div className="mb-3 grid gap-1">
-        <div className="text-base font-semibold text-foreground">标签体系</div>
-        <div className="text-xs leading-5 text-muted-foreground">
+      <div className="settings-v2-legacy-section-header">
+        <div className="settings-v2-legacy-section-title">标签体系</div>
+        <div className="settings-v2-legacy-section-description">
           用于组织博客文章、桌面端标签建议和 AI 元数据补全；除推荐标签外，也可以输入自定义标签。
         </div>
       </div>
@@ -572,5 +576,6 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
         </section>
       </div>
     </section>
+    </SettingsPageLayout>
   );
 }

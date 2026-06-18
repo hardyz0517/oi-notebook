@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ExternalLink, Loader2, PlugZap } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { SettingRow } from "../SettingsPages";
+import { SettingsPageLayout } from "../v2/components/SettingsPageLayout";
+import { SettingsBadge } from "../v2/primitives/SettingsBadge";
+import { SettingsButton } from "../v2/primitives/SettingsButton";
 
 export interface LuoguRuleSettingOption {
   value: string;
@@ -22,7 +24,7 @@ export interface LuoguRuleSettingRow {
   options: LuoguRuleSettingOption[];
 }
 
-const SETTINGS_SELECT_ITEM_HEIGHT = 36;
+const SETTINGS_SELECT_ITEM_HEIGHT = 30;
 const SETTINGS_SELECT_VERTICAL_PADDING = 4;
 const SETTINGS_SELECT_BORDER_WIDTH = 1;
 const SETTINGS_SELECT_GAP = 6;
@@ -80,7 +82,6 @@ export function SettingsInlineSelect({
   ariaLabel,
   expandedRuleId,
   onExpandedRuleChange,
-  themed = false,
 }: {
   id: string;
   value: string;
@@ -157,7 +158,7 @@ export function SettingsInlineSelect({
   return (
     <div
       ref={rootRef}
-      className="relative w-full max-w-[300px] sm:w-[300px]"
+      className="settings-v2-inline-select"
       data-no-window-drag="true"
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -170,11 +171,7 @@ export function SettingsInlineSelect({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={expanded}
-        className={cn(
-          "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-border/75 bg-muted/20 px-3 text-left text-sm font-normal text-foreground shadow-sm outline-none transition-colors",
-          "hover:border-muted-foreground/55 hover:bg-muted/25 focus:border-primary/65 focus:bg-background focus:ring-2 focus:ring-primary/20",
-          "disabled:cursor-not-allowed disabled:border-border/50 disabled:bg-muted/10 disabled:text-muted-foreground disabled:opacity-70",
-        )}
+        className="settings-v2-inline-select-trigger"
         onPointerDown={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -184,18 +181,15 @@ export function SettingsInlineSelect({
           onExpandedRuleChange(expanded ? null : id);
         }}
       >
-        <span className="min-w-0 truncate">{selectedOption?.label ?? "请选择"}</span>
-        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+        <span className="settings-v2-inline-select-label">{selectedOption?.label ?? "请选择"}</span>
+        <ChevronDown className={cn("settings-v2-pill-icon transition-transform", expanded && "rotate-180")} />
       </button>
       {expanded && (
         <div
           ref={menuRef}
           data-no-window-drag="true"
           className={cn(
-            "absolute left-0 z-[80] grid w-full border p-1 text-sm shadow-lg transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
-            themed
-              ? "rounded-lg border-border/70 bg-popover text-popover-foreground shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
-              : "rounded-md border-border bg-[#1f1f1f] text-foreground",
+            "settings-v2-inline-select-menu",
             menuLayout.shouldScroll ? "overflow-y-auto" : "overflow-visible",
             menuLayout.direction === "down" ? "top-[calc(100%+6px)]" : "bottom-[calc(100%+6px)]",
           )}
@@ -223,17 +217,7 @@ export function SettingsInlineSelect({
                 role="option"
                 aria-selected={selected}
                 disabled={option.disabled}
-                className={cn(
-                  "flex h-9 min-w-0 items-center gap-2 rounded-sm px-2.5 text-left text-sm transition-colors",
-                  themed
-                    ? selected
-                      ? "bg-accent/70 text-accent-foreground dark:bg-white/[0.08] dark:text-foreground"
-                      : "text-popover-foreground hover:bg-accent/60 hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
-                    : selected
-                      ? "bg-[#343434] text-foreground"
-                      : "text-foreground hover:bg-[#2a2a2a]",
-                  option.disabled && "cursor-not-allowed opacity-50",
-                )}
+                className="settings-v2-inline-select-option"
                 title={option.label}
                 onPointerDown={(event) => {
                   event.preventDefault();
@@ -250,10 +234,10 @@ export function SettingsInlineSelect({
                   onExpandedRuleChange(null);
                 }}
               >
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                <span className="settings-v2-inline-select-label">{option.label}</span>
+                <span className="settings-v2-inline-select-check">
                   {selected && <Check className="h-3.5 w-3.5" />}
                 </span>
-                <span className="min-w-0 truncate">{option.label}</span>
               </button>
             );
           })}
@@ -265,6 +249,7 @@ export function SettingsInlineSelect({
 
 export function LuoguAccountSettingsPage({
   className,
+  embedded = false,
   configured,
   statusLabel,
   statusDescription,
@@ -277,6 +262,7 @@ export function LuoguAccountSettingsPage({
   onOpenSettings,
 }: {
   className: string;
+  embedded?: boolean;
   configured: boolean;
   statusLabel: string;
   statusDescription: string;
@@ -289,17 +275,17 @@ export function LuoguAccountSettingsPage({
   onOpenSettings: () => void;
 }) {
   return (
+    <SettingsPageLayout title="洛谷" embedded={embedded}>
     <section className={className}>
-      <div className="mb-3">
-        <div className="text-base font-semibold text-foreground">账号配置</div>
+      <div className="settings-v2-legacy-section-header">
+        <div className="settings-v2-legacy-section-title">账号配置</div>
+        <div className="settings-v2-legacy-section-description">查看或更新洛谷 Cookie 配置。</div>
       </div>
       <SettingRow title="连接状态" description={statusDescription}>
-        <span className={cn("inline-flex rounded-sm border px-2 py-0.5 text-xs", configured ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" : "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200")}>
-          {statusLabel}
-        </span>
+        <SettingsBadge tone={configured ? "success" : "warning"}>{statusLabel}</SettingsBadge>
       </SettingRow>
       <SettingRow title="当前配置" description="查看或更新洛谷 Cookie 配置。">
-        <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
+        <div className="settings-v2-value-list">
           <span>UID：{uid || "未读取"}</span>
           <span>最后同步提交 ID：{lastSubmissionId || "未设置"}</span>
           <span>AI：{aiConfigured ? "已配置" : "未配置或未读取"}</span>
@@ -307,18 +293,20 @@ export function LuoguAccountSettingsPage({
       </SettingRow>
       <SettingRow title="账号操作" description="打开现有洛谷设置窗口，可测试连接并保存配置。">
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={onOpenSettings} disabled={isLoadingConfig || isSavingConfig || isTestingConnection}>
+          <SettingsButton onClick={onOpenSettings} disabled={isLoadingConfig || isSavingConfig || isTestingConnection}>
             {isLoadingConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
             打开账号配置
-          </Button>
+          </SettingsButton>
         </div>
       </SettingRow>
     </section>
+    </SettingsPageLayout>
   );
 }
 
 export function LuoguRulesSettingsPage({
   className,
+  embedded = false,
   rows,
   expandedRuleId,
   onExpandedRuleChange,
@@ -328,6 +316,7 @@ export function LuoguRulesSettingsPage({
   onCustomSaveDirectoryChange,
 }: {
   className: string;
+  embedded?: boolean;
   rows: LuoguRuleSettingRow[];
   expandedRuleId: string | null;
   onExpandedRuleChange: (id: string | null) => void;
@@ -337,10 +326,11 @@ export function LuoguRulesSettingsPage({
   onCustomSaveDirectoryChange: (value: string) => void;
 }) {
   return (
+    <SettingsPageLayout title="洛谷" embedded={embedded}>
     <section className={className}>
-      <div className="mb-3 grid gap-1">
-        <div className="text-base font-semibold text-foreground">导入规则</div>
-        <div className="text-xs leading-5 text-muted-foreground">配置扫描、筛选、预览生成和写入策略；规则会保存到本地。</div>
+      <div className="settings-v2-legacy-section-header">
+        <div className="settings-v2-legacy-section-title">导入规则</div>
+        <div className="settings-v2-legacy-section-description">配置扫描、筛选、预览生成和写入策略；规则会保存到本地。</div>
       </div>
       {rows.map((row) => (
         <SettingRow key={row.id} title={row.title} description={row.description}>
@@ -367,11 +357,13 @@ export function LuoguRulesSettingsPage({
         </SettingRow>
       )}
     </section>
+    </SettingsPageLayout>
   );
 }
 
 export function LuoguImportCenterSettingsPage({
   className,
+  embedded = false,
   accountLabel,
   aiLabel,
   rangeLabel,
@@ -379,6 +371,7 @@ export function LuoguImportCenterSettingsPage({
   onOpenImportCenter,
 }: {
   className: string;
+  embedded?: boolean;
   accountLabel: string;
   aiLabel: string;
   rangeLabel: string;
@@ -386,24 +379,26 @@ export function LuoguImportCenterSettingsPage({
   onOpenImportCenter: () => void;
 }) {
   return (
+    <SettingsPageLayout title="洛谷" embedded={embedded}>
     <section className={className}>
-      <div className="mb-3 grid gap-1">
-        <div className="text-base font-semibold text-foreground">导入中心</div>
-        <div className="text-xs leading-5 text-muted-foreground">扫描洛谷提交，预览后写入本地笔记。</div>
+      <div className="settings-v2-legacy-section-header">
+        <div className="settings-v2-legacy-section-title">导入中心</div>
+        <div className="settings-v2-legacy-section-description">扫描洛谷提交，预览后写入本地笔记。</div>
       </div>
       <SettingRow title="导入前置状态" description="导入中心打开时会读取最新洛谷和 AI 配置。">
-        <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
+        <div className="settings-v2-value-list">
           <span>洛谷账号：{accountLabel}</span>
           <span>AI：{aiLabel}</span>
           <span>默认扫描范围：{rangeLabel}</span>
         </div>
       </SettingRow>
       <SettingRow title="打开导入中心" description="打开后可在独立窗口中扫描提交、生成预览并写入本地笔记。">
-        <Button variant="outline" size="sm" onClick={onOpenImportCenter} disabled={disabled}>
+        <SettingsButton onClick={onOpenImportCenter} disabled={disabled}>
           <ExternalLink className="h-3.5 w-3.5" />
           打开洛谷导入中心
-        </Button>
+        </SettingsButton>
       </SettingRow>
     </section>
+    </SettingsPageLayout>
   );
 }
