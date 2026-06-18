@@ -1,4 +1,4 @@
-﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ComponentType, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
 import { EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
@@ -25,6 +25,7 @@ import {
   Table2,
   X,
 } from "lucide-react";
+import { ToolbarButton } from "@/components/ui/toolbar-button";
 import { cn } from "@/lib/utils";
 import { markPreviewEditorDocChanged } from "@/lib/previewPerf";
 
@@ -636,21 +637,22 @@ export function MarkdownEditorToolbar({
           {group.actions.map((action) => {
             const Icon = action.icon;
             return (
-              <button
+              
+              <ToolbarButton
                 key={action.id}
                 type="button"
                 title={action.title}
                 aria-label={action.title}
                 disabled={disabled}
-                className="markdown-toolbar-button inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
-                onMouseDown={(event) => {
+                size="compact"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => {
                   event.preventDefault();
                   if (disabled) return;
                   onAction?.(action.id);
                 }}
               >
-                {Icon ? <Icon className="h-4 w-4" /> : action.label}
-              </button>
+                {Icon ? <Icon className="h-4 w-4" aria-hidden="true" /> : action.label}
+              </ToolbarButton>
             );
           })}
         </div>

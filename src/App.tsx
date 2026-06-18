@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
+import { ToolbarButton } from "@/components/ui/toolbar-button";
 import AppContextMenu from "@/components/common/AppContextMenu";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10184,39 +10185,40 @@ export default function App() {
         </div>
         <div className="min-w-4 flex-1 self-stretch" data-tauri-drag-region />
         <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
-          <div className="flex items-center" aria-label="窗口控制">
-            <button
+          <div className="flex items-center" aria-label="Window controls">
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              size="compact"
+              className="h-6 w-8"
               onClick={() => void handleMinimizeWindow()}
-              title="最小化"
-              aria-label="最小化窗口"
+              title="Minimize"
+              aria-label="Minimize window"
             >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <button
+              <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              size="compact"
+              className="h-6 w-8"
               onClick={() => void handleToggleMaximizeWindow()}
-              title="最大化 / 还原"
-              aria-label="最大化或还原窗口"
+              title="Maximize / Restore"
+              aria-label="Maximize or restore window"
             >
-              <Square className="h-3 w-3" />
-            </button>
-            <button
+              <Square className="h-3 w-3" aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
+              size="compact"
+              className="h-6 w-8 hover:bg-red-500/85 hover:text-white focus-visible:ring-red-400/70"
               onClick={() => void handleCloseWindow()}
-              title="关闭"
-              aria-label="关闭窗口"
+              title="Close"
+              aria-label="Close window"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </ToolbarButton>
           </div>
         </div>
       </header>
-
-      {/* Main workspace */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div id="settings-center-content-root" className="pointer-events-none absolute inset-0 z-[60]" />
         <nav

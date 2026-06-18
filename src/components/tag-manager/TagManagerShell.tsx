@@ -2,6 +2,7 @@ import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { debugEvent } from "./tagManagerDebug";
@@ -227,10 +228,10 @@ export function TagManagerShell({
         style={{ left: dialogRect.left, top: dialogRect.top, width: dialogRect.width, height: dialogRect.height }}
       >
         <header data-tag-manager-no-clear="true" className="flex h-12 shrink-0 cursor-grab items-center justify-between gap-4 border-b border-border/70 px-5 active:cursor-grabbing" onPointerDown={beginDrag}>
-          <div className="text-base font-semibold text-foreground">标签管理器</div>
-          <Button data-tag-manager-interactive="true" type="button" variant="ghost" size="icon" aria-label="关闭标签管理器" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="text-base font-semibold text-foreground">Tag Manager</div>
+          <IconButton data-tag-manager-interactive="true" type="button" aria-label="Close tag manager" onClick={onClose}>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </IconButton>
         </header>
 
         <div data-tag-manager-clear-scope="true" className="flex min-h-0 flex-1 flex-col overflow-hidden" onPointerDownCapture={handleClearScopePointerDown}>
