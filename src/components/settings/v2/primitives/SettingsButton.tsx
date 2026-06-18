@@ -25,14 +25,7 @@ export function SettingsButton({
       type={type}
       variant={buttonVariant}
       size="compact"
-      className={cn(
-        variant === "ghost"
-          ? "settings-v2-button settings-v2-button--ghost"
-          : variant === "danger"
-            ? "settings-v2-button settings-v2-button--danger"
-            : "settings-v2-button settings-v2-button--secondary",
-        className,
-      )}
+      className={cn("settings-v2-button", className)}
       {...props}
     >
       {children}

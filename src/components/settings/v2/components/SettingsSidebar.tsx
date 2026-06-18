@@ -1,6 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NavItem } from "@/components/ui/nav-item";
 import { cn } from "@/lib/utils";
 
 import type { SettingsGroupId, SettingsNavigationGroup } from "../../settingsTypes";
@@ -48,19 +49,14 @@ export function SettingsSidebar({
                 const Icon = SETTINGS_V2_ICONS[group.id];
                 const isActive = activeGroupId === group.id;
                 return (
-                  <Button
+                  <NavItem
                     key={group.id}
-                    type="button"
-                    variant="ghost"
-                    size="compact"
-                    className={cn("settings-v2-nav-item", isActive && "settings-v2-nav-item-active")}
-                    aria-current={isActive ? "page" : undefined}
+                    icon={Icon}
+                    label={group.label}
+                    selected={isActive}
+                    className={cn("settings-v2-nav-item")}
                     onClick={() => onOpenGroup(group.id)}
-                  >
-                    <span className={cn("settings-v2-nav-active-rail", isActive && "settings-v2-nav-active-rail-on")} />
-                    <Icon className="h-4 w-4" />
-                    <span>{group.label}</span>
-                  </Button>
+                  />
                 );
               })}
             </div>
