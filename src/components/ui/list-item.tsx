@@ -2,13 +2,28 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function ListItem({ className, ...props }: React.ComponentProps<"div">) {
+export interface ListItemProps extends React.ComponentProps<"div"> {
+  interactive?: boolean
+  selected?: boolean
+}
+
+function ListItem({
+  className,
+  interactive = false,
+  selected = false,
+  ...props
+}: ListItemProps) {
   return (
     <div
       data-slot="list-item"
+      data-interactive={interactive ? "true" : undefined}
+      data-selected={selected ? "true" : undefined}
       className={cn(
-        "flex min-w-0 items-center justify-between gap-3 border-b border-border bg-transparent px-4 py-2 transition-[background-color,border-color,color] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] last:border-b-0 data-[interactive=true]:hover:bg-[var(--color-background-hover)] data-[selected=true]:bg-[var(--color-background-active)]",
-        className
+        "rounded-[var(--ui-radius-item)] border border-transparent transition-[background-color,border-color,color,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)]",
+        interactive && "cursor-pointer hover:bg-[var(--ui-state-hover)]",
+        selected &&
+          "bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]",
+        className,
       )}
       {...props}
     />
