@@ -124,6 +124,32 @@
     --motion-scale-pressed: 0.98;
     --motion-dropdown-y: 4px;
     --motion-popover-scale: 0.98;
+    --ui-space-1: 0.25rem;
+    --ui-space-2: 0.375rem;
+    --ui-space-3: 0.5rem;
+    --ui-space-4: 0.75rem;
+    --ui-space-5: 1rem;
+    --ui-radius-control: var(--radius-md);
+    --ui-radius-item: var(--radius-sm);
+    --ui-radius-panel: var(--radius-lg);
+    --ui-radius-dialog: var(--radius-xl);
+    --ui-border-subtle: var(--color-border-subtle, var(--border-subtle));
+    --ui-border-control: var(--color-border-control, var(--input));
+    --ui-border-strong: var(--color-border-strong, var(--separator-strong));
+    --ui-state-hover: var(--color-background-hover, var(--hover-bg));
+    --ui-state-active: var(--color-background-active, var(--selected-bg));
+    --ui-state-selected: var(--color-background-selected, var(--selected-bg));
+    --ui-state-selected-foreground: var(--color-text-primary, var(--foreground));
+    --ui-focus-ring: var(--color-ring-focus, var(--ring));
+    --ui-focus-ring-soft: color-mix(in oklch, var(--ui-focus-ring) 24%, transparent);
+    --ui-disabled-opacity: 0.52;
+    --ui-disabled-foreground: var(--color-text-disabled, var(--text-disabled));
+    --ui-motion-duration-fast: var(--motion-duration-fast);
+    --ui-motion-duration-base: var(--motion-duration-base);
+    --ui-motion-ease-standard: var(--motion-ease-standard);
+    --ui-motion-ease-out: var(--motion-ease-out);
+    --ui-motion-enter-y: var(--motion-dropdown-y);
+    --ui-motion-enter-scale: var(--motion-popover-scale);
 }
 
 .dark {
@@ -349,6 +375,10 @@
     --motion-scale-pressed: 1;
     --motion-dropdown-y: 0px;
     --motion-popover-scale: 1;
+    --ui-motion-duration-fast: 0ms;
+    --ui-motion-duration-base: 0ms;
+    --ui-motion-enter-y: 0px;
+    --ui-motion-enter-scale: 1;
   }
 }
 
