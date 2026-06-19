@@ -17,3 +17,5 @@ export {
   writeStoredSettingsThemeState,
 } from "./themeStorage";
 export { applyThemeCssVariables, applyThemeRootState } from "./themeDom";
+export { ThemeProvider, useThemeEngine } from "./ThemeProvider";
+export type { ThemeEngineActions, ThemeEngineContextValue, ThemeEngineState } from "./ThemeProvider";
