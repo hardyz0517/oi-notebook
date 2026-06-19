@@ -1,43 +1,53 @@
 .notex-workbench {
-  --notex-bg: #181818;
+  --notex-bg: var(--color-background-sidebar, var(--background, #181818));
   --notex-surface: var(--notex-bg);
-  --notex-surface-panel: #1d1d1d;
-  --notex-surface-soft: #242424;
-  --notex-surface-raised: #2e2e2e;
-  --notex-surface-hover: #2A2D2E;
-  --notex-surface-selected: rgb(255 255 255 / 0.11);
+  --notex-surface-panel: var(--color-background-panel, var(--card, #1d1d1d));
+  --notex-surface-soft: var(--color-background-control, var(--muted, #242424));
+  --notex-surface-raised: var(--color-background-elevated-primary, var(--popover, #2e2e2e));
+  --notex-surface-hover: var(--color-background-hover, var(--muted, #2A2D2E));
+  --notex-surface-selected: var(--color-background-selected, var(--accent, rgb(255 255 255 / 0.11)));
   --notex-panel: var(--notex-surface-panel);
   --notex-panel-soft: var(--notex-surface-soft);
   --notex-panel-strong: var(--notex-surface-selected);
-  --notex-text: rgb(232 232 232 / 0.94);
-  --notex-text-muted: rgb(232 232 232 / 0.72);
-  --notex-text-subtle: rgb(232 232 232 / 0.58);
-  --notex-text-faint: rgb(232 232 232 / 0.34);
-  --notex-composer-bg: #2e2e2e;
+  --notex-text: var(--color-text-primary, var(--foreground, rgb(232 232 232 / 0.94)));
+  --notex-text-muted: var(--color-text-secondary, var(--muted-foreground, rgb(232 232 232 / 0.72)));
+  --notex-text-subtle: var(--color-text-muted, var(--muted-foreground, rgb(232 232 232 / 0.58)));
+  --notex-text-faint: var(--color-text-disabled, var(--muted-foreground, rgb(232 232 232 / 0.34)));
+  --notex-composer-bg: var(--color-background-control, var(--muted, #2e2e2e));
   --notex-code-bg: var(--notex-surface-soft);
-  --notex-command-bg: rgb(46 46 46 / 0.88);
-  --notex-command-hover: var(--notex-surface-hover);
-  --notex-user-bubble-bg: rgb(255 255 255 / 0.055);
-  --notex-input-bg: rgb(255 255 255 / 0.04);
-  --notex-pill-bg: rgb(255 255 255 / 0.055);
-  --notex-pill-hover-bg: rgb(255 255 255 / 0.085);
-  --notex-pill-active-bg: color-mix(in oklch, var(--primary) 18%, rgb(255 255 255 / 0.075));
-  --notex-switch-track: rgb(255 255 255 / 0.16);
-  --notex-switch-thumb: rgb(255 255 255 / 0.74);
-  --notex-switch-thumb-active: rgb(255 255 255 / 0.9);
-  --notex-switch-active-bg: color-mix(in oklch, var(--primary) 48%, #41515c 52%);
-  --notex-send-bg: color-mix(in oklch, var(--foreground) 88%, transparent);
-  --notex-send-fg: var(--notex-bg);
-  --notex-send-disabled-bg: rgb(255 255 255 / 0.18);
-  --notex-send-disabled-fg: rgb(232 232 232 / 0.62);
-  --notex-border: rgb(255 255 255 / 0.08);
-  --notex-border-soft: rgb(255 255 255 / 0.045);
+  --notex-command-bg: var(--color-background-popover, var(--popover, #2e2e2e));
+  --notex-command-hover: var(--color-background-active, var(--notex-surface-hover));
+  --notex-user-bubble-bg: var(--color-background-selected, var(--notex-surface-selected));
+  --notex-input-bg: var(--color-background-control, var(--muted, rgb(255 255 255 / 0.04)));
+  --notex-pill-bg: var(--color-skill-bg, var(--color-background-control, var(--muted, rgb(255 255 255 / 0.055))));
+  --notex-pill-hover-bg: var(--color-background-hover, var(--notex-surface-hover));
+  --notex-pill-active-bg: var(--color-accent-muted, var(--accent, rgb(255 255 255 / 0.075)));
+  --notex-switch-track: var(--color-background-control, var(--muted, rgb(255 255 255 / 0.16)));
+  --notex-switch-thumb: var(--color-icon-secondary, var(--foreground, rgb(255 255 255 / 0.74)));
+  --notex-switch-thumb-active: var(--color-icon-primary, var(--foreground, rgb(255 255 255 / 0.9)));
+  --notex-switch-active-bg: var(--color-accent-muted, var(--accent, #41515c));
+  --notex-accent: var(--color-accent-primary, var(--primary, #0169CC));
+  --notex-accent-hover: var(--color-accent-hover, var(--primary, #0169CC));
+  --notex-accent-muted: var(--color-accent-muted, var(--accent, rgb(255 255 255 / 0.075)));
+  --notex-accent-text: var(--color-accent-text, var(--primary-foreground, var(--notex-bg)));
+  --notex-focus: var(--color-ring-focus, var(--ring, var(--notex-accent)));
+  --notex-skill: var(--color-skill, var(--notex-accent));
+  --notex-skill-bg: var(--color-skill-bg, var(--notex-accent-muted));
+  --notex-skill-border: var(--color-skill-border, var(--notex-border));
+  --notex-send-bg: var(--notex-accent);
+  --notex-send-fg: var(--notex-accent-text);
+  --notex-send-disabled-bg: var(--color-background-control, var(--muted, rgb(255 255 255 / 0.18)));
+  --notex-send-disabled-fg: var(--color-text-disabled, var(--muted-foreground, rgb(232 232 232 / 0.62)));
+  --notex-border: var(--color-border-primary, var(--border, rgb(255 255 255 / 0.08)));
+  --notex-border-soft: var(--color-border-subtle, var(--border, rgb(255 255 255 / 0.045)));
   --notex-border-subtle: var(--notex-border-soft);
-  --notex-hover: rgb(255 255 255 / 0.065);
-  --notex-session-hover: #2A2D2E;
+  --notex-border-strong: var(--color-border-strong, var(--notex-border));
+  --notex-hover: var(--color-background-hover, var(--muted, rgb(255 255 255 / 0.065)));
+  --notex-active: var(--color-background-active, var(--accent, var(--notex-hover)));
+  --notex-session-hover: var(--notex-hover);
   --notex-selected: var(--notex-surface-selected);
   --notex-muted: var(--notex-text-muted);
-  --notex-scrollbar-thumb: color-mix(in oklch, var(--muted-foreground) 20%, transparent);
+  --notex-scrollbar-thumb: color-mix(in oklch, var(--color-text-muted, var(--muted-foreground, var(--notex-text-muted))) 34%, transparent);
   --notex-scrollbar-track: transparent;
   --notex-shadow-strong: rgb(0 0 0 / 0.48);
   --notex-shadow-soft: rgb(0 0 0 / 0.28);
@@ -61,51 +71,6 @@
   background: var(--notex-surface) !important;
   color: var(--notex-text);
   font-size: 15px;
-}
-
-html[data-theme="light"] .notex-workbench {
-  --notex-bg: #FFFFFF;
-  --notex-surface: #FFFFFF;
-  --notex-surface-panel: var(--card, #fbfbfa);
-  --notex-surface-soft: var(--muted, #ececea);
-  --notex-surface-raised: var(--surface-card-soft, #f2f2ef);
-  --notex-surface-hover: var(--hover-bg, #eeeeeb);
-  --notex-surface-selected: var(--selected-bg, #e4e4e0);
-  --notex-panel: var(--notex-surface-panel);
-  --notex-panel-soft: var(--notex-surface-soft);
-  --notex-panel-strong: var(--notex-surface-selected);
-  --notex-text: var(--foreground, #2f2f2d);
-  --notex-text-muted: var(--muted-foreground, #6f6f6a);
-  --notex-text-subtle: var(--text-muted, #8a8a84);
-  --notex-text-faint: var(--text-disabled, #aaa9a3);
-  --notex-composer-bg: #FFFFFF;
-  --notex-code-bg: #F9F9F9;
-  --notex-command-bg: rgb(251 251 250 / 0.92);
-  --notex-command-hover: var(--hover-bg, #eeeeeb);
-  --notex-user-bubble-bg: var(--hover-bg, #eeeeeb);
-  --notex-input-bg: rgb(0 0 0 / 0.035);
-  --notex-pill-bg: color-mix(in oklch, var(--muted, #ececea) 72%, transparent);
-  --notex-pill-hover-bg: var(--hover-bg, #eeeeeb);
-  --notex-pill-active-bg: color-mix(in oklch, var(--primary) 12%, var(--hover-bg, #eeeeeb));
-  --notex-switch-track: rgb(0 0 0 / 0.16);
-  --notex-switch-thumb: rgb(255 255 255 / 0.92);
-  --notex-switch-thumb-active: #ffffff;
-  --notex-switch-active-bg: color-mix(in oklch, var(--primary) 60%, var(--selected-bg, #e4e4e0));
-  --notex-send-bg: color-mix(in oklch, var(--foreground) 88%, transparent);
-  --notex-send-fg: var(--background, #f4f4f3);
-  --notex-send-disabled-bg: rgb(0 0 0 / 0.12);
-  --notex-send-disabled-fg: var(--text-muted, #8a8a84);
-  --notex-border: color-mix(in oklch, var(--border, #d8d8d5) 92%, transparent);
-  --notex-border-soft: color-mix(in oklch, var(--border-subtle, #e0e0dc) 88%, transparent);
-  --notex-border-subtle: var(--notex-border-soft);
-  --notex-hover: color-mix(in oklch, var(--hover-bg, #eeeeeb) 92%, transparent);
-  --notex-session-hover: #EDEDED;
-  --notex-selected: var(--notex-surface-selected);
-  --notex-muted: var(--notex-text-muted);
-  --notex-scrollbar-thumb: color-mix(in oklch, var(--scrollbar-thumb, #c3c3bd) 80%, transparent);
-  --notex-scrollbar-track: transparent;
-  --notex-shadow-strong: rgb(0 0 0 / 0.18);
-  --notex-shadow-soft: rgb(0 0 0 / 0.12);
 }
 
 .notex-workbench * {
@@ -669,7 +634,7 @@ html[data-theme="light"] .notex-workbench {
 
 .notex-session-view-all:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--ring);
+  box-shadow: 0 0 0 1px var(--notex-focus);
 }
 
 .notex-modebar .notex-session-view-all {
@@ -1487,8 +1452,8 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
 
 .notex-tool-pill[data-active="true"] .notex-tool-pill-icon,
 .notex-tool-pill[aria-checked="true"] .notex-tool-pill-icon {
-  background: color-mix(in oklch, var(--primary) 54%, var(--foreground) 46%);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent);
+  background: color-mix(in oklch, var(--notex-accent) 54%, var(--notex-text) 46%);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--notex-accent) 16%, transparent);
 }
 
 .notex-tool-pill-label {
@@ -1571,19 +1536,19 @@ html[data-theme="light"] .notex-workbench [data-ai-markdown-message] pre[data-ai
 
 .notex-command-item:hover .notex-command-name,
 .notex-command-item[data-active="true"] .notex-command-name {
-  color: #f2f2f2 !important;
+  color: var(--notex-text) !important;
 }
 
 .notex-command-item:hover .notex-command-description,
 .notex-command-item[data-active="true"] .notex-command-description {
-  color: rgb(245 245 245 / 0.78) !important;
+  color: color-mix(in oklch, var(--notex-text) 78%, transparent) !important;
 }
 
 .notex-command-item:hover .notex-command-icon,
 .notex-command-item[data-active="true"] .notex-command-icon,
 .notex-command-item:hover .notex-command-icon svg,
 .notex-command-item[data-active="true"] .notex-command-icon svg {
-  color: #f2f2f2 !important;
+  color: var(--notex-text) !important;
   opacity: 0.95;
 }
 
@@ -1790,7 +1755,7 @@ html[data-theme="light"] .notex-workbench .notex-command-item:disabled[data-acti
   width: 13px;
   height: 13px;
   margin-top: 0 !important;
-  accent-color: var(--primary);
+  accent-color: var(--notex-accent);
 }
 
 .notex-tag-candidate-body {
