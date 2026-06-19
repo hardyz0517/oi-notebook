@@ -575,10 +575,17 @@ export async function writeNote(
   }
 }
 
-export async function showSaveMarkdownDialog(defaultFileName: string): Promise<string | null> {
+export function buildMarkdownSaveDialogDefaultPath(defaultFileName: string, defaultDirectory?: string): string {
+  const fileName = defaultFileName.endsWith(".md") ? defaultFileName : `${defaultFileName}.md`;
+  const directory = defaultDirectory?.trim();
+  if (!directory) return fileName;
+  return `${directory.replace(/[\\\/]+$/, "")}\\${fileName}`;
+}
+
+export async function showSaveMarkdownDialog(defaultFileName: string, defaultDirectory?: string): Promise<string | null> {
   const result = await save({
     title: "Save Markdown File",
-    defaultPath: defaultFileName.endsWith(".md") ? defaultFileName : `${defaultFileName}.md`,
+    defaultPath: buildMarkdownSaveDialogDefaultPath(defaultFileName, defaultDirectory),
     filters: [{ name: "Markdown", extensions: ["md"] }],
   });
   return typeof result === "string" ? result : null;
