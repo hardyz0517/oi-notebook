@@ -2644,17 +2644,6 @@ function getPreviewMarkdownSyncDelayMs(docLength: number): number {
   return 120;
 }
 
-function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target instanceof HTMLInputElement) {
-    const inputType = target.type.toLowerCase();
-    return !["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"].includes(inputType);
-  }
-  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
-  if (target.isContentEditable) return true;
-  return Boolean(target.closest('[contenteditable="true"], .cm-editor'));
-}
-
 export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
@@ -6741,7 +6730,6 @@ export default function App() {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.key === "Process" || event.key === "Unidentified") return;
       if (event.key.toLowerCase() !== "n" || (!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
-      if (isEditableShortcutTarget(event.target)) return;
       event.preventDefault();
       createUntitledEditor();
     };
