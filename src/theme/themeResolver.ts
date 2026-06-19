@@ -90,10 +90,6 @@ function resolveCodexLikeTokens(theme: SettingsThemeV1Payload): ThemeCssVariable
   const diffRemovedRgb = hexToRgb(theme.theme.semanticColors.diffRemoved) ?? accentRgb;
   const skillRgb = hexToRgb(theme.theme.semanticColors.skill) ?? accentRgb;
 
-  const editorBackground = variant === "light"
-    ? mixHex(surfaceRgb, WHITE, 0.12)
-    : mixHex(surfaceRgb, inkRgb, 0.07);
-
   const surfaceUnder = variant === "light"
     ? mixHex(surfaceRgb, inkRgb, 0.04 + delta * 0.0012)
     : mixHex(surfaceRgb, BLACK, 0.16 + delta * 0.0015);
@@ -112,7 +108,7 @@ function resolveCodexLikeTokens(theme: SettingsThemeV1Payload): ThemeCssVariable
 
   const controlRgb = variant === "light"
     ? mixRgb(surfaceRgb, WHITE, 0.09 + c * 0.04)
-    : mixRgb(surfaceRgb, inkRgb, 0.06 + c * 0.05);
+    : mixRgb(surfaceRgb, inkRgb, 0.08 + c * 0.05);
 
   const textSecondary = rgba(inkRgb, 0.65 + c * 0.1);
   const textTertiary = variant === "light"
@@ -167,8 +163,8 @@ function resolveCodexLikeTokens(theme: SettingsThemeV1Payload): ThemeCssVariable
     "--color-background-sidebar": surfaceUnder,
     "--color-background-toolbar": panel,
     "--color-background-workspace": surfaceUnder,
-    "--color-background-editor": editorBackground,
-    "--color-background-preview": editorBackground,
+    "--color-background-editor": surface,
+    "--color-background-preview": surface,
     "--color-background-card": rgba(elevatedPrimaryRgb, 0.96),
     "--color-background-panel": panel,
     "--color-background-popover": rgba(elevatedPrimaryRgb, 0.96),

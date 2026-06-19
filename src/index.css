@@ -105,7 +105,7 @@
     --code-border: var(--color-border-subtle, #d4d4cf);
     --code-text: var(--color-text-primary, #2f302d);
     --inline-code-bg: var(--color-background-control, #ece9e3);
-    --inline-code-text: var(--color-accent-primary, #6f3f32);
+    --inline-code-text: var(--code-text);
     --scrollbar-thumb: var(--color-border-strong, #c3c3bd);
     --scrollbar-thumb-hover: var(--color-text-muted, #999991);
     --editor-selection-bg: var(--color-background-selected, rgb(120 132 150 / 34%));
@@ -211,7 +211,7 @@
     --code-border: var(--color-border-subtle, oklch(0.34 0 0 / 52%));
     --code-text: var(--color-text-primary, oklch(0.93 0 0));
     --inline-code-bg: var(--color-background-control, oklch(0.288 0 0));
-    --inline-code-text: var(--color-accent-primary, oklch(0.78 0 0));
+    --inline-code-text: var(--code-text);
     --scrollbar-thumb: var(--color-border-strong, oklch(0.37 0 0 / 62%));
     --scrollbar-thumb-hover: var(--color-text-muted, oklch(0.62 0 0));
     --editor-selection-bg: var(--color-background-selected, var(--accent));
@@ -1040,14 +1040,14 @@ html[data-theme="light"] .app-editor-workspace {
 html[data-theme="light"] .app-editor-pane {
   margin: 0;
   border: 0;
-  background: var(--surface-editor);
+  background: var(--color-background-editor, var(--background));
   box-shadow: none;
 }
 
 html[data-theme="light"] .app-preview-pane {
   margin: 0;
   border: 0;
-  background: color-mix(in oklch, var(--surface-preview) 86%, var(--surface-workspace));
+  background: var(--color-background-preview, var(--background));
   box-shadow: none;
 }
 
