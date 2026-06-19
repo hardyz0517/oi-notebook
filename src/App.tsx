@@ -84,6 +84,7 @@ import {
 import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxonomySettingsPage";
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { SETTINGS_SECTION_FALLBACK, SETTINGS_SECTION_LABELS, SETTINGS_TREE } from "@/components/settings/settingsNavigation";
+import { shouldRenderSettingsGroup, shouldRenderSettingsPage } from "@/components/settings/settingsRenderGuards";
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import {
   areSettingsCenterRectsEqual,
@@ -3183,20 +3184,10 @@ export default function App() {
     () => SETTINGS_TREE.filter((group) => developerModeEnabled || !group.developerOnly),
     [developerModeEnabled],
   );
-  const shouldRenderSettingsPage = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
-    const activeGroupId =
-      activeTarget.type === "category"
-        ? activeTarget.category
-        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
-    return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeGroupId;
-  };
-  const shouldRenderSettingsGroup = (groupId: SettingsGroupId, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
-    const activeGroupId =
-      activeTarget.type === "category"
-        ? activeTarget.category
-        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
-    return activeGroupId === groupId;
-  };
+  const shouldRenderSettingsPageForTarget = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean =>
+    shouldRenderSettingsPage(pageKey, activePageKey, activeTarget, SETTINGS_SECTION_LABELS);
+  const shouldRenderSettingsGroupForTarget = (groupId: SettingsGroupId, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean =>
+    shouldRenderSettingsGroup(groupId, activePageKey, activeTarget, SETTINGS_SECTION_LABELS);
   const settingsPageSectionClass = "settings-v2-legacy-page grid min-w-0 gap-0";
   const promptTemplateRows = useMemo(
     () => promptTemplates.map((prompt) => ({
@@ -4738,13 +4729,13 @@ export default function App() {
 
   const ActiveSettingsPageEffects = ({ activePageKey, activeTarget }: { activePageKey: SettingsSection; activeTarget: SettingsTarget }) => {
     useEffect(() => {
-      const localNotesVisible = shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget);
+      const localNotesVisible = shouldRenderSettingsPageForTarget("ai-local-notes", activePageKey, activeTarget);
       if (!localNotesVisible || localIndexStatus || isLoadingLocalIndexStatus || isRebuildingLocalIndex) return;
       void refreshLocalIndexStatus();
     }, [activePageKey, activeTarget]);
 
     useEffect(() => {
-      if (!shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
+      if (!shouldRenderSettingsPageForTarget("ai-prompts", activePageKey, activeTarget) || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
       hasRequestedPromptTemplatesRef.current = true;
       void loadPromptTemplates();
     }, [activePageKey, activeTarget]);
@@ -8893,13 +8884,13 @@ export default function App() {
       renderActivePage={(activePageKey, activeTarget) => (
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
-                  {shouldRenderSettingsPage("general-basics", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("general-basics", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="general-basics">
                       <GeneralSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("appearance-theme", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="appearance-theme">
                       <AppearanceSettingsPage
                         appTheme={appTheme}
@@ -8925,9 +8916,9 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsGroup("ai", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("ai", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="AI">
-                  {shouldRenderSettingsPage("ai-api", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-api", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-api">
                         <SettingsV2Section title="模型与 API">
                           <SettingsV2Card>
@@ -8955,7 +8946,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-local-notes", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-local-notes">
                         <SettingsV2Section title="索引">
                           <SettingsV2Card>
@@ -9030,7 +9021,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-web-search", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-web-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-web-search">
                     <section className={settingsPageSectionClass}>
                       <div className="settings-v2-legacy-section-header">
@@ -9128,7 +9119,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-prompts", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-prompts">
                     <section className={settingsPageSectionClass}>
                       <div className="settings-v2-legacy-section-header">
@@ -9201,9 +9192,9 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsGroup("luogu", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("luogu", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="洛谷">
-                  {shouldRenderSettingsPage("luogu-account", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-account", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-account">
                     <LuoguAccountSettingsPage
                       className={settingsPageSectionClass}
@@ -9222,7 +9213,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("luogu-rules", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-rules", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-rules">
                     <LuoguRulesSettingsPage
                       className={settingsPageSectionClass}
@@ -9238,7 +9229,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("luogu-import-center", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-import-center", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-import-center">
                     <LuoguImportCenterSettingsPage
                       className={settingsPageSectionClass}
@@ -9254,9 +9245,9 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsGroup("blog", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("blog", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="博客">
-                  {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
+                  {(shouldRenderSettingsPageForTarget("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPageForTarget("blog-preview", activePageKey, activeTarget)) && (
                     <BlogPreviewSettingsPage
                       className={settingsPageSectionClass}
                       embedded
@@ -9274,7 +9265,7 @@ export default function App() {
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-taxonomy", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("blog-tag-taxonomy", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="blog-tag-taxonomy">
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
@@ -9340,7 +9331,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-manager", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("blog-tag-manager", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="blog-tag-manager">
                     <BlogTagManagerSettingsPage
                       className={settingsPageSectionClass}
@@ -9356,7 +9347,7 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsPage("data-storage", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("data-storage", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="data-storage">
                     <DataStorageSettingsPage
                       className={settingsPageSectionClass}
@@ -9367,15 +9358,15 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("keyboard-shortcuts", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("keyboard-shortcuts", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="keyboard-shortcuts">
                       <KeyboardSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsGroup("advanced", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("advanced", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="高级 / 开发者">
-                  {shouldRenderSettingsPage("advanced-developer", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("advanced-developer", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="advanced-developer">
                       <AdvancedSettingsPage
                         embedded
@@ -9385,7 +9376,7 @@ export default function App() {
                       />
                     </SettingsSectionAnchor>
                   )}
-                  {shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("diagnostics-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="diagnostics-search">
                     <section className={settingsPageSectionClass}>
                       <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
@@ -9395,7 +9386,7 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("about-version", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="about-version">
                       <AboutSettingsPage capabilities={MARKDOWN_CAPABILITIES} />
                     </SettingsSectionAnchor>
