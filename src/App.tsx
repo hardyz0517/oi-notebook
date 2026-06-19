@@ -45,10 +45,6 @@ import {
   type ReducedMotionMode,
   type ThemeMode,
 } from "@/components/settings/v2/pages/AppearanceSettingsPage";
-import { getSettingsThemeCssVariables } from "@/components/settings/v2/theme/settingsThemeApply";
-import { normalizeSettingsThemeState } from "@/components/settings/v2/theme/settingsThemeCodec";
-import { DEFAULT_SETTINGS_THEME_STATE } from "@/components/settings/v2/theme/settingsThemePresets";
-import type { SettingsThemeState } from "@/components/settings/v2/theme/settingsThemeTypes";
 import { GeneralSettingsPage } from "@/components/settings/v2/pages/GeneralSettingsPage";
 import { KeyboardSettingsPage } from "@/components/settings/v2/pages/KeyboardSettingsPage";
 import {
@@ -81,6 +77,7 @@ import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConf
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
   createExternalWorkingCopy,
   createNoteWorkingCopy,
@@ -123,7 +120,6 @@ const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).hr
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const THEME_STORAGE_KEY = "oi-notebook.theme";
 const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
 const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
 const APP_ZOOM_MIN = 0.8;
@@ -144,7 +140,6 @@ const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
 const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.settingsV2.accentColor";
 const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.settingsV2.translucentSidebar";
 const CONTRAST_STORAGE_KEY = "oi-notebook.settingsV2.contrast";
-const SETTINGS_THEME_V1_STORAGE_KEY = "oi-notebook.settingsThemeV1";
 const POINTER_CURSOR_STORAGE_KEY = "oi-notebook.settingsV2.pointerCursor";
 const REDUCED_MOTION_STORAGE_KEY = "oi-notebook.settingsV2.reducedMotion";
 const DIFF_MARKER_MODE_STORAGE_KEY = "oi-notebook.settingsV2.diffMarkerMode";
@@ -2048,15 +2043,6 @@ function getInitialEditorPreviewRatio(): number {
   return clampEditorPreviewRatio(parsed);
 }
 
-function isAppTheme(value: string | null): value is AppTheme {
-  return value === "dark" || value === "light" || value === "system";
-}
-
-function getInitialAppTheme(): AppTheme {
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return isAppTheme(stored) ? stored : "dark";
-}
-
 function isReadingDensity(value: string | null): value is ReadingDensity {
   return value === "compact" || value === "standard" || value === "comfortable";
 }
@@ -2066,59 +2052,11 @@ function getInitialReadingDensity(): ReadingDensity {
   return isReadingDensity(stored) ? stored : "standard";
 }
 
-function isHexColor(value: string | null): value is string {
-  return /^#[0-9a-fA-F]{6}$/.test(value ?? "");
-}
-
-function getInitialAccentColor(): string {
-  const stored = window.localStorage.getItem(ACCENT_COLOR_STORAGE_KEY);
-  return isHexColor(stored) ? stored.toUpperCase() : "#0169CC";
-}
-
 function getInitialBooleanSetting(storageKey: string, defaultValue: boolean): boolean {
   const stored = window.localStorage.getItem(storageKey);
   if (stored === "true") return true;
   if (stored === "false") return false;
   return defaultValue;
-}
-
-function getInitialContrast(): number {
-  const rawValue = window.localStorage.getItem(CONTRAST_STORAGE_KEY);
-  if (rawValue === null) return 56;
-  const parsed = Number(rawValue);
-  return Number.isFinite(parsed) ? clampNumberRange(parsed, 0, 100) : 56;
-}
-
-function getInitialSettingsThemeState(): SettingsThemeState {
-  try {
-    const rawValue = window.localStorage.getItem(SETTINGS_THEME_V1_STORAGE_KEY);
-    if (rawValue) {
-      return normalizeSettingsThemeState(JSON.parse(rawValue));
-    }
-  } catch {
-    // Fall through to the legacy setting bridge.
-  }
-
-  const variant = getInitialAppTheme();
-  const resolvedVariant = variant === "system" ? getInitialSystemTheme() : variant;
-  const initialState = normalizeSettingsThemeState({
-    ...DEFAULT_SETTINGS_THEME_STATE,
-    mode: variant,
-  });
-  return {
-    ...initialState,
-    [resolvedVariant]: {
-      ...initialState[resolvedVariant],
-      theme: {
-        ...initialState[resolvedVariant].theme,
-        accent: getInitialAccentColor(),
-        contrast: getInitialContrast(),
-        ink: resolvedVariant === "dark" ? "#F3F4F6" : "#0D0D0D",
-        opaqueWindows: getInitialBooleanSetting(TRANSLUCENT_SIDEBAR_STORAGE_KEY, false),
-        surface: resolvedVariant === "dark" ? "#1D1D1D" : "#F7F7F5",
-      },
-    },
-  };
 }
 
 function getInitialReducedMotion(): ReducedMotionMode {
@@ -2129,10 +2067,6 @@ function getInitialReducedMotion(): ReducedMotionMode {
 function getInitialDiffMarkerMode(): DiffMarkerMode {
   const stored = window.localStorage.getItem(DIFF_MARKER_MODE_STORAGE_KEY);
   return stored === "symbols" ? "symbols" : "color";
-}
-
-function getInitialSystemTheme(): "dark" | "light" {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function getInitialDeveloperMode(): boolean {
@@ -2683,9 +2617,15 @@ export default function App() {
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [editorCursorOffset, setEditorCursorOffset] = useState<number | null>(null);
   const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
-  const [settingsThemeState, setSettingsThemeState] = useState(getInitialSettingsThemeState);
-  const [appTheme, setAppTheme] = useState<AppTheme>(settingsThemeState.mode);
-  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getInitialSystemTheme);
+  const {
+    activeTheme: activeSettingsTheme,
+    appTheme,
+    applyThemeState,
+    resolvedTheme,
+    setAppTheme,
+    themeState: settingsThemeState,
+    themeVariables: settingsThemeVariables,
+  } = useThemeEngine();
   const [appZoom, setAppZoom] = useState(getInitialAppZoom);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const contentZoomRef = useRef(contentZoom);
@@ -4187,11 +4127,8 @@ export default function App() {
     [selectedPromptFileName],
   );
   const chromeZoom = 1 + (appZoom - 1) * 0.45;
-  const resolvedTheme = appTheme === "system" ? systemTheme : appTheme;
-  const activeSettingsTheme = resolvedTheme === "light" ? settingsThemeState.light : settingsThemeState.dark;
   const appearanceBackgroundColor = activeSettingsTheme.theme.surface;
   const appearanceForegroundColor = activeSettingsTheme.theme.ink;
-  const settingsThemeVariables = useMemo(() => getSettingsThemeCssVariables(activeSettingsTheme), [activeSettingsTheme]);
   const activeReadingDensity =
     READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
   const appearanceStyle = {
@@ -4438,19 +4375,11 @@ export default function App() {
   };
 
   const applySettingsThemeState = (nextThemeState: SettingsThemeState) => {
-    const normalizedState = normalizeSettingsThemeState(nextThemeState);
-    const nextResolvedTheme = normalizedState.mode === "system" ? systemTheme : normalizedState.mode;
-    const nextActiveTheme = nextResolvedTheme === "light" ? normalizedState.light : normalizedState.dark;
-    setSettingsThemeState(normalizedState);
-    setAppTheme(normalizedState.mode);
-    setAccentColor(nextActiveTheme.theme.accent);
-    setAppearanceContrast(nextActiveTheme.theme.contrast);
-    setTranslucentSidebar(nextActiveTheme.theme.opaqueWindows);
+    applyThemeState(nextThemeState);
   };
 
   const updateAppTheme = (nextTheme: AppTheme) => {
     setAppTheme(nextTheme);
-    setSettingsThemeState((current) => normalizeSettingsThemeState({ ...current, mode: nextTheme }));
   };
 
   const updateCodeFontSize = (nextSize: number) => {
@@ -7925,42 +7854,6 @@ export default function App() {
   }, [appZoom]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!mediaQuery) return;
-
-    const updateSystemTheme = () => {
-      setSystemTheme(mediaQuery.matches ? "dark" : "light");
-    };
-
-    updateSystemTheme();
-    mediaQuery.addEventListener?.("change", updateSystemTheme);
-    return () => mediaQuery.removeEventListener?.("change", updateSystemTheme);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.theme = resolvedTheme;
-    root.dataset.themeMode = appTheme;
-    root.classList.toggle("dark", resolvedTheme === "dark");
-    window.localStorage.setItem(THEME_STORAGE_KEY, appTheme);
-  }, [appTheme, resolvedTheme]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const entries = Object.entries(settingsThemeVariables);
-
-    for (const [name, value] of entries) {
-      root.style.setProperty(name, String(value));
-    }
-
-    return () => {
-      for (const [name] of entries) {
-        root.style.removeProperty(name);
-      }
-    };
-  }, [settingsThemeVariables]);
-
-  useEffect(() => {
     window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
   }, [uiScale]);
 
@@ -8010,14 +7903,6 @@ export default function App() {
     setAppearanceContrast(activeSettingsTheme.theme.contrast);
     setTranslucentSidebar(activeSettingsTheme.theme.opaqueWindows);
   }, [activeSettingsTheme]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(SETTINGS_THEME_V1_STORAGE_KEY, JSON.stringify(settingsThemeState));
-    } catch {
-      // A storage failure should not prevent Settings Center from opening.
-    }
-  }, [settingsThemeState]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("app-translucent-sidebar", translucentSidebar);
