@@ -416,23 +416,21 @@ export function BlogPreviewSettingsPage({
     <SettingsPageLayout title={L.blog} embedded={embedded}>
       <div data-settings-section="blog-info">
         <SettingsSection title={L.blogInfo}>
-          <SettingsCard>
-            <SettingRow title={L.blogNameIntro} align="start">
-              <div className="grid gap-3">
-                <label className="settings-v2-field-label">
-                  {L.blogName}
-                  <Input value={blogTitle} onChange={(event) => onBlogTitleChange(event.target.value)} placeholder="OI Notebook" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
-                </label>
-                <label className="settings-v2-field-label">
-                  {L.blogSubtitle}
-                  <Input value={blogSubtitle} onChange={(event) => onBlogSubtitleChange(event.target.value)} placeholder="OI Notebook Blog" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
-                </label>
-                {blogConfigError ? <div className="settings-v2-field-error">{blogConfigError}</div> : null}
-                <div className="flex justify-end">
-                  <SettingsButton onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>{isSavingBlogConfig ? L.saving : L.saveBlog}</SettingsButton>
-                </div>
+          <SettingsCard title={L.blogNameIntro} description={L.blogInfoDesc} className="settings-v2-blog-info-card">
+            <div className="settings-v2-blog-info-form">
+              <label className="settings-v2-field-label settings-v2-blog-info-field">
+                {L.blogName}
+                <Input value={blogTitle} onChange={(event) => onBlogTitleChange(event.target.value)} placeholder="OI Notebook" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
+              </label>
+              <label className="settings-v2-field-label settings-v2-blog-info-field">
+                {L.blogSubtitle}
+                <Input value={blogSubtitle} onChange={(event) => onBlogSubtitleChange(event.target.value)} placeholder="OI Notebook Blog" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
+              </label>
+              {blogConfigError ? <div className="settings-v2-field-error settings-v2-blog-info-error">{blogConfigError}</div> : null}
+              <div className="settings-v2-blog-info-actions">
+                <SettingsButton onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>{isSavingBlogConfig ? L.saving : L.saveBlog}</SettingsButton>
               </div>
-            </SettingRow>
+            </div>
           </SettingsCard>
         </SettingsSection>
       </div>

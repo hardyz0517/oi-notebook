@@ -10,17 +10,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border-border/70 bg-background/70 text-foreground shadow-sm hover:border-border hover:bg-accent/80 hover:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground dark:bg-input/35 dark:hover:bg-accent/90",
+          "border-[var(--ui-border-control)] bg-background/70 text-foreground shadow-sm hover:border-[var(--ui-border-strong)] hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground dark:bg-input/35",
         primary:
-          "border-border/70 bg-primary text-primary-foreground shadow-sm hover:border-border/80 hover:bg-primary/92",
+          "border-[var(--ui-border-control)] bg-primary text-primary-foreground shadow-sm hover:border-[var(--ui-border-strong)] hover:bg-primary/92",
         outline:
-          "border-border bg-background/70 text-foreground/92 hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground dark:bg-input/35 dark:hover:bg-accent/90",
+          "border-[var(--ui-border-control)] bg-background/70 text-foreground/92 hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground dark:bg-input/35",
         secondary:
-          "border-border/60 bg-secondary text-secondary-foreground hover:bg-secondary/88 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "border-[var(--ui-border-control)] bg-secondary text-secondary-foreground hover:bg-[var(--ui-state-hover)] aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-secondary-foreground",
         ghost:
-          "text-muted-foreground hover:bg-accent/80 hover:text-foreground aria-expanded:bg-accent/80 aria-expanded:text-foreground",
+          "text-muted-foreground hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground",
         subtle:
-          "border-border/45 bg-muted/40 text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground aria-expanded:bg-muted/70 aria-expanded:text-foreground",
+          "border-[var(--ui-border-subtle)] bg-muted/40 text-muted-foreground hover:border-[var(--ui-border-control)] hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground",
         danger:
           "border-destructive/30 bg-destructive/12 text-destructive hover:bg-destructive/18 focus-visible:border-destructive/50 focus-visible:ring-destructive/20 dark:bg-destructive/18 dark:hover:bg-destructive/24 dark:focus-visible:ring-destructive/30",
         destructive:

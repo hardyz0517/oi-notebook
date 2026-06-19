@@ -4,8 +4,66 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+type UiDropdownRegistryGlobal = typeof globalThis & {
+  __oiNotebookActiveDropdownClose?: (() => void) | null
+}
+
+function getActiveDropdownClose() {
+  return (globalThis as UiDropdownRegistryGlobal).__oiNotebookActiveDropdownClose ?? null
+}
+
+function setActiveDropdownClose(close: (() => void) | null) {
+  ;(globalThis as UiDropdownRegistryGlobal).__oiNotebookActiveDropdownClose = close
+}
+
+function DropdownMenu({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const isControlled = open !== undefined
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false)
+  const actualOpen = isControlled ? open : internalOpen
+  const closeRef = React.useRef<() => void>(() => undefined)
+  const close = React.useCallback(() => closeRef.current(), [])
+
+  closeRef.current = () => {
+    if (!isControlled) {
+      setInternalOpen(false)
+    }
+    if (actualOpen) {
+      onOpenChange?.(false)
+    }
+  }
+
+  React.useEffect(() => {
+    return () => {
+      if (getActiveDropdownClose() === close) {
+        setActiveDropdownClose(null)
+      }
+    }
+  }, [close])
+
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      open={actualOpen}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          getActiveDropdownClose()?.()
+          setActiveDropdownClose(close)
+        } else if (getActiveDropdownClose() === close) {
+          setActiveDropdownClose(null)
+        }
+        if (!isControlled) {
+          setInternalOpen(nextOpen)
+        }
+        onOpenChange?.(nextOpen)
+      }}
+      {...props}
+    />
+  )
 }
 
 function DropdownMenuTrigger({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
@@ -30,13 +88,12 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         className={cn(
-          "z-80 min-w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-1 text-popover-foreground shadow-lg outline-none duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-[var(--ui-motion-enter-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-top-[var(--ui-motion-enter-y)]",
+          "ui-dropdown-content z-80 overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-1 text-popover-foreground shadow-lg outline-none",
           className
         )}
         style={
           {
-            "--tw-duration": "var(--ui-motion-duration-base)",
-            minWidth: "max(var(--radix-dropdown-menu-trigger-width, 9rem), 9rem)",
+            minWidth: "var(--radix-dropdown-menu-trigger-width)",
             ...style,
           } as React.CSSProperties
         }

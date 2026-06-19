@@ -28,12 +28,12 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-80 w-72 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-lg outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-[var(--motion-dropdown-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-top-[var(--motion-dropdown-y)]",
+          "z-80 w-72 rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-4 text-popover-foreground shadow-lg outline-none duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-[var(--ui-motion-enter-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-top-[var(--ui-motion-enter-y)]",
           className
         )}
         style={
           {
-            "--tw-duration": "var(--motion-duration-base)",
+            "--tw-duration": "var(--ui-motion-duration-base)",
           } as React.CSSProperties
         }
         {...props}

@@ -26,12 +26,12 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-90 overflow-hidden rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:slide-in-from-top-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+          "z-90 overflow-hidden rounded-[var(--ui-radius-item)] border border-[var(--ui-border-subtle)] bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-out)] data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:slide-in-from-top-[var(--ui-motion-enter-y)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
           className
         )}
         style={
           {
-            "--tw-duration": "var(--motion-duration-fast)",
+            "--tw-duration": "var(--ui-motion-duration-fast)",
           } as React.CSSProperties
         }
         {...props}

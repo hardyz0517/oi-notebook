@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Loader2, PlugZap } from "lucide-react";
+import { ExternalLink, Loader2, PlugZap } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import { SettingRow } from "../SettingsPages";
 import { SettingsPageLayout } from "../v2/components/SettingsPageLayout";
@@ -24,64 +23,12 @@ export interface LuoguRuleSettingRow {
   options: LuoguRuleSettingOption[];
 }
 
-const SETTINGS_SELECT_ITEM_HEIGHT = 30;
-const SETTINGS_SELECT_VERTICAL_PADDING = 4;
-const SETTINGS_SELECT_BORDER_WIDTH = 1;
-const SETTINGS_SELECT_GAP = 6;
-
-interface SettingsSelectPlacementInput {
-  triggerRect: Pick<DOMRect, "top" | "bottom">;
-  containerRect: Pick<DOMRect, "top" | "bottom">;
-  optionsCount: number;
-}
-
-interface SettingsSelectPlacement {
-  direction: "up" | "down";
-  menuNaturalHeight: number;
-  maxHeight: number | null;
-  shouldScroll: boolean;
-}
-
-function computeSettingsSelectPlacement({
-  triggerRect,
-  containerRect,
-  optionsCount,
-}: SettingsSelectPlacementInput): SettingsSelectPlacement {
-  const optionCount = Math.max(0, optionsCount);
-  const menuNaturalHeight =
-    optionCount * SETTINGS_SELECT_ITEM_HEIGHT +
-    SETTINGS_SELECT_VERTICAL_PADDING * 2 +
-    SETTINGS_SELECT_BORDER_WIDTH * 2;
-  const availableBelow = Math.max(0, containerRect.bottom - triggerRect.bottom - SETTINGS_SELECT_GAP);
-  const availableAbove = Math.max(0, triggerRect.top - containerRect.top - SETTINGS_SELECT_GAP);
-
-  if (menuNaturalHeight <= availableBelow) {
-    return { direction: "down", menuNaturalHeight, maxHeight: null, shouldScroll: false };
-  }
-  if (menuNaturalHeight <= availableAbove) {
-    return { direction: "up", menuNaturalHeight, maxHeight: null, shouldScroll: false };
-  }
-
-  const direction = availableBelow >= availableAbove ? "down" : "up";
-  const available = direction === "down" ? availableBelow : availableAbove;
-
-  return {
-    direction,
-    menuNaturalHeight,
-    maxHeight: Math.max(1, available),
-    shouldScroll: true,
-  };
-}
-
 export function SettingsInlineSelect({
-  id,
   value,
   options,
   disabled,
   onChange,
   ariaLabel,
-  expandedRuleId,
-  onExpandedRuleChange,
 }: {
   id: string;
   value: string;
@@ -93,157 +40,26 @@ export function SettingsInlineSelect({
   onExpandedRuleChange: (id: string | null) => void;
   themed?: boolean;
 }) {
-  const expanded = expandedRuleId === id;
-  const selectedOption = options.find((option) => option.value === value) ?? options[0];
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [menuLayout, setMenuLayout] = useState<SettingsSelectPlacement>({
-    direction: "down",
-    menuNaturalHeight: 0,
-    maxHeight: null,
-    shouldScroll: false,
-  });
-  const [menuEntered, setMenuEntered] = useState(false);
-
-  const updateMenuLayout = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-
-    const scrollContainer = trigger.closest("[data-settings-scroll-container='true']");
-    const boundaryRect = scrollContainer?.getBoundingClientRect() ?? document.documentElement.getBoundingClientRect();
-    const triggerRect = trigger.getBoundingClientRect();
-    setMenuLayout(computeSettingsSelectPlacement({
-      triggerRect,
-      containerRect: boundaryRect,
-      optionsCount: options.length,
-    }));
-  }, [options.length]);
-
-  useEffect(() => {
-    if (!expanded) return;
-
-    updateMenuLayout();
-    setMenuEntered(false);
-    const frameId = window.requestAnimationFrame(() => setMenuEntered(true));
-    const trigger = triggerRef.current;
-    const scrollContainer = trigger?.closest("[data-settings-scroll-container='true']");
-    const handleScrollOrResize = () => {
-      onExpandedRuleChange(null);
-    };
-    const handleDocumentPointerDown = (event: globalThis.PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      onExpandedRuleChange(null);
-    };
-    const handleDocumentKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onExpandedRuleChange(null);
-    };
-
-    document.addEventListener("pointerdown", handleDocumentPointerDown, true);
-    document.addEventListener("keydown", handleDocumentKeyDown);
-    scrollContainer?.addEventListener("scroll", handleScrollOrResize, { passive: true });
-    window.addEventListener("resize", handleScrollOrResize);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
-      document.removeEventListener("keydown", handleDocumentKeyDown);
-      scrollContainer?.removeEventListener("scroll", handleScrollOrResize);
-      window.removeEventListener("resize", handleScrollOrResize);
-    };
-  }, [expanded, onExpandedRuleChange, updateMenuLayout]);
-
   return (
-    <div
-      ref={rootRef}
-      className="settings-v2-inline-select"
-      data-no-window-drag="true"
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <button
-        ref={triggerRef}
-        type="button"
-        disabled={disabled}
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger
         aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={expanded}
         className="settings-v2-inline-select-trigger"
-        onPointerDown={(event) => event.stopPropagation()}
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (disabled) return;
-          updateMenuLayout();
-          onExpandedRuleChange(expanded ? null : id);
-        }}
+        onClick={(event) => event.stopPropagation()}
       >
-        <span className="settings-v2-inline-select-label">{selectedOption?.label ?? "请选择"}</span>
-        <ChevronDown className={cn("settings-v2-pill-icon transition-transform", expanded && "rotate-180")} />
-      </button>
-      {expanded && (
-        <div
-          ref={menuRef}
-          data-no-window-drag="true"
-          className={cn(
-            "settings-v2-inline-select-menu",
-            menuLayout.shouldScroll ? "overflow-y-auto" : "overflow-visible",
-            menuLayout.direction === "down" ? "top-[calc(100%+6px)]" : "bottom-[calc(100%+6px)]",
-          )}
-          style={{
-            maxHeight: menuLayout.maxHeight === null ? undefined : `${menuLayout.maxHeight}px`,
-            opacity: menuEntered ? 1 : 0,
-            transform: menuEntered
-              ? "translateY(0) scale(1)"
-              : menuLayout.direction === "down"
-                ? "translateY(-4px) scale(0.98)"
-                : "translateY(4px) scale(0.98)",
-          }}
-          role="listbox"
-          aria-label={ariaLabel}
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {options.map((option) => {
-            const selected = option.value === value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                disabled={option.disabled}
-                className="settings-v2-inline-select-option"
-                title={option.label}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (option.disabled) return;
-                  if (option.value !== value) onChange(option.value);
-                  onExpandedRuleChange(null);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (event.detail !== 0 || option.disabled) return;
-                  if (option.value !== value) onChange(option.value);
-                  onExpandedRuleChange(null);
-                }}
-              >
-                <span className="settings-v2-inline-select-label">{option.label}</span>
-                <span className="settings-v2-inline-select-check">
-                  {selected && <Check className="h-3.5 w-3.5" />}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+        <SelectValue placeholder="请选择" />
+      </SelectTrigger>
+      <SelectContent
+        className="settings-v2-inline-select-content"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled} title={option.label}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

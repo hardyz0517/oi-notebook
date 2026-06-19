@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Check } from "lucide-react";
+
+import { Check, Type } from "lucide-react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -146,21 +147,24 @@ function ThemePresetSelect({
             {selectedPreset?.name ?? "Codex"}
           </SelectPill>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="settings-v2-inline-select-menu" role="listbox">
+        <DropdownMenuContent className="settings-v2-theme-preset-menu" align="end" sideOffset={6}>
           {presets.map((preset) => {
             const selected = preset.id === selectedPreset?.id;
             return (
               <DropdownMenuItem
                 key={preset.id}
-                className="settings-v2-inline-select-option"
-                role="option"
-                aria-selected={selected}
+                className={selected ? "settings-v2-theme-preset-item settings-v2-theme-preset-item-selected" : "settings-v2-theme-preset-item"}
                 onSelect={() => {
                   onChange({ ...preset.payload, variant });
                 }}
               >
-                <span>{preset.name}</span>
-                {selected ? <span className="settings-v2-inline-select-check"><Check aria-hidden="true" /></span> : null}
+                <span className="settings-v2-theme-preset-icon">
+                  <Type aria-hidden className="size-3" />
+                </span>
+                <span className="settings-v2-theme-preset-label">{preset.name}</span>
+                <span className="settings-v2-theme-preset-check" aria-hidden="true">
+                  {selected ? <Check className="size-3.5" /> : null}
+                </span>
               </DropdownMenuItem>
             );
           })}
@@ -192,7 +196,6 @@ function ThemeEditCard({
       <div className="settings-v2-theme-option-card">
         <div className="settings-v2-theme-option-copy">
           <div className="settings-v2-theme-option-title">{title}</div>
-          <div className="settings-v2-theme-option-description">Codex</div>
         </div>
         <div className="settings-v2-theme-toolbar">
           <SettingsButton variant="ghost" onClick={() => onCopy(theme)}>{L.copy}</SettingsButton>
@@ -210,17 +213,17 @@ function ThemeEditCard({
         <SettingRow title={L.ink} variant="nested">
           <ColorField value={theme.theme.ink} ariaLabel={`${title} ${L.ink}`} onChange={(ink) => updateTheme({ ink })} />
         </SettingRow>
-        <SettingRow title={L.contrast} variant="nested">
-          <SliderControl value={theme.theme.contrast} min={0} max={100} ariaLabel={`${title} ${L.contrast}`} onChange={(contrast) => updateTheme({ contrast })} />
-        </SettingRow>
-        <SettingRow title={L.opaqueWindows} variant="nested">
-          <ToggleSwitch checked={theme.theme.opaqueWindows} ariaLabel={`${title} ${L.opaqueWindows}`} onChange={(opaqueWindows) => updateTheme({ opaqueWindows })} />
-        </SettingRow>
         <SettingRow title={L.uiFont} variant="nested">
           <SettingsTextField value={theme.theme.fonts.ui} ariaLabel={`${title} ${L.uiFont}`} onChange={(ui) => updateTheme({ fonts: { ...theme.theme.fonts, ui } })} />
         </SettingRow>
         <SettingRow title={L.codeFont} variant="nested">
           <SettingsTextField value={theme.theme.fonts.code} ariaLabel={`${title} ${L.codeFont}`} onChange={(code) => updateTheme({ fonts: { ...theme.theme.fonts, code } })} />
+        </SettingRow>
+        <SettingRow title={L.opaqueWindows} variant="nested">
+          <ToggleSwitch checked={theme.theme.opaqueWindows} ariaLabel={`${title} ${L.opaqueWindows}`} onChange={(opaqueWindows) => updateTheme({ opaqueWindows })} />
+        </SettingRow>
+        <SettingRow title={L.contrast} variant="nested">
+          <SliderControl value={theme.theme.contrast} min={0} max={100} ariaLabel={`${title} ${L.contrast}`} onChange={(contrast) => updateTheme({ contrast })} />
         </SettingRow>
       </div>
     </SettingsCard>

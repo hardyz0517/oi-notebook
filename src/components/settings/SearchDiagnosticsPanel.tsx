@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, Clipboard, Loader2, Play, PlugZap, Search, TriangleAlert, XCircle } from "lucide-react";
+import { CheckCircle2, Clipboard, Loader2, Play, PlugZap, Search, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   getLocalNoteIndexStatus,
   getPromptCitationContractStatus,
@@ -1390,7 +1391,6 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
   const [researchEngineShadowCompareQuery, setResearchEngineShadowCompareQuery] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_QUERY);
   const [researchEngineShadowCompareReadTopN, setResearchEngineShadowCompareReadTopN] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_READ_TOP_N);
   const [researchEngineShadowCompareMaxCandidates, setResearchEngineShadowCompareMaxCandidates] = useState(DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_MAX_CANDIDATES);
-  const [isResearchEngineSampleMenuOpen, setIsResearchEngineSampleMenuOpen] = useState(false);
   const [researchEngineSelfCheck, setResearchEngineSelfCheck] = useState<ResearchEngineDeveloperSelfCheckResult | null>(null);
   const [researchEngineSample, setResearchEngineSample] = useState<ResearchEngineDeveloperSampleResult | null>(null);
   const [researchEngineRealProviderSmoke, setResearchEngineRealProviderSmoke] = useState<ResearchEngineRealProviderSmokeResult | null>(null);
@@ -1416,7 +1416,6 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
     [aiConfigDraft],
   );
   const rawWebSearchProvider = (aiConfigDraft?.web_search as unknown as { provider?: string } | undefined)?.provider;
-  const selectedResearchEngineSample = researchEngineSamples.find((sample) => sample.id === researchEngineSampleId) ?? researchEngineSamples[0];
 
   const counts = useMemo(() => {
     const result: Record<DiagnosticStatus, number> = { pass: 0, warn: 0, fail: 0, skipped: 0, running: 0 };
@@ -2070,38 +2069,25 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
             {isRunningResearchEngineSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             运行自检
           </Button>
-          <div className="relative min-w-0 max-w-full">
-            <button
-              type="button"
-              className="flex min-h-9 w-full max-w-full items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => setIsResearchEngineSampleMenuOpen((open) => !open)}
-              disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
-            >
-              <span className="min-w-0 truncate">{selectedResearchEngineSample.labelZh}：{selectedResearchEngineSample.displayQuestion}</span>
-              <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isResearchEngineSampleMenuOpen && "rotate-180")} />
-            </button>
-            {isResearchEngineSampleMenuOpen && (
-              <div className="absolute left-0 top-11 z-20 grid max-h-72 w-full min-w-0 max-w-full overflow-auto rounded-md border border-border bg-popover p-1 text-sm shadow-lg">
-                {researchEngineSamples.map((sample) => (
-                  <button
-                    key={sample.id}
-                    type="button"
-                    className={cn(
-                      "grid min-w-0 rounded-sm px-3 py-2 text-left hover:bg-muted/60",
-                      sample.id === researchEngineSampleId && "bg-muted text-foreground",
-                    )}
-                    onClick={() => {
-                      setResearchEngineSampleId(sample.id);
-                      setIsResearchEngineSampleMenuOpen(false);
-                    }}
-                  >
-                    <span className="min-w-0 truncate font-medium text-foreground">{sample.labelZh}</span>
+          <Select
+            value={researchEngineSampleId}
+            onValueChange={(value) => setResearchEngineSampleId(value as ResearchEngineDeveloperSampleId)}
+            disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
+          >
+            <SelectTrigger className="h-9 w-full min-w-0 text-sm lg:min-w-80" aria-label="Research Engine 离线样例">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-w-[min(32rem,var(--radix-select-content-available-width))]">
+              {researchEngineSamples.map((sample) => (
+                <SelectItem key={sample.id} value={sample.id} className="py-2 text-sm">
+                  <span className="grid min-w-0">
+                    <span className="min-w-0 truncate font-medium">{sample.labelZh}</span>
                     <span className="mt-0.5 min-w-0 truncate text-xs leading-5 text-muted-foreground">{sample.displayQuestion}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
             {isRunningResearchEngineSample ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
             运行离线样例
@@ -2191,13 +2177,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               )}
               <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-                <button
+                <Button
                   type="button"
-                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  variant="outline"
+                  size="compact"
+                  className="mt-2"
                   onClick={() => setIsResearchEngineRealProviderSmokeReportExpanded((expanded) => !expanded)}
                 >
                   {isResearchEngineRealProviderSmokeReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-                </button>
+                </Button>
                 {isResearchEngineRealProviderSmokeReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealProviderSmoke.markdownReport}
@@ -2282,13 +2270,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               )}
               <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-                <button
+                <Button
                   type="button"
-                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  variant="outline"
+                  size="compact"
+                  className="mt-2"
                   onClick={() => setIsResearchEngineRealUrlReaderSmokeReportExpanded((expanded) => !expanded)}
                 >
                   {isResearchEngineRealUrlReaderSmokeReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-                </button>
+                </Button>
                 {isResearchEngineRealUrlReaderSmokeReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealUrlReaderSmoke.markdownReport}
@@ -2386,13 +2376,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               )}
               <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-                <button
+                <Button
                   type="button"
-                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  variant="outline"
+                  size="compact"
+                  className="mt-2"
                   onClick={() => setIsResearchEngineRealE2ESmokeReportExpanded((expanded) => !expanded)}
                 >
                   {isResearchEngineRealE2ESmokeReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-                </button>
+                </Button>
                 {isResearchEngineRealE2ESmokeReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealE2ESmoke.markdownReport}
@@ -2416,17 +2408,20 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               onChange={(event) => setResearchEngineRealShadowRunQuery(event.target.value)}
               placeholder={DEFAULT_RESEARCH_ENGINE_REAL_SHADOW_RUN_QUERY}
             />
-            <select
-              className="min-h-9 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
-              value={researchEngineRealShadowRunReadTopN}
-              onChange={(event) => setResearchEngineRealShadowRunReadTopN(Number(event.target.value))}
+            <Select
+              value={String(researchEngineRealShadowRunReadTopN)}
+              onValueChange={(value) => setResearchEngineRealShadowRunReadTopN(Number(value))}
               disabled={isRunningResearchEngineRealShadowRun}
-              aria-label="Shadow Run readTopN"
             >
-              {[1, 2, 3].map((value) => (
-                <option key={value} value={value}>readTopN {value}</option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 min-w-36 text-sm" aria-label="Shadow Run readTopN">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3].map((value) => (
+                  <SelectItem key={value} value={String(value)}>readTopN {value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <input
               className="min-h-9 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring xl:w-28"
               type="number"
@@ -2577,13 +2572,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               </details>
               <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-                <button
+                <Button
                   type="button"
-                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  variant="outline"
+                  size="compact"
+                  className="mt-2"
                   onClick={() => setIsResearchEngineRealShadowRunReportExpanded((expanded) => !expanded)}
                 >
                   {isResearchEngineRealShadowRunReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-                </button>
+                </Button>
                 {isResearchEngineRealShadowRunReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineRealShadowRun.markdownReport}
@@ -2608,17 +2605,20 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               placeholder={DEFAULT_RESEARCH_ENGINE_SHADOW_COMPARE_QUERY}
               disabled={isRunningResearchEngineShadowCompare}
             />
-            <select
-              className="min-h-9 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
-              value={researchEngineShadowCompareReadTopN}
-              onChange={(event) => setResearchEngineShadowCompareReadTopN(Number(event.target.value))}
+            <Select
+              value={String(researchEngineShadowCompareReadTopN)}
+              onValueChange={(value) => setResearchEngineShadowCompareReadTopN(Number(value))}
               disabled={isRunningResearchEngineShadowCompare}
-              aria-label="Shadow Compare readTopN"
             >
-              {[1, 2, 3].map((value) => (
-                <option key={value} value={value}>readTopN {value}</option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 min-w-36 text-sm" aria-label="Shadow Compare readTopN">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3].map((value) => (
+                  <SelectItem key={value} value={String(value)}>readTopN {value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <input
               className="min-h-9 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring xl:w-28"
               type="number"
@@ -2686,13 +2686,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
               )}
               <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-                <button
+                <Button
                   type="button"
-                  className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                  variant="outline"
+                  size="compact"
+                  className="mt-2"
                   onClick={() => setIsResearchEngineShadowCompareReportExpanded((expanded) => !expanded)}
                 >
                   {isResearchEngineShadowCompareReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-                </button>
+                </Button>
                 {isResearchEngineShadowCompareReportExpanded && (
                   <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                     {researchEngineShadowCompare.markdownReport}
@@ -2798,13 +2800,15 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
             )}
             <details className="min-w-0 max-w-full overflow-hidden text-xs leading-5 text-muted-foreground">
               <summary className="cursor-pointer whitespace-normal break-words text-foreground">Markdown 报告</summary>
-              <button
+              <Button
                 type="button"
-                className="mt-2 rounded-sm border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+                variant="outline"
+                size="compact"
+                className="mt-2"
                 onClick={() => setIsResearchEngineReportExpanded((expanded) => !expanded)}
               >
                 {isResearchEngineReportExpanded ? "Hide Markdown report" : "Show Markdown report"}
-              </button>
+              </Button>
               {isResearchEngineReportExpanded && (
                 <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/70 bg-muted/20 p-3 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
                   {researchEngineSample.markdownReport}

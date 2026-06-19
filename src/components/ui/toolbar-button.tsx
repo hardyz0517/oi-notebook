@@ -24,7 +24,7 @@ function ToolbarButton({
       variant="ghost"
       size={size}
       className={cn(
-        "rounded-[var(--ui-radius-item)] text-muted-foreground hover:bg-[var(--ui-state-hover)] hover:text-foreground data-[selected=true]:bg-[var(--ui-state-selected)] data-[selected=true]:text-[var(--ui-state-selected-foreground)]",
+        "rounded-[var(--ui-radius-item)] text-muted-foreground transition-[background-color,color,box-shadow,opacity,transform] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] disabled:cursor-not-allowed disabled:text-[var(--ui-disabled-foreground)] disabled:opacity-[var(--ui-disabled-opacity)] data-[selected=true]:bg-[var(--ui-state-selected)] data-[selected=true]:text-[var(--ui-state-selected-foreground)]",
         className,
       )}
       aria-pressed={selected || props["aria-pressed"]}
