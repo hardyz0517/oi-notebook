@@ -467,7 +467,7 @@ export default function FileTree({
             </div>
           </div>
           {isCollapsed ? null : (
-            <ul className="w-full space-y-px">
+            <ul className="w-full">
               {renderInlineFileInput(node.path, depth + 1)}
               {renderInlineFolderInput(node.path, depth + 1)}
               {node.children.length === 0 && inlineFileParent !== node.path && inlineFolderParent !== node.path ? (
@@ -553,7 +553,7 @@ export default function FileTree({
     >
       <div className="onb-tree w-full px-1 py-1">
         {rootCollapsed ? null : (
-          <ul className="w-full space-y-px">
+          <ul className="w-full">
             {renderInlineFileInput("", 0)}
             {renderInlineFolderInput("", 0)}
             {tree.length === 0 && inlineFileParent !== "" && inlineFolderParent !== "" ? (

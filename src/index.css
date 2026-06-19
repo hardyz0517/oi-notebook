@@ -1628,15 +1628,21 @@ html[data-theme="light"] .app-file-actions {
 }
 
 .onb-tree {
-  --onb-tree-row-height: 40px;
-  --onb-tree-slot: 24px;
-  --onb-tree-actions-width: 66px;
+  --onb-tree-scale: var(--app-zoom, 1);
+  --onb-tree-content-line-height: calc(20px * var(--onb-tree-scale));
+  --onb-tree-row-padding-y: calc(5px * var(--onb-tree-scale));
+  --onb-tree-row-height: calc(var(--onb-tree-content-line-height) + var(--onb-tree-row-padding-y) * 2);
+  --onb-tree-font-size: calc(13px * var(--onb-tree-scale));
+  --onb-tree-slot: calc(18px * var(--onb-tree-scale));
+  --onb-tree-icon-size: calc(14px * var(--onb-tree-scale));
+  --onb-tree-action-size: calc(20px * var(--onb-tree-scale));
+  --onb-tree-actions-width: calc((var(--onb-tree-action-size) * 2) + 4px);
   --onb-tree-hover-bg: #2a2d2e;
   --onb-tree-selected-bg: #04395e;
   --onb-tree-selected-hover-bg: #064875;
   min-height: 100%;
   color: color-mix(in oklch, var(--foreground) 90%, var(--text-secondary));
-  font-size: 20px;
+  font-size: var(--onb-tree-font-size);
   line-height: var(--onb-tree-row-height);
 }
 
@@ -1686,9 +1692,10 @@ html[data-theme="light"] .app-file-actions {
   min-width: 0;
   height: var(--onb-tree-row-height);
   align-items: center;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--onb-tree-scale));
   color: inherit;
   outline: none;
+  padding-block: var(--onb-tree-row-padding-y);
   transition:
     background-color 90ms ease,
     color 90ms ease;
@@ -1725,13 +1732,13 @@ html[data-theme="light"] .app-file-actions {
   height: 100%;
   flex: 1 1 0;
   align-items: center;
-  gap: 8px;
+  gap: calc(3px * var(--onb-tree-scale));
   overflow: hidden;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
-  line-height: var(--onb-tree-row-height);
+  line-height: var(--onb-tree-content-line-height);
   outline: none;
   padding: 0;
   text-align: left;
@@ -1756,13 +1763,13 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 
 .onb-tree-twistie svg,
 .onb-tree-icon svg {
-  width: 20px;
-  height: 20px;
+  width: var(--onb-tree-icon-size);
+  height: var(--onb-tree-icon-size);
 }
 
 .onb-tree-icon svg {
-  width: 20px;
-  height: 20px;
+  width: var(--onb-tree-icon-size);
+  height: var(--onb-tree-icon-size);
 }
 
 .onb-tree-icon {
@@ -1803,9 +1810,9 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
   flex: 1 1 auto;
   overflow: hidden;
   color: inherit;
-  font-size: 20px;
+  font-size: var(--onb-tree-font-size);
   font-weight: 400;
-  line-height: var(--onb-tree-row-height);
+  line-height: var(--onb-tree-content-line-height);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1831,9 +1838,9 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 .onb-tree-actions {
   position: absolute;
   top: 50%;
-  right: 6px;
+  right: calc(2px * var(--onb-tree-scale));
   display: flex;
-  height: 32px;
+  height: var(--onb-tree-action-size);
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
@@ -1857,13 +1864,13 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 .onb-tree-row:hover .onb-tree-label,
 .onb-tree-row:focus-within .onb-tree-label,
 .onb-tree-row[data-active="true"] .onb-tree-label {
-  padding-right: calc(var(--onb-tree-actions-width) + 8px);
+  padding-right: calc(var(--onb-tree-actions-width) + 4px);
 }
 
 .onb-tree-action {
   display: inline-flex;
-  width: 32px;
-  height: 32px;
+  width: var(--onb-tree-action-size);
+  height: var(--onb-tree-action-size);
   align-items: center;
   justify-content: center;
   border: 0;
@@ -1875,9 +1882,9 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-main:hover {
 }
 
 .onb-tree-action svg {
-  width: 19px;
-  height: 19px;
-  stroke-width: 1.9;
+  width: calc(13px * var(--onb-tree-scale));
+  height: calc(13px * var(--onb-tree-scale));
+  stroke-width: 1.8;
 }
 
 .app-notes-sidebar .onb-tree-action:hover,
@@ -1903,14 +1910,14 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-action-danger:hover {
 
 .onb-tree-inline-input {
   min-width: 0;
-  height: var(--onb-tree-row-height);
+  height: var(--onb-tree-content-line-height);
   flex: 1 1 auto;
   border: 0;
   background: transparent;
   color: var(--foreground);
   font: inherit;
-  font-size: 20px;
-  line-height: var(--onb-tree-row-height);
+  font-size: var(--onb-tree-font-size);
+  line-height: var(--onb-tree-content-line-height);
   outline: none;
   padding: 0;
 }
@@ -1922,8 +1929,8 @@ html[data-theme="light"] .app-notes-sidebar .onb-tree-action-danger:hover {
 .onb-tree-empty,
 .onb-tree-error,
 .onb-tree-section-header {
-  font-size: 11px;
-  line-height: 18px;
+  font-size: calc(11px * var(--onb-tree-scale));
+  line-height: calc(18px * var(--onb-tree-scale));
 }
 
 .onb-tree-empty,
