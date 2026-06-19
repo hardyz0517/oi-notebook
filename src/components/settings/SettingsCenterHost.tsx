@@ -331,6 +331,8 @@ const SettingsCenterHost = forwardRef<SettingsCenterHostHandle, SettingsCenterHo
         onToggleGroup={toggleGroup}
         onOpenSettingsSection={openSettingsSection}
         onActiveSettingsSectionChange={setActiveSectionFromScroll}
+        onCloseAiConfigManager={closeAiConfigManager}
+        onCloseLuoguAccountManager={closeLuoguAccountManager}
         onOpenChange={(nextOpen) => {
           if (nextOpen) {
             openSettingsCenter();

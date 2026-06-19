@@ -1,4 +1,4 @@
-﻿import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ComponentType, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { history, historyKeymap } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
 import { EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
@@ -25,6 +25,12 @@ import {
   Table2,
   X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { ToolbarButton } from "@/components/ui/toolbar-button";
 import { cn } from "@/lib/utils";
 import { markPreviewEditorDocChanged } from "@/lib/previewPerf";
 
@@ -636,21 +642,22 @@ export function MarkdownEditorToolbar({
           {group.actions.map((action) => {
             const Icon = action.icon;
             return (
-              <button
+              
+              <ToolbarButton
                 key={action.id}
                 type="button"
                 title={action.title}
                 aria-label={action.title}
                 disabled={disabled}
-                className="markdown-toolbar-button inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
-                onMouseDown={(event) => {
+                size="compact"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => {
                   event.preventDefault();
                   if (disabled) return;
                   onAction?.(action.id);
                 }}
               >
-                {Icon ? <Icon className="h-4 w-4" /> : action.label}
-              </button>
+                {Icon ? <Icon className="h-4 w-4" aria-hidden="true" /> : action.label}
+              </ToolbarButton>
             );
           })}
         </div>
@@ -1160,36 +1167,36 @@ export default function MarkdownEditor({
                 {insertDialog.kind === "code-block" && "插入代码块"}
                 {insertDialog.kind === "table" && "插入表格"}
               </h2>
-              <button
+              <IconButton
                 type="button"
                 title="关闭"
                 aria-label="关闭"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                size="icon-sm"
                 onClick={closeInsertDialog}
               >
-                <X className="h-4 w-4" />
-              </button>
+                <X className="h-4 w-4" aria-hidden="true" />
+              </IconButton>
             </div>
 
             {insertDialog.kind === "link" && (
               <div className="grid gap-3">
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   链接地址
-                  <input
+                  <Input
                     autoFocus
                     value={linkUrl}
                     onChange={(event) => setLinkUrl(event.target.value)}
                     placeholder="https://www.luogu.com.cn/problem/P1001"
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   链接介绍
-                  <input
+                  <Input
                     value={linkText}
                     onChange={(event) => setLinkText(event.target.value)}
                     placeholder="洛谷题目"
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
               </div>
@@ -1199,21 +1206,21 @@ export default function MarkdownEditor({
               <div className="grid gap-3">
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   图片地址
-                  <input
+                  <Input
                     autoFocus
                     value={imageUrl}
                     onChange={(event) => setImageUrl(event.target.value)}
                     placeholder="assets/example.png"
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   图片描述
-                  <input
+                  <Input
                     value={imageAlt}
                     onChange={(event) => setImageAlt(event.target.value)}
                     placeholder="图片描述"
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
               </div>
@@ -1223,27 +1230,27 @@ export default function MarkdownEditor({
               <div className="grid gap-3">
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   选择语言
-                  <select
-                    autoFocus
-                    value={codeLanguage}
-                    onChange={(event) => setCodeLanguage(event.target.value)}
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
-                  >
-                    <option value="cpp">cpp</option>
-                    <option value="c">c</option>
-                    <option value="python">python</option>
-                    <option value="java">java</option>
-                    <option value="rust">rust</option>
-                    <option value="text">text</option>
-                  </select>
+                  <Select value={codeLanguage} onValueChange={setCodeLanguage}>
+                    <SelectTrigger autoFocus className="h-9 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cpp">cpp</SelectItem>
+                      <SelectItem value="c">c</SelectItem>
+                      <SelectItem value="python">python</SelectItem>
+                      <SelectItem value="java">java</SelectItem>
+                      <SelectItem value="rust">rust</SelectItem>
+                      <SelectItem value="text">text</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   代码
-                  <textarea
+                  <Textarea
                     value={codeContent}
                     onChange={(event) => setCodeContent(event.target.value)}
                     placeholder="#include <bits/stdc++.h>"
-                    className="min-h-44 resize-y rounded-sm border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="min-h-44 resize-y text-sm"
                   />
                 </label>
               </div>
@@ -1254,25 +1261,25 @@ export default function MarkdownEditor({
                 <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   行数
-                  <input
+                  <Input
                     autoFocus
                     type="number"
                     min={1}
                     max={20}
                     value={tableRows}
                     onChange={(event) => updateTableSize(Number(event.target.value), tableColumns)}
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                   列数
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     max={20}
                     value={tableColumns}
                     onChange={(event) => updateTableSize(tableRows, Number(event.target.value))}
-                    className="h-9 rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring"
+                    className="h-9 text-sm"
                   />
                 </label>
                 </div>
@@ -1286,7 +1293,7 @@ export default function MarkdownEditor({
                   >
                     {tableCells.map((row, rowIndex) =>
                       row.map((cell, columnIndex) => (
-                        <input
+                        <Input
                           key={`${rowIndex}-${columnIndex}`}
                           value={cell}
                           onChange={(event) => updateTableCell(rowIndex, columnIndex, event.target.value)}
@@ -1297,7 +1304,7 @@ export default function MarkdownEditor({
                             ? `Header ${columnIndex + 1}`
                             : `Row ${rowIndex} column ${columnIndex + 1}`}
                           className={cn(
-                            "h-9 min-w-0 border-b border-r border-border bg-background px-2 text-xs text-foreground outline-none transition-colors focus:z-10 focus:border-ring",
+                            "h-9 min-w-0 rounded-none border-0 border-b border-r border-border bg-background px-2 text-xs shadow-none focus-visible:z-10",
                             rowIndex === 0 && "bg-muted/40 font-semibold",
                             columnIndex === tableColumns - 1 && "border-r-0",
                             rowIndex === tableRows - 1 && "border-b-0",
@@ -1311,19 +1318,21 @@ export default function MarkdownEditor({
             )}
 
             <div className="flex justify-end gap-2">
-              <button
+              <Button
                 type="button"
-                className="inline-flex h-8 items-center justify-center rounded-sm border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                variant="outline"
+                size="default"
                 onClick={closeInsertDialog}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className="inline-flex h-8 items-center justify-center rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                variant="primary"
+                size="default"
               >
                 确认
-              </button>
+              </Button>
             </div>
           </form>
         </div>

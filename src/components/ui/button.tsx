@@ -5,22 +5,22 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent bg-clip-padding text-xs font-medium whitespace-nowrap outline-none select-none transition-[background-color,border-color,color,box-shadow,transform,opacity] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] focus-visible:border-ring/80 focus-visible:ring-[3px] focus-visible:ring-ring/25 active:not-aria-[haspopup]:scale-[var(--motion-scale-pressed)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/60 dark:aria-invalid:ring-destructive/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-[var(--ui-radius-control)] border border-transparent bg-clip-padding font-medium whitespace-nowrap outline-none select-none transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] active:not-aria-[haspopup]:scale-[var(--motion-scale-pressed)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:text-[var(--ui-disabled-foreground)] disabled:opacity-[var(--ui-disabled-opacity)] aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/60 dark:aria-invalid:ring-destructive/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default:
-          "border-border/70 bg-background/70 text-foreground shadow-sm hover:border-border hover:bg-accent/80 hover:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground dark:bg-input/35 dark:hover:bg-accent/90",
+          "border-[var(--ui-border-control)] bg-background/70 text-foreground shadow-sm hover:border-[var(--ui-border-strong)] hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground dark:bg-input/35",
         primary:
-          "border-border/70 bg-primary text-primary-foreground shadow-sm hover:border-border/80 hover:bg-primary/92",
+          "border-[var(--ui-border-control)] bg-primary text-primary-foreground shadow-sm hover:border-[var(--ui-border-strong)] hover:bg-primary/92",
         outline:
-          "border-border bg-background/70 text-foreground/92 hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground dark:bg-input/35 dark:hover:bg-accent/90",
+          "border-[var(--ui-border-control)] bg-background/70 text-foreground/92 hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground dark:bg-input/35",
         secondary:
-          "border-border/60 bg-secondary text-secondary-foreground hover:bg-secondary/88 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "border-[var(--ui-border-control)] bg-secondary text-secondary-foreground hover:bg-[var(--ui-state-hover)] aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-secondary-foreground",
         ghost:
-          "text-muted-foreground hover:bg-accent/80 hover:text-foreground aria-expanded:bg-accent/80 aria-expanded:text-foreground",
+          "text-muted-foreground hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground",
         subtle:
-          "border-border/45 bg-muted/40 text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground aria-expanded:bg-muted/70 aria-expanded:text-foreground",
+          "border-[var(--ui-border-subtle)] bg-muted/40 text-muted-foreground hover:border-[var(--ui-border-control)] hover:bg-[var(--ui-state-hover)] hover:text-foreground aria-expanded:bg-[var(--ui-state-active)] aria-expanded:text-foreground",
         danger:
           "border-destructive/30 bg-destructive/12 text-destructive hover:bg-destructive/18 focus-visible:border-destructive/50 focus-visible:ring-destructive/20 dark:bg-destructive/18 dark:hover:bg-destructive/24 dark:focus-visible:ring-destructive/30",
         destructive:

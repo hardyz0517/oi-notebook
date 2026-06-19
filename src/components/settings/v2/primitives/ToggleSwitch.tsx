@@ -1,5 +1,4 @@
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
 
 import type { SettingsControlBaseProps } from "./SettingsPrimitiveTypes";
 
@@ -20,7 +19,7 @@ export function ToggleSwitch({
       onCheckedChange={onChange}
       aria-label={ariaLabel}
       disabled={disabled}
-      className={cn("settings-v2-switch", checked && "settings-v2-switch-on")}
+      className="settings-v2-switch"
     />
   );
 }

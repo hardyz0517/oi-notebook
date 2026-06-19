@@ -5,11 +5,14 @@ import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ToolbarButton } from "@/components/ui/toolbar-button";
 import AppContextMenu from "@/components/common/AppContextMenu";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import { mergeConfigWithStoredCustomCollections, normalizeCustomCollections, parseUserTagTaxonomyConfigJson, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
@@ -3044,8 +3047,6 @@ export default function App() {
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
   const [collectionCandidatesFromNotes, setCollectionCandidatesFromNotes] = useState<string[]>([]);
   const [isTagNormalizationDetailsOpen, setIsTagNormalizationDetailsOpen] = useState(false);
-  const [isDifficultyMenuOpen, setIsDifficultyMenuOpen] = useState(false);
-  const difficultyDropdownRef = useRef<HTMLDivElement | null>(null);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
   const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
   const [activeTreeDirectoryPath, setActiveTreeDirectoryPath] = useState<string | null>(null);
@@ -3442,27 +3443,6 @@ export default function App() {
       setIsTagNormalizationDetailsOpen(false);
     }
   }, [tagNormalizationSuggestions.length]);
-  useEffect(() => {
-    if (!isDifficultyMenuOpen) return;
-
-    const handlePointerDown = (event: globalThis.PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && difficultyDropdownRef.current?.contains(target)) return;
-      setIsDifficultyMenuOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsDifficultyMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isDifficultyMenuOpen]);
   const luoguSubmissionCandidateStates = useMemo(() => {
     const submissions = luoguPreviewResult?.submissions ?? [];
     return Object.fromEntries(
@@ -7901,8 +7881,7 @@ export default function App() {
 
   const activityButtonClass = (_item: ActivityBarItem) =>
     cn(
-      "app-activity-button relative flex h-12 w-12 items-center justify-center rounded-md text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
-      "disabled:pointer-events-none disabled:opacity-40",
+      "app-activity-button relative h-12 w-12 rounded-md",
     );
 
   // Ctrl+S / Cmd+S 保存当前笔记
@@ -8583,7 +8562,7 @@ export default function App() {
                   <button
                     key={result.path}
                     type="button"
-                    className="grid w-full min-w-0 gap-1 rounded-md border border-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/35 focus-visible:border-ring focus-visible:bg-accent/35 focus-visible:outline-none"
+                    className="grid w-full min-w-0 gap-1 rounded-[var(--ui-radius-item)] border border-transparent px-3 py-2.5 text-left outline-none transition-[background-color,border-color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:border-[var(--ui-border-control)] hover:bg-[var(--ui-state-hover)] focus-visible:border-[var(--ui-focus-ring)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]"
                     onClick={() => handleSearchResultSelect(result.path)}
                   >
                     <div className="flex min-w-0 items-center justify-between gap-3">
@@ -8674,8 +8653,8 @@ export default function App() {
                       key={option.id}
                       type="button"
                       className={cn(
-                        "flex min-h-16 items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/40",
-                        newNoteLocationOption === option.id ? "border-ring bg-accent/50" : "border-border bg-background",
+                        "flex min-h-16 items-start gap-2 rounded-[var(--ui-radius-item)] border px-3 py-2 text-left text-sm outline-none transition-[background-color,border-color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]",
+                        newNoteLocationOption === option.id ? "border-[var(--ui-focus-ring)] bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]" : "border-[var(--ui-border-control)] bg-background",
                       )}
                       onClick={() => setNewNoteLocationOption(option.id)}
                     >
@@ -8704,8 +8683,8 @@ export default function App() {
                       <button
                         type="button"
                         className={cn(
-                          "block w-full truncate px-2 py-1 text-left text-xs transition-colors hover:bg-accent/40",
-                          newNoteCustomDirectory.trim() === "" && "bg-accent/45 text-accent-foreground",
+                          "block w-full truncate rounded-[var(--ui-radius-item)] px-2 py-1 text-left text-xs outline-none transition-[background-color,color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]",
+                          newNoteCustomDirectory.trim() === "" && "bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]",
                         )}
                         onClick={() => setNewNoteCustomDirectory("")}
                       >
@@ -8716,8 +8695,8 @@ export default function App() {
                           key={directory}
                           type="button"
                           className={cn(
-                            "block w-full truncate px-2 py-1 text-left font-mono text-xs transition-colors hover:bg-accent/40",
-                            newNoteCustomDirectory.trim() === directory && "bg-accent/45 text-accent-foreground",
+                            "block w-full truncate rounded-[var(--ui-radius-item)] px-2 py-1 text-left font-mono text-xs outline-none transition-[background-color,color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]",
+                            newNoteCustomDirectory.trim() === directory && "bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]",
                           )}
                           style={{ paddingLeft: `${8 + directory.split("/").length * 10}px` }}
                           onClick={() => setNewNoteCustomDirectory(directory)}
@@ -8743,8 +8722,8 @@ export default function App() {
                         key={tag}
                         type="button"
                         className={cn(
-                          "rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:bg-accent/45",
-                          selected ? "border-ring bg-primary text-primary-foreground" : "border-border bg-background text-foreground/90",
+                          "rounded-full border px-3 py-1 text-xs font-medium outline-none transition-[background-color,border-color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]",
+                          selected ? "border-primary bg-primary text-primary-foreground" : "border-[var(--ui-border-control)] bg-background text-foreground/90",
                         )}
                         aria-pressed={selected}
                         onClick={() => toggleNewNoteTag(tag)}
@@ -9857,7 +9836,7 @@ export default function App() {
                   <button
                     key={variable.name}
                     type="button"
-                    className="grid min-w-0 max-w-full gap-1 rounded-sm border border-border/60 bg-background/35 px-2 py-1.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                    className="grid min-w-0 max-w-full gap-1 rounded-[var(--ui-radius-item)] border border-[var(--ui-border-subtle)] bg-background/35 px-2 py-1.5 text-left outline-none transition-[background-color,border-color,box-shadow] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:border-[var(--ui-border-control)] hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)]"
                     onMouseDown={() => {
                       promptEditorHadFocusBeforeVariableClickRef.current = promptEditorRef.current?.hasFocus() ?? false;
                     }}
@@ -9904,7 +9883,7 @@ export default function App() {
       )}
       renderLuoguAccountManager={() => (
         <LuoguAccountManager
-          mode="page"
+          mode="dialog"
           uid={luoguConfigUid}
           clientId={luoguConfigClientId}
           lastSubmissionId={luoguConfigLastSubmissionId}
@@ -9985,9 +9964,9 @@ export default function App() {
                               </SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             <SettingsV2Row title={aiConfigDraft?.providers.length ? "供应商管理" : "新建供应商"} description="管理供应商、模型和 API Key。">
-                              <button type="button" className="settings-v2-action-button" onClick={() => settingsCenterHostRef.current?.openAiConfigManager()}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => settingsCenterHostRef.current?.openAiConfigManager()}>
                                 {aiConfigDraft?.providers.length ? "打开管理中心" : "新建供应商"}
-                              </button>
+                              </Button>
                             </SettingsV2Row>
                           </SettingsV2Card>
                         </SettingsV2Section>
@@ -10053,16 +10032,16 @@ export default function App() {
                         <SettingsV2Section title="维护">
                           <SettingsV2Card>
                             <SettingsV2Row title="刷新状态" description="重新读取当前本地索引状态。">
-                              <button type="button" className="settings-v2-action-button" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
                                 {isLoadingLocalIndexStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                                 刷新状态
-                              </button>
+                              </Button>
                             </SettingsV2Row>
                             <SettingsV2Row title="重建本地笔记索引" description="当搜索不准确或索引版本更新时重建。不会修改笔记正文。">
-                              <button type="button" className="settings-v2-action-button" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
                                 {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
                                 {isRebuildingLocalIndex ? "正在建立..." : "重建索引"}
-                              </button>
+                              </Button>
                             </SettingsV2Row>
                           </SettingsV2Card>
                         </SettingsV2Section>
@@ -10077,17 +10056,12 @@ export default function App() {
                         <div className="settings-v2-legacy-section-description">配置 NoteX 的搜索服务、网页读取授权和缓存。</div>
                       </div>
                       <SettingRow title="启用联网搜索" description="关闭后 NoteX 不会主动发起公开网页检索。">
-                        <button
-                          type="button"
-                          className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", webSearchDraft.enabled ? "border-primary/70 bg-primary" : "border-border bg-muted")}
-                          onClick={() => updateWebSearchDraft({ enabled: !webSearchDraft.enabled })}
-                          role="switch"
-                          aria-checked={webSearchDraft.enabled}
+                        <Switch
+                          checked={webSearchDraft.enabled}
+                          onCheckedChange={(enabled) => updateWebSearchDraft({ enabled })}
                           aria-label="启用联网搜索"
                           disabled={isSavingAiConfig || isLoadingAiConfig}
-                        >
-                          <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", webSearchDraft.enabled && "translate-x-5")} />
-                        </button>
+                        />
                       </SettingRow>
                       <SettingRow title="搜索服务" description="Bing 使用公开搜索；Bocha / Brave 需要填写对应 API Key。" layout="stacked">
                         <SettingsInlineSelect
@@ -10142,17 +10116,12 @@ export default function App() {
                         </label>
                       </SettingRow>
                       <SettingRow title="公开网页授权" description="开启后才允许 NoteX 为回答读取公开 http/https 网页摘录。">
-                        <button
-                          type="button"
-                          className={cn("relative h-6 w-11 shrink-0 rounded-full border transition-colors", webSearchDraft.publicSearchConsent ? "border-primary/70 bg-primary" : "border-border bg-muted")}
-                          onClick={() => updateWebSearchDraft({ publicSearchConsent: !webSearchDraft.publicSearchConsent })}
-                          role="switch"
-                          aria-checked={webSearchDraft.publicSearchConsent}
+                        <Switch
+                          checked={webSearchDraft.publicSearchConsent}
+                          onCheckedChange={(publicSearchConsent) => updateWebSearchDraft({ publicSearchConsent })}
                           aria-label="允许公开网页检索"
                           disabled={isSavingAiConfig || isLoadingAiConfig}
-                        >
-                          <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform", webSearchDraft.publicSearchConsent && "translate-x-5")} />
-                        </button>
+                        />
                       </SettingRow>
                       <SettingRow title="测试与缓存" description="测试当前搜索服务，或删除已保存的搜索结果和网页摘要缓存。">
                         <div className="grid gap-2">
@@ -10224,7 +10193,7 @@ export default function App() {
                               <button
                                 key={prompt.fileName}
                                 type="button"
-                                className="group flex w-full min-w-0 cursor-pointer items-start justify-between gap-6 border-b border-border/40 px-0 py-4 text-left last:border-b-0 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="group flex w-full min-w-0 cursor-pointer items-start justify-between gap-6 border-b border-[var(--ui-border-subtle)] px-0 py-4 text-left outline-none transition-[background-color,box-shadow,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] last:border-b-0 hover:bg-[var(--ui-state-hover)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] disabled:cursor-not-allowed disabled:opacity-[var(--ui-disabled-opacity)]"
                                 onClick={() => handleEditPrompt(prompt.fileName)}
                                 disabled={isLoadingPrompt || isSavingPrompt || isPolishingPrompt}
                               >
@@ -10481,39 +10450,40 @@ export default function App() {
         </div>
         <div className="min-w-4 flex-1 self-stretch" data-tauri-drag-region />
         <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
-          <div className="flex items-center" aria-label="窗口控制">
-            <button
+          <div className="flex items-center" aria-label="Window controls">
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              size="compact"
+              className="h-6 w-8"
               onClick={() => void handleMinimizeWindow()}
-              title="最小化"
-              aria-label="最小化窗口"
+              title="Minimize"
+              aria-label="Minimize window"
             >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <button
+              <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              size="compact"
+              className="h-6 w-8"
               onClick={() => void handleToggleMaximizeWindow()}
-              title="最大化 / 还原"
-              aria-label="最大化或还原窗口"
+              title="Maximize / Restore"
+              aria-label="Maximize or restore window"
             >
-              <Square className="h-3 w-3" />
-            </button>
-            <button
+              <Square className="h-3 w-3" aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
-              className="flex h-6 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-red-500/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70"
+              size="compact"
+              className="h-6 w-8 hover:bg-red-500/85 hover:text-white focus-visible:ring-red-400/70"
               onClick={() => void handleCloseWindow()}
-              title="关闭"
-              aria-label="关闭窗口"
+              title="Close"
+              aria-label="Close window"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </ToolbarButton>
           </div>
         </div>
       </header>
-
-      {/* Main workspace */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div id="settings-center-content-root" className="pointer-events-none absolute inset-0 z-[60]" />
         <nav
@@ -10521,68 +10491,68 @@ export default function App() {
           aria-label="主活动栏"
         >
           <div className="flex flex-col items-center gap-1.5">
-            <button
+            <ToolbarButton
               type="button"
               className={activityButtonClass("notes")}
               onClick={handleActivityNotes}
               title={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
               aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
-              aria-pressed={activeActivityItem === "notes"}
+              selected={activeActivityItem === "notes"}
             >
               <FileText size={24} strokeWidth={2.18} />
-            </button>
-            <button
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
               className={activityButtonClass("search")}
               onClick={handleActivitySearch}
               title="搜索笔记"
               aria-label="搜索笔记"
-              aria-pressed={activeActivityItem === "search"}
+              selected={activeActivityItem === "search"}
             >
               <Search size={24} strokeWidth={2.18} />
-            </button>
-            <button
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
               className={activityButtonClass("luogu")}
               onClick={handleActivityLuogu}
               title="洛谷导入中心"
               aria-label="洛谷导入中心"
-              aria-pressed={activeActivityItem === "luogu"}
+              selected={activeActivityItem === "luogu"}
               disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
             >
               <RefreshCw size={24} strokeWidth={2.18} />
-            </button>
-            <button
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
               className={activityButtonClass("ai")}
               onClick={handleActivityAi}
               title={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
               aria-label={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
-              aria-pressed={isAiActivityActive}
+              selected={isAiActivityActive}
             >
               <Bot size={24} strokeWidth={2.18} />
-            </button>
-            <button
+            </ToolbarButton>
+            <ToolbarButton
               type="button"
               className={activityButtonClass("blog")}
               onClick={handleActivityBlog}
               title="打开博客"
               aria-label="打开博客"
-              aria-pressed={activeActivityItem === "blog"}
+              selected={activeActivityItem === "blog"}
             >
               <ExternalLink size={24} strokeWidth={2.18} />
-            </button>
+            </ToolbarButton>
           </div>
-          <button
+          <ToolbarButton
             type="button"
             className={activityButtonClass("settings")}
             onClick={openSettingsCenter}
             title="设置中心"
             aria-label="设置中心"
-            aria-pressed={activeActivityItem === "settings"}
+            selected={activeActivityItem === "settings"}
           >
             <Settings size={24} strokeWidth={2.18} />
-          </button>
+          </ToolbarButton>
         </nav>
 
         {isNotesSidebarOpen && (
@@ -10779,7 +10749,7 @@ export default function App() {
                       onToggle={(event) => setIsFrontmatterOpen(event.currentTarget.open)}
                       className="app-frontmatter-panel shrink-0 border-b border-border bg-background/95"
                     >
-                      <summary className="flex h-7 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground hover:bg-accent/30 [&::-webkit-details-marker]:hidden">
+                      <summary className="flex h-7 cursor-pointer list-none select-none items-center justify-between px-4 text-xs font-medium text-muted-foreground transition-colors duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:bg-[var(--ui-state-hover)] [&::-webkit-details-marker]:hidden">
                         <span className="inline-flex items-center gap-1.5">
                           <ChevronRight
                             className={cn(
@@ -10873,86 +10843,60 @@ export default function App() {
                           </div>
                           <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-difficulty">难度</Label>
-                            <div ref={difficultyDropdownRef} className="relative">
-                              <button
-                                id="frontmatter-difficulty"
-                                type="button"
-                                disabled={!frontmatter.canMerge}
-                                className={cn(
-                                  "flex h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 text-left text-xs outline-none transition-colors hover:border-border focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80",
-                                  isDifficultyMenuOpen && "border-ring/50 ring-1 ring-ring/20 dark:border-white/25 dark:ring-white/10",
-                                  getDifficultyOptionClassName(frontmatter.fields.difficulty),
-                                )}
-                                aria-haspopup="listbox"
-                                aria-expanded={isDifficultyMenuOpen}
-                                onClick={() => {
-                                  if (!frontmatter.canMerge) return;
-                                  setIsDifficultyMenuOpen((open) => !open);
-                                }}
-                              >
-                                <span
-                                  className="min-w-0 truncate"
-                                  style={{ color: getDifficultyOptionTextColor(frontmatter.fields.difficulty, resolvedTheme) }}
-                                >
-                                  {frontmatter.fields.difficulty.trim() || "无"}
-                                </span>
-                                <ChevronDown
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild disabled={!frontmatter.canMerge}>
+                                <button
+                                  id="frontmatter-difficulty"
+                                  type="button"
                                   className={cn(
-                                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
-                                    isDifficultyMenuOpen && "rotate-180",
+                                    "group flex h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-[var(--ui-radius-control)] border border-[var(--ui-border-control)] bg-background px-2.5 text-left text-xs outline-none transition-[background-color,border-color,box-shadow,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] hover:border-[var(--ui-border-strong)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-[var(--ui-disabled-opacity)] dark:bg-input/30 dark:disabled:bg-input/80",
+                                    getDifficultyOptionClassName(frontmatter.fields.difficulty),
                                   )}
-                                  aria-hidden="true"
-                                />
-                              </button>
-                              {isDifficultyMenuOpen && frontmatter.canMerge && (
-                                <div
-                                  role="listbox"
-                                  aria-labelledby="frontmatter-difficulty"
-                                  className="absolute left-0 top-[calc(100%+5px)] z-50 w-full overflow-hidden rounded-sm border border-border/70 bg-popover py-0 text-xs text-popover-foreground shadow-lg shadow-black/10 dark:border-white/10 dark:bg-[#222222] dark:text-foreground dark:shadow-black/20"
+                                  aria-label="选择难度"
                                 >
-                                  {!LUOGU_DIFFICULTY_OPTIONS.some((option) => option.value === frontmatter.fields.difficulty) && frontmatter.fields.difficulty.trim() && (
-                                    <button
-                                      type="button"
-                                      role="option"
-                                      aria-selected
-                                      className="flex h-[34px] w-full items-center justify-between gap-2 px-2.5 text-left text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:text-foreground dark:hover:bg-white/[0.06]"
-                                      onClick={() => setIsDifficultyMenuOpen(false)}
+                                  <span
+                                    className="min-w-0 truncate"
+                                    style={{ color: getDifficultyOptionTextColor(frontmatter.fields.difficulty, resolvedTheme) }}
+                                  >
+                                    {frontmatter.fields.difficulty.trim() || "无"}
+                                  </span>
+                                  <ChevronDown
+                                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] group-data-[state=open]:rotate-180"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]">
+                                {!LUOGU_DIFFICULTY_OPTIONS.some((option) => option.value === frontmatter.fields.difficulty) && frontmatter.fields.difficulty.trim() && (
+                                  <DropdownMenuItem className="justify-between">
+                                    <span className="min-w-0 truncate">当前：{frontmatter.fields.difficulty}</span>
+                                    <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                                  </DropdownMenuItem>
+                                )}
+                                {LUOGU_DIFFICULTY_OPTIONS.map((option) => {
+                                  const selected = frontmatter.fields.difficulty === option.value;
+                                  return (
+                                    <DropdownMenuItem
+                                      key={option.value || "none"}
+                                      className={cn(
+                                        "justify-between",
+                                        selected && "bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]",
+                                        option.className,
+                                      )}
+                                      onSelect={() => updateFrontmatter({ difficulty: option.value })}
                                     >
-                                      <span className="min-w-0 truncate">当前：{frontmatter.fields.difficulty}</span>
-                                      <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                                    </button>
-                                  )}
-                                  {LUOGU_DIFFICULTY_OPTIONS.map((option) => {
-                                    const selected = frontmatter.fields.difficulty === option.value;
-                                    return (
-                                      <button
-                                        key={option.value || "none"}
-                                        type="button"
-                                        role="option"
-                                        aria-selected={selected}
-                                        className={cn(
-                                          "flex h-[34px] w-full items-center justify-between gap-2 px-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.06]",
-                                          selected && "bg-accent/70 text-accent-foreground dark:bg-white/[0.08]",
-                                          option.className,
-                                        )}
-                                        onClick={() => {
-                                          updateFrontmatter({ difficulty: option.value });
-                                          setIsDifficultyMenuOpen(false);
-                                        }}
+                                      <span
+                                        className="min-w-0 truncate"
+                                        style={{ color: getDifficultyOptionTextColor(option.value, resolvedTheme) }}
                                       >
-                                        <span
-                                          className="min-w-0 truncate"
-                                          style={{ color: getDifficultyOptionTextColor(option.value, resolvedTheme) }}
-                                        >
-                                          {option.label}
-                                        </span>
-                                        {selected && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
+                                        {option.label}
+                                      </span>
+                                      {selected && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                                    </DropdownMenuItem>
+                                  );
+                                })}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                           <div className="app-frontmatter-field grid gap-1">
                             <Label htmlFor="frontmatter-source">来源</Label>

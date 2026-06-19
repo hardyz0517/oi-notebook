@@ -23,7 +23,7 @@ export function SegmentedControl<TValue extends string>({
       ariaLabel={ariaLabel}
       disabled={disabled}
       className="settings-v2-segmented"
-      itemClassName={(_option, checked) => checked ? "settings-v2-segment settings-v2-segment-active" : "settings-v2-segment"}
+      itemClassName="settings-v2-segment"
     />
   );
 }

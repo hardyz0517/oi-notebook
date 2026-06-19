@@ -59,6 +59,7 @@ export function NumberField({
         value={draft}
         inputMode="decimal"
         aria-label={ariaLabel}
+        className="settings-v2-number-input"
         disabled={disabled}
         onChange={(event) => {
           if (/^-?\d*(?:\.\d*)?$/.test(event.target.value)) setDraft(event.target.value);

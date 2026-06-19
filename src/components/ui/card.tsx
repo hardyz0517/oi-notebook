@@ -6,14 +6,14 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card"
-      className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)}
+      className={cn("rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-card text-card-foreground shadow-sm", className)}
       {...props}
     />
   )
 }
 
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="card-header" className={cn("flex items-center justify-between gap-3 border-b border-border px-4 py-3", className)} {...props} />
+  return <div data-slot="card-header" className={cn("flex items-center justify-between gap-3 border-b border-[var(--ui-border-subtle)] px-4 py-3", className)} {...props} />
 }
 
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {

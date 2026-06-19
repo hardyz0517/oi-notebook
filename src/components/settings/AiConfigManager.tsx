@@ -5,6 +5,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, Bot, Check, ChevronDown, GripVertical, Loader2, Pencil, PlugZap, Plus, RefreshCw, Search, Server, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AiConfig, AiProvider } from "@/lib/api";
@@ -110,15 +112,16 @@ function Section({ title, action, children }: { title: ReactNode; action?: React
 function FloatingBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <div className="absolute left-0 right-0 top-0 z-20 flex items-center gap-3 border-b border-border/70 bg-background/95 px-8 py-2.5 shadow-[0_8px_24px_hsl(var(--background)/0.55)] backdrop-blur">
-      <button
+      <IconButton
         type="button"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/80 text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-[0.98] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        variant="outline"
+        size="icon"
         onClick={onBack}
         aria-label="返回供应商列表"
         title="返回供应商列表"
       >
         <ArrowLeft className="h-4 w-4" />
-      </button>
+      </IconButton>
       <span className="min-w-0 truncate text-sm font-medium text-foreground">{title}</span>
     </div>
   );
@@ -159,7 +162,6 @@ export default function AiConfigManager({
   const [createError, setCreateError] = useState("");
   const [createFeedback, setCreateFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [createBusyAction, setCreateBusyAction] = useState<"test" | "sync" | null>(null);
-  const [defaultModelDropdownOpen, setDefaultModelDropdownOpen] = useState(false);
 
   const providers = config?.providers ?? [];
   const providerIds = useMemo(() => providers.map((provider) => provider.id), [providers]);
@@ -641,62 +643,49 @@ export default function AiConfigManager({
                     </div>
                     <div className="space-y-2">
                       <FieldLabel label="默认模型" />
-                      <div
-                        className="relative"
-                        onBlur={(event) => {
-                          const nextTarget = event.relatedTarget;
-                          if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) {
-                            setDefaultModelDropdownOpen(false);
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") setDefaultModelDropdownOpen(false);
-                        }}
-                      >
+                      <div className="relative">
                         <Input
                           value={activeProviderDefaultModel}
                           placeholder="deepseek-chat"
                           className="pr-10"
                           onChange={(event) => onUpdateProvider(activeProvider.id, { default_model: event.target.value.trim() || null, updated_at: Date.now() })}
                         />
-                        <button
-                          type="button"
-                          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          aria-label="展开默认模型列表"
-                          title="展开默认模型列表"
-                          aria-expanded={defaultModelDropdownOpen}
-                          onClick={() => setDefaultModelDropdownOpen((open) => !open)}
-                        >
-                          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", defaultModelDropdownOpen && "rotate-180")} />
-                        </button>
-                        {defaultModelDropdownOpen && (
-                          <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-border/70 bg-popover p-1 text-popover-foreground shadow-lg">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <IconButton
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
+                              aria-label="展开默认模型列表"
+                              title="展开默认模型列表"
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </IconButton>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="max-h-64 overflow-y-auto" align="end">
                             {modelOptions.length > 0 ? (
                               modelOptions.map((modelId) => {
                                 const isSelected = activeProviderDefaultModel === modelId;
                                 return (
-                                  <button
+                                  <DropdownMenuItem
                                     key={modelId}
-                                    type="button"
                                     className={cn(
-                                      "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground",
-                                      isSelected && "bg-primary/10 text-primary",
+                                      "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] text-left",
+                                      isSelected && "bg-[var(--ui-state-selected)] text-[var(--ui-state-selected-foreground)]",
                                     )}
-                                    onClick={() => {
-                                      onSetDefaultModel(activeProvider.id, modelId);
-                                      setDefaultModelDropdownOpen(false);
-                                    }}
+                                    onSelect={() => onSetDefaultModel(activeProvider.id, modelId)}
                                   >
                                     <span className="min-w-0 truncate">{modelId}</span>
                                     {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
-                                  </button>
+                                  </DropdownMenuItem>
                                 );
                               })
                             ) : (
                               <div className="px-2 py-4 text-center text-xs text-muted-foreground">暂无模型，请先同步或手动添加模型</div>
                             )}
-                          </div>
-                        )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                       <p className="h-4 text-[11px] leading-4 text-muted-foreground">可手动输入，也可从已同步或手动添加的模型中选择。</p>
                     </div>

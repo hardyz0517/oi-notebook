@@ -44,9 +44,9 @@ export function LuoguAccountManager({
   const isBusy = isLoading || isSaving || isSyncing;
 
   return (
-    <div className={cn("flex min-h-0 flex-col overflow-hidden bg-white dark:bg-background", isPage && "h-full")}>
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-        <div className="mx-auto grid w-full max-w-[820px] gap-5">
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden bg-transparent", !isPage && "min-h-full")}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="mx-auto grid w-full max-w-[520px] gap-5">
           <div className="grid gap-1">
             <div className="text-base font-semibold text-foreground">洛谷账号配置</div>
             <div className="text-xs leading-5 text-muted-foreground">
@@ -115,8 +115,8 @@ export function LuoguAccountManager({
           )}
         </div>
       </div>
-      <div className="shrink-0 border-t border-border/70 bg-white px-6 py-3 dark:bg-background/95">
-        <DialogFooter className="mx-auto w-full max-w-[820px]">
+      <div className="shrink-0 border-t border-border/70 bg-background/70 px-5 py-3 backdrop-blur">
+        <DialogFooter className="mx-auto w-full max-w-[520px]">
           <Button variant="outline" onClick={onTestConnection} disabled={isBusy || isTestingConnection}>
             {isTestingConnection ? "测试中..." : "测试连接"}
           </Button>

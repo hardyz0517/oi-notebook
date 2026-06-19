@@ -1,7 +1,6 @@
 ﻿import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import type { CSSProperties } from "react";
 
 function normalizeHexColor(value: string) {
   const trimmed = value.trim();
@@ -10,6 +9,11 @@ function normalizeHexColor(value: string) {
     : trimmed;
   return /^#[0-9a-f]{6}$/i.test(expanded) ? expanded.toUpperCase() : null;
 }
+
+type ColorFieldStyle = CSSProperties & {
+  "--settings-color-field-value": string;
+  "--settings-color-field-foreground": string;
+};
 
 export interface ColorFieldProps {
   value: string;
@@ -29,9 +33,16 @@ export function ColorField({
   onChange,
 }: ColorFieldProps) {
   const colorInputRef = useRef<HTMLInputElement | null>(null);
+  const textInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedValue = normalizeHexColor(value) ?? "#000000";
   const [draft, setDraft] = useState(normalizedValue);
   const interactive = !readonly && !readOnly && !disabled && Boolean(onChange);
+  const numericColor = Number.parseInt(normalizedValue.slice(1), 16);
+  const red = (numericColor >> 16) & 255;
+  const green = (numericColor >> 8) & 255;
+  const blue = numericColor & 255;
+  const relativeLuminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  const foregroundColor = relativeLuminance > 0.56 ? "#111111" : "#ffffff";
 
   useEffect(() => {
     setDraft(normalizedValue);
@@ -59,20 +70,29 @@ export function ColorField({
   };
 
   return (
-    <div className="settings-v2-color-field" data-readonly={interactive ? "false" : "true"}>
-      <Button
+    <div
+      className="settings-v2-color-field"
+      data-readonly={interactive ? "false" : "true"}
+      style={{
+        "--settings-color-field-value": normalizedValue,
+        "--settings-color-field-foreground": foregroundColor,
+      } as ColorFieldStyle}
+      onClick={(event) => {
+        if (!interactive) return;
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
+        textInputRef.current?.focus();
+      }}
+    >
+      <button
         type="button"
-        variant="ghost"
-        size="icon-xs"
         disabled={!interactive}
         aria-label={ariaLabel}
         className="settings-v2-color-swatch"
-        style={{ backgroundColor: normalizedValue }}
         onClick={() => colorInputRef.current?.click()}
       />
       {interactive ? (
         <>
-          <Input
+          <input
             ref={colorInputRef}
             type="color"
             value={normalizedValue}
@@ -82,7 +102,8 @@ export function ColorField({
               if (next) commitValue(next);
             }}
           />
-          <Input
+          <input
+            ref={textInputRef}
             type="text"
             value={draft}
             aria-label={`${ariaLabel} HEX`}

@@ -8,7 +8,7 @@ function Checkbox({ className, type = "checkbox", ...props }: React.ComponentPro
       data-slot="checkbox"
       type={type}
       className={cn(
-        "size-4 rounded border-border accent-primary outline-none transition-[box-shadow,opacity] duration-[var(--motion-duration-fast)] ease-[var(--motion-ease-standard)] focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50",
+        "size-4 rounded-[var(--ui-radius-item)] border-[var(--ui-border-control)] accent-primary outline-none transition-[box-shadow,opacity] duration-[var(--ui-motion-duration-fast)] ease-[var(--ui-motion-ease-standard)] focus-visible:ring-[3px] focus-visible:ring-[var(--ui-focus-ring-soft)] disabled:cursor-not-allowed disabled:opacity-[var(--ui-disabled-opacity)]",
         className
       )}
       {...props}

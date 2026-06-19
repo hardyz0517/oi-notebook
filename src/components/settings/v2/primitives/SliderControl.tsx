@@ -1,5 +1,3 @@
-import type { CSSProperties } from "react";
-
 import { Slider } from "@/components/ui/slider";
 
 export interface SliderControlProps {
@@ -23,12 +21,9 @@ export function SliderControl({
 }: SliderControlProps) {
   const clampValue = (nextValue: number) => Math.min(max, Math.max(min, nextValue));
   const safeValue = clampValue(Number.isFinite(value) ? value : min);
-  const percent = max === min ? 0 : ((safeValue - min) / (max - min)) * 100;
-
   return (
     <Slider
       className="settings-v2-slider-control"
-      style={{ "--settings-slider-value": `${percent}%` } as CSSProperties}
       value={safeValue}
       min={min}
       max={max}
