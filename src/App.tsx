@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, Check, ChevronDown, ChevronRight, Columns2, Download, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, Plus, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Columns2, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import AppContextMenu from "@/components/common/AppContextMenu";
@@ -59,7 +59,6 @@ import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxono
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/datetime";
 import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
@@ -118,6 +117,7 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 `;
 
 const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
+const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
 const THEME_STORAGE_KEY = "oi-notebook.theme";
@@ -4282,14 +4282,6 @@ export default function App() {
     transition: "none",
     animation: "none",
   } as CSSProperties;
-  const dashboardNotes = useMemo(
-    () =>
-      [...files]
-        .filter((file) => !file.isDirectory)
-        .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
-        .slice(0, 6),
-    [files],
-  );
   const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
   useEffect(() => {
     let cancelled = false;
@@ -7249,7 +7241,7 @@ export default function App() {
         setActiveWorkingCopyId(null);
         setCurrentFilePath(null);
         setActiveWorkspaceTabId(openReviewTabs[0]?.id ?? null);
-        replaceEditorDocument(INITIAL_MARKDOWN, null, "");
+        replaceEditorDocument("", null, "");
         setIsDirty(false);
         isDirtyRef.current = false;
       }
@@ -7258,13 +7250,15 @@ export default function App() {
     const tabIndex = openTabPaths.indexOf(path);
     if (tabIndex === -1) return;
 
-    const isClosingActiveTab = getNoteWorkingCopyId(path) === activeWorkingCopyId;
+    const noteWorkingCopyId = getNoteWorkingCopyId(path);
+    const isClosingActiveTab = currentFilePath === path || activeWorkspaceTabId === noteWorkingCopyId;
+    const visibleNoteTabsAfterClose = openTabs.filter((item) => item.kind === "file" && item.path && item.path !== path);
 
     const nextTabs = openTabPaths.filter((tabPath) => tabPath !== path);
-    setOpenTabPaths(nextTabs);
+    setOpenTabPaths(visibleNoteTabsAfterClose.length === 0 ? [] : nextTabs);
     setWorkingCopies((current) => {
       const next = { ...current };
-      delete next[getNoteWorkingCopyId(path)];
+      delete next[noteWorkingCopyId];
       return next;
     });
 
@@ -7273,7 +7267,11 @@ export default function App() {
     setPendingFileSelection(null);
     setIsDirty(false);
 
-    const nextPath = nextTabs[tabIndex] ?? nextTabs[tabIndex - 1] ?? null;
+    const visibleTabIndex = openTabs.findIndex((item) => item.kind === "file" && item.path === path);
+    const nextPath =
+      visibleNoteTabsAfterClose[visibleTabIndex]?.path ??
+      visibleNoteTabsAfterClose[visibleTabIndex - 1]?.path ??
+      null;
     if (nextPath) {
       finishFileSelection(nextPath, false);
     } else {
@@ -8428,12 +8426,12 @@ export default function App() {
   useEffect(() => {
     if (currentFilePath === null) {
       if (activeWorkingCopyId) return;
-      // 无选中文件时恢复欢迎内容
-      replaceEditorDocument(INITIAL_MARKDOWN, null, "");
+      // No active editor document: keep the editor model empty and show the empty workbench.
+      replaceEditorDocument("", null, "");
       savedSnapshotRef.current = {
         path: null,
         frontmatterPrefix: "",
-        markdown: INITIAL_MARKDOWN,
+        markdown: "",
       };
       setIsDirty(false);
       isDirtyRef.current = false;
@@ -10706,147 +10704,51 @@ export default function App() {
               })}
             />
           ) : !hasActiveEditorDocument ? (
-            <div data-app-context-menu="welcome" className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
-              <div className="grid w-full max-w-6xl content-start gap-5">
-                <section className="rounded-xl border border-border/70 bg-background/90 px-6 py-7 shadow-sm">
-                  <div className="max-w-3xl">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h1 className="text-3xl font-semibold tracking-tight text-foreground">欢迎回来</h1>
-                      <span className="rounded-md border border-border/70 bg-muted/35 px-2 py-1 text-xs font-medium text-muted-foreground">
-                        OI Notebook
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      继续整理 OI 笔记、复盘题解，或从洛谷导入新的训练记录。
-                    </p>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <Button className="gap-2" onClick={requestInlineCreateFile}>
-                        <Plus className="h-4 w-4" />
-                        新建笔记
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={() => void openLuoguDialog()}>
-                        <Download className="h-4 w-4" />
-                        从洛谷导入
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={handleOpenBlog}>
-                        <ExternalLink className="h-4 w-4" />
-                        打开本地博客
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="gap-2"
-                        onClick={() => void openAiSettings()}
-                        disabled={isLoadingAiConfig || isSavingAiConfig}
-                      >
-                        <Bot className="h-4 w-4" />
-                        配置 AI
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={openSettingsCenter}>
-                        <Settings className="h-4 w-4" />
-                        打开设置
-                      </Button>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <section className="grid content-start gap-3 rounded-xl border border-border/70 bg-background/80 p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-lg font-semibold text-foreground">最近笔记</div>
-                      <span className="text-xs text-muted-foreground">按最近修改排序</span>
-                    </div>
-                    {dashboardNotes.length > 0 ? (
-                      <div className="grid gap-2">
-                        {dashboardNotes.map((file) => (
-                          <button
-                            key={file.path}
-                            type="button"
-                            className="grid min-w-0 gap-1.5 rounded-md border border-border/65 bg-muted/10 px-3 py-3 text-left transition-colors hover:bg-accent/35"
-                            onClick={() => handleSelectFile(file.path)}
-                          >
-                            <div className="flex min-w-0 items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-foreground">{file.name.replace(/\.md$/i, "")}</div>
-                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <span className="rounded-sm border border-border/65 bg-background/55 px-1.5 py-0.5">
-                                    {getDashboardNoteCategory(file.path)}
-                                  </span>
-                                  <span className="truncate">{file.path}</span>
-                                </div>
-                              </div>
-                              <div className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(file.modified)}</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-sm leading-6 text-muted-foreground">
-                        暂无笔记。新建一篇笔记，或从洛谷导入训练记录。
-                      </div>
-                    )}
-                  </section>
-
-                  <aside className="grid content-start gap-5">
-                    <section className="rounded-xl border border-border/70 bg-background/80 p-5">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-base font-semibold text-foreground">当前状态</div>
-                        <span className="text-xs text-muted-foreground">{dashboardNotes.length} 篇笔记</span>
-                      </div>
-                      <div className="mt-3 divide-y divide-border/60">
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
-                          onClick={() => openSettingsSection("blog")}
-                        >
-                          <span className="text-muted-foreground">本地博客</span>
-                          <span className="text-xs text-muted-foreground">{blogStatusLabel}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
-                          onClick={() => openSettingsSection("ai")}
-                        >
-                          <span className="text-muted-foreground">AI</span>
-                          <span className={cn("text-xs", aiConfigured ? "text-muted-foreground" : "text-amber-600 dark:text-amber-300")}>
-                            {aiStatusLabel}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground"
-                          onClick={() => openSettingsSection("luogu")}
-                        >
-                          <span className="text-muted-foreground">洛谷</span>
-                          <span className={cn(
-                            "text-xs",
-                            luoguConnectionError
-                              ? "text-red-600 dark:text-red-300"
-                              : luoguConfigured
-                                ? "text-muted-foreground"
-                                : "text-amber-600 dark:text-amber-300",
-                          )}>
-                            {luoguStatusLabel}
-                          </span>
-                        </button>
-                        <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                          <span className="text-muted-foreground">数据目录</span>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={openNotesFolder}>
-                            打开本地目录
-                          </Button>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="rounded-xl border border-border/60 bg-muted/10 p-5">
-                      <div className="text-base font-semibold text-foreground">核心功能</div>
-                      <div className="mt-3 grid gap-2 text-xs leading-5 text-muted-foreground">
-                        <div><span className="font-medium text-foreground">Markdown：</span>数学公式、代码高亮、表格与 callout</div>
-                        <div><span className="font-medium text-foreground">洛谷导入：</span>扫描提交并整理训练记录</div>
-                        <div><span className="font-medium text-foreground">AI：</span>润色、总结、检索本地笔记</div>
-                        <div><span className="font-medium text-foreground">本地博客：</span>预览与浏览笔记文章</div>
-                      </div>
-                    </section>
-                  </aside>
+            <div
+              data-app-context-menu="empty-editor"
+              className="app-empty-editor flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-background px-6 py-8 text-muted-foreground"
+            >
+              <div className="grid w-full max-w-[360px] justify-items-center gap-6">
+                <img
+                  src={APP_EMPTY_STATE_ICON_URL}
+                  alt=""
+                  aria-hidden="true"
+                  className="h-44 w-44 select-none object-contain opacity-[0.085] dark:opacity-[0.075]"
+                  draggable={false}
+                />
+                <div className="grid w-full gap-2 text-[13px]">
+                  <button
+                    type="button"
+                    className="group grid h-7 cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-sm px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+                    onClick={createUntitledEditor}
+                  >
+                    <span>新建文件</span>
+                    <span className="inline-flex gap-1 text-[11px] text-muted-foreground/80 group-hover:text-muted-foreground">
+                      <kbd className="rounded-sm bg-muted px-1.5 py-0.5 font-mono">Ctrl</kbd>
+                      <kbd className="rounded-sm bg-muted px-1.5 py-0.5 font-mono">N</kbd>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="group grid h-7 cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-sm px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+                    onClick={() => setIsSearchOpen(true)}
+                  >
+                    <span>搜索笔记</span>
+                    <span className="inline-flex gap-1 text-[11px] text-muted-foreground/80 group-hover:text-muted-foreground">
+                      <kbd className="rounded-sm bg-muted px-1.5 py-0.5 font-mono">Ctrl</kbd>
+                      <kbd className="rounded-sm bg-muted px-1.5 py-0.5 font-mono">K</kbd>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="group grid h-7 cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-sm px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+                    onClick={openNotesFolder}
+                  >
+                    <span>打开笔记文件夹</span>
+                    <span className="inline-flex gap-1 text-[11px] text-muted-foreground/80 group-hover:text-muted-foreground">
+                      <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>
