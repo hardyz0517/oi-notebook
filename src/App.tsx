@@ -121,6 +121,14 @@ import {
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
+import {
+  COMMON_COLLECTIONS,
+  buildCollectionCandidates,
+  getDisplayTags,
+  getEffectiveCollections,
+  normalizeCollectionValues,
+  normalizeTagValue,
+} from "@/lib/collectionTags";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import {
@@ -701,7 +709,6 @@ interface LuoguCandidateDisplayState {
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
-const COMMON_COLLECTIONS = ["题解", "技巧", "复盘", "杂谈", "集训日志"];
 const LUOGU_DIFFICULTY_OPTIONS = [
   { value: "", label: "无", className: "text-muted-foreground", textColor: "var(--muted-foreground)", darkTextColor: "var(--muted-foreground)" },
   { value: "入门", label: "入门", className: "text-[#fe4c61]", textColor: "#fe4c61", darkTextColor: "#fe4c61" },
@@ -937,79 +944,6 @@ function formatWebSearchTestError(error: unknown): string {
     return "搜索服务暂时不可用。测试失败不影响 AI 模型和设置保存。";
   }
   return message || "搜索测试失败。测试失败不影响设置保存，也不影响普通聊天。";
-}
-
-function normalizeTagValue(tag: string): string {
-  return tag.trim().replace(/\s+/g, " ");
-}
-
-function isCollectionTag(tag: string): boolean {
-  const normalized = normalizeTagValue(tag).toLocaleLowerCase();
-  return normalized.startsWith("文集:") || normalized.startsWith("collection:");
-}
-
-function getCollectionFromTag(tag: string): string | null {
-  const normalized = normalizeTagValue(tag);
-  const lower = normalized.toLocaleLowerCase();
-  if (normalized.startsWith("文集:")) return normalizeTagValue(normalized.slice("文集:".length)) || null;
-  if (lower.startsWith("collection:")) return normalizeTagValue(normalized.slice("collection:".length)) || null;
-  return null;
-}
-
-function getDisplayTags(tags: string[]): string[] {
-  return tags.filter((tag) => !isCollectionTag(tag));
-}
-
-function normalizeCollectionValues(collections: string[]): string[] {
-  const normalizedCollections: string[] = [];
-  const seen = new Set<string>();
-
-  for (const rawCollection of collections) {
-    const collection = normalizeTagValue(rawCollection);
-    if (!collection || collection === "未归档") continue;
-    const key = collection.toLocaleLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    normalizedCollections.push(collection);
-  }
-
-  return normalizedCollections;
-}
-
-function getEffectiveCollections(fields: FrontmatterFields): string[] {
-  const collections = [...fields.collection];
-
-  const legacyCategory = normalizeTagValue(fields.category);
-  if (legacyCategory) collections.push(legacyCategory);
-  for (const tag of fields.tags) {
-    const collection = getCollectionFromTag(tag);
-    if (collection) collections.push(collection);
-  }
-
-  return normalizeCollectionValues(collections);
-}
-
-function buildCollectionCandidates(fields: FrontmatterFields, customCandidates: string[] = [], extraCandidates: string[] = []): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-
-  const addCandidate = (rawCandidate: string | null | undefined) => {
-    const candidate = normalizeTagValue(rawCandidate ?? "");
-    if (!candidate || candidate === "未归档") return;
-    const key = candidate.toLocaleLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    candidates.push(candidate);
-  };
-
-  for (const collection of COMMON_COLLECTIONS) addCandidate(collection);
-  for (const collection of customCandidates) addCandidate(collection);
-  for (const collection of fields.collection) addCandidate(collection);
-  addCandidate(fields.category);
-  for (const tag of fields.tags) addCandidate(getCollectionFromTag(tag));
-  for (const collection of extraCandidates) addCandidate(collection);
-
-  return candidates;
 }
 
 function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | null): UserTagTaxonomyConfig {
