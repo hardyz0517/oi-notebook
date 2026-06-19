@@ -6,9 +6,9 @@ export type AppTheme = SettingsThemeVariant;
 export type ResolvedTheme = "dark" | "light";
 
 export const THEME_STORAGE_KEY = "oi-notebook.theme";
-export const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.accentColor";
-export const CONTRAST_STORAGE_KEY = "oi-notebook.appearance.contrast";
-export const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.translucentSidebar";
+export const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.settingsV2.accentColor";
+export const CONTRAST_STORAGE_KEY = "oi-notebook.settingsV2.contrast";
+export const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.settingsV2.translucentSidebar";
 export const SETTINGS_THEME_V1_STORAGE_KEY = "oi-notebook.settingsThemeV1";
 
 function isAppTheme(value: string | null): value is AppTheme {
