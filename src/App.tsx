@@ -54,6 +54,24 @@ import {
   SettingsInlineSelect,
   type LuoguRuleSettingRow,
 } from "@/components/settings/pages/LuoguSettingsPages";
+import {
+  applyLuoguPreparedRules,
+  normalizeLuoguImportRules,
+  readStoredLuoguImportRules,
+  saveStoredLuoguImportRules,
+  validateLuoguSaveDirectoryInput,
+  type LuoguDefaultDraftStatus,
+  type LuoguDefaultSaveLocation,
+  type LuoguImportedProblemPolicy,
+  type LuoguImportRules,
+  type LuoguIncludeSourceCode,
+  type LuoguMissingInsightStrategy,
+  type LuoguProblemIdFilter,
+  type LuoguSameProblemStrategy,
+  type LuoguScanResultVisibility,
+  type LuoguSubmitFilter,
+  type LuoguWriteStrategy,
+} from "@/components/settings/pages/luoguImportRules";
 import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxonomySettingsPage";
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
 import { SETTINGS_SECTION_FALLBACK, SETTINGS_SECTION_LABELS, SETTINGS_TREE } from "@/components/settings/settingsNavigation";
@@ -362,16 +380,6 @@ type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguScanMode = "count" | "days";
 type LuoguScanCountLimit = 20 | 50 | 100 | 200;
 type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
-type LuoguSubmitFilter = "acOnly" | "includeNonAc";
-type LuoguProblemIdFilter = "all" | "onlyP";
-type LuoguSameProblemStrategy = "latestAc" | "allAc" | "manual";
-type LuoguImportedProblemPolicy = "skip" | "showUnselected" | "regenerate";
-type LuoguMissingInsightStrategy = "skip" | "draft" | "review";
-type LuoguScanResultVisibility = "hideSkipped" | "showAll";
-type LuoguDefaultSaveLocation = "luogu" | "problems" | "custom";
-type LuoguWriteStrategy = "createNew" | "askOnConflict" | "overwrite";
-type LuoguDefaultDraftStatus = "draft" | "published";
-type LuoguIncludeSourceCode = "no" | "yes";
 type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
 type LuoguPrepareProgress = {
@@ -629,7 +637,6 @@ const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
 const LUOGU_PREPARE_CONCURRENCY = 2;
-const LUOGU_IMPORT_RULES_STORAGE_KEY = "oi-notebook.luoguImportRules";
 const READING_DENSITY_OPTIONS: Array<{
   id: ReadingDensity;
   label: string;
@@ -692,22 +699,6 @@ interface LuoguScanSummary {
   rangeLabel: string;
 }
 
-interface LuoguImportRules {
-  requireAc: boolean;
-  submitFilter: LuoguSubmitFilter;
-  problemIdFilter: LuoguProblemIdFilter;
-  sameProblemStrategy: LuoguSameProblemStrategy;
-  keepLatestAcOnly: boolean;
-  importedProblemPolicy: LuoguImportedProblemPolicy;
-  missingInsightStrategy: LuoguMissingInsightStrategy;
-  scanResultVisibility: LuoguScanResultVisibility;
-  defaultSaveLocation: LuoguDefaultSaveLocation;
-  customSaveDirectory: string;
-  writeStrategy: LuoguWriteStrategy;
-  defaultDraftStatus: LuoguDefaultDraftStatus;
-  includeSourceCode: boolean;
-}
-
 interface LuoguSubmissionCandidateState {
   canSelect: boolean;
   defaultSelected: boolean;
@@ -729,110 +720,6 @@ interface LuoguCandidateDisplayState {
   detail: string;
   tone: "success" | "warning" | "muted" | "danger" | "info" | "primary";
   output: string;
-}
-
-const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
-  requireAc: true,
-  submitFilter: "acOnly",
-  problemIdFilter: "all",
-  sameProblemStrategy: "latestAc",
-  keepLatestAcOnly: true,
-  importedProblemPolicy: "skip",
-  missingInsightStrategy: "draft",
-  scanResultVisibility: "showAll",
-  defaultSaveLocation: "luogu",
-  customSaveDirectory: "",
-  writeStrategy: "createNew",
-  defaultDraftStatus: "draft",
-  includeSourceCode: false,
-};
-
-function normalizeLuoguImportRules(value: Partial<LuoguImportRules> | null | undefined): LuoguImportRules {
-  const sameProblemStrategy =
-    value?.sameProblemStrategy ??
-    (value?.keepLatestAcOnly === false ? "allAc" : DEFAULT_LUOGU_IMPORT_RULES.sameProblemStrategy);
-  const submitFilter = value?.submitFilter ?? (value?.requireAc === false ? "includeNonAc" : "acOnly");
-
-  return {
-    ...DEFAULT_LUOGU_IMPORT_RULES,
-    ...value,
-    submitFilter,
-    requireAc: submitFilter === "acOnly",
-    problemIdFilter: value?.problemIdFilter === "onlyP" ? "onlyP" : DEFAULT_LUOGU_IMPORT_RULES.problemIdFilter,
-    sameProblemStrategy,
-    keepLatestAcOnly: sameProblemStrategy === "latestAc",
-    missingInsightStrategy: value?.missingInsightStrategy ?? DEFAULT_LUOGU_IMPORT_RULES.missingInsightStrategy,
-    customSaveDirectory: typeof value?.customSaveDirectory === "string" ? value.customSaveDirectory : DEFAULT_LUOGU_IMPORT_RULES.customSaveDirectory,
-    includeSourceCode: value?.includeSourceCode === true,
-  };
-}
-
-function readStoredLuoguImportRules(): LuoguImportRules {
-  if (typeof window === "undefined") return DEFAULT_LUOGU_IMPORT_RULES;
-
-  try {
-    const stored = window.localStorage.getItem(LUOGU_IMPORT_RULES_STORAGE_KEY);
-    if (!stored) return DEFAULT_LUOGU_IMPORT_RULES;
-    return normalizeLuoguImportRules(JSON.parse(stored) as Partial<LuoguImportRules>);
-  } catch {
-    return DEFAULT_LUOGU_IMPORT_RULES;
-  }
-}
-
-function saveStoredLuoguImportRules(rules: LuoguImportRules): void {
-  window.localStorage.setItem(LUOGU_IMPORT_RULES_STORAGE_KEY, JSON.stringify(rules));
-}
-
-function validateLuoguSaveDirectoryInput(value: string): string | null {
-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  if (!normalized) return "目录不能为空";
-  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return "不能使用绝对路径";
-  if (normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) return "不能包含空段或 ..";
-  if (/[<>:"|?*]/.test(normalized)) return "不能包含 Windows 非法字符";
-  return null;
-}
-
-function normalizeLuoguSaveDirectory(rules: LuoguImportRules): string {
-  if (rules.defaultSaveLocation === "problems") return "problems";
-  if (rules.defaultSaveLocation === "custom") {
-    const custom = rules.customSaveDirectory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return validateLuoguSaveDirectoryInput(custom) ? "luogu" : custom;
-  }
-  return "luogu";
-}
-
-function rewriteLuoguPreparedRelativePath(relativePath: string, rules: LuoguImportRules): string {
-  const targetDir = normalizeLuoguSaveDirectory(rules);
-  const fileName = relativePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-  if (!fileName) return relativePath;
-  return `${targetDir}/${fileName}`;
-}
-
-function setMarkdownDraftValue(markdown: string, draftValue: boolean): string {
-  const nextDraft = `draft: ${draftValue ? "true" : "false"}`;
-  if (markdown.startsWith("---")) {
-    const end = markdown.indexOf("\n---", 3);
-    if (end > 0) {
-      const frontmatter = markdown.slice(0, end);
-      if (/^draft:\s*(true|false)\s*$/m.test(frontmatter)) {
-        return markdown.replace(/^draft:\s*(true|false)\s*$/m, nextDraft);
-      }
-      return `${frontmatter}\n${nextDraft}${markdown.slice(end)}`;
-    }
-  }
-  return markdown;
-}
-
-function applyLuoguPreparedRules(
-  prepared: PrepareLuoguSubmissionNoteResult,
-  rules: LuoguImportRules,
-): PrepareLuoguSubmissionNoteResult {
-  if (prepared.skipped || prepared.aiStatus === "failed" || !prepared.markdown.trim() || !prepared.suggestedRelativePath.trim()) return prepared;
-  return {
-    ...prepared,
-    suggestedRelativePath: rewriteLuoguPreparedRelativePath(prepared.suggestedRelativePath, rules),
-    markdown: setMarkdownDraftValue(prepared.markdown, rules.defaultDraftStatus === "draft"),
-  };
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
