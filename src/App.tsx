@@ -124,6 +124,7 @@ import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConf
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
+import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
@@ -337,41 +338,6 @@ const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
 const EDITOR_PREVIEW_RATIO_MIN = 0.2;
 const EDITOR_PREVIEW_RATIO_MAX = 0.8;
 const EDITOR_PREVIEW_MIN_PANE_WIDTH = 320;
-
-function getLocalIndexStatusLabel(status: LocalNoteIndexStatusResult | null, isBuilding: boolean): string {
-  if (isBuilding) return "正在建立本地笔记索引...";
-  if (!status) return "尚未读取";
-  if (status.status === "ready") return "可用";
-  if (status.status === "stale") return "建议重建";
-  if (status.status === "error") return "读取失败";
-  if (!status.exists) return "尚未建立";
-  return status.status || "未知";
-}
-
-function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {
-  if (!status?.updatedAt) return "尚未记录";
-  return new Date(status.updatedAt * 1000).toLocaleString();
-}
-
-function formatLocalIndexSize(bytes: number | null | undefined, includeBytes = false): string {
-  const safeBytes = Math.max(0, bytes ?? 0);
-  const units = ["B", "KB", "MB", "GB"];
-  let size = safeBytes;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  const formattedSize = unitIndex === 0 ? `${safeBytes} B` : `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
-  return includeBytes && unitIndex > 0 ? `${formattedSize} (${safeBytes.toLocaleString()} bytes)` : formattedSize;
-}
-
-function getLocalIndexAccessLabel(status: LocalNoteIndexStatusResult): string {
-  if (status.readable && status.writable) return "可读写";
-  if (status.readable) return "只读";
-  if (status.writable) return "仅可写入";
-  return "不可读取";
-}
 
 type DialogMode = "create" | "rename" | "create-folder";
 type ConfirmDialogState = {
