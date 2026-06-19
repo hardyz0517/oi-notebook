@@ -5,10 +5,12 @@ import { cn } from "@/lib/utils";
 
 export interface OpenFileTab {
   kind: "file";
-  path: string;
+  id: string;
+  path: string | null;
   title?: string;
   displayName: string;
   dirty?: boolean;
+  externalPath?: string | null;
 }
 
 export interface OpenReviewTab {
@@ -116,10 +118,10 @@ export default function OpenTabsBar({
       >
         <div className="open-tabs-list flex w-max min-w-max">
           {tabs.map((tab) => {
-            const tabId = tab.kind === "file" ? tab.path : tab.id;
+            const tabId = tab.id;
             const isActive = tabId === activeTabId;
             const label = tab.title?.trim() || tab.displayName;
-            const tooltip = tab.kind === "file" ? tab.path : `${tab.title}: ${tab.sourcePath}`;
+            const tooltip = tab.kind === "file" ? (tab.path ?? tab.externalPath ?? tab.displayName) : `${tab.title}: ${tab.sourcePath}`;
             const Icon = tab.kind === "file" ? FileText : GitCompare;
 
             return (

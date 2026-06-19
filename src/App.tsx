@@ -60,7 +60,7 @@ import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/datetime";
-import { listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -79,6 +79,15 @@ import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConf
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import {
+  createExternalWorkingCopy,
+  createNoteWorkingCopy,
+  createUntitledWorkingCopy,
+  getNoteWorkingCopyId,
+  markWorkingCopySaved,
+  updateWorkingCopyContent,
+  type WorkingCopy,
+} from "@/lib/workingCopies";
 import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
@@ -2653,6 +2662,11 @@ export default function App() {
   const [openTabPaths, setOpenTabPaths] = useState<string[]>(getInitialOpenTabPaths);
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
+  const [workingCopies, setWorkingCopies] = useState<Record<string, WorkingCopy>>({});
+  const [activeWorkingCopyId, setActiveWorkingCopyId] = useState<string | null>(null);
+  const workingCopiesRef = useRef<Record<string, WorkingCopy>>({});
+  const untitledSequenceRef = useRef(0);
+  const persistActiveWorkingCopyRef = useRef<() => void>(() => {});
   // null 时显示欢迎内容，选中文件后只把正文 body 放进主编辑器。
   const [committedMarkdown, setCommittedMarkdown] = useState(INITIAL_MARKDOWN);
   const markdown = committedMarkdown;
@@ -2794,6 +2808,10 @@ export default function App() {
     currentFilePathRef.current = currentFilePath;
     activeFileKeyRef.current = currentFilePath;
   }, [currentFilePath]);
+
+  useEffect(() => {
+    workingCopiesRef.current = workingCopies;
+  }, [workingCopies]);
 
   useEffect(() => {
     contentZoomRef.current = contentZoom;
@@ -3405,6 +3423,10 @@ export default function App() {
       ? markdownLiveRef.current
       : combineMarkdown(frontmatterPrefix, markdownLiveRef.current)
   ), [frontmatterPrefix]);
+  const getLiveWorkingCopyContent = useCallback(() => ({
+    frontmatterPrefix,
+    markdown: markdownLiveRef.current,
+  }), [frontmatterPrefix]);
 
   useEffect(() => {
     setEditorSelectedTextLength(null);
@@ -3637,8 +3659,11 @@ export default function App() {
   const luoguConfigured =
     luoguConfigUid.trim() !== "" &&
     luoguConfigClientId.trim() !== "";
+  const activeWorkingCopy = activeWorkingCopyId ? workingCopies[activeWorkingCopyId] ?? null : null;
+  const hasActiveEditorDocument = Boolean(currentFilePath || activeWorkingCopy);
+  const activeEditorDirty = activeWorkingCopy?.dirty ?? isDirty;
   const saveStatusLabel =
-    currentFilePath === null ? "未选择文件" : isSavingNote ? "保存中" : isDirty ? "未保存" : "已保存";
+    !hasActiveEditorDocument ? "未选择文件" : isSavingNote ? "保存中" : activeEditorDirty ? "未保存" : "已保存";
   const blogStatusLabel = isRestartingBlog ? "重启中" : "打开 / 重启";
   const aiStatusLabel =
     !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
@@ -4326,13 +4351,17 @@ export default function App() {
   }, [currentFilePath]);
   const openTabs = useMemo<OpenFileTab[]>(
     () =>
-      openTabPaths.map((path) => ({
-        kind: "file",
-        path,
-        displayName: getNoteDisplayName(path, displayFiles),
-        dirty: path === currentFilePath && isDirty,
-      })),
-    [currentFilePath, displayFiles, isDirty, openTabPaths],
+      Object.values(workingCopies)
+        .filter((copy) => copy.kind !== "note" || openTabPaths.includes(copy.path ?? ""))
+        .map((copy) => ({
+          kind: "file",
+          id: copy.id,
+          path: copy.path,
+          externalPath: copy.absolutePath,
+          displayName: copy.kind === "note" && copy.path ? getNoteDisplayName(copy.path, displayFiles) : copy.displayName,
+          dirty: copy.dirty,
+        })),
+    [displayFiles, openTabPaths, workingCopies],
   );
   const reviewTabs = useMemo<OpenReviewTab[]>(
     () =>
@@ -4590,7 +4619,40 @@ export default function App() {
     });
     setActiveWorkspaceTabId((current) => {
       if (!current || current.startsWith("review:")) return current;
+      if (current.startsWith("note:")) {
+        return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
+      }
       return rewritePath(current);
+    });
+    setActiveWorkingCopyId((current) => {
+      if (!current || !current.startsWith("note:")) return current;
+      return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
+    });
+    setWorkingCopies((current) => {
+      let changed = false;
+      const next: Record<string, WorkingCopy> = {};
+      for (const copy of Object.values(current)) {
+        if (copy.kind !== "note" || !copy.path) {
+          next[copy.id] = copy;
+          continue;
+        }
+        const rewrittenPath = rewritePath(copy.path);
+        if (rewrittenPath === copy.path) {
+          next[copy.id] = copy;
+          continue;
+        }
+        changed = true;
+        const rewrittenCopy = createNoteWorkingCopy(rewrittenPath, getNoteDisplayName(rewrittenPath, files), {
+          frontmatterPrefix: copy.frontmatterPrefix,
+          markdown: copy.markdown,
+        });
+        next[rewrittenCopy.id] = {
+          ...rewrittenCopy,
+          savedSnapshot: copy.savedSnapshot,
+          dirty: copy.dirty,
+        };
+      }
+      return changed ? next : current;
     });
     setActiveTreeDirectoryPath((current) => current ? rewritePath(current) : current);
     setActiveTreeFilePath((current) => current ? rewritePath(current) : current);
@@ -4651,19 +4713,6 @@ export default function App() {
     requestInlineCreateFileAt(getDefaultNewNoteCreateParent());
   };
 
-  useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.isComposing || event.key === "Process" || event.key === "Unidentified") return;
-      if (event.key.toLowerCase() !== "n" || (!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      event.preventDefault();
-      requestInlineCreateFile();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  });
-
   const handleSelectTreeDirectory = useCallback((path: string) => {
     setActiveTreeDirectoryPath(path);
     setActiveTreeFilePath(null);
@@ -4710,15 +4759,7 @@ export default function App() {
     const newPath = joinNotePath(directory, filename);
     if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
 
-    if (isDirty) {
-      const ok = await requestConfirm({
-        title: "放弃未保存更改？",
-        description: "当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。",
-        confirmText: "继续新建",
-        danger: true,
-      });
-      if (!ok) return;
-    }
+    persistActiveWorkingCopyRef.current();
 
     try {
       if (directory && !findEntryCaseInsensitive(directory, true)) {
@@ -4730,7 +4771,8 @@ export default function App() {
       closeDialog();
       setDisplayTitleForPath(newPath, dialogValue.trim().replace(/\.md$/i, ""));
       setCurrentFilePath(newPath);
-      setActiveWorkspaceTabId(newPath);
+      setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
+      setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
       setIsDirty(false);
       toast.success("已创建空白笔记");
     } catch (e) {
@@ -4796,28 +4838,21 @@ export default function App() {
     const newPath = joinNotePath(parentPath, filename);
     if (findEntryCaseInsensitive(newPath, false)) throw new Error("同目录已存在同名笔记");
 
-    if (isDirty) {
-      const ok = await requestConfirm({
-        title: "放弃未保存更改？",
-        description: "当前笔记有未保存的改动，新建会切换走，未保存的改动将丢失。",
-        confirmText: "继续新建",
-        danger: true,
-      });
-      if (!ok) throw new Error("已取消新建");
-    }
+    persistActiveWorkingCopyRef.current();
 
     await writeNote(newPath, buildNewNoteMarkdown(name.trim().replace(/\.md$/i, ""), []));
     const updated = await listNotes();
     setFiles(updated);
     setDisplayTitleForPath(newPath, name.trim().replace(/\.md$/i, ""));
     setCurrentFilePath(newPath);
-    setActiveWorkspaceTabId(newPath);
+    setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
+    setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
     setActiveTreeDirectoryPath(null);
     setActiveTreeFilePath(newPath);
     setIsDirty(false);
     toast.success("已创建空白笔记");
     return newPath;
-  }, [files, isDirty, requestConfirm]);
+  }, [files]);
 
   const handleRename = async () => {
     if (!renameTarget) return;
@@ -6510,15 +6545,7 @@ export default function App() {
       toast.error("源码不能为空");
       return;
     }
-    if (isDirty) {
-      const ok = await requestConfirm({
-        title: "放弃未保存更改并导入？",
-        description: "当前笔记有未保存的改动，导入后会切换到新笔记。未保存的改动将丢失。",
-        confirmText: "继续导入",
-        danger: true,
-      });
-      if (!ok) return;
-    }
+    persistActiveWorkingCopyRef.current();
 
     setIsImportingLuogu(true);
     try {
@@ -6559,13 +6586,27 @@ export default function App() {
     }
     schedulePreviewMarkdownSync(value, editorDocVersionRef.current);
 
+    if (activeWorkingCopyId) {
+      setWorkingCopies((current) => {
+        const active = current[activeWorkingCopyId];
+        if (!active) return current;
+        return {
+          ...current,
+          [activeWorkingCopyId]: updateWorkingCopyContent(active, {
+            frontmatterPrefix,
+            markdown: value,
+          }),
+        };
+      });
+    }
+
     const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, value);
     if (isDirtyRef.current !== nextDirty) {
       isDirtyRef.current = nextDirty;
       setIsDirty(nextDirty);
     }
     scheduleCommittedMarkdownSync();
-  }, [currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync, schedulePreviewMarkdownSync]);
+  }, [activeWorkingCopyId, currentFilePath, frontmatterPrefix, scheduleCommittedMarkdownSync, schedulePreviewMarkdownSync]);
 
   useEffect(() => {
     markDeferredMarkdownSeen(previewMarkdown.length);
@@ -6613,6 +6654,101 @@ export default function App() {
       toast.warning(loaded.warning);
     }
   }, [replaceEditorDocument]);
+
+  const persistActiveWorkingCopy = useCallback(() => {
+    if (!activeWorkingCopyId) return;
+    const content = getLiveWorkingCopyContent();
+    setWorkingCopies((current) => {
+      const active = current[activeWorkingCopyId];
+      if (!active) return current;
+      return {
+        ...current,
+        [activeWorkingCopyId]: updateWorkingCopyContent(active, content),
+      };
+    });
+  }, [activeWorkingCopyId, getLiveWorkingCopyContent]);
+
+  useEffect(() => {
+    persistActiveWorkingCopyRef.current = persistActiveWorkingCopy;
+  }, [persistActiveWorkingCopy]);
+
+  const createUntitledEditor = useCallback(() => {
+    persistActiveWorkingCopy();
+    untitledSequenceRef.current += 1;
+    const copy = createUntitledWorkingCopy(untitledSequenceRef.current);
+    setWorkingCopies((current) => ({
+      ...current,
+      [copy.id]: copy,
+    }));
+    setActiveWorkingCopyId(copy.id);
+    setCurrentFilePath(null);
+    setActiveTreeDirectoryPath(null);
+    setActiveTreeFilePath(null);
+    setActiveWorkspaceTabId(copy.id);
+    replaceEditorDocument("", null, "");
+    savedSnapshotRef.current = {
+      path: null,
+      frontmatterPrefix: "",
+      markdown: "",
+    };
+    setIsDirty(false);
+    isDirtyRef.current = false;
+  }, [persistActiveWorkingCopy, replaceEditorDocument]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    listen("main-close-requested", async () => {
+      if (disposed) return;
+      persistActiveWorkingCopy();
+      const copies = workingCopiesRef.current;
+      const activeCopy = activeWorkingCopyId ? copies[activeWorkingCopyId] : null;
+      const liveContent = getLiveWorkingCopyContent();
+      const activeCopyIsDirty = activeCopy ? updateWorkingCopyContent(activeCopy, liveContent).dirty : false;
+      const hasDirtyCopies = activeCopyIsDirty || Object.values(copies).some((copy) => copy.dirty);
+      if (hasDirtyCopies) {
+        const ok = await requestConfirm({
+          title: "关闭未保存文件？",
+          description: "仍有未保存的编辑内容。关闭窗口会把应用收进托盘，但这些未保存内容只保存在当前会话中。",
+          confirmText: "关闭窗口",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+      try {
+        await hideMainWindow();
+      } catch (error) {
+        toast.error(`关闭窗口失败: ${getErrorMessage(error)}`);
+      }
+    })
+      .then((dispose) => {
+        if (disposed) {
+          dispose();
+        } else {
+          unlisten = dispose;
+        }
+      })
+      .catch((error: Error) => console.error("注册关闭监听失败：", error.message));
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [activeWorkingCopyId, getLiveWorkingCopyContent, persistActiveWorkingCopy, requestConfirm]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || event.key === "Process" || event.key === "Unidentified") return;
+      if (event.key.toLowerCase() !== "n" || (!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      event.preventDefault();
+      createUntitledEditor();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [createUntitledEditor]);
 
   const handlePasteImage = async (file: File) => {
     if (!currentFilePath) {
@@ -7038,7 +7174,9 @@ export default function App() {
 
   const finishFileSelection = (path: string, closeSearchOnSuccess: boolean) => {
     setCurrentFilePath(path);
-    setActiveWorkspaceTabId(path);
+    const id = getNoteWorkingCopyId(path);
+    setActiveWorkingCopyId(id);
+    setActiveWorkspaceTabId(id);
     if (closeSearchOnSuccess) {
       setIsSearchOpen(false);
       setSearchQuery("");
@@ -7060,7 +7198,8 @@ export default function App() {
     setActiveTreeDirectoryPath(null);
     setActiveTreeFilePath(path);
     if (path === currentFilePath) {
-      setActiveWorkspaceTabId(path);
+      setActiveWorkingCopyId(getNoteWorkingCopyId(path));
+      setActiveWorkspaceTabId(getNoteWorkingCopyId(path));
       if (options?.closeSearchOnSuccess) {
         setIsSearchOpen(false);
         setSearchQuery("");
@@ -7071,10 +7210,7 @@ export default function App() {
       toast.info("当前笔记正在保存，请稍候再切换");
       return false;
     }
-    if (isDirty) {
-      setPendingFileSelection({ path, closeSearchOnSuccess: options?.closeSearchOnSuccess ?? false });
-      return false;
-    }
+    persistActiveWorkingCopy();
     finishFileSelection(path, options?.closeSearchOnSuccess ?? false);
     return true;
   };
@@ -7084,7 +7220,24 @@ export default function App() {
       setActiveWorkspaceTabId(tab.id);
       return;
     }
-    handleSelectFile(tab.path);
+    if (tab.path) {
+      handleSelectFile(tab.path);
+      return;
+    }
+    const copy = workingCopies[tab.id];
+    if (!copy) return;
+    persistActiveWorkingCopy();
+    setActiveWorkingCopyId(copy.id);
+    setCurrentFilePath(copy.path);
+    replaceEditorDocument(copy.markdown, copy.path, copy.frontmatterPrefix);
+    savedSnapshotRef.current = {
+      path: copy.path,
+      frontmatterPrefix: copy.savedSnapshot.frontmatterPrefix,
+      markdown: copy.savedSnapshot.markdown,
+    };
+    setIsDirty(copy.dirty);
+    isDirtyRef.current = copy.dirty;
+    setActiveWorkspaceTabId(copy.id);
   };
 
   const handleCloseOpenTab = async (tab: OpenTab) => {
@@ -7097,22 +7250,35 @@ export default function App() {
     }
 
     const path = tab.path;
+    if (!path) {
+      const isClosingActiveUntitled = tab.id === activeWorkingCopyId;
+      setWorkingCopies((current) => {
+        const next = { ...current };
+        delete next[tab.id];
+        return next;
+      });
+      if (isClosingActiveUntitled) {
+        setActiveWorkingCopyId(null);
+        setCurrentFilePath(null);
+        setActiveWorkspaceTabId(openReviewTabs[0]?.id ?? null);
+        replaceEditorDocument(INITIAL_MARKDOWN, null, "");
+        setIsDirty(false);
+        isDirtyRef.current = false;
+      }
+      return;
+    }
     const tabIndex = openTabPaths.indexOf(path);
     if (tabIndex === -1) return;
 
-    const isClosingActiveTab = path === currentFilePath;
-    if (isClosingActiveTab && isDirty) {
-      const ok = await requestConfirm({
-        title: "关闭未保存笔记？",
-        description: "该笔记有未保存更改，关闭后更改将丢失。",
-        confirmText: "关闭",
-        danger: true,
-      });
-      if (!ok) return;
-    }
+    const isClosingActiveTab = getNoteWorkingCopyId(path) === activeWorkingCopyId;
 
     const nextTabs = openTabPaths.filter((tabPath) => tabPath !== path);
     setOpenTabPaths(nextTabs);
+    setWorkingCopies((current) => {
+      const next = { ...current };
+      delete next[getNoteWorkingCopyId(path)];
+      return next;
+    });
 
     if (!isClosingActiveTab) return;
 
@@ -7123,6 +7289,7 @@ export default function App() {
     if (nextPath) {
       finishFileSelection(nextPath, false);
     } else {
+      setActiveWorkingCopyId(null);
       setCurrentFilePath(null);
       setActiveWorkspaceTabId(openReviewTabs[0]?.id ?? null);
     }
@@ -7157,8 +7324,14 @@ export default function App() {
     }
   };
 
+  const getUntitledSaveDefaultName = (copy: WorkingCopy): string => {
+    const base = copy.displayName.trim() || "Untitled";
+    return base.toLowerCase().endsWith(".md") ? base : `${base}.md`;
+  };
+
   const handleSaveCurrentNote = async () => {
-    if (currentFilePath === null) {
+    const activeCopy = activeWorkingCopyId ? workingCopiesRef.current[activeWorkingCopyId] : null;
+    if (!activeCopy && currentFilePath === null) {
       toast.info("请先打开一个笔记后再保存");
       return;
     }
@@ -7168,10 +7341,104 @@ export default function App() {
     flushCommittedMarkdownSync();
     setIsSavingNote(true);
     try {
+      if (activeCopy?.kind === "untitled") {
+        const selectedPath = await showSaveMarkdownDialog(getUntitledSaveDefaultName(activeCopy));
+        if (!selectedPath) return;
+        const classification = await classifyMarkdownSavePath(selectedPath);
+
+        if (classification.kind === "note" && classification.relativePath) {
+          const warning = await writeNote(classification.relativePath, liveFullMarkdown);
+          const updated = await listNotes();
+          const savedContent = await readNote(classification.relativePath);
+          const loaded = splitLoadedMarkdown(savedContent);
+          const nextCopy = markWorkingCopySaved(
+            createNoteWorkingCopy(classification.relativePath, getNoteDisplayName(classification.relativePath, updated), {
+              frontmatterPrefix: loaded.frontmatterPrefix,
+              markdown: loaded.body,
+            }),
+            {
+              frontmatterPrefix: loaded.frontmatterPrefix,
+              markdown: loaded.body,
+            },
+          );
+          setFiles(updated);
+          setWorkingCopies((current) => {
+            const next = { ...current };
+            delete next[activeCopy.id];
+            next[nextCopy.id] = nextCopy;
+            return next;
+          });
+          setActiveWorkingCopyId(nextCopy.id);
+          setCurrentFilePath(classification.relativePath);
+          setActiveWorkspaceTabId(nextCopy.id);
+          setActiveTreeDirectoryPath(null);
+          setActiveTreeFilePath(classification.relativePath);
+          applyLoadedMarkdown(savedContent, classification.relativePath);
+          showSavedToast("已保存", warning);
+          setIsDirty(false);
+          isDirtyRef.current = false;
+          return;
+        }
+
+        await writeExternalMarkdownFile(classification.absolutePath, liveFullMarkdown);
+        const displayName = classification.absolutePath.replace(/\\/g, "/").split("/").pop() ?? activeCopy.displayName;
+        const nextCopy = markWorkingCopySaved(
+          createExternalWorkingCopy(classification.absolutePath, displayName, {
+            frontmatterPrefix,
+            markdown: liveMarkdown,
+          }),
+          { frontmatterPrefix, markdown: liveMarkdown },
+        );
+        setWorkingCopies((current) => {
+          const next = { ...current };
+          delete next[activeCopy.id];
+          next[nextCopy.id] = nextCopy;
+          return next;
+        });
+        setActiveWorkingCopyId(nextCopy.id);
+        setActiveWorkspaceTabId(nextCopy.id);
+        setIsDirty(false);
+        isDirtyRef.current = false;
+        toast.success("已保存");
+        return;
+      }
+
+      if (activeCopy?.kind === "external" && activeCopy.absolutePath) {
+        await writeExternalMarkdownFile(activeCopy.absolutePath, liveFullMarkdown);
+        const savedCopy = markWorkingCopySaved(activeCopy, { frontmatterPrefix, markdown: liveMarkdown });
+        setWorkingCopies((current) => ({ ...current, [savedCopy.id]: savedCopy }));
+        setIsDirty(false);
+        isDirtyRef.current = false;
+        toast.success("已保存");
+        return;
+      }
+
+      if (currentFilePath === null) {
+        toast.info("请先打开一个笔记后再保存");
+        return;
+      }
+
       const warning = await writeNote(currentFilePath, liveFullMarkdown);
       try {
         const savedContent = await readNote(currentFilePath);
         applyLoadedMarkdown(savedContent, currentFilePath);
+        const loaded = splitLoadedMarkdown(savedContent);
+        const id = getNoteWorkingCopyId(currentFilePath);
+        setWorkingCopies((current) => {
+          const existing = current[id] ?? createNoteWorkingCopy(currentFilePath, getNoteDisplayName(currentFilePath, displayFiles), {
+            frontmatterPrefix: loaded.frontmatterPrefix,
+            markdown: loaded.body,
+          });
+          return {
+            ...current,
+            [id]: markWorkingCopySaved(existing, {
+              frontmatterPrefix: loaded.frontmatterPrefix,
+              markdown: loaded.body,
+            }),
+          };
+        });
+        setActiveWorkingCopyId(id);
+        setActiveWorkspaceTabId(id);
       } catch (readError) {
         console.warn("Reload saved note failed:", readError);
         savedSnapshotRef.current = {
@@ -7179,6 +7446,17 @@ export default function App() {
           frontmatterPrefix,
           markdown: liveMarkdown,
         };
+        const id = getNoteWorkingCopyId(currentFilePath);
+        setWorkingCopies((current) => {
+          const existing = current[id] ?? createNoteWorkingCopy(currentFilePath, getNoteDisplayName(currentFilePath, displayFiles), {
+            frontmatterPrefix,
+            markdown: liveMarkdown,
+          });
+          return {
+            ...current,
+            [id]: markWorkingCopySaved(existing, { frontmatterPrefix, markdown: liveMarkdown }),
+          };
+        });
       }
       showSavedToast("已保存", warning);
       setPendingAssetsByFile((prev) => {
@@ -7188,8 +7466,9 @@ export default function App() {
         return next;
       });
       setIsDirty(false);
+      isDirtyRef.current = false;
     } catch (err) {
-      toast.error(`保存失败: ${err}`);
+      toast.error(`保存失败: ${getErrorMessage(err)}`);
     } finally {
       setIsSavingNote(false);
     }
@@ -8110,8 +8389,9 @@ export default function App() {
   useEffect(() => {
     if (!currentFilePath) return;
     const isReviewActive = openReviewTabs.some((tab) => tab.id === activeWorkspaceTabId);
-    if (!activeWorkspaceTabId || (!isReviewActive && activeWorkspaceTabId !== currentFilePath)) {
-      setActiveWorkspaceTabId(currentFilePath);
+    const noteWorkingCopyId = getNoteWorkingCopyId(currentFilePath);
+    if (!activeWorkspaceTabId || (!isReviewActive && activeWorkspaceTabId !== noteWorkingCopyId)) {
+      setActiveWorkspaceTabId(noteWorkingCopyId);
     }
   }, [activeWorkspaceTabId, currentFilePath, openReviewTabs]);
 
@@ -8153,6 +8433,7 @@ export default function App() {
   // cancelled 确保只有最新一次 readNote 的结果会被 setMarkdown 采用。
   useEffect(() => {
     if (currentFilePath === null) {
+      if (activeWorkingCopyId) return;
       // 无选中文件时恢复欢迎内容
       replaceEditorDocument(INITIAL_MARKDOWN, null, "");
       savedSnapshotRef.current = {
@@ -8162,6 +8443,20 @@ export default function App() {
       };
       setIsDirty(false);
       isDirtyRef.current = false;
+      return;
+    }
+
+    const cached = workingCopiesRef.current[getNoteWorkingCopyId(currentFilePath)];
+    if (cached) {
+      replaceEditorDocument(cached.markdown, cached.path, cached.frontmatterPrefix);
+      savedSnapshotRef.current = {
+        path: cached.path,
+        frontmatterPrefix: cached.savedSnapshot.frontmatterPrefix,
+        markdown: cached.savedSnapshot.markdown,
+      };
+      setIsDirty(cached.dirty);
+      isDirtyRef.current = cached.dirty;
+      setActiveWorkingCopyId(cached.id);
       return;
     }
 
@@ -8176,6 +8471,16 @@ export default function App() {
       .then((content) => {
         if (!cancelled) {
           applyLoadedMarkdown(content, currentFilePath);
+          const loaded = splitLoadedMarkdown(content);
+          const id = getNoteWorkingCopyId(currentFilePath);
+          setWorkingCopies((current) => ({
+            ...current,
+            [id]: createNoteWorkingCopy(currentFilePath, getNoteDisplayName(currentFilePath, displayFiles), {
+              frontmatterPrefix: loaded.frontmatterPrefix,
+              markdown: loaded.body,
+            }),
+          }));
+          setActiveWorkingCopyId(id);
         }
       })
       .catch((e: Error) => {
@@ -8185,7 +8490,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [currentFilePath]);
+  }, [activeWorkingCopyId, applyLoadedMarkdown, currentFilePath, displayFiles, replaceEditorDocument]);
 
   const folderNameValidationMessage =
     dialogMode === "create-folder" && dialogValue.trim()
@@ -10406,7 +10711,7 @@ export default function App() {
                 status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : "pending",
               })}
             />
-          ) : !currentFilePath ? (
+          ) : !hasActiveEditorDocument ? (
             <div data-app-context-menu="welcome" className="flex min-h-0 flex-1 justify-center overflow-auto px-6 py-8">
               <div className="grid w-full max-w-6xl content-start gap-5">
                 <section className="rounded-xl border border-border/70 bg-background/90 px-6 py-7 shadow-sm">
@@ -10795,7 +11100,7 @@ export default function App() {
                   )}
                   <MarkdownEditor
                     value={committedMarkdown}
-                    documentKey={currentFilePath ?? "__welcome__"}
+                    documentKey={activeWorkingCopyId ?? currentFilePath ?? "__welcome__"}
                     externalDocVersion={externalDocVersion}
                     onChange={handleEditorChange}
                     aiContextSelectionRange={aiContextSelectionRange}
@@ -10880,15 +11185,15 @@ export default function App() {
               type="button"
               className={cn(
                 "app-status-item app-status-button inline-flex h-5 items-center gap-1 rounded px-1.5 transition-colors",
-                isDirty && !isSavingNote
+                activeEditorDirty && !isSavingNote
                   ? "app-status-save-dirty"
                   : "cursor-default text-muted-foreground",
-                (!currentFilePath || !isDirty || isSavingNote) && "pointer-events-none",
+                (!hasActiveEditorDocument || isSavingNote) && "pointer-events-none",
               )}
               onClick={handleSaveCurrentNote}
-              disabled={!currentFilePath || !isDirty || isSavingNote}
-              title={isDirty ? "保存当前笔记" : saveStatusLabel}
-              aria-label={isDirty ? "保存当前笔记" : saveStatusLabel}
+              disabled={!hasActiveEditorDocument || isSavingNote}
+              title={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
+              aria-label={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
             >
               <Save className="h-3 w-3" aria-hidden="true" />
               保存：{saveStatusLabel}

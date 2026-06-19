@@ -1254,3 +1254,11 @@ export async function openNotesFolder(): Promise<void> {
     throw toError(e);
   }
 }
+
+export async function hideMainWindow(): Promise<void> {
+  try {
+    await invoke<void>("hide_main_window");
+  } catch (e) {
+    throw toError(e);
+  }
+}

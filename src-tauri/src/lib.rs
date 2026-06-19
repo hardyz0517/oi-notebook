@@ -15,7 +15,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 struct BlogServerState {
@@ -197,6 +197,13 @@ fn open_notes_folder() -> Result<(), String> {
         .map_err(|e| format!("打开笔记文件夹失败：{e}"))
 }
 
+#[tauri::command]
+fn hide_main_window(window: tauri::Window) -> Result<(), String> {
+    window
+        .hide()
+        .map_err(|e| format!("隐藏主窗口失败：{e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -218,6 +225,7 @@ pub fn run() {
             notes::create_note_folder,
             notes::rename_note_folder,
             notes::delete_note_folder,
+            hide_main_window,
             git::commit_note,
             git::commit_deleted_note,
             git::commit_renamed_note,
@@ -406,7 +414,7 @@ pub fn run() {
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    let _ = window.hide();
+                    let _ = window.emit("main-close-requested", ());
                 }
             }
         })
