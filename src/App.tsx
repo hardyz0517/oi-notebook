@@ -123,6 +123,56 @@ import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
+import {
+  ACCENT_COLOR_STORAGE_KEY,
+  APP_ZOOM_DEFAULT,
+  APP_ZOOM_STEP,
+  APP_ZOOM_STORAGE_KEY,
+  CONTENT_ZOOM_STEP,
+  CONTENT_ZOOM_STORAGE_KEY,
+  CONTRAST_STORAGE_KEY,
+  DEVELOPER_MODE_STORAGE_KEY,
+  DIFF_MARKER_MODE_STORAGE_KEY,
+  EDITOR_FONT_SIZE_DEFAULT,
+  EDITOR_FONT_SIZE_STORAGE_KEY,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  POINTER_CURSOR_STORAGE_KEY,
+  PREVIEW_FONT_SIZE_DEFAULT,
+  PREVIEW_FONT_SIZE_STORAGE_KEY,
+  PROMPT_EDITOR_FONT_SIZE_DEFAULT,
+  PROMPT_EDITOR_FONT_SIZE_MAX,
+  PROMPT_EDITOR_FONT_SIZE_MIN,
+  PROMPT_EDITOR_FONT_SIZE_STEP,
+  READING_DENSITY_STORAGE_KEY,
+  REDUCED_MOTION_STORAGE_KEY,
+  SETTINGS_FONT_SIZE_DEFAULT,
+  SETTINGS_FONT_SIZE_MAX,
+  SETTINGS_FONT_SIZE_MIN,
+  SETTINGS_FONT_SIZE_STORAGE_KEY,
+  TOOLBAR_FONT_SIZE_DEFAULT,
+  TOOLBAR_FONT_SIZE_MAX,
+  TOOLBAR_FONT_SIZE_MIN,
+  TOOLBAR_FONT_SIZE_STORAGE_KEY,
+  TRANSLUCENT_SIDEBAR_STORAGE_KEY,
+  UI_SCALE_DEFAULT,
+  UI_SCALE_STORAGE_KEY,
+  clampAppZoom,
+  clampContentZoom,
+  clampFontSize,
+  clampNumberRange,
+  getInitialAppZoom,
+  getInitialBooleanSetting,
+  getInitialContentZoom,
+  getInitialDeveloperMode,
+  getInitialDiffMarkerMode,
+  getInitialFontSize,
+  getInitialNumberRange,
+  getInitialReadingDensity,
+  getInitialReducedMotion,
+  getInitialScale,
+  type ReadingDensity,
+} from "@/lib/appPreferences";
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
@@ -169,44 +219,6 @@ const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).hr
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
-const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
-const APP_ZOOM_MIN = 0.8;
-const APP_ZOOM_MAX = 1.6;
-const APP_ZOOM_STEP = 0.1;
-const APP_ZOOM_DEFAULT = 1;
-const CONTENT_ZOOM_MIN = 0.8;
-const CONTENT_ZOOM_MAX = 2;
-const CONTENT_ZOOM_STEP = 0.1;
-const CONTENT_ZOOM_DEFAULT = 1;
-const UI_SCALE_STORAGE_KEY = "oi-notebook.uiScale";
-const UI_SCALE_DEFAULT = 1;
-const EDITOR_FONT_SIZE_STORAGE_KEY = "oi-notebook.editorFontSize";
-const PREVIEW_FONT_SIZE_STORAGE_KEY = "oi-notebook.previewFontSize";
-const READING_DENSITY_STORAGE_KEY = "oi-notebook.readingDensity";
-const TOOLBAR_FONT_SIZE_STORAGE_KEY = "oi-notebook.toolbarFontSize";
-const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
-const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.settingsV2.accentColor";
-const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.settingsV2.translucentSidebar";
-const CONTRAST_STORAGE_KEY = "oi-notebook.settingsV2.contrast";
-const POINTER_CURSOR_STORAGE_KEY = "oi-notebook.settingsV2.pointerCursor";
-const REDUCED_MOTION_STORAGE_KEY = "oi-notebook.settingsV2.reducedMotion";
-const DIFF_MARKER_MODE_STORAGE_KEY = "oi-notebook.settingsV2.diffMarkerMode";
-const DEVELOPER_MODE_STORAGE_KEY = "oi-notebook.developerMode";
-const FONT_SIZE_MIN = 13;
-const FONT_SIZE_MAX = 20;
-const EDITOR_FONT_SIZE_DEFAULT = 14;
-const PREVIEW_FONT_SIZE_DEFAULT = 14;
-const TOOLBAR_FONT_SIZE_MIN = 12;
-const TOOLBAR_FONT_SIZE_MAX = 18;
-const TOOLBAR_FONT_SIZE_DEFAULT = 12;
-const SETTINGS_FONT_SIZE_MIN = 13;
-const SETTINGS_FONT_SIZE_MAX = 18;
-const SETTINGS_FONT_SIZE_DEFAULT = 14;
-const PROMPT_EDITOR_FONT_SIZE_MIN = 12;
-const PROMPT_EDITOR_FONT_SIZE_MAX = 22;
-const PROMPT_EDITOR_FONT_SIZE_DEFAULT = 14;
-const PROMPT_EDITOR_FONT_SIZE_STEP = 1;
 const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
 const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
 const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
@@ -363,7 +375,6 @@ type LuoguPrepareProgress = {
   skipped: number;
 };
 type AppTheme = ThemeMode;
-type ReadingDensity = "compact" | "standard" | "comfortable";
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
@@ -1348,76 +1359,6 @@ function getLuoguPreviewStatusBadgeClass(statusLabel: string): string {
   return "border-border bg-muted/20 text-muted-foreground";
 }
 
-function clampAppZoom(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(APP_ZOOM_MAX, Math.max(APP_ZOOM_MIN, stepped));
-}
-
-function clampContentZoom(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, stepped));
-}
-
-function clampScale(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(1.3, Math.max(0.9, stepped));
-}
-
-function clampFontSize(value: number): number {
-  const rounded = Math.round(value);
-  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, rounded));
-}
-
-function clampNumberRange(value: number, min: number, max: number): number {
-  const rounded = Math.round(value);
-  return Math.min(max, Math.max(min, rounded));
-}
-
-function getInitialAppZoom(): number {
-  const stored = window.localStorage.getItem(APP_ZOOM_STORAGE_KEY);
-  if (stored === null) return APP_ZOOM_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return APP_ZOOM_DEFAULT;
-  return clampAppZoom(parsed);
-}
-
-function getInitialContentZoom(): number {
-  const stored = window.localStorage.getItem(CONTENT_ZOOM_STORAGE_KEY);
-  if (stored === null) return CONTENT_ZOOM_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return CONTENT_ZOOM_DEFAULT;
-  return clampContentZoom(parsed);
-}
-
-function getInitialScale(storageKey: string, fallback: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampScale(parsed);
-}
-
-function getInitialFontSize(storageKey: string, fallback: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampFontSize(parsed);
-}
-
-function getInitialNumberRange(storageKey: string, fallback: number, min: number, max: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampNumberRange(parsed, min, max);
-}
-
 function getAiSidebarWidthMax(): number {
   const appZoom = Number.parseFloat(
     window.getComputedStyle(document.documentElement).getPropertyValue("--app-zoom"),
@@ -1459,36 +1400,6 @@ function getInitialEditorPreviewRatio(): number {
   const parsed = Number(stored);
   if (!Number.isFinite(parsed)) return EDITOR_PREVIEW_RATIO_DEFAULT;
   return clampEditorPreviewRatio(parsed);
-}
-
-function isReadingDensity(value: string | null): value is ReadingDensity {
-  return value === "compact" || value === "standard" || value === "comfortable";
-}
-
-function getInitialReadingDensity(): ReadingDensity {
-  const stored = window.localStorage.getItem(READING_DENSITY_STORAGE_KEY);
-  return isReadingDensity(stored) ? stored : "standard";
-}
-
-function getInitialBooleanSetting(storageKey: string, defaultValue: boolean): boolean {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === "true") return true;
-  if (stored === "false") return false;
-  return defaultValue;
-}
-
-function getInitialReducedMotion(): ReducedMotionMode {
-  const stored = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
-  return stored === "on" || stored === "off" || stored === "system" ? stored : "system";
-}
-
-function getInitialDiffMarkerMode(): DiffMarkerMode {
-  const stored = window.localStorage.getItem(DIFF_MARKER_MODE_STORAGE_KEY);
-  return stored === "symbols" ? "symbols" : "color";
-}
-
-function getInitialDeveloperMode(): boolean {
-  return window.localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) === "true";
 }
 
 function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
