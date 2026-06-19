@@ -16,9 +16,15 @@ import { SettingsDialog } from "../primitives/SettingsDialog";
 import { SettingsTextField } from "../primitives/SettingsTextField";
 import { SliderControl } from "../primitives/SliderControl";
 import { ToggleSwitch } from "../primitives/ToggleSwitch";
-import { decodeSettingsThemeV1, encodeSettingsThemeV1, normalizeSettingsThemeState } from "../theme/settingsThemeCodec";
-import { CODEX_BUILTIN_THEME_PRESETS } from "../theme/settingsThemePresets";
-import type { SettingsThemeState, SettingsThemeV1Payload, SettingsThemeVariant } from "../theme/settingsThemeTypes";
+import {
+  CODEX_BUILTIN_THEME_PRESETS,
+  decodeSettingsThemeV1,
+  encodeSettingsThemeV1,
+  normalizeSettingsThemeState,
+  type SettingsThemeState,
+  type SettingsThemeV1Payload,
+  type SettingsThemeVariant,
+} from "@/theme";
 
 export type ThemeMode = SettingsThemeVariant;
 export type ReducedMotionMode = "system" | "on" | "off";
