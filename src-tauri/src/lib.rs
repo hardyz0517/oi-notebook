@@ -201,12 +201,16 @@ fn open_notes_folder() -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(BlogServerState::new())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             notes::list_notes,
             notes::search_notes,
             notes::read_note,
             notes::write_note,
+            notes::get_notes_root_path,
+            notes::classify_markdown_save_path,
+            notes::write_external_markdown_file,
             notes::save_note_asset,
             notes::resolve_note_asset_url,
             notes::delete_note,

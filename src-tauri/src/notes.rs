@@ -38,6 +38,14 @@ pub struct SaveNoteAssetResult {
     pub asset_relative_path: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownSavePathClassification {
+    pub kind: String,
+    pub relative_path: Option<String>,
+    pub absolute_path: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteSearchResult {
@@ -202,6 +210,18 @@ fn validate_note_folder_path(relative_path: &str) -> Result<String, String> {
         return Err("Folder name cannot end with .md".to_string());
     }
     Ok(normalized)
+}
+
+fn normalize_absolute_path_text(path: &Path) -> Result<String, String> {
+    path.to_str()
+        .map(|value| value.to_string())
+        .ok_or_else(|| format!("Path contains non-UTF-8 characters: {path:?}"))
+}
+
+fn normalize_relative_path_text(path: &Path) -> Result<String, String> {
+    path.to_str()
+        .map(|value| value.replace('\\', "/"))
+        .ok_or_else(|| format!("Path contains non-UTF-8 characters: {path:?}"))
 }
 
 fn case_fold_path(value: &Path) -> String {
@@ -865,6 +885,93 @@ pub fn read_note(relative_path: String) -> Result<String, String> {
     }
 
     fs::read_to_string(&path).map_err(|e| format!("读取笔记失败（{relative_path}）：{e}"))
+}
+
+#[tauri::command]
+pub fn get_notes_root_path() -> Result<String, String> {
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+    let canonical_notes = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve notes directory path: {e}"))?;
+
+    normalize_absolute_path_text(&canonical_notes)
+}
+
+#[tauri::command]
+pub fn classify_markdown_save_path(
+    absolute_path: String,
+) -> Result<MarkdownSavePathClassification, String> {
+    let target_path = PathBuf::from(&absolute_path);
+    if !target_path.is_absolute() {
+        return Err("Markdown save path must be absolute".to_string());
+    }
+
+    let notes_dir = get_notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
+    let canonical_notes = notes_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve notes directory path: {e}"))?;
+
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "Markdown save path must have a parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create markdown save parent directory: {e}"))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve markdown save parent directory: {e}"))?;
+    let file_name = target_path
+        .file_name()
+        .ok_or_else(|| "Markdown save path must include a file name".to_string())?;
+    let canonical_target = canonical_parent.join(file_name);
+    let absolute_path = normalize_absolute_path_text(&canonical_target)?;
+
+    if canonical_target.starts_with(&canonical_notes) {
+        let relative = canonical_target
+            .strip_prefix(&canonical_notes)
+            .map_err(|_| "Failed to calculate note-relative save path".to_string())?;
+        let relative_path = normalize_relative_path_text(relative)?;
+        let relative_path = validate_note_file_path(&relative_path)?;
+
+        return Ok(MarkdownSavePathClassification {
+            kind: "note".to_string(),
+            relative_path: Some(relative_path),
+            absolute_path,
+        });
+    }
+
+    Ok(MarkdownSavePathClassification {
+        kind: "external".to_string(),
+        relative_path: None,
+        absolute_path,
+    })
+}
+
+#[tauri::command]
+pub fn write_external_markdown_file(absolute_path: String, content: String) -> Result<(), String> {
+    let target_path = PathBuf::from(&absolute_path);
+    if !target_path.is_absolute() {
+        return Err("Markdown file path must be absolute".to_string());
+    }
+    if target_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+        != Some("md")
+    {
+        return Err("External markdown file path must end with .md".to_string());
+    }
+
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "Markdown file path must have a parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create external markdown parent directory: {e}"))?;
+
+    fs::write(&target_path, content.as_bytes())
+        .map_err(|e| format!("Failed to write external markdown file: {e}"))
 }
 
 /// 覆盖写入指定笔记，写入前自动补全 frontmatter。如果父目录不存在，会自动创建。

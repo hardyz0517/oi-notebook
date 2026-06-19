@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
@@ -7,6 +8,12 @@ import type { NoteFileInfo } from "@/types/note";
 export interface SaveNoteAssetResult {
   markdownPath: string;
   assetRelativePath: string;
+}
+
+export interface MarkdownSavePathClassification {
+  kind: "note" | "external";
+  relativePath: string | null;
+  absolutePath: string;
 }
 
 const safeExternalProtocols = new Set(["http:", "https:", "mailto:"]);
@@ -563,6 +570,39 @@ export async function writeNote(
 ): Promise<string | null> {
   try {
     return await invoke<string | null>("write_note", { relativePath, content });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function showSaveMarkdownDialog(defaultFileName: string): Promise<string | null> {
+  const result = await save({
+    title: "Save Markdown File",
+    defaultPath: defaultFileName.endsWith(".md") ? defaultFileName : `${defaultFileName}.md`,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  return typeof result === "string" ? result : null;
+}
+
+export async function getNotesRootPath(): Promise<string> {
+  try {
+    return await invoke<string>("get_notes_root_path");
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function classifyMarkdownSavePath(absolutePath: string): Promise<MarkdownSavePathClassification> {
+  try {
+    return await invoke<MarkdownSavePathClassification>("classify_markdown_save_path", { absolutePath });
+  } catch (e) {
+    throw toError(e);
+  }
+}
+
+export async function writeExternalMarkdownFile(absolutePath: string, content: string): Promise<void> {
+  try {
+    await invoke<void>("write_external_markdown_file", { absolutePath, content });
   } catch (e) {
     throw toError(e);
   }
