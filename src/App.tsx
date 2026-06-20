@@ -85,6 +85,8 @@ import {
 import { useLuoguImportController } from "@/components/luogu/useLuoguImportController";
 import {
   applyLuoguPreparedRules,
+  buildLuoguImportRuleRowModels,
+  isLuoguRuleControlDisabled as getLuoguRuleControlDisabled,
   normalizeLuoguImportRules,
   readStoredLuoguImportRules,
   saveStoredLuoguImportRules,
@@ -92,6 +94,7 @@ import {
   type LuoguDefaultDraftStatus,
   type LuoguDefaultSaveLocation,
   type LuoguImportedProblemPolicy,
+  type LuoguImportRuleId,
   type LuoguImportRules,
   type LuoguIncludeSourceCode,
   type LuoguMissingInsightStrategy,
@@ -693,6 +696,31 @@ interface LuoguScanSummary {
   candidateCount: number;
   skippedCount: number;
   rangeLabel: string;
+}
+
+function getLuoguImportRuleUpdate(id: LuoguImportRuleId, value: string): Partial<LuoguImportRules> {
+  switch (id) {
+    case "submitFilter":
+      return { submitFilter: value as LuoguSubmitFilter };
+    case "problemIdFilter":
+      return { problemIdFilter: value as LuoguProblemIdFilter };
+    case "sameProblemStrategy":
+      return { sameProblemStrategy: value as LuoguSameProblemStrategy };
+    case "importedProblemPolicy":
+      return { importedProblemPolicy: value as LuoguImportedProblemPolicy };
+    case "missingInsightStrategy":
+      return { missingInsightStrategy: value as LuoguMissingInsightStrategy };
+    case "scanResultVisibility":
+      return { scanResultVisibility: value as LuoguScanResultVisibility };
+    case "defaultSaveLocation":
+      return { defaultSaveLocation: value as LuoguDefaultSaveLocation };
+    case "writeStrategy":
+      return { writeStrategy: value as LuoguWriteStrategy };
+    case "defaultDraftStatus":
+      return { defaultDraftStatus: value as LuoguDefaultDraftStatus };
+    case "includeSourceCode":
+      return { includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" };
+  }
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
@@ -2251,130 +2279,18 @@ export default function App() {
     ...luoguStatusInput,
     hasConnectionResult: Boolean(luoguConnectionResult),
   });
-  const isLuoguRuleControlDisabled =
-    isLoadingLuoguConfig ||
-    isTestingLuoguConnection ||
-    isScanningLuoguPreview ||
-    isPreparingSelectedLuogu ||
-    isWritingPreparedLuogu ||
-    isSyncingLuogu;
-  const luoguRuleSettingRows: LuoguRuleSettingRow[] = [
-    {
-      id: "submitFilter",
-      title: "提交筛选",
-      description: "控制扫描时哪些提交会进入候选。",
-      value: luoguImportRules.submitFilter,
-      onChange: (value: string) => updateLuoguImportRules({ submitFilter: value as LuoguSubmitFilter }),
-      options: [
-        { value: "acOnly", label: "只处理 AC" },
-        { value: "includeNonAc", label: "包含非 AC" },
-      ],
-    },
-    {
-      id: "problemIdFilter",
-      title: "题号类型筛选",
-      description: "只保留 P 开头的公开题库题目，过滤 U / T 等题号。",
-      value: luoguImportRules.problemIdFilter,
-      onChange: (value: string) => updateLuoguImportRules({ problemIdFilter: value as LuoguProblemIdFilter }),
-      options: [
-        { value: "all", label: "全部题号" },
-        { value: "onlyP", label: "仅保留 P 题" },
-      ],
-    },
-    {
-      id: "sameProblemStrategy",
-      title: "同题策略",
-      description: "同一道题有多次提交时如何处理。",
-      value: luoguImportRules.sameProblemStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ sameProblemStrategy: value as LuoguSameProblemStrategy }),
-      options: [
-        { value: "latestAc", label: "同题保留最新 AC" },
-        { value: "allAc", label: "保留全部 AC" },
-        { value: "manual", label: "手动选择" },
-      ],
-    },
-    {
-      id: "importedProblemPolicy",
-      title: "已导入题目",
-      description: "本地已有记录时如何处理。",
-      value: luoguImportRules.importedProblemPolicy,
-      onChange: (value: string) => updateLuoguImportRules({ importedProblemPolicy: value as LuoguImportedProblemPolicy }),
-      options: [
-        { value: "skip", label: "跳过" },
-        { value: "showUnselected", label: "显示但默认不选" },
-        { value: "regenerate", label: "允许重新生成" },
-      ],
-    },
-    {
-      id: "missingInsightStrategy",
-      title: "无心得时",
-      description: "没有找到文末启示或可整理心得时如何处理。",
-      value: luoguImportRules.missingInsightStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ missingInsightStrategy: value as LuoguMissingInsightStrategy }),
-      options: [
-        { value: "draft", label: "生成草稿" },
-        { value: "skip", label: "跳过" },
-        { value: "review", label: "进入手动审阅" },
-      ],
-    },
-    {
-      id: "scanResultVisibility",
-      title: "扫描结果显示",
-      description: "扫描界面是否显示被规则跳过的提交。",
-      value: luoguImportRules.scanResultVisibility,
-      onChange: (value: string) => updateLuoguImportRules({ scanResultVisibility: value as LuoguScanResultVisibility }),
-      options: [
-        { value: "showAll", label: "显示全部" },
-        { value: "hideSkipped", label: "隐藏跳过项" },
-      ],
-    },
-    {
-      id: "defaultSaveLocation",
-      title: "默认保存位置",
-      description: "生成笔记默认写入目录。",
-      value: luoguImportRules.defaultSaveLocation,
-      onChange: (value: string) => updateLuoguImportRules({ defaultSaveLocation: value as LuoguDefaultSaveLocation }),
-      options: [
-        { value: "luogu", label: "luogu/" },
-        { value: "problems", label: "problems/" },
-        { value: "custom", label: "自定义目录" },
-      ],
-    },
-    {
-      id: "writeStrategy",
-      title: "写入策略",
-      description: "目标文件已存在时如何处理。",
-      value: luoguImportRules.writeStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ writeStrategy: value as LuoguWriteStrategy }),
-      options: [
-        { value: "createNew", label: "仅新建，不覆盖" },
-        { value: "askOnConflict", label: "冲突时询问" },
-        { value: "overwrite", label: "允许覆盖" },
-      ],
-    },
-    {
-      id: "defaultDraftStatus",
-      title: "默认草稿状态",
-      description: "写入后的 frontmatter 草稿状态默认值。",
-      value: luoguImportRules.defaultDraftStatus,
-      onChange: (value: string) => updateLuoguImportRules({ defaultDraftStatus: value as LuoguDefaultDraftStatus }),
-      options: [
-        { value: "draft", label: "写入为草稿" },
-        { value: "published", label: "写入为正式笔记" },
-      ],
-    },
-    {
-      id: "includeSourceCode",
-      title: "导入时包含源代码",
-      description: "默认只生成复盘笔记；开启后在文末附上完整提交代码。",
-      value: luoguImportRules.includeSourceCode ? "yes" : "no",
-      onChange: (value: string) => updateLuoguImportRules({ includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" }),
-      options: [
-        { value: "no", label: "不包含" },
-        { value: "yes", label: "包含源代码" },
-      ],
-    },
-  ];
+  const isLuoguRuleControlDisabled = getLuoguRuleControlDisabled({
+    isLoadingConfig: isLoadingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
+    isScanningPreview: isScanningLuoguPreview,
+    isPreparingSelected: isPreparingSelectedLuogu,
+    isWritingPrepared: isWritingPreparedLuogu,
+    isSyncing: isSyncingLuogu,
+  });
+  const luoguRuleSettingRows: LuoguRuleSettingRow[] = buildLuoguImportRuleRowModels(luoguImportRules).map((row) => ({
+    ...row,
+    onChange: (value: string) => updateLuoguImportRules(getLuoguImportRuleUpdate(row.id, value)),
+  }));
   const luoguImportCenterAccountLabel = getLuoguImportCenterAccountLabel(isLoadingLuoguConfig, luoguConfigured);
   const luoguImportCenterAiLabel =
     isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置";
