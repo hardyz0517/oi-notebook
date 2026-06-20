@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:run": "vitest run",
     "build:local-blog": "pnpm --dir local-blog build",
     "preview": "vite preview",
     "tauri": "tauri"
