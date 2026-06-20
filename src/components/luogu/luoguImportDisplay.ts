@@ -3,7 +3,10 @@ import type { PreviewLuoguSubmission } from "@/lib/api";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
 import type { LuoguPrepareItemStatus } from "./luoguDisplay";
-import { getLuoguSubmissionCandidateState } from "@/components/settings/pages/luoguImportDomain";
+import {
+  getLuoguSubmissionCandidateState,
+  type LuoguSubmissionCandidateState,
+} from "@/components/settings/pages/luoguImportDomain";
 import type { LuoguImportRules } from "@/components/settings/pages/luoguImportRules";
 
 export type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
@@ -79,6 +82,52 @@ export function getLuoguScanCompletionSelection(
     candidateCount,
     skippedCount: Math.max(0, input.submissions.length - candidateCount),
     defaultSelectedSubmissionIds,
+  };
+}
+
+export interface LuoguPrepareSelectionPlanInput {
+  submissions: PreviewLuoguSubmission[];
+  selectedSubmissionIds: Set<string>;
+  candidateStates: Record<string, LuoguSubmissionCandidateState | undefined>;
+  skippedSubmissionIds: Set<string>;
+  prepareStatusesById: Record<string, LuoguPrepareItemStatus>;
+  hasReusablePreview: (submissionId: string) => boolean;
+}
+
+export interface LuoguPrepareSelectionPlan {
+  selectedSubmissions: PreviewLuoguSubmission[];
+  queue: PreviewLuoguSubmission[];
+  reusablePreviewSubmissions: PreviewLuoguSubmission[];
+  ignoredCount: number;
+}
+
+export function getLuoguPrepareSelectionPlan(
+  input: LuoguPrepareSelectionPlanInput,
+): LuoguPrepareSelectionPlan {
+  const selectedSubmissions = input.submissions.filter((submission) =>
+    input.selectedSubmissionIds.has(submission.submissionId),
+  );
+  const queue = selectedSubmissions.filter((submission, index, submissions) => {
+    const candidateState = input.candidateStates[submission.submissionId];
+    const prepareStatus = input.prepareStatusesById[submission.submissionId];
+    return (
+      submissions.findIndex((item) => item.submissionId === submission.submissionId) === index &&
+      candidateState?.canSelect &&
+      !input.skippedSubmissionIds.has(submission.submissionId) &&
+      prepareStatus !== "running" &&
+      prepareStatus !== "queued" &&
+      !input.hasReusablePreview(submission.submissionId)
+    );
+  });
+  const reusablePreviewSubmissions = selectedSubmissions.filter((submission) =>
+    input.hasReusablePreview(submission.submissionId),
+  );
+
+  return {
+    selectedSubmissions,
+    queue,
+    reusablePreviewSubmissions,
+    ignoredCount: selectedSubmissions.length - queue.length - reusablePreviewSubmissions.length,
   };
 }
 

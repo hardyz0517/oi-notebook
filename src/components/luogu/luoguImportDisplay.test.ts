@@ -6,6 +6,7 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
 } from "./luoguImportDisplay";
@@ -172,6 +173,46 @@ describe("luoguImportDisplay", () => {
     expect(selection.candidateCount).toBe(3);
     expect(selection.skippedCount).toBe(0);
     expect(selection.defaultSelectedSubmissionIds).toEqual(new Set());
+  });
+
+  it("groups selected submissions into prepare queue, reusable previews, and ignored count", () => {
+    const plan = getLuoguPrepareSelectionPlan({
+      submissions: luoguSubmissions,
+      selectedSubmissionIds: new Set(["103", "102", "101", "missing"]),
+      candidateStates: {
+        "103": { canSelect: true, defaultSelected: true, statusLabel: "candidate" },
+        "102": { canSelect: false, defaultSelected: false, statusLabel: "blocked" },
+        "101": { canSelect: true, defaultSelected: true, statusLabel: "candidate" },
+      },
+      skippedSubmissionIds: new Set(),
+      prepareStatusesById: {},
+      hasReusablePreview: (submissionId) => submissionId === "101",
+    });
+
+    expect(plan.selectedSubmissions.map((submission) => submission.submissionId)).toEqual(["103", "102", "101"]);
+    expect(plan.queue.map((submission) => submission.submissionId)).toEqual(["103"]);
+    expect(plan.reusablePreviewSubmissions.map((submission) => submission.submissionId)).toEqual(["101"]);
+    expect(plan.ignoredCount).toBe(1);
+  });
+
+  it("excludes duplicate, skipped, running, queued, and reusable submissions from prepare queue", () => {
+    const duplicateSubmissions = [luoguSubmissions[0], luoguSubmissions[0], luoguSubmissions[1], luoguSubmissions[2]];
+    const plan = getLuoguPrepareSelectionPlan({
+      submissions: duplicateSubmissions,
+      selectedSubmissionIds: new Set(["103", "102", "101"]),
+      candidateStates: {
+        "103": { canSelect: true, defaultSelected: true, statusLabel: "candidate" },
+        "102": { canSelect: true, defaultSelected: true, statusLabel: "candidate" },
+        "101": { canSelect: true, defaultSelected: true, statusLabel: "candidate" },
+      },
+      skippedSubmissionIds: new Set(["101"]),
+      prepareStatusesById: { "102": "queued" },
+      hasReusablePreview: (submissionId) => submissionId === "103",
+    });
+
+    expect(plan.queue).toEqual([]);
+    expect(plan.reusablePreviewSubmissions.map((submission) => submission.submissionId)).toEqual(["103", "103"]);
+    expect(plan.ignoredCount).toBe(2);
   });
 
   it("formats paused scan summary before other states", () => {

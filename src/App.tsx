@@ -73,6 +73,7 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
   type LuoguImportStep,
@@ -4079,20 +4080,15 @@ export default function App() {
         return;
       }
     }
-    const selectedSubmissions = luoguPreviewResult.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId));
-    const queue = selectedSubmissions.filter((submission, index, submissions) => {
-      const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-      return (
-        submissions.findIndex((item) => item.submissionId === submission.submissionId) === index &&
-        candidateState?.canSelect &&
-        !skippedLuoguSubmissionIds.has(submission.submissionId) &&
-        luoguPrepareStatusesById[submission.submissionId] !== "running" &&
-        luoguPrepareStatusesById[submission.submissionId] !== "queued" &&
-        !hasReusableLuoguPreparedPreview(submission.submissionId)
-      );
+    const prepareSelectionPlan = getLuoguPrepareSelectionPlan({
+      submissions: luoguPreviewResult.submissions,
+      selectedSubmissionIds: selectedLuoguSubmissionIds,
+      candidateStates: luoguSubmissionCandidateStates,
+      skippedSubmissionIds: skippedLuoguSubmissionIds,
+      prepareStatusesById: luoguPrepareStatusesById,
+      hasReusablePreview: hasReusableLuoguPreparedPreview,
     });
-    const reusablePreviewSubmissions = selectedSubmissions.filter((submission) => hasReusableLuoguPreparedPreview(submission.submissionId));
-    const ignoredCount = selectedSubmissions.length - queue.length - reusablePreviewSubmissions.length;
+    const { selectedSubmissions, queue, reusablePreviewSubmissions, ignoredCount } = prepareSelectionPlan;
 
     if (selectedSubmissions.length === 0) {
       toast.error("请选择要生成预览的洛谷提交");
