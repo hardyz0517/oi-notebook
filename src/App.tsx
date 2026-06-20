@@ -133,6 +133,7 @@ import {
   markPreviewEditorChange,
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
+import { getCommittedMarkdownSyncDelayMs, getPreviewMarkdownSyncDelayMs } from "@/lib/previewSyncTiming";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
@@ -1193,36 +1194,6 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
   };
 }
 
-function getCommittedMarkdownSyncDelayMs(docLength: number): number {
-  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
-
-  if (docLength <= 2_000 && lastParseMs < 40) {
-    return 50;
-  }
-  if (docLength <= 15_000 && lastParseMs < 90) {
-    return 90;
-  }
-  if (docLength >= 25_000 || lastParseMs >= 120) {
-    return 160;
-  }
-  return 120;
-}
-
-function getPreviewMarkdownSyncDelayMs(docLength: number): number {
-  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
-
-  if (docLength < 3_000) {
-    return 25;
-  }
-  if (docLength < 12_000) {
-    return lastParseMs >= 90 ? 90 : 65;
-  }
-  if (docLength >= 25_000 || lastParseMs >= 120) {
-    return 150;
-  }
-  return 120;
-}
-
 export default function App() {
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
@@ -1850,7 +1821,7 @@ export default function App() {
     markPreviewMarkdownSchedule(nextMarkdown.length);
     pendingPreviewVersionRef.current = version;
     const scheduledVersion = pendingPreviewVersionRef.current;
-    const delayMs = getPreviewMarkdownSyncDelayMs(nextMarkdown.length);
+    const delayMs = getPreviewMarkdownSyncDelayMs(nextMarkdown.length, getPreviewPerfStats()?.lastParseMs ?? 0);
     pendingPreviewTimerRef.current = window.setTimeout(() => {
       pendingPreviewTimerRef.current = null;
       pendingPreviewVersionRef.current = null;
@@ -1912,7 +1883,7 @@ export default function App() {
         markPreviewStaleRender();
       }
       const scheduledVersion = pendingCommitVersionRef.current;
-      const delayMs = getCommittedMarkdownSyncDelayMs(markdownLiveRef.current.length);
+      const delayMs = getCommittedMarkdownSyncDelayMs(markdownLiveRef.current.length, getPreviewPerfStats()?.lastParseMs ?? 0);
       pendingCommitTimerRef.current = window.setTimeout(() => {
         pendingCommitTimerRef.current = null;
         pendingCommitVersionRef.current = null;
