@@ -1,6 +1,7 @@
 use crate::{
+    blog_service::{read_effective_blog_config, render_blog_config_api_json, render_json_error},
     luogu::{
-        default_blog_subtitle, default_blog_title, read_config, write_config, BlogConfigFields,
+        read_config, write_config, BlogConfigFields,
     },
     paths,
 };
@@ -70,12 +71,6 @@ struct BlogNote {
     draft: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct BlogConfigApiResponse {
-    title: String,
-    subtitle: String,
-}
-
 impl BlogNote {
     fn display_summary(&self) -> &str {
         if self.summary.is_empty() {
@@ -106,11 +101,6 @@ struct BlogNoteApiResponse {
     summary: String,
     metadata: NoteFrontmatter,
     body: String,
-}
-
-#[derive(Debug, Serialize)]
-struct BlogErrorApiResponse<'a> {
-    error: &'a str,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -353,35 +343,6 @@ fn blog_route_for_path(path: &str) -> BlogRoute {
     BlogRoute::NotFound
 }
 
-fn effective_blog_config(config: BlogConfigFields) -> BlogConfigApiResponse {
-    let title = config.title.trim();
-    let subtitle = config.subtitle.trim();
-
-    BlogConfigApiResponse {
-        title: if title.is_empty() {
-            default_blog_title()
-        } else {
-            title.to_string()
-        },
-        subtitle: if subtitle.is_empty() {
-            default_blog_subtitle()
-        } else {
-            subtitle.to_string()
-        },
-    }
-}
-
-fn read_effective_blog_config() -> BlogConfigApiResponse {
-    read_config()
-        .map(|config| effective_blog_config(config.blog))
-        .unwrap_or_else(|_| effective_blog_config(BlogConfigFields::default()))
-}
-
-fn render_blog_config_api_json() -> Result<String, String> {
-    serde_json::to_string(&read_effective_blog_config())
-        .map_err(|e| format!("Failed to serialize blog config API response: {e}"))
-}
-
 #[tauri::command]
 pub fn get_blog_config() -> Result<BlogConfigFields, String> {
     Ok(read_config()?.blog)
@@ -436,11 +397,6 @@ fn serialize_note_api_json(detail: BlogNoteDetail) -> Result<String, String> {
         body: detail.markdown_body,
     })
     .map_err(|e| format!("Failed to serialize note API response: {e}"))
-}
-
-fn render_json_error(message: &str) -> String {
-    serde_json::to_string(&BlogErrorApiResponse { error: message })
-        .unwrap_or_else(|_| r#"{"error":"Failed to serialize error response."}"#.to_string())
 }
 
 fn render_note_detail_page(request_path: &str) -> Result<String, String> {
