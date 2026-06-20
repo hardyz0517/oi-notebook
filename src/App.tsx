@@ -301,6 +301,7 @@ import {
   buildNewNoteMarkdown,
   buildRenameNotePath,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
+  getCreateFolderDialogInitialState,
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getFolderDialogState,
@@ -2649,10 +2650,15 @@ export default function App() {
   };
 
   const openCreateFolderDialog = () => {
-    setReturnToCreateAfterFolder(dialogMode === "create");
-    setDialogMode("create-folder");
-    setDialogValue("");
-    setFolderParentDirectory(dialogMode === "create" ? getResolvedNewNoteDirectory() : currentNoteDirectory);
+    const createFolderState = getCreateFolderDialogInitialState(
+      dialogMode,
+      getResolvedNewNoteDirectory(),
+      currentNoteDirectory,
+    );
+    setReturnToCreateAfterFolder(createFolderState.returnToCreateAfterFolder);
+    setDialogMode(createFolderState.dialogMode);
+    setDialogValue(createFolderState.dialogValue);
+    setFolderParentDirectory(createFolderState.folderParentDirectory);
   };
 
   const getDefaultFolderCreateParent = () => {

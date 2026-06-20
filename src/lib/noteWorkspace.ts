@@ -18,6 +18,13 @@ export interface RenameDialogInitialState {
   renameTargetIsDirectory: boolean;
 }
 
+export interface CreateFolderDialogInitialState {
+  returnToCreateAfterFolder: boolean;
+  dialogMode: "create-folder";
+  dialogValue: string;
+  folderParentDirectory: string;
+}
+
 const FOLDER_DIALOG_DEFAULT_HELP_TEXT = "名称不能包含路径穿越或 Windows 非法字符";
 
 export function getNoteDirectories(files: NoteFileInfo[]): string[] {
@@ -62,6 +69,20 @@ export function getRenameDialogInitialState(path: string, isDirectory = false): 
     dialogValue: isDirectory ? filename : filename.replace(/\.md$/i, ""),
     renameTarget: path,
     renameTargetIsDirectory: isDirectory,
+  };
+}
+
+export function getCreateFolderDialogInitialState(
+  activeDialogMode: FolderDialogMode,
+  resolvedNewNoteDirectory: string,
+  currentNoteDirectory: string,
+): CreateFolderDialogInitialState {
+  const returnToCreateAfterFolder = activeDialogMode === "create";
+  return {
+    returnToCreateAfterFolder,
+    dialogMode: "create-folder",
+    dialogValue: "",
+    folderParentDirectory: returnToCreateAfterFolder ? resolvedNewNoteDirectory : currentNoteDirectory,
   };
 }
 

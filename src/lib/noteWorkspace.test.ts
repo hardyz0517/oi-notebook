@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildNewNoteMarkdown,
   buildRenameNotePath,
+  getCreateFolderDialogInitialState,
   getFolderDialogState,
   findEntryCaseInsensitive,
   getCurrentNoteDirectory,
@@ -72,6 +73,21 @@ describe("noteWorkspace", () => {
       dialogValue: "old-folder",
       renameTarget: "A/old-folder",
       renameTargetIsDirectory: true,
+    });
+  });
+
+  it("derives create-folder dialog initial state from the active dialog", () => {
+    expect(getCreateFolderDialogInitialState("create", "custom/path", "current/path")).toEqual({
+      returnToCreateAfterFolder: true,
+      dialogMode: "create-folder",
+      dialogValue: "",
+      folderParentDirectory: "custom/path",
+    });
+    expect(getCreateFolderDialogInitialState(null, "custom/path", "current/path")).toEqual({
+      returnToCreateAfterFolder: false,
+      dialogMode: "create-folder",
+      dialogValue: "",
+      folderParentDirectory: "current/path",
     });
   });
 
