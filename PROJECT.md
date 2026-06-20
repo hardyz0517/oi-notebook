@@ -61,6 +61,8 @@ oi-notebook/
 
 **Foundation upgrade status:** The current engineering pass is foundation-first with AI behavior frozen. Theme Engine lives under `src/theme/**`; Settings V2 visual styling is protected; App shell helpers, note workspace rules, long-task state helpers, and API error normalization are being extracted into focused `src/lib/**` modules with Vitest coverage.
 
+**Long-task model:** Non-AI long-running work should expose `TaskState` from `src/lib/taskStatus.ts` and, when UI labels/progress are needed, a small domain task-view helper. Local index rebuild/load state, Luogu scan/prepare/write state, and tag normalization scan/apply state are already aligned with this rule. New task surfaces should not invent ad hoc `isLoading`/`isBusy`/`error` boolean clusters when the shared model can represent the workflow.
+
 **Planned data flow:**
 - User edits in CodeMirror -> real-time remark/rehype preview
 - Save -> writes `.md` file -> `git add && git commit` (message: `note: {title}`)
@@ -113,6 +115,7 @@ content here
 - The Rust crate produces `staticlib + cdylib + rlib` - required for Tauri on Windows to avoid lib name collisions
 - AI provider config lives in `.oinb/config.json`; prompts are templatable Markdown in `.oinb/prompts/*.md`
 - All frontend -> Rust calls go through `src/lib/api.ts`
+- Non-AI long-running frontend work should use `src/lib/taskStatus.ts` as its status/progress/error contract when practical
 - Do not simplify the two-layer path safety check in `src-tauri/src/notes.rs`
 
 ## Blog Design Direction (for future Astro site)

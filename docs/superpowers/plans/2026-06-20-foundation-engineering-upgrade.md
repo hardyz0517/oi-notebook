@@ -93,6 +93,7 @@ Already completed foundation commits:
 Progress calibration, 2026-06-20:
 
 - Completed from this plan: app preference helpers, collection/tag helpers, local index display/status/task-state helpers, blog config draft rules, note workspace path rewrite/deleted-cleanup/tree-selection helpers, tag taxonomy export payload helpers, settings render guards, settings registry/search helpers, Luogu import controller/rule settings model/update patch helpers/scan task-state bridge/UI consumption, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
+- Long-task model status: `src/lib/taskStatus.ts` is the shared frontend contract for non-AI long-running status/progress/error state. Existing migrated surfaces include local index load/rebuild task views, Luogu scan/prepare/write task states, and tag normalization scan/apply task views. Future non-AI task surfaces should expose `TaskState` plus a small domain task-view helper instead of growing new local boolean clusters.
 - Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, `src/lib/luoguDifficulty.ts`, `src/lib/tagTaxonomyUserConfig.ts`, `src/lib/appAsync.ts`, `src/lib/appShell.ts`, `src/lib/apiError.ts`, `src/components/luogu/luoguImportDisplay.ts`, and `src/lib/tagTaxonomySettingsModel.ts`, each with focused tests where pure logic is present. Existing `src/components/settings/pages/luoguImportRules.ts` now also owns the Luogu rule settings row model.
 - Remaining foundation focus: further `App.tsx` shell decomposition, broader task-controller adoption of `src/lib/taskStatus.ts` beyond Luogu scan/write progress and local index status/load/rebuild state, more note workspace side-effect cleanup where it can stay pure, tag manager config helper consolidation where behavior can be preserved, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, continued API boundary audits, and documentation/handoff sync. Latest verified slices centralized file-tree selection state, root tree selection state, rename path rules, and create-folder dialog validation state in `src/lib/noteWorkspace.ts`, tag taxonomy export JSON/file-name rules, import-preview state derivation, and entry/alias add-delete update rules in `src/lib/tagTaxonomyUserConfig.ts`, Luogu config form load/save payload rules in `src/lib/luoguConfigForm.ts`, queued/paused/resumed/stopping transition helpers and common status predicates in `src/lib/taskStatus.ts`, Luogu scan state now consumes the shared running/paused/failed predicates, Luogu import center global busy state, preparation workspace reset state, scan-completion candidate/default-selection state, prepare progress initialization, review selection id derivation, prepare status cancellation finalization, and write progress counter mapping are centralized in `src/components/luogu/luoguImportDisplay.ts`, tag normalization scan stats/selection derivation and scan task state are centralized in `src/components/tag-manager/tagNormalizationScan.ts`, and local index task view plus rebuild message helpers are centralized in `src/lib/localIndexStatus.ts`; `pnpm.cmd test:run`, `pnpm.cmd build`, and the frontend API boundary audit passed afterward.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
@@ -106,6 +107,7 @@ Hard guardrails for every task:
 - Do not simplify the two-layer path safety check in `src-tauri/src/notes.rs`.
 - Do not change the ref-based patterns in `src/components/editor/MarkdownEditor.tsx` or `src/components/editor/MarkdownPreview.tsx`.
 - Frontend-to-Rust calls continue through `src/lib/api.ts`.
+- New or updated non-AI long-running UI flows should use `src/lib/taskStatus.ts` when the shared status/progress/error model fits. Domain modules may add task-view helpers for labels, disabled states, and progress text, but `App.tsx` should avoid reassembling task booleans directly.
 - Use exact `git add -- <paths>` only; never use `git add .`.
 - Before each commit, run `git diff --cached --name-only`.
 
@@ -1502,9 +1504,10 @@ When the user is away, execute these low-risk tasks in order:
 4. Keep preview sync timing rules in `src/lib/previewSyncTiming.ts`; future performance tuning should update its tests with the rule change.
 5. Extract prompt usage metadata helpers only if the task can avoid changing prompt content or AI behavior.
 6. Continue reducing note/file workspace orchestration by moving pure path rewrite helpers, leaving side effects in `App.tsx`.
-7. Add or update tests for every pure helper module touched in the same commit.
-8. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
-9. Treat `src/lib/tagTaxonomyUserConfig.ts` as the App-facing user taxonomy helper boundary; keep `src/components/tag-manager/tagManagerConfig.ts` ID behavior separate unless a later task deliberately preserves and tests both algorithms.
+7. Continue unifying non-AI long-running workflows on `src/lib/taskStatus.ts`; new task domains should return `TaskState` and consume `deriveTaskView` or a domain-specific task-view wrapper.
+8. Add or update tests for every pure helper module touched in the same commit.
+9. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
+10. Treat `src/lib/tagTaxonomyUserConfig.ts` as the App-facing user taxonomy helper boundary; keep `src/components/tag-manager/tagManagerConfig.ts` ID behavior separate unless a later task deliberately preserves and tests both algorithms.
 
 Hold these for user-visible review before continuing:
 
