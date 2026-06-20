@@ -163,7 +163,7 @@ import {
   isAiActivitySelected,
   type ActivityBarItem,
 } from "@/lib/appShell";
-import { DEFAULT_BLOG_CONFIG, normalizeBlogConfigDraft } from "@/lib/blogConfig";
+import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
@@ -1279,17 +1279,12 @@ export default function App() {
     setIsLoadingBlogConfig(true);
     try {
       const config = await getBlogConfig();
-      setBlogInfoDraft({
-        title: config.title ?? DEFAULT_BLOG_CONFIG.title,
-        subtitle: config.subtitle ?? DEFAULT_BLOG_CONFIG.subtitle,
-      });
+      setBlogInfoDraft(resolveBlogConfigDraft(config));
       setBlogConfigError(null);
     } catch (error) {
       const message = getErrorMessage(error);
       console.warn("Failed to load blog config; using defaults.", message);
-      setBlogInfoDraft({
-        ...DEFAULT_BLOG_CONFIG,
-      });
+      setBlogInfoDraft(resolveBlogConfigDraft(null));
       setBlogConfigError(message);
     } finally {
       setIsLoadingBlogConfig(false);
@@ -2935,12 +2930,17 @@ export default function App() {
   };
 
   const handleSaveBlogInfo = async () => {
-    const normalizedConfig = normalizeBlogConfigDraft(blogInfoDraft);
+    const saveDraft = buildBlogConfigSaveDraft(blogInfoDraft);
+    if (!saveDraft.ok) {
+      setBlogConfigError(saveDraft.error);
+      toast.error(saveDraft.error);
+      return;
+    }
     setIsSavingBlogConfig(true);
     setBlogConfigError(null);
     try {
-      await saveBlogConfig(normalizedConfig);
-      setBlogInfoDraft(normalizedConfig);
+      await saveBlogConfig(saveDraft.config);
+      setBlogInfoDraft(saveDraft.config);
       toast.success("博客信息已保存");
     } catch (error) {
       const message = getErrorMessage(error);
