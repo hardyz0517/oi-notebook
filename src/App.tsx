@@ -294,6 +294,7 @@ import {
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
+  getFolderDialogState,
   getNoteDirectories,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
   getTreeSelectionAfterClear,
@@ -6195,23 +6196,11 @@ export default function App() {
     };
   }, [activeWorkingCopyId, applyLoadedMarkdown, currentFilePath, displayFiles, replaceEditorDocument]);
 
-  const folderNameValidationMessage =
-    dialogMode === "create-folder" && dialogValue.trim()
-      ? validateNoteNamePart(dialogValue, "folder")
-      : null;
-  const folderParentValidationMessage =
-    dialogMode === "create-folder" && folderParentDirectory.trim()
-      ? validateNoteDirectoryPathInput(folderParentDirectory)
-      : null;
-  const folderDialogHelpText =
-    folderNameValidationMessage ??
-    folderParentValidationMessage ??
-    "名称不能包含路径穿越或 Windows 非法字符";
-  const canConfirmFolderDialog =
-    dialogMode === "create-folder" &&
-    Boolean(dialogValue.trim()) &&
-    !folderNameValidationMessage &&
-    !folderParentValidationMessage;
+  const folderDialogState = getFolderDialogState(dialogMode, dialogValue, folderParentDirectory);
+  const folderNameValidationMessage = folderDialogState.nameValidationMessage;
+  const folderParentValidationMessage = folderDialogState.parentValidationMessage;
+  const folderDialogHelpText = folderDialogState.helpText;
+  const canConfirmFolderDialog = folderDialogState.canConfirm;
 
   void luoguSettingsStatusTone;
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildNewNoteMarkdown,
   buildRenameNotePath,
+  getFolderDialogState,
   findEntryCaseInsensitive,
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent,
@@ -56,6 +57,38 @@ describe("noteWorkspace", () => {
     expect(buildRenameNotePath("A/old.md", "new", false)).toBe("A/new.md");
     expect(buildRenameNotePath("old.md", "new.md", false)).toBe("new.md");
     expect(buildRenameNotePath("A/old-folder", "new-folder", true)).toBe("A/new-folder");
+  });
+
+  it("derives create-folder dialog validation state", () => {
+    expect(getFolderDialogState("create-folder", "Algo", "tricks/dp")).toEqual({
+      nameValidationMessage: null,
+      parentValidationMessage: null,
+      helpText: "名称不能包含路径穿越或 Windows 非法字符",
+      canConfirm: true,
+    });
+
+    expect(getFolderDialogState("create-folder", "bad/name", "")).toEqual({
+      nameValidationMessage: 'Name cannot contain Windows reserved characters < > : " / \\ | ? *',
+      parentValidationMessage: null,
+      helpText: 'Name cannot contain Windows reserved characters < > : " / \\ | ? *',
+      canConfirm: false,
+    });
+
+    expect(getFolderDialogState("create-folder", "Algo", "bad//path")).toEqual({
+      nameValidationMessage: null,
+      parentValidationMessage: "Directory cannot contain empty path segments",
+      helpText: "Directory cannot contain empty path segments",
+      canConfirm: false,
+    });
+  });
+
+  it("keeps folder dialog confirmation disabled outside create-folder mode", () => {
+    expect(getFolderDialogState("rename", "Algo", "tricks")).toEqual({
+      nameValidationMessage: null,
+      parentValidationMessage: null,
+      helpText: "名称不能包含路径穿越或 Windows 非法字符",
+      canConfirm: false,
+    });
   });
 
   it("finds entries case-insensitively by kind", () => {

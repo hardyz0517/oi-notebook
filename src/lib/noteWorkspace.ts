@@ -1,7 +1,17 @@
 import type { NoteFileInfo } from "@/types/note";
-import { normalizeNoteFileName } from "@/lib/notePathHelpers";
+import { normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 
 export type NewNoteLocationOption = "root" | "current" | "tricks" | "problems" | "custom";
+export type FolderDialogMode = "create" | "rename" | "create-folder" | null;
+
+export interface FolderDialogState {
+  nameValidationMessage: string | null;
+  parentValidationMessage: string | null;
+  helpText: string;
+  canConfirm: boolean;
+}
+
+const FOLDER_DIALOG_DEFAULT_HELP_TEXT = "名称不能包含路径穿越或 Windows 非法字符";
 
 export function getNoteDirectories(files: NoteFileInfo[]): string[] {
   return files
@@ -36,6 +46,29 @@ export function buildRenameNotePath(targetPath: string, nextName: string, isDire
   const directoryPrefix = lastSlashIndex === -1 ? "" : targetPath.slice(0, lastSlashIndex + 1);
   const normalizedName = isDirectory ? nextName.trim() : normalizeNoteFileName(nextName);
   return `${directoryPrefix}${normalizedName}`;
+}
+
+export function getFolderDialogState(
+  dialogMode: FolderDialogMode,
+  folderName: string,
+  parentDirectory: string,
+): FolderDialogState {
+  const isCreateFolder = dialogMode === "create-folder";
+  const nameValidationMessage =
+    isCreateFolder && folderName.trim()
+      ? validateNoteNamePart(folderName, "folder")
+      : null;
+  const parentValidationMessage =
+    isCreateFolder && parentDirectory.trim()
+      ? validateNoteDirectoryPathInput(parentDirectory)
+      : null;
+
+  return {
+    nameValidationMessage,
+    parentValidationMessage,
+    helpText: nameValidationMessage ?? parentValidationMessage ?? FOLDER_DIALOG_DEFAULT_HELP_TEXT,
+    canConfirm: isCreateFolder && Boolean(folderName.trim()) && !nameValidationMessage && !parentValidationMessage,
+  };
 }
 
 export function findEntryCaseInsensitive(
