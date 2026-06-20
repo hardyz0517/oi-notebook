@@ -1,5 +1,5 @@
 import type { NoteFileInfo } from "@/types/note";
-import { normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
+import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 
 export type NewNoteLocationOption = "root" | "current" | "tricks" | "problems" | "custom";
 export type FolderDialogMode = "create" | "rename" | "create-folder" | null;
@@ -23,6 +23,17 @@ export interface CreateFolderDialogInitialState {
   dialogMode: "create-folder";
   dialogValue: string;
   folderParentDirectory: string;
+}
+
+export interface NoteWorkspaceCreatePlan {
+  path: string;
+  title: string;
+  error: string | null;
+}
+
+export interface NoteWorkspaceCreateFolderPlan {
+  path: string;
+  error: string | null;
 }
 
 const FOLDER_DIALOG_DEFAULT_HELP_TEXT = "名称不能包含路径穿越或 Windows 非法字符";
@@ -116,6 +127,48 @@ export function findEntryCaseInsensitive(
 ): NoteFileInfo | undefined {
   const normalized = path.toLowerCase();
   return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
+}
+
+export function getCreateNotePlan(
+  files: NoteFileInfo[],
+  directory: string,
+  name: string,
+): NoteWorkspaceCreatePlan {
+  const fileError = validateNoteNamePart(name, "file");
+  if (fileError) return { path: "", title: "", error: fileError };
+
+  const directoryError = validateNoteDirectoryPathInput(directory);
+  if (directoryError) return { path: "", title: "", error: directoryError };
+
+  const filename = normalizeNoteFileName(name);
+  const path = joinNotePath(directory, filename);
+  if (findEntryCaseInsensitive(files, path, false)) {
+    return { path, title: name.trim().replace(/\.md$/i, ""), error: "同目录已存在同名笔记" };
+  }
+
+  return { path, title: name.trim().replace(/\.md$/i, ""), error: null };
+}
+
+export function getCreateFolderPlan(
+  files: NoteFileInfo[],
+  parentDirectory: string,
+  name: string,
+): NoteWorkspaceCreateFolderPlan {
+  const nameError = validateNoteNamePart(name, "folder");
+  if (nameError) return { path: "", error: nameError };
+
+  const parentError = validateNoteDirectoryPathInput(parentDirectory);
+  if (parentError) return { path: "", error: parentError };
+
+  const path = joinNotePath(parentDirectory, name.trim());
+  if (findEntryCaseInsensitive(files, path, true)) {
+    return { path, error: "同目录已存在同名文件夹" };
+  }
+  if (findEntryCaseInsensitive(files, `${path}.md`, false)) {
+    return { path, error: "同目录已存在同名笔记" };
+  }
+
+  return { path, error: null };
 }
 
 export function quoteYamlString(value: string): string {

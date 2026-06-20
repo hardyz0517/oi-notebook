@@ -296,10 +296,12 @@ import {
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
 import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
-import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
+import { validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
   buildRenameNotePath,
+  getCreateFolderPlan,
+  getCreateNotePlan,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
   getCreateFolderDialogInitialState,
   getCurrentNoteDirectory,
@@ -2729,15 +2731,9 @@ export default function App() {
   };
 
   const handleCreate = async () => {
-    const fileErr = validateNoteNamePart(dialogValue, "file");
-    if (fileErr) { toast.error(fileErr); return; }
     const directory = getResolvedNewNoteDirectory();
-    const directoryErr = validateNoteDirectoryPathInput(directory);
-    if (directoryErr) { toast.error(directoryErr); return; }
-
-    const filename = normalizeNoteFileName(dialogValue);
-    const newPath = joinNotePath(directory, filename);
-    if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
+    const createPlan = getCreateNotePlan(files, directory, dialogValue);
+    if (createPlan.error) { toast.error(createPlan.error); return; }
 
     persistActiveWorkingCopyRef.current();
 
@@ -2745,14 +2741,14 @@ export default function App() {
       if (directory && !findEntryCaseInsensitive(directory, true)) {
         await createNoteFolder(directory);
       }
-      await writeNote(newPath, buildNewNoteMarkdown(dialogValue.trim().replace(/\.md$/i, ""), newNoteTags));
+      await writeNote(createPlan.path, buildNewNoteMarkdown(createPlan.title, newNoteTags));
       const updated = await listNotes();
       setFiles(updated);
       closeDialog();
-      setDisplayTitleForPath(newPath, dialogValue.trim().replace(/\.md$/i, ""));
-      setCurrentFilePath(newPath);
-      setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
-      setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
+      setDisplayTitleForPath(createPlan.path, createPlan.title);
+      setCurrentFilePath(createPlan.path);
+      setActiveWorkingCopyId(getNoteWorkingCopyId(createPlan.path));
+      setActiveWorkspaceTabId(getNoteWorkingCopyId(createPlan.path));
       setIsDirty(false);
       toast.success("已创建空白笔记");
     } catch (e) {
@@ -2761,20 +2757,14 @@ export default function App() {
   };
 
   const handleCreateFolder = async () => {
-    const nameErr = validateNoteNamePart(dialogValue, "folder");
-    if (nameErr) { toast.error(nameErr); return; }
-    const parentErr = validateNoteDirectoryPathInput(folderParentDirectory);
-    if (parentErr) { toast.error(parentErr); return; }
-
-    const newPath = joinNotePath(folderParentDirectory, dialogValue.trim());
-    if (findEntryCaseInsensitive(newPath, true)) { toast.error("同目录已存在同名文件夹"); return; }
-    if (findEntryCaseInsensitive(`${newPath}.md`, false)) { toast.error("同目录已存在同名笔记"); return; }
+    const createFolderPlan = getCreateFolderPlan(files, folderParentDirectory, dialogValue);
+    if (createFolderPlan.error) { toast.error(createFolderPlan.error); return; }
 
     try {
-      await createNoteFolder(newPath);
+      await createNoteFolder(createFolderPlan.path);
       const updated = await listNotes();
       setFiles(updated);
-      setNewNoteCustomDirectory(newPath);
+      setNewNoteCustomDirectory(createFolderPlan.path);
       setNewNoteLocationOption("custom");
       if (returnToCreateAfterFolder) {
         setDialogMode("create");
@@ -2791,47 +2781,35 @@ export default function App() {
   };
 
   const handleCreateFolderAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNoteNamePart(name, "folder");
-    if (nameErr) throw new Error(nameErr);
-    const parentErr = validateNoteDirectoryPathInput(parentPath);
-    if (parentErr) throw new Error(parentErr);
+    const createFolderPlan = getCreateFolderPlan(files, parentPath, name);
+    if (createFolderPlan.error) throw new Error(createFolderPlan.error);
 
-    const newPath = joinNotePath(parentPath, name.trim());
-    if (findEntryCaseInsensitive(newPath, true)) throw new Error("同目录已存在同名文件夹");
-    if (findEntryCaseInsensitive(`${newPath}.md`, false)) throw new Error("同目录已存在同名笔记");
-
-    await createNoteFolder(newPath);
+    await createNoteFolder(createFolderPlan.path);
     const updated = await listNotes();
     setFiles(updated);
-    setActiveTreeDirectoryPath(newPath);
+    setActiveTreeDirectoryPath(createFolderPlan.path);
     toast.success("已创建文件夹");
-    return newPath;
+    return createFolderPlan.path;
   }, [files]);
 
   const handleCreateFileAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNoteNamePart(name, "file");
-    if (nameErr) throw new Error(nameErr);
-    const parentErr = validateNoteDirectoryPathInput(parentPath);
-    if (parentErr) throw new Error(parentErr);
-
-    const filename = normalizeNoteFileName(name);
-    const newPath = joinNotePath(parentPath, filename);
-    if (findEntryCaseInsensitive(newPath, false)) throw new Error("同目录已存在同名笔记");
+    const createPlan = getCreateNotePlan(files, parentPath, name);
+    if (createPlan.error) throw new Error(createPlan.error);
 
     persistActiveWorkingCopyRef.current();
 
-    await writeNote(newPath, buildNewNoteMarkdown(name.trim().replace(/\.md$/i, ""), []));
+    await writeNote(createPlan.path, buildNewNoteMarkdown(createPlan.title, []));
     const updated = await listNotes();
     setFiles(updated);
-    setDisplayTitleForPath(newPath, name.trim().replace(/\.md$/i, ""));
-    setCurrentFilePath(newPath);
-    setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
-    setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
+    setDisplayTitleForPath(createPlan.path, createPlan.title);
+    setCurrentFilePath(createPlan.path);
+    setActiveWorkingCopyId(getNoteWorkingCopyId(createPlan.path));
+    setActiveWorkspaceTabId(getNoteWorkingCopyId(createPlan.path));
     setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(newPath);
+    setActiveTreeFilePath(createPlan.path);
     setIsDirty(false);
     toast.success("已创建空白笔记");
-    return newPath;
+    return createPlan.path;
   }, [files]);
 
   const handleRename = async () => {

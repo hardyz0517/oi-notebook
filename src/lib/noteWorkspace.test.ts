@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildNewNoteMarkdown,
   buildRenameNotePath,
+  getCreateFolderPlan,
+  getCreateNotePlan,
   getCreateFolderDialogInitialState,
   getFolderDialogState,
   findEntryCaseInsensitive,
@@ -127,6 +129,39 @@ describe("noteWorkspace", () => {
     expect(findEntryCaseInsensitive(files, "a/note.md", false)?.path).toBe("A/note.md");
     expect(findEntryCaseInsensitive(files, "a", true)?.path).toBe("A");
     expect(findEntryCaseInsensitive(files, "a", false)).toBeUndefined();
+  });
+
+  it("builds create note plans with validation and conflicts", () => {
+    expect(getCreateNotePlan(files, "A", "New Note")).toEqual({
+      path: "A/New Note.md",
+      title: "New Note",
+      error: null,
+    });
+    expect(getCreateNotePlan(files, "A", "note.md")).toEqual({
+      path: "A/note.md",
+      title: "note",
+      error: "同目录已存在同名笔记",
+    });
+    expect(getCreateNotePlan(files, "bad//path", "New")).toEqual({
+      path: "",
+      title: "",
+      error: "Directory cannot contain empty path segments",
+    });
+  });
+
+  it("builds create folder plans with validation and sibling conflicts", () => {
+    expect(getCreateFolderPlan(files, "A", "child")).toEqual({
+      path: "A/child",
+      error: null,
+    });
+    expect(getCreateFolderPlan(files, "", "a")).toEqual({
+      path: "a",
+      error: "同目录已存在同名文件夹",
+    });
+    expect(getCreateFolderPlan(files, "A", "note")).toEqual({
+      path: "A/note",
+      error: "同目录已存在同名笔记",
+    });
   });
 
   it("quotes yaml strings through JSON escaping", () => {
