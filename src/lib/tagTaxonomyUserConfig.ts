@@ -1,4 +1,8 @@
-import { normalizeCustomCollections } from "@/components/tag-manager/tagManagerConfig";
+import {
+  normalizeCustomCollections,
+  parseUserTagTaxonomyConfigJson,
+  type TagTaxonomyConfigImportResult,
+} from "@/components/tag-manager/tagManagerConfig";
 import { normalizeTagValue } from "@/lib/collectionTags";
 import {
   getTagSuggestionList,
@@ -24,6 +28,16 @@ export interface TagTaxonomyConfigExportPayload {
   fileName: string;
 }
 
+export type TagTaxonomyImportPreviewResult =
+  | {
+    ok: true;
+    result: TagTaxonomyConfigImportResult;
+  }
+  | {
+    ok: false;
+    error: string;
+  };
+
 export function buildTagTaxonomyConfigExport(
   config?: UserTagTaxonomyConfig | null,
   exportedAt = new Date(),
@@ -33,6 +47,22 @@ export function buildTagTaxonomyConfigExport(
     json: `${JSON.stringify(exportConfig, null, 2)}\n`,
     fileName: `oi-notebook-tag-taxonomy-${exportedAt.toISOString().slice(0, 10)}.json`,
   };
+}
+
+export function previewTagTaxonomyConfigImportJson(jsonText: string): TagTaxonomyImportPreviewResult {
+  const text = jsonText.trim();
+  if (!text) {
+    return { ok: false, error: "请先粘贴标签配置 JSON。" };
+  }
+
+  try {
+    return { ok: true, result: parseUserTagTaxonomyConfigJson(text) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export type TagTaxonomyConfigUpdateResult =

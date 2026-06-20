@@ -12,6 +12,7 @@ import {
   normalizeUserTagTaxonomyConfig,
   parseAliasListInput,
   parseTagPathInput,
+  previewTagTaxonomyConfigImportJson,
   resolveTagTaxonomyAliasTarget,
 } from "./tagTaxonomyUserConfig";
 
@@ -107,6 +108,40 @@ describe("tagTaxonomyUserConfig", () => {
         customCollections: ["tricks"],
       }, null, 2)}\n`,
       fileName: "oi-notebook-tag-taxonomy-2026-06-20.json",
+    });
+  });
+
+  it("previews imported taxonomy config JSON without UI state", () => {
+    const result = previewTagTaxonomyConfigImportJson(JSON.stringify({
+      entries: [{ id: "user.dp", path: ["算法", "动态规划"], source: "user" }],
+      aliases: { DP: "user.dp" },
+      hiddenIds: ["legacy"],
+      orderOverrides: { "user.dp": 1 },
+      merges: { legacy: "user.dp" },
+      customCollections: ["题解", "题解"],
+    }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result.preview).toEqual({
+      entriesCount: 1,
+      aliasesCount: 1,
+      hiddenIdsCount: 1,
+      orderOverridesCount: 1,
+      mergesCount: 1,
+      customCollectionsCount: 1,
+    });
+    expect(result.result.config.customCollections).toEqual(["题解"]);
+  });
+
+  it("returns import preview errors for empty and malformed JSON", () => {
+    expect(previewTagTaxonomyConfigImportJson("  ")).toEqual({
+      ok: false,
+      error: "请先粘贴标签配置 JSON。",
+    });
+    expect(previewTagTaxonomyConfigImportJson("{")).toEqual({
+      ok: false,
+      error: "JSON 解析失败，请检查格式。",
     });
   });
 

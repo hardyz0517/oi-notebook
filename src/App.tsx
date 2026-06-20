@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
-import { mergeConfigWithStoredCustomCollections, parseUserTagTaxonomyConfigJson, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import { mergeConfigWithStoredCustomCollections, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
 import { useCollectionCandidatesFromNotes } from "@/components/tag-manager/useCollectionCandidatesFromNotes";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
@@ -284,6 +284,7 @@ import {
   deleteTagTaxonomyEntry,
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
+  previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
 import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
@@ -2132,24 +2133,17 @@ export default function App() {
     }
   }, [tagTaxonomyConfig]);
   const previewTagTaxonomyImport = useCallback((jsonText: string) => {
-    const text = jsonText.trim();
-    if (!text) {
+    const preview = previewTagTaxonomyConfigImportJson(jsonText);
+    if (!preview.ok) {
       setTagTaxonomyImportPreview(null);
-      setTagTaxonomyImportError("请先粘贴标签配置 JSON。");
+      setTagTaxonomyImportError(preview.error);
       return null;
     }
 
-    try {
-      const result = parseUserTagTaxonomyConfigJson(text);
-      setTagTaxonomyImportPreview(result);
-      setTagTaxonomyImportError(null);
-      setTagTaxonomyImportMessage(null);
-      return result;
-    } catch (error) {
-      setTagTaxonomyImportPreview(null);
-      setTagTaxonomyImportError(getErrorMessage(error));
-      return null;
-    }
+    setTagTaxonomyImportPreview(preview.result);
+    setTagTaxonomyImportError(null);
+    setTagTaxonomyImportMessage(null);
+    return preview.result;
   }, []);
   const handleTagTaxonomyImportInputChange = useCallback((value: string) => {
     setTagTaxonomyImportJsonInput(value);
