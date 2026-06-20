@@ -297,6 +297,7 @@ import {
   filterDeletedNoteTabs,
   isNotePathAffectedByTarget,
   rewriteNotePathReference,
+  rewriteNoteWorkspaceReferences,
   resolveNewNoteDirectory,
   type NewNoteLocationOption,
 } from "@/lib/noteWorkspace";
@@ -2574,19 +2575,45 @@ export default function App() {
     const rewritePath = (path: string) => {
       return rewriteNotePathReference(path, oldPath, newPath, isDirectory);
     };
+    const rewrittenReferences = rewriteNoteWorkspaceReferences(
+      {
+        openTabPaths,
+        pendingFileSelection,
+        pendingAssetsByFile: {},
+        openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
+        currentFilePath,
+        activeWorkspaceTabId,
+        activeWorkingCopyId,
+        activeTreeDirectoryPath,
+        activeTreeFilePath,
+        savedSnapshotPath: savedSnapshotRef.current.path,
+      },
+      oldPath,
+      newPath,
+      isDirectory,
+    );
 
-    setOpenTabPaths((current) => current.map(rewritePath));
-    setPendingFileSelection((current) => current ? { ...current, path: rewritePath(current.path) } : current);
-    setPendingAssetsByFile((current) => {
-      let changed = false;
-      const next: Record<string, string[]> = {};
-      for (const [path, assets] of Object.entries(current)) {
-        const rewritten = rewritePath(path);
-        if (rewritten !== path) changed = true;
-        next[rewritten] = [...(next[rewritten] ?? []), ...assets];
-      }
-      return changed ? next : current;
-    });
+    setOpenTabPaths(rewrittenReferences.openTabPaths);
+    setPendingFileSelection(rewrittenReferences.pendingFileSelection as { path: string; closeSearchOnSuccess: boolean } | null);
+    setPendingAssetsByFile((current) =>
+      rewriteNoteWorkspaceReferences(
+        {
+          openTabPaths: [],
+          pendingFileSelection: null,
+          pendingAssetsByFile: current,
+          openReviewTabs: [],
+          currentFilePath: null,
+          activeWorkspaceTabId: null,
+          activeWorkingCopyId: null,
+          activeTreeDirectoryPath: null,
+          activeTreeFilePath: null,
+          savedSnapshotPath: null,
+        },
+        oldPath,
+        newPath,
+        isDirectory,
+      ).pendingAssetsByFile,
+    );
     rewriteDisplayTitlePaths(rewritePath);
     setOpenReviewTabs((current) =>
       current.map((tab) => {
@@ -2596,25 +2623,12 @@ export default function App() {
           : { ...tab, preview: { ...tab.preview, notePath: rewritten } };
       }),
     );
-    setCurrentFilePath((current) => {
-      if (!current) return current;
-      const rewritten = rewritePath(current);
-      if (rewritten !== current) {
-        skipNextReadForPathRef.current = rewritten;
-      }
-      return rewritten;
-    });
-    setActiveWorkspaceTabId((current) => {
-      if (!current || current.startsWith("review:")) return current;
-      if (current.startsWith("note:")) {
-        return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
-      }
-      return rewritePath(current);
-    });
-    setActiveWorkingCopyId((current) => {
-      if (!current || !current.startsWith("note:")) return current;
-      return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
-    });
+    if (rewrittenReferences.currentFilePath !== currentFilePath && rewrittenReferences.currentFilePath) {
+      skipNextReadForPathRef.current = rewrittenReferences.currentFilePath;
+    }
+    setCurrentFilePath(rewrittenReferences.currentFilePath);
+    setActiveWorkspaceTabId(rewrittenReferences.activeWorkspaceTabId);
+    setActiveWorkingCopyId(rewrittenReferences.activeWorkingCopyId);
     setWorkingCopies((current) => {
       let changed = false;
       const next: Record<string, WorkingCopy> = {};
@@ -2641,17 +2655,13 @@ export default function App() {
       }
       return changed ? next : current;
     });
-    setActiveTreeDirectoryPath((current) => current ? rewritePath(current) : current);
-    setActiveTreeFilePath((current) => current ? rewritePath(current) : current);
-    const savedPath = savedSnapshotRef.current.path;
-    if (savedPath) {
-      const rewritten = rewritePath(savedPath);
-      if (rewritten !== savedPath) {
-        savedSnapshotRef.current = {
-          ...savedSnapshotRef.current,
-          path: rewritten,
-        };
-      }
+    setActiveTreeDirectoryPath(rewrittenReferences.activeTreeDirectoryPath);
+    setActiveTreeFilePath(rewrittenReferences.activeTreeFilePath);
+    if (rewrittenReferences.savedSnapshotPath !== savedSnapshotRef.current.path) {
+      savedSnapshotRef.current = {
+        ...savedSnapshotRef.current,
+        path: rewrittenReferences.savedSnapshotPath,
+      };
     }
   };
 

@@ -10,6 +10,7 @@ import {
   quoteYamlString,
   rewriteNotePathReference,
   filterDeletedNoteTabs,
+  rewriteNoteWorkspaceReferences,
   isNotePathAffectedByTarget,
   resolveNewNoteDirectory,
 } from "./noteWorkspace";
@@ -101,5 +102,79 @@ describe("noteWorkspace", () => {
       "A/dir2/c.md",
       "A/root.md",
     ]);
+  });
+
+  it("rewrites workspace path references for a directory rename", () => {
+    expect(
+      rewriteNoteWorkspaceReferences(
+        {
+          openTabPaths: ["A/dir/a.md", "A/dir2/b.md"],
+          pendingFileSelection: { path: "A/dir/a.md", previousPath: "keep" },
+          pendingAssetsByFile: {
+            "A/dir/a.md": ["a.png"],
+            "A/dir/nested/b.md": ["b.png"],
+            "A/dir2/c.md": ["c.png"],
+          },
+          openReviewTabs: [
+            { id: "review-1", notePath: "A/dir/a.md" },
+            { id: "review-2", notePath: "A/dir2/b.md" },
+          ],
+          currentFilePath: "A/dir/a.md",
+          activeWorkspaceTabId: "note:A/dir/a.md",
+          activeWorkingCopyId: "note:A/dir/a.md",
+          activeTreeDirectoryPath: "A/dir",
+          activeTreeFilePath: "A/dir/nested/b.md",
+          savedSnapshotPath: "A/dir/a.md",
+        },
+        "A/dir",
+        "B/dir",
+        true,
+      ),
+    ).toEqual({
+      openTabPaths: ["B/dir/a.md", "A/dir2/b.md"],
+      pendingFileSelection: { path: "B/dir/a.md", previousPath: "keep" },
+      pendingAssetsByFile: {
+        "B/dir/a.md": ["a.png"],
+        "B/dir/nested/b.md": ["b.png"],
+        "A/dir2/c.md": ["c.png"],
+      },
+      openReviewTabs: [
+        { id: "review-1", notePath: "B/dir/a.md" },
+        { id: "review-2", notePath: "A/dir2/b.md" },
+      ],
+      currentFilePath: "B/dir/a.md",
+      activeWorkspaceTabId: "note:B/dir/a.md",
+      activeWorkingCopyId: "note:B/dir/a.md",
+      activeTreeDirectoryPath: "B/dir",
+      activeTreeFilePath: "B/dir/nested/b.md",
+      savedSnapshotPath: "B/dir/a.md",
+    });
+  });
+
+  it("merges pending asset buckets when a rename collides with an existing reference", () => {
+    expect(
+      rewriteNoteWorkspaceReferences(
+        {
+          openTabPaths: [],
+          pendingFileSelection: null,
+          pendingAssetsByFile: {
+            "A/old.md": ["old.png"],
+            "A/new.md": ["new.png"],
+          },
+          openReviewTabs: [],
+          currentFilePath: null,
+          activeWorkspaceTabId: null,
+          activeWorkingCopyId: null,
+          activeTreeDirectoryPath: null,
+          activeTreeFilePath: null,
+          savedSnapshotPath: null,
+        },
+        "A/old.md",
+        "A/new.md",
+        false,
+      ).pendingAssetsByFile,
+    ).toEqual({
+      "A/new.md": ["old.png", "new.png"],
+    });
   });
 });

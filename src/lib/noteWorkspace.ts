@@ -93,3 +93,65 @@ export function isNotePathAffectedByTarget(path: string, targetPath: string, isD
 export function filterDeletedNoteTabs(tabPaths: string[], deletedPath: string, isDirectory: boolean): string[] {
   return tabPaths.filter((tabPath) => !isNotePathAffectedByTarget(tabPath, deletedPath, isDirectory));
 }
+
+export interface NoteWorkspacePendingFileSelection {
+  path: string;
+  [key: string]: unknown;
+}
+
+export interface NoteWorkspaceReviewTabReference {
+  id: string;
+  notePath: string;
+}
+
+export interface NoteWorkspacePathReferences {
+  openTabPaths: string[];
+  pendingFileSelection: NoteWorkspacePendingFileSelection | null;
+  pendingAssetsByFile: Record<string, string[]>;
+  openReviewTabs: NoteWorkspaceReviewTabReference[];
+  currentFilePath: string | null;
+  activeWorkspaceTabId: string | null;
+  activeWorkingCopyId: string | null;
+  activeTreeDirectoryPath: string | null;
+  activeTreeFilePath: string | null;
+  savedSnapshotPath: string | null;
+}
+
+function rewriteNoteWorkspaceTabId(tabId: string | null, rewritePath: (path: string) => string): string | null {
+  if (!tabId || tabId.startsWith("review:")) return tabId;
+  if (tabId.startsWith("note:")) return `note:${rewritePath(tabId.slice("note:".length))}`;
+  return rewritePath(tabId);
+}
+
+function rewriteNullableNotePath(path: string | null, rewritePath: (path: string) => string): string | null {
+  return path ? rewritePath(path) : path;
+}
+
+export function rewriteNoteWorkspaceReferences(
+  references: NoteWorkspacePathReferences,
+  oldPath: string,
+  newPath: string,
+  isDirectory: boolean,
+): NoteWorkspacePathReferences {
+  const rewritePath = (path: string) => rewriteNotePathReference(path, oldPath, newPath, isDirectory);
+  const pendingAssetsByFile: Record<string, string[]> = {};
+  for (const [path, assets] of Object.entries(references.pendingAssetsByFile)) {
+    const rewritten = rewritePath(path);
+    pendingAssetsByFile[rewritten] = [...(pendingAssetsByFile[rewritten] ?? []), ...assets];
+  }
+
+  return {
+    openTabPaths: references.openTabPaths.map(rewritePath),
+    pendingFileSelection: references.pendingFileSelection
+      ? { ...references.pendingFileSelection, path: rewritePath(references.pendingFileSelection.path) }
+      : references.pendingFileSelection,
+    pendingAssetsByFile,
+    openReviewTabs: references.openReviewTabs.map((tab) => ({ ...tab, notePath: rewritePath(tab.notePath) })),
+    currentFilePath: rewriteNullableNotePath(references.currentFilePath, rewritePath),
+    activeWorkspaceTabId: rewriteNoteWorkspaceTabId(references.activeWorkspaceTabId, rewritePath),
+    activeWorkingCopyId: rewriteNoteWorkspaceTabId(references.activeWorkingCopyId, rewritePath),
+    activeTreeDirectoryPath: rewriteNullableNotePath(references.activeTreeDirectoryPath, rewritePath),
+    activeTreeFilePath: rewriteNullableNotePath(references.activeTreeFilePath, rewritePath),
+    savedSnapshotPath: rewriteNullableNotePath(references.savedSnapshotPath, rewritePath),
+  };
+}
