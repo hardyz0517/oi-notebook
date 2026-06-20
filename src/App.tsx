@@ -3867,21 +3867,13 @@ export default function App() {
       }
 
       const submissions = luoguPreviewResult?.submissions ?? [];
-      setSelectedLuoguSubmissionIds(
-        new Set(
-          submissions
-            .filter((submission) =>
-              getLuoguSubmissionCandidateState(
-                submission,
-                submissions,
-                next,
-                luoguPreviewResult?.lastSubmissionId ?? null,
-                new Set<string>(),
-              ).defaultSelected,
-            )
-            .map((submission) => submission.submissionId),
-        ),
-      );
+      const nextSelection = getLuoguScanCompletionSelection({
+        submissions,
+        rules: next,
+        lastSubmissionId: luoguPreviewResult?.lastSubmissionId ?? null,
+        skippedSubmissionIds: new Set<string>(),
+      });
+      setSelectedLuoguSubmissionIds(nextSelection.defaultSelectedSubmissionIds);
       return next;
     });
 
