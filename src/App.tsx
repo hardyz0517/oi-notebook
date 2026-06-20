@@ -148,7 +148,7 @@ import {
   getLuoguStatusLabel,
   getSaveStatusLabel,
 } from "@/lib/appStatusLabels";
-import { normalizeBlogConfigDraft } from "@/lib/blogConfig";
+import { DEFAULT_BLOG_CONFIG, normalizeBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
@@ -303,8 +303,6 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
-const DEFAULT_BLOG_TITLE = "OI Notebook";
-const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 function isAiPerfDebugEnabled(): boolean {
@@ -1179,8 +1177,7 @@ export default function App() {
   const [isSavingTagTaxonomyConfig, setIsSavingTagTaxonomyConfig] = useState(false);
   const [tagTaxonomySaveError, setTagTaxonomySaveError] = useState<string | null>(null);
   const [blogInfoDraft, setBlogInfoDraft] = useState<BlogConfig>({
-    title: DEFAULT_BLOG_TITLE,
-    subtitle: DEFAULT_BLOG_SUBTITLE,
+    ...DEFAULT_BLOG_CONFIG,
   });
   const [blogConfigError, setBlogConfigError] = useState<string | null>(null);
   const [isLoadingBlogConfig, setIsLoadingBlogConfig] = useState(false);
@@ -1278,16 +1275,15 @@ export default function App() {
     try {
       const config = await getBlogConfig();
       setBlogInfoDraft({
-        title: config.title ?? DEFAULT_BLOG_TITLE,
-        subtitle: config.subtitle ?? DEFAULT_BLOG_SUBTITLE,
+        title: config.title ?? DEFAULT_BLOG_CONFIG.title,
+        subtitle: config.subtitle ?? DEFAULT_BLOG_CONFIG.subtitle,
       });
       setBlogConfigError(null);
     } catch (error) {
       const message = getErrorMessage(error);
       console.warn("Failed to load blog config; using defaults.", message);
       setBlogInfoDraft({
-        title: DEFAULT_BLOG_TITLE,
-        subtitle: DEFAULT_BLOG_SUBTITLE,
+        ...DEFAULT_BLOG_CONFIG,
       });
       setBlogConfigError(message);
     } finally {
