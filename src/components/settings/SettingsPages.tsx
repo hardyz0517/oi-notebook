@@ -435,7 +435,7 @@ export function BlogPreviewSettingsPage({
         <SettingsSection title={L.localPreview}>
           <SettingsCard>
             <div className="settings-v2-action-row">
-              <SettingsButton onClick={onOpenBlog}><ExternalLink className="h-3.5 w-3.5" />{blogSettingsView.openButtonLabel}</SettingsButton>
+              <SettingsButton onClick={onOpenBlog} disabled={blogSettingsView.isOpenDisabled}><ExternalLink className="h-3.5 w-3.5" />{blogSettingsView.openButtonLabel}</SettingsButton>
               <SettingsButton onClick={onRestartBlog} disabled={blogSettingsView.isRestartDisabled}>
                 <RotateCcw className="h-3.5 w-3.5" />
                 {blogSettingsView.restartButtonLabel}

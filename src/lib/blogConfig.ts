@@ -42,6 +42,8 @@ export interface BlogSettingsView {
   areFieldsDisabled: boolean;
   isSaveDisabled: boolean;
   saveButtonLabel: string;
+  isOpenDisabled: boolean;
+  isBlogOperationBusy: boolean;
   isRestartDisabled: boolean;
   restartButtonLabel: string;
   openButtonLabel: string;
@@ -55,6 +57,8 @@ export function deriveBlogSettingsView(input: BlogSettingsViewInput): BlogSettin
     areFieldsDisabled: isConfigBusy,
     isSaveDisabled: isConfigBusy,
     saveButtonLabel: input.isSavingBlogConfig ? "保存中..." : "保存博客信息",
+    isOpenDisabled: false,
+    isBlogOperationBusy: input.isRestartingBlog,
     isRestartDisabled: input.isRestartingBlog,
     restartButtonLabel: input.isRestartingBlog ? "重启中..." : "重启博客",
     openButtonLabel: "打开博客",

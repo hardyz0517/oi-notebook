@@ -54,6 +54,8 @@ describe("blogConfig", () => {
       areFieldsDisabled: false,
       isSaveDisabled: false,
       saveButtonLabel: "保存博客信息",
+      isOpenDisabled: false,
+      isBlogOperationBusy: false,
       isRestartDisabled: false,
       restartButtonLabel: "重启博客",
       openButtonLabel: "打开博客",
@@ -70,6 +72,8 @@ describe("blogConfig", () => {
       areFieldsDisabled: true,
       isSaveDisabled: true,
       saveButtonLabel: "保存博客信息",
+      isOpenDisabled: false,
+      isBlogOperationBusy: false,
     });
   });
 
@@ -83,6 +87,8 @@ describe("blogConfig", () => {
       areFieldsDisabled: true,
       isSaveDisabled: true,
       saveButtonLabel: "保存中...",
+      isOpenDisabled: false,
+      isBlogOperationBusy: false,
     });
   });
 
@@ -92,6 +98,8 @@ describe("blogConfig", () => {
       isSavingBlogConfig: false,
       isRestartingBlog: true,
     })).toMatchObject({
+      isOpenDisabled: false,
+      isBlogOperationBusy: true,
       isRestartDisabled: true,
       restartButtonLabel: "重启中...",
     });
