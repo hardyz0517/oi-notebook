@@ -1,10 +1,25 @@
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
+import type { TaskState } from "@/lib/taskStatus";
 
 export type LocalIndexStatusBadgeTone = "info" | "success" | "danger" | "warning";
 
 export interface LocalIndexActionBusyState {
   isLoading: boolean;
   isRebuilding: boolean;
+}
+
+export interface LocalIndexTaskViewInput {
+  loadTask: TaskState;
+  rebuildTask: TaskState;
+  fallbackMessage: string | null;
+}
+
+export interface LocalIndexTaskView {
+  isLoading: boolean;
+  isRebuilding: boolean;
+  actionDisabled: boolean;
+  rebuildButtonLabel: string;
+  message: string | null;
 }
 
 export function getLocalIndexStatusLabel(
@@ -50,6 +65,24 @@ export function isLocalIndexActionDisabled(state: LocalIndexActionBusyState): bo
 
 export function getLocalIndexRebuildButtonLabel(isRebuilding: boolean): string {
   return isRebuilding ? "正在建立..." : "重建索引";
+}
+
+export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalIndexTaskView {
+  const isLoading = input.loadTask.status === "running";
+  const isRebuilding = input.rebuildTask.status === "running";
+  const taskError =
+    input.rebuildTask.status === "failed"
+      ? input.rebuildTask.error
+      : input.loadTask.status === "failed"
+        ? input.loadTask.error
+        : null;
+  return {
+    isLoading,
+    isRebuilding,
+    actionDisabled: isLocalIndexActionDisabled({ isLoading, isRebuilding }),
+    rebuildButtonLabel: getLocalIndexRebuildButtonLabel(isRebuilding),
+    message: isRebuilding ? "正在建立本地笔记索引..." : taskError ?? input.fallbackMessage,
+  };
 }
 
 export function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {

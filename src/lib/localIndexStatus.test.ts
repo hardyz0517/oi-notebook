@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
 import {
   buildLocalIndexStatusMessage,
+  deriveLocalIndexTaskView,
   getLocalIndexRebuildButtonLabel,
   getLocalIndexStatusBadgeTone,
   isLocalIndexActionDisabled,
@@ -52,5 +53,43 @@ describe("localIndexStatus model helpers", () => {
 
     expect(getLocalIndexRebuildButtonLabel(false)).toBe("重建索引");
     expect(getLocalIndexRebuildButtonLabel(true)).toBe("正在建立...");
+  });
+
+  it("derives legacy local index UI flags from task states", () => {
+    expect(
+      deriveLocalIndexTaskView({
+        loadTask: { status: "running", progress: null, error: null },
+        rebuildTask: { status: "idle", progress: null, error: null },
+        fallbackMessage: null,
+      }),
+    ).toEqual({
+      isLoading: true,
+      isRebuilding: false,
+      actionDisabled: true,
+      rebuildButtonLabel: "重建索引",
+      message: null,
+    });
+
+    expect(
+      deriveLocalIndexTaskView({
+        loadTask: { status: "idle", progress: null, error: null },
+        rebuildTask: { status: "running", progress: null, error: null },
+        fallbackMessage: "old message",
+      }),
+    ).toEqual({
+      isLoading: false,
+      isRebuilding: true,
+      actionDisabled: true,
+      rebuildButtonLabel: "正在建立...",
+      message: "正在建立本地笔记索引...",
+    });
+
+    expect(
+      deriveLocalIndexTaskView({
+        loadTask: { status: "idle", progress: null, error: null },
+        rebuildTask: { status: "failed", progress: null, error: "boom" },
+        fallbackMessage: null,
+      }).message,
+    ).toBe("boom");
   });
 });

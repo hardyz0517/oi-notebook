@@ -252,14 +252,13 @@ import {
 import { formatSearchDate } from "@/lib/localSearchResults";
 import {
   buildLocalIndexStatusMessage,
+  deriveLocalIndexTaskView,
   formatLocalIndexSize,
   getLocalIndexAccessLabel,
-  getLocalIndexRebuildButtonLabel,
   getLocalIndexStatusBadgeClassName,
   getLocalIndexStatusBadgeTone,
   getLocalIndexStatusLabel,
   getLocalIndexUpdatedLabel,
-  isLocalIndexActionDisabled,
 } from "@/lib/localIndexStatus";
 import { LUOGU_DIFFICULTY_OPTIONS, getDifficultyOptionClassName, getDifficultyOptionTextColor } from "@/lib/luoguDifficulty";
 import {
@@ -286,7 +285,7 @@ import {
   parseTagPathInput,
   resolveTagTaxonomyAliasTarget,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createTaskProgress, updateTaskProgressValue, type TaskProgress } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
@@ -1519,8 +1518,8 @@ export default function App() {
   const [isClearingWebCache, setIsClearingWebCache] = useState(false);
   const [webCacheMessage, setWebCacheMessage] = useState<string | null>(null);
   const [localIndexStatus, setLocalIndexStatus] = useState<LocalNoteIndexStatusResult | null>(null);
-  const [isLoadingLocalIndexStatus, setIsLoadingLocalIndexStatus] = useState(false);
-  const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
+  const [localIndexLoadTask, setLocalIndexLoadTask] = useState<TaskState>(createIdleTaskState);
+  const [localIndexRebuildTask, setLocalIndexRebuildTask] = useState<TaskState>(createIdleTaskState);
   const [localIndexMessage, setLocalIndexMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
@@ -2025,12 +2024,17 @@ export default function App() {
     () => getTagManagerAvailableCandidateCount(tagTaxonomyUserConfig),
     [tagTaxonomyUserConfig],
   );
-  const localIndexStatusBadgeTone = getLocalIndexStatusBadgeTone(localIndexStatus, isRebuildingLocalIndex);
-  const localIndexActionDisabled = isLocalIndexActionDisabled({
-    isLoading: isLoadingLocalIndexStatus,
-    isRebuilding: isRebuildingLocalIndex,
+  const localIndexTaskView = deriveLocalIndexTaskView({
+    loadTask: localIndexLoadTask,
+    rebuildTask: localIndexRebuildTask,
+    fallbackMessage: localIndexMessage,
   });
-  const localIndexRebuildButtonLabel = getLocalIndexRebuildButtonLabel(isRebuildingLocalIndex);
+  const isLoadingLocalIndexStatus = localIndexTaskView.isLoading;
+  const isRebuildingLocalIndex = localIndexTaskView.isRebuilding;
+  const localIndexStatusBadgeTone = getLocalIndexStatusBadgeTone(localIndexStatus, isRebuildingLocalIndex);
+  const localIndexActionDisabled = localIndexTaskView.actionDisabled;
+  const localIndexRebuildButtonLabel = localIndexTaskView.rebuildButtonLabel;
+  const localIndexDisplayMessage = localIndexTaskView.message;
   const openTagManagerWorkspace = useCallback((initialFilterMode: TagManagerFilterMode = "all") => {
     const returnTarget: SettingsTarget = { type: "page", page: "blog-tag-manager" };
     debugTagManager("app.openTagManager.request", {
@@ -3667,35 +3671,37 @@ export default function App() {
   };
 
   const refreshLocalIndexStatus = async () => {
-    setIsLoadingLocalIndexStatus(true);
+    setLocalIndexLoadTask(startTaskState());
     setLocalIndexMessage(null);
     try {
       const status = await getLocalNoteIndexStatus();
       setLocalIndexStatus(status);
       setLocalIndexMessage(buildLocalIndexStatusMessage(status));
+      setLocalIndexLoadTask((task) => finishTaskState(task));
     } catch (e) {
       const message = getErrorMessage(e);
       setLocalIndexMessage(message);
+      setLocalIndexLoadTask((task) => failTaskState(task, message));
       toast.error(`本地索引状态读取失败：${message}`);
     } finally {
-      setIsLoadingLocalIndexStatus(false);
     }
   };
 
   const handleRebuildLocalIndex = async () => {
-    setIsRebuildingLocalIndex(true);
+    setLocalIndexRebuildTask(startTaskState());
     setLocalIndexMessage("正在建立本地笔记索引...");
     try {
       const status = await rebuildLocalNoteIndex();
       setLocalIndexStatus(status);
       setLocalIndexMessage(`重建完成：${status.noteCount} 篇笔记，${status.chunkCount} 个片段。`);
+      setLocalIndexRebuildTask((task) => finishTaskState(task));
       toast.success("本地笔记索引已重建");
     } catch (e) {
       const message = getErrorMessage(e);
       setLocalIndexMessage(message);
+      setLocalIndexRebuildTask((task) => failTaskState(task, message));
       toast.error(`本地索引重建失败：${message}`);
     } finally {
-      setIsRebuildingLocalIndex(false);
     }
   };
 
@@ -7815,9 +7821,9 @@ export default function App() {
                                 </SettingsV2Row>
                               </>
                             )}
-                            {localIndexMessage && (
+                            {localIndexDisplayMessage && (
                               <SettingsV2Row title="消息">
-                                <span className="settings-v2-readonly-value">{localIndexMessage}</span>
+                                <span className="settings-v2-readonly-value">{localIndexDisplayMessage}</span>
                               </SettingsV2Row>
                             )}
                           </SettingsV2Card>
