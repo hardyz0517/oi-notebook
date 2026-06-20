@@ -5,6 +5,7 @@ import {
   getCreateFolderPlan,
   getCreateNotePlan,
   getCreateFolderDialogInitialState,
+  getClosedNoteDialogState,
   getFolderDialogState,
   findEntryCaseInsensitive,
   getCurrentNoteDirectory,
@@ -91,6 +92,20 @@ describe("noteWorkspace", () => {
       dialogMode: "create-folder",
       dialogValue: "",
       folderParentDirectory: "current/path",
+    });
+  });
+
+  it("derives closed note dialog reset state", () => {
+    expect(getClosedNoteDialogState()).toEqual({
+      dialogMode: null,
+      dialogValue: "",
+      newNoteLocationOption: "current",
+      newNoteCustomDirectory: "",
+      newNoteTags: [],
+      folderParentDirectory: "",
+      returnToCreateAfterFolder: false,
+      renameTarget: null,
+      renameTargetIsDirectory: false,
     });
   });
 

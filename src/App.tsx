@@ -300,6 +300,7 @@ import {
   buildNewNoteMarkdown,
   getCreateFolderPlan,
   getCreateNotePlan,
+  getClosedNoteDialogState,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
   getCreateFolderDialogInitialState,
   getCurrentNoteDirectory,
@@ -2714,15 +2715,16 @@ export default function App() {
   };
 
   const closeDialog = () => {
-    setDialogMode(null);
-    setDialogValue("");
-    setNewNoteLocationOption("current");
-    setNewNoteCustomDirectory("");
-    setNewNoteTags([]);
-    setFolderParentDirectory("");
-    setReturnToCreateAfterFolder(false);
-    setRenameTarget(null);
-    setRenameTargetIsDirectory(false);
+    const dialogState = getClosedNoteDialogState();
+    setDialogMode(dialogState.dialogMode);
+    setDialogValue(dialogState.dialogValue);
+    setNewNoteLocationOption(dialogState.newNoteLocationOption);
+    setNewNoteCustomDirectory(dialogState.newNoteCustomDirectory);
+    setNewNoteTags(dialogState.newNoteTags);
+    setFolderParentDirectory(dialogState.folderParentDirectory);
+    setReturnToCreateAfterFolder(dialogState.returnToCreateAfterFolder);
+    setRenameTarget(dialogState.renameTarget);
+    setRenameTargetIsDirectory(dialogState.renameTargetIsDirectory);
   };
 
   const toggleNewNoteTag = (tag: string) => {

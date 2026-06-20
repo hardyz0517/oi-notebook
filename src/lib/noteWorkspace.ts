@@ -25,6 +25,18 @@ export interface CreateFolderDialogInitialState {
   folderParentDirectory: string;
 }
 
+export interface ClosedNoteDialogState {
+  dialogMode: null;
+  dialogValue: string;
+  newNoteLocationOption: NewNoteLocationOption;
+  newNoteCustomDirectory: string;
+  newNoteTags: string[];
+  folderParentDirectory: string;
+  returnToCreateAfterFolder: boolean;
+  renameTarget: string | null;
+  renameTargetIsDirectory: boolean;
+}
+
 export interface NoteWorkspaceCreatePlan {
   path: string;
   title: string;
@@ -100,6 +112,20 @@ export function getCreateFolderDialogInitialState(
     dialogMode: "create-folder",
     dialogValue: "",
     folderParentDirectory: returnToCreateAfterFolder ? resolvedNewNoteDirectory : currentNoteDirectory,
+  };
+}
+
+export function getClosedNoteDialogState(): ClosedNoteDialogState {
+  return {
+    dialogMode: null,
+    dialogValue: "",
+    newNoteLocationOption: "current",
+    newNoteCustomDirectory: "",
+    newNoteTags: [],
+    folderParentDirectory: "",
+    returnToCreateAfterFolder: false,
+    renameTarget: null,
+    renameTargetIsDirectory: false,
   };
 }
 
