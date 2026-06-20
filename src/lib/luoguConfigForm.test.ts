@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLuoguConfigFormState,
   buildLuoguConfigSavePayload,
+  deriveLuoguAccountSettingsView,
   isLuoguAiConfigured,
 } from "./luoguConfigForm";
 import type { LuoguConfig } from "./api";
@@ -44,6 +45,38 @@ describe("luoguConfigForm", () => {
       ...baseConfig,
       luogu: { ...baseConfig.luogu, last_submission_id: null },
     }).lastSubmissionId).toBe("");
+  });
+
+  it("derives account settings button state", () => {
+    expect(deriveLuoguAccountSettingsView({
+      isLoadingConfig: false,
+      isSavingConfig: false,
+      isTestingConnection: false,
+    })).toEqual({
+      isOpenSettingsDisabled: false,
+      showOpenSettingsSpinner: false,
+    });
+
+    expect(deriveLuoguAccountSettingsView({
+      isLoadingConfig: true,
+      isSavingConfig: false,
+      isTestingConnection: false,
+    })).toEqual({
+      isOpenSettingsDisabled: true,
+      showOpenSettingsSpinner: true,
+    });
+
+    expect(deriveLuoguAccountSettingsView({
+      isLoadingConfig: false,
+      isSavingConfig: true,
+      isTestingConnection: false,
+    })).toMatchObject({ isOpenSettingsDisabled: true });
+
+    expect(deriveLuoguAccountSettingsView({
+      isLoadingConfig: false,
+      isSavingConfig: false,
+      isTestingConnection: true,
+    })).toMatchObject({ isOpenSettingsDisabled: true });
   });
 
   it("builds save payloads from trimmed form input", () => {

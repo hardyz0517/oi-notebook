@@ -13,6 +13,17 @@ export interface LuoguConfigFormInput {
   lastSubmissionId: string;
 }
 
+export interface LuoguAccountSettingsViewInput {
+  isLoadingConfig: boolean;
+  isSavingConfig: boolean;
+  isTestingConnection: boolean;
+}
+
+export interface LuoguAccountSettingsView {
+  isOpenSettingsDisabled: boolean;
+  showOpenSettingsSpinner: boolean;
+}
+
 export type LuoguConfigSavePayloadResult =
   | {
     ok: true;
@@ -37,6 +48,13 @@ export function buildLuoguConfigFormState(config: LuoguConfig): LuoguConfigFormS
     clientId: config.luogu.client_id,
     lastSubmissionId: config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
     aiConfigured: isLuoguAiConfigured(config),
+  };
+}
+
+export function deriveLuoguAccountSettingsView(input: LuoguAccountSettingsViewInput): LuoguAccountSettingsView {
+  return {
+    isOpenSettingsDisabled: input.isLoadingConfig || input.isSavingConfig || input.isTestingConnection,
+    showOpenSettingsSpinner: input.isLoadingConfig,
   };
 }
 

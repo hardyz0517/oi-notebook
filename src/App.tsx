@@ -165,7 +165,7 @@ import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, Pre
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
-import { buildLuoguConfigFormState, buildLuoguConfigSavePayload } from "@/lib/luoguConfigForm";
+import { buildLuoguConfigFormState, buildLuoguConfigSavePayload, deriveLuoguAccountSettingsView } from "@/lib/luoguConfigForm";
 import {
   formatZoomLabel,
   getBlogStatusLabel,
@@ -2313,6 +2313,11 @@ export default function App() {
   const luoguSettingsStatusDescription = getLuoguSettingsStatusDescription({
     ...luoguStatusInput,
     hasConnectionResult: Boolean(luoguConnectionResult),
+  });
+  const luoguAccountSettingsView = deriveLuoguAccountSettingsView({
+    isLoadingConfig: isLoadingLuoguConfig,
+    isSavingConfig: isSavingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
   });
   const isLuoguRuleControlDisabled = getLuoguRuleControlDisabled({
     isLoadingConfig: isLoadingLuoguConfig,
@@ -7957,9 +7962,7 @@ export default function App() {
                       uid={luoguConfigUid}
                       lastSubmissionId={luoguConfigLastSubmissionId}
                       aiConfigured={luoguConfigAiConfigured}
-                      isLoadingConfig={isLoadingLuoguConfig}
-                      isSavingConfig={isSavingLuoguConfig}
-                      isTestingConnection={isTestingLuoguConnection}
+                      accountSettingsView={luoguAccountSettingsView}
                       onOpenSettings={() => void openLuoguAccountManager()}
                     />
                     </SettingsSectionAnchor>
