@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LUOGU_IMPORT_RULES,
   buildLuoguImportRuleRowModels,
+  getLuoguImportRuleUpdate,
   isLuoguRuleControlDisabled,
   type LuoguImportRuleBusyState,
 } from "./luoguImportRules";
@@ -55,5 +56,19 @@ describe("luoguImportRules settings model", () => {
     expect(isLuoguRuleControlDisabled({ ...idle, isPreparingSelected: true })).toBe(true);
     expect(isLuoguRuleControlDisabled({ ...idle, isWritingPrepared: true })).toBe(true);
     expect(isLuoguRuleControlDisabled({ ...idle, isSyncing: true })).toBe(true);
+  });
+
+  it("maps rule row value changes to typed rule patches", () => {
+    expect(getLuoguImportRuleUpdate("submitFilter", "includeNonAc")).toEqual({ submitFilter: "includeNonAc" });
+    expect(getLuoguImportRuleUpdate("problemIdFilter", "onlyP")).toEqual({ problemIdFilter: "onlyP" });
+    expect(getLuoguImportRuleUpdate("sameProblemStrategy", "manual")).toEqual({ sameProblemStrategy: "manual" });
+    expect(getLuoguImportRuleUpdate("importedProblemPolicy", "regenerate")).toEqual({ importedProblemPolicy: "regenerate" });
+    expect(getLuoguImportRuleUpdate("missingInsightStrategy", "review")).toEqual({ missingInsightStrategy: "review" });
+    expect(getLuoguImportRuleUpdate("scanResultVisibility", "hideSkipped")).toEqual({ scanResultVisibility: "hideSkipped" });
+    expect(getLuoguImportRuleUpdate("defaultSaveLocation", "custom")).toEqual({ defaultSaveLocation: "custom" });
+    expect(getLuoguImportRuleUpdate("writeStrategy", "overwrite")).toEqual({ writeStrategy: "overwrite" });
+    expect(getLuoguImportRuleUpdate("defaultDraftStatus", "published")).toEqual({ defaultDraftStatus: "published" });
+    expect(getLuoguImportRuleUpdate("includeSourceCode", "yes")).toEqual({ includeSourceCode: true });
+    expect(getLuoguImportRuleUpdate("includeSourceCode", "no")).toEqual({ includeSourceCode: false });
   });
 });

@@ -127,6 +127,31 @@ export function isLuoguRuleControlDisabled(state: LuoguImportRuleBusyState): boo
   );
 }
 
+export function getLuoguImportRuleUpdate(id: LuoguImportRuleId, value: string): Partial<LuoguImportRules> {
+  switch (id) {
+    case "submitFilter":
+      return { submitFilter: value as LuoguSubmitFilter };
+    case "problemIdFilter":
+      return { problemIdFilter: value as LuoguProblemIdFilter };
+    case "sameProblemStrategy":
+      return { sameProblemStrategy: value as LuoguSameProblemStrategy };
+    case "importedProblemPolicy":
+      return { importedProblemPolicy: value as LuoguImportedProblemPolicy };
+    case "missingInsightStrategy":
+      return { missingInsightStrategy: value as LuoguMissingInsightStrategy };
+    case "scanResultVisibility":
+      return { scanResultVisibility: value as LuoguScanResultVisibility };
+    case "defaultSaveLocation":
+      return { defaultSaveLocation: value as LuoguDefaultSaveLocation };
+    case "writeStrategy":
+      return { writeStrategy: value as LuoguWriteStrategy };
+    case "defaultDraftStatus":
+      return { defaultDraftStatus: value as LuoguDefaultDraftStatus };
+    case "includeSourceCode":
+      return { includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" };
+  }
+}
+
 export function buildLuoguImportRuleRowModels(rules: LuoguImportRules): LuoguImportRuleRowModel[] {
   return [
     {

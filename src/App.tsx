@@ -86,23 +86,13 @@ import { useLuoguImportController } from "@/components/luogu/useLuoguImportContr
 import {
   applyLuoguPreparedRules,
   buildLuoguImportRuleRowModels,
+  getLuoguImportRuleUpdate,
   isLuoguRuleControlDisabled as getLuoguRuleControlDisabled,
   normalizeLuoguImportRules,
   readStoredLuoguImportRules,
   saveStoredLuoguImportRules,
   validateLuoguSaveDirectoryInput,
-  type LuoguDefaultDraftStatus,
-  type LuoguDefaultSaveLocation,
-  type LuoguImportedProblemPolicy,
-  type LuoguImportRuleId,
   type LuoguImportRules,
-  type LuoguIncludeSourceCode,
-  type LuoguMissingInsightStrategy,
-  type LuoguProblemIdFilter,
-  type LuoguSameProblemStrategy,
-  type LuoguScanResultVisibility,
-  type LuoguSubmitFilter,
-  type LuoguWriteStrategy,
 } from "@/components/settings/pages/luoguImportRules";
 import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxonomySettingsPage";
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
@@ -696,31 +686,6 @@ interface LuoguScanSummary {
   candidateCount: number;
   skippedCount: number;
   rangeLabel: string;
-}
-
-function getLuoguImportRuleUpdate(id: LuoguImportRuleId, value: string): Partial<LuoguImportRules> {
-  switch (id) {
-    case "submitFilter":
-      return { submitFilter: value as LuoguSubmitFilter };
-    case "problemIdFilter":
-      return { problemIdFilter: value as LuoguProblemIdFilter };
-    case "sameProblemStrategy":
-      return { sameProblemStrategy: value as LuoguSameProblemStrategy };
-    case "importedProblemPolicy":
-      return { importedProblemPolicy: value as LuoguImportedProblemPolicy };
-    case "missingInsightStrategy":
-      return { missingInsightStrategy: value as LuoguMissingInsightStrategy };
-    case "scanResultVisibility":
-      return { scanResultVisibility: value as LuoguScanResultVisibility };
-    case "defaultSaveLocation":
-      return { defaultSaveLocation: value as LuoguDefaultSaveLocation };
-    case "writeStrategy":
-      return { writeStrategy: value as LuoguWriteStrategy };
-    case "defaultDraftStatus":
-      return { defaultDraftStatus: value as LuoguDefaultDraftStatus };
-    case "includeSourceCode":
-      return { includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" };
-  }
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
