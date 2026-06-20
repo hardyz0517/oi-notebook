@@ -27,6 +27,7 @@ import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreview
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import { useOpenTabsController } from "@/components/layout/useOpenTabsController";
+import { useNotesListController } from "@/components/notes/useNotesListController";
 import { useLocalNoteSearchController } from "@/components/search/useLocalNoteSearchController";
 import AiConfigManager from "@/components/settings/AiConfigManager";
 import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
@@ -1297,8 +1298,6 @@ function getPreviewMarkdownSyncDelayMs(docLength: number): number {
 }
 
 export default function App() {
-  const [files, setFiles] = useState<NoteFileInfo[]>([]);
-  const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
@@ -1449,6 +1448,17 @@ export default function App() {
     currentFilePathRef.current = currentFilePath;
     activeFileKeyRef.current = currentFilePath;
   }, [currentFilePath]);
+
+  const handleNotesChangedForList = useCallback(() => {
+    debugTagManager("notes.changed", {
+      hasTagManagerSession: Boolean(tagManagerSessionRef.current),
+      currentFilePath: currentFilePathRef.current,
+      refreshList: true,
+    });
+  }, []);
+  const { files, setFiles, hasLoadedNotes } = useNotesListController({
+    onNotesChanged: handleNotesChangedForList,
+  });
 
   useEffect(() => {
     workingCopiesRef.current = workingCopies;
@@ -6599,55 +6609,6 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  // 挂载时从后端加载笔记列表
-  useEffect(() => {
-    listNotes()
-      .then((loaded) => {
-        setFiles(loaded);
-        setHasLoadedNotes(true);
-      })
-      .catch((e: Error) => console.error("加载笔记列表失败：", e.message));
-  }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    listen("notes-changed", () => {
-      debugTagManager("notes.changed", {
-        hasTagManagerSession: Boolean(tagManagerSessionRef.current),
-        currentFilePath: currentFilePathRef.current,
-        refreshList: true,
-      });
-      listNotes()
-        .then((updated) => {
-          if (!cancelled) {
-            setFiles(updated);
-            setHasLoadedNotes(true);
-          }
-        })
-        .catch((e: Error) =>
-          console.error("收到 notes-changed 后刷新列表失败：", e.message),
-        );
-    })
-      .then((fn) => {
-        if (cancelled) {
-          // 组件已卸载，立即取消订阅
-          fn();
-        } else {
-          unlisten = fn;
-        }
-      })
-      .catch((e: Error) =>
-        console.error("注册 notes-changed 监听失败：", e.message),
-      );
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
   }, []);
 
   useEffect(() => {
