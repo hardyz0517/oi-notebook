@@ -105,11 +105,39 @@ Use domain modules as the home for stable rules:
   scan/apply task state, stats, panel state, and selection summaries.
 - `src/lib/localIndexStatus.ts`: local index status labels, task view state,
   rebuild messages, and size/date formatting.
+- `src/lib/blogConfig.ts`: blog identity defaults, loaded config fallback,
+  draft normalization, save validation, and Blog settings view state such as
+  field disabled state, button labels, and Blog operation entry state.
 - `src/lib/appStatusLabels.ts`: status bar and settings status labels.
 - `src/lib/api.ts`: the only frontend boundary for Rust command invocation.
 
 Future work should continue this pattern for blog configuration, Luogu account
 settings, Tag Manager details, and other non-AI areas.
+
+## Blog Domain Boundary
+
+Blog configuration rules are owned by `src/lib/blogConfig.ts`. This includes
+`DEFAULT_BLOG_CONFIG`, `normalizeBlogConfigDraft`, `resolveBlogConfigDraft`,
+`buildBlogConfigSaveDraft`, and `deriveBlogSettingsView`.
+
+The Blog settings page should consume `BlogSettingsView` instead of assembling
+loading, saving, restarting, disabled-state, or button-label formulas in JSX.
+This keeps Settings visual components stable and lets Blog UI behavior be
+tested without rendering the Settings center.
+
+`src/App.tsx` remains the correct owner for Blog side effects and app-shell
+orchestration: calling `getBlogConfig`, `saveBlogConfig`, `openBlog`, and
+`restartBlogServer`; preserving toast behavior; and maintaining try/catch and
+state update order. Do not move those API calls into `blogConfig.ts`.
+
+When extending Blog behavior, first decide whether the change is:
+
+- a pure config/view rule, which belongs in `src/lib/blogConfig.ts` with
+  focused tests;
+- an app-shell side effect, which may stay in `src/App.tsx` or move into a
+  dedicated controller only if the whole effect has a clear owner;
+- a visual Settings change, which should be handled separately from foundation
+  cleanup and must preserve the Settings V2 visual contract.
 
 ## Side Effects
 
