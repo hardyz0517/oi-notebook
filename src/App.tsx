@@ -73,6 +73,7 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
   type LuoguImportStep,
   type LuoguPreviewDetailTab,
@@ -3161,45 +3162,27 @@ export default function App() {
         lastSubmissionId: latestPageResult.lastSubmissionId,
         submissions: limitedSubmissions,
       };
-      const candidateCount = result.submissions.filter((submission) =>
-        getLuoguSubmissionCandidateState(
-          submission,
-          result.submissions,
-          luoguImportRules,
-          result.lastSubmissionId,
-          new Set<string>(),
-        ).canSelect,
-      ).length;
-      const skippedCount = result.submissions.length - candidateCount;
+      const scanCompletionSelection = getLuoguScanCompletionSelection({
+        submissions: result.submissions,
+        rules: luoguImportRules,
+        lastSubmissionId: result.lastSubmissionId,
+        skippedSubmissionIds: new Set<string>(),
+      });
 
       setLuoguPreviewResult(result);
       setLuoguScanSummary({
         scannedPages,
         foundCount: result.submissions.length,
-        candidateCount,
-        skippedCount,
+        candidateCount: scanCompletionSelection.candidateCount,
+        skippedCount: scanCompletionSelection.skippedCount,
         rangeLabel,
       });
-      setSelectedLuoguSubmissionIds(
-        new Set(
-          result.submissions
-            .filter((submission) =>
-              getLuoguSubmissionCandidateState(
-                submission,
-                result.submissions,
-                luoguImportRules,
-                result.lastSubmissionId,
-                new Set<string>(),
-              ).defaultSelected,
-            )
-            .map((submission) => submission.submissionId),
-        ),
-      );
+      setSelectedLuoguSubmissionIds(scanCompletionSelection.defaultSelectedSubmissionIds);
       setLuoguConfigAiConfigured(result.aiConfigured);
       setLuoguConfigLastSubmissionId(
         result.lastSubmissionId === null ? "" : String(result.lastSubmissionId),
       );
-      toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${candidateCount} 条`);
+      toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${scanCompletionSelection.candidateCount} 条`);
     } catch (e) {
       const message = getErrorMessage(e);
       setLuoguScanError(message);

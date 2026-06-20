@@ -1,7 +1,10 @@
 import { createIdleTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import type { PreviewLuoguSubmission } from "@/lib/api";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
 import type { LuoguPrepareItemStatus } from "./luoguDisplay";
+import { getLuoguSubmissionCandidateState } from "@/components/settings/pages/luoguImportDomain";
+import type { LuoguImportRules } from "@/components/settings/pages/luoguImportRules";
 
 export type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 export type LuoguImportStep = "scan" | "preview";
@@ -35,6 +38,48 @@ export interface LuoguImportCenterBusyInput {
 
 export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): boolean {
   return input.isImporting || input.isPreparing || input.isWriting || input.isScanning || input.isSyncing;
+}
+
+export interface LuoguScanCompletionSelectionInput {
+  submissions: PreviewLuoguSubmission[];
+  rules: LuoguImportRules;
+  lastSubmissionId: number | null;
+  skippedSubmissionIds: Set<string>;
+}
+
+export interface LuoguScanCompletionSelection {
+  candidateCount: number;
+  skippedCount: number;
+  defaultSelectedSubmissionIds: Set<string>;
+}
+
+export function getLuoguScanCompletionSelection(
+  input: LuoguScanCompletionSelectionInput,
+): LuoguScanCompletionSelection {
+  let candidateCount = 0;
+  const defaultSelectedSubmissionIds = new Set<string>();
+
+  for (const submission of input.submissions) {
+    const state = getLuoguSubmissionCandidateState(
+      submission,
+      input.submissions,
+      input.rules,
+      input.lastSubmissionId,
+      input.skippedSubmissionIds,
+    );
+    if (state.canSelect) {
+      candidateCount += 1;
+    }
+    if (state.defaultSelected) {
+      defaultSelectedSubmissionIds.add(submission.submissionId);
+    }
+  }
+
+  return {
+    candidateCount,
+    skippedCount: Math.max(0, input.submissions.length - candidateCount),
+    defaultSelectedSubmissionIds,
+  };
 }
 
 export interface LuoguPreparationWorkspaceState<TPreparedNote = unknown, TWriteResult = unknown> {

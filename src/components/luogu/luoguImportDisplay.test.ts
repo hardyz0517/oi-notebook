@@ -6,10 +6,45 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
 } from "./luoguImportDisplay";
+import { normalizeLuoguImportRules } from "@/components/settings/pages/luoguImportRules";
+import type { PreviewLuoguSubmission } from "@/lib/api";
 
 const emptyStats = { total: 0, candidateCount: 0, skippedCount: 0 };
+const luoguSubmissions: PreviewLuoguSubmission[] = [
+  {
+    submissionId: "103",
+    problemId: "P1001",
+    problemTitle: "A+B",
+    difficulty: "入门",
+    status: "Accepted",
+    isAc: true,
+    submitTime: "",
+    statusLabel: "可候选",
+  },
+  {
+    submissionId: "102",
+    problemId: "P1002",
+    problemTitle: "过河卒",
+    difficulty: "普及-",
+    status: "Wrong Answer",
+    isAc: false,
+    submitTime: "",
+    statusLabel: "可候选",
+  },
+  {
+    submissionId: "101",
+    problemId: "B2001",
+    problemTitle: "Hello",
+    difficulty: "入门",
+    status: "Accepted",
+    isAc: true,
+    submitTime: "",
+    statusLabel: "可候选",
+  },
+];
 
 describe("luoguImportDisplay", () => {
   it("creates an empty preparation workspace state", () => {
@@ -106,6 +141,37 @@ describe("luoguImportDisplay", () => {
       summary: null,
       error: null,
     })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
+  it("derives scan completion counts and default selection from import rules", () => {
+    const selection = getLuoguScanCompletionSelection({
+      submissions: luoguSubmissions,
+      rules: normalizeLuoguImportRules({
+        requireAc: true,
+        problemIdFilter: "onlyP",
+      }),
+      lastSubmissionId: null,
+      skippedSubmissionIds: new Set(),
+    });
+
+    expect(selection.candidateCount).toBe(1);
+    expect(selection.skippedCount).toBe(2);
+    expect(selection.defaultSelectedSubmissionIds).toEqual(new Set(["103"]));
+  });
+
+  it("keeps imported submissions selectable but unselected when rules ask for review", () => {
+    const selection = getLuoguScanCompletionSelection({
+      submissions: luoguSubmissions,
+      rules: normalizeLuoguImportRules({
+        importedProblemPolicy: "showUnselected",
+      }),
+      lastSubmissionId: 103,
+      skippedSubmissionIds: new Set(),
+    });
+
+    expect(selection.candidateCount).toBe(3);
+    expect(selection.skippedCount).toBe(0);
+    expect(selection.defaultSelectedSubmissionIds).toEqual(new Set());
   });
 
   it("formats paused scan summary before other states", () => {
