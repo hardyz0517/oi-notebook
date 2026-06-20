@@ -16,6 +16,7 @@ import {
   isTaskFailed,
   isTaskPaused,
   isTaskRunning,
+  deriveTaskView,
 } from "./taskStatus";
 
 describe("taskStatus", () => {
@@ -136,5 +137,63 @@ describe("taskStatus", () => {
 
     expect(isTaskFailed(failed)).toBe(true);
     expect(isTaskFailed(cancelTaskState(running))).toBe(false);
+  });
+
+  it("derives a common task view for controls and status text", () => {
+    expect(deriveTaskView(createIdleTaskState(), {
+      idleLabel: "Ready",
+      runningLabel: "Working",
+      succeededLabel: "Done",
+      failedLabel: "Failed",
+      cancelledLabel: "Cancelled",
+    })).toEqual({
+      status: "idle",
+      isActive: false,
+      isBusy: false,
+      canStart: true,
+      canCancel: false,
+      canRetry: false,
+      label: "Ready",
+      message: null,
+      progress: null,
+      error: null,
+    });
+
+    expect(deriveTaskView(updateTaskProgress(startTaskState(3), { current: 1 }), {
+      idleLabel: "Ready",
+      runningLabel: "Working",
+      succeededLabel: "Done",
+      failedLabel: "Failed",
+      cancelledLabel: "Cancelled",
+    })).toEqual({
+      status: "running",
+      isActive: true,
+      isBusy: true,
+      canStart: false,
+      canCancel: true,
+      canRetry: false,
+      label: "Working",
+      message: "1/3",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveTaskView(failTaskState(startTaskState(), "boom"), {
+      idleLabel: "Ready",
+      runningLabel: "Working",
+      succeededLabel: "Done",
+      failedLabel: "Failed",
+      cancelledLabel: "Cancelled",
+    })).toMatchObject({
+      status: "failed",
+      isActive: false,
+      isBusy: false,
+      canStart: true,
+      canCancel: false,
+      canRetry: true,
+      label: "Failed",
+      message: "boom",
+      error: "boom",
+    });
   });
 });

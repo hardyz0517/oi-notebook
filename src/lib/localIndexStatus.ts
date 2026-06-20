@@ -1,5 +1,5 @@
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
-import { isTaskFailed, isTaskRunning, type TaskState } from "@/lib/taskStatus";
+import { deriveTaskView, isTaskFailed, type TaskState } from "@/lib/taskStatus";
 
 export type LocalIndexStatusBadgeTone = "info" | "success" | "danger" | "warning";
 
@@ -78,8 +78,23 @@ export function buildLocalIndexRebuildSuccessMessage(
 }
 
 export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalIndexTaskView {
-  const isLoading = isTaskRunning(input.loadTask);
-  const isRebuilding = isTaskRunning(input.rebuildTask);
+  const loadView = deriveTaskView(input.loadTask, {
+    idleLabel: "",
+    runningLabel: "",
+    succeededLabel: "",
+    failedLabel: "",
+    cancelledLabel: "",
+  });
+  const rebuildView = deriveTaskView(input.rebuildTask, {
+    idleLabel: getLocalIndexRebuildButtonLabel(false),
+    runningLabel: getLocalIndexRebuildButtonLabel(true),
+    stoppingLabel: getLocalIndexRebuildButtonLabel(true),
+    succeededLabel: getLocalIndexRebuildButtonLabel(false),
+    failedLabel: getLocalIndexRebuildButtonLabel(false),
+    cancelledLabel: getLocalIndexRebuildButtonLabel(false),
+  });
+  const isLoading = loadView.isBusy;
+  const isRebuilding = rebuildView.isBusy;
   const taskError =
     isTaskFailed(input.rebuildTask)
       ? input.rebuildTask.error
@@ -90,7 +105,7 @@ export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalI
     isLoading,
     isRebuilding,
     actionDisabled: isLocalIndexActionDisabled({ isLoading, isRebuilding }),
-    rebuildButtonLabel: getLocalIndexRebuildButtonLabel(isRebuilding),
+    rebuildButtonLabel: rebuildView.label,
     message: isRebuilding ? "正在建立本地笔记索引..." : taskError ?? input.fallbackMessage,
   };
 }

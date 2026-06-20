@@ -101,4 +101,33 @@ describe("localIndexStatus model helpers", () => {
       }).message,
     ).toBe("boom");
   });
+
+  it("derives local index busy flags from the common task view model", () => {
+    expect(
+      deriveLocalIndexTaskView({
+        loadTask: { status: "queued", progress: null, error: null },
+        rebuildTask: { status: "idle", progress: null, error: null },
+        fallbackMessage: null,
+      }),
+    ).toMatchObject({
+      isLoading: true,
+      isRebuilding: false,
+      actionDisabled: true,
+      message: null,
+    });
+
+    expect(
+      deriveLocalIndexTaskView({
+        loadTask: { status: "idle", progress: null, error: null },
+        rebuildTask: { status: "stopping", progress: null, error: null },
+        fallbackMessage: "old message",
+      }),
+    ).toMatchObject({
+      isLoading: false,
+      isRebuilding: true,
+      actionDisabled: true,
+      rebuildButtonLabel: getLocalIndexRebuildButtonLabel(true),
+      message: getLocalIndexRebuildRunningMessage(),
+    });
+  });
 });

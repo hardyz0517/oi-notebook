@@ -21,6 +21,7 @@ import {
   getTreeInlineCreateState,
   normalizeCustomNoteDirectory,
   quoteYamlString,
+  removeDeletedNoteWorkingCopies,
   removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   filterDeletedNoteTabs,
@@ -328,6 +329,29 @@ describe("noteWorkspace", () => {
       activeTreeDirectoryPath: "A/dir",
       activeTreeFilePath: null,
       shouldClearDirty: false,
+    });
+  });
+
+  it("removes note working copies affected by deleted files and directories", () => {
+    const workingCopies = {
+      "note:A/dir/a.md": { id: "note:A/dir/a.md", kind: "note", path: "A/dir/a.md" },
+      "note:A/dir/nested/b.md": { id: "note:A/dir/nested/b.md", kind: "note", path: "A/dir/nested/b.md" },
+      "note:A/dir2/c.md": { id: "note:A/dir2/c.md", kind: "note", path: "A/dir2/c.md" },
+      "external:C:/tmp/a.md": { id: "external:C:/tmp/a.md", kind: "external", path: null },
+      "untitled:1": { id: "untitled:1", kind: "untitled", path: null },
+    };
+
+    expect(removeDeletedNoteWorkingCopies(workingCopies, "A/dir/a.md", false)).toEqual({
+      "note:A/dir/nested/b.md": { id: "note:A/dir/nested/b.md", kind: "note", path: "A/dir/nested/b.md" },
+      "note:A/dir2/c.md": { id: "note:A/dir2/c.md", kind: "note", path: "A/dir2/c.md" },
+      "external:C:/tmp/a.md": { id: "external:C:/tmp/a.md", kind: "external", path: null },
+      "untitled:1": { id: "untitled:1", kind: "untitled", path: null },
+    });
+
+    expect(removeDeletedNoteWorkingCopies(workingCopies, "A/dir", true)).toEqual({
+      "note:A/dir2/c.md": { id: "note:A/dir2/c.md", kind: "note", path: "A/dir2/c.md" },
+      "external:C:/tmp/a.md": { id: "external:C:/tmp/a.md", kind: "external", path: null },
+      "untitled:1": { id: "untitled:1", kind: "untitled", path: null },
     });
   });
 

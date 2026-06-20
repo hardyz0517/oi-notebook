@@ -318,6 +318,7 @@ import {
   getTreeSelectionAfterFileSelect,
   getTreeInlineCreateState,
   getTreeSelectionAfterRootSelect,
+  removeDeletedNoteWorkingCopies,
   removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   rewriteNoteWorkspaceReferences,
@@ -2875,6 +2876,7 @@ export default function App() {
       setCurrentFilePath(references.currentFilePath);
       setActiveWorkspaceTabId(references.activeWorkspaceTabId);
       setActiveWorkingCopyId(references.activeWorkingCopyId);
+      setWorkingCopies((current) => removeDeletedNoteWorkingCopies(current, path, isDirectory));
       setActiveTreeDirectoryPath(references.activeTreeDirectoryPath);
       setActiveTreeFilePath(references.activeTreeFilePath);
       if (references.shouldClearDirty) {

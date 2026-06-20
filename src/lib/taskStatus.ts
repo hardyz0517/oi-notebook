@@ -14,6 +14,30 @@ export interface TaskState<TError = string> {
   error: TError | null;
 }
 
+export interface TaskView<TError = string> {
+  status: TaskStatus;
+  isActive: boolean;
+  isBusy: boolean;
+  canStart: boolean;
+  canCancel: boolean;
+  canRetry: boolean;
+  label: string;
+  message: string | null;
+  progress: TaskProgress | null;
+  error: TError | null;
+}
+
+export interface TaskViewLabels {
+  idleLabel: string;
+  queuedLabel?: string;
+  runningLabel: string;
+  pausedLabel?: string;
+  stoppingLabel?: string;
+  succeededLabel: string;
+  failedLabel: string;
+  cancelledLabel: string;
+}
+
 export function createIdleTaskState<TError = string>(): TaskState<TError> {
   return { status: "idle", progress: null, error: null };
 }
@@ -91,18 +115,54 @@ export function cancelTaskState<TError = string>(state: TaskState<TError>): Task
   return { ...state, status: "cancelled", error: null };
 }
 
-export function isTaskRunning(state: TaskState): boolean {
+export function isTaskRunning(state: TaskState<unknown>): boolean {
   return state.status === "running";
 }
 
-export function isTaskPaused(state: TaskState): boolean {
+export function isTaskPaused(state: TaskState<unknown>): boolean {
   return state.status === "paused";
 }
 
-export function isTaskActive(state: TaskState): boolean {
+export function isTaskActive(state: TaskState<unknown>): boolean {
   return state.status === "queued" || state.status === "running" || state.status === "paused" || state.status === "stopping";
 }
 
-export function isTaskFailed(state: TaskState): boolean {
+export function isTaskFailed(state: TaskState<unknown>): boolean {
   return state.status === "failed";
+}
+
+export function formatTaskProgress(progress: TaskProgress | null): string | null {
+  if (!progress || progress.total <= 0) return null;
+  return `${progress.current}/${progress.total}`;
+}
+
+export function deriveTaskView<TError = string>(
+  state: TaskState<TError>,
+  labels: TaskViewLabels,
+): TaskView<TError> {
+  const isActive = isTaskActive(state);
+  const isBusy = state.status === "queued" || state.status === "running" || state.status === "stopping";
+  const labelByStatus: Record<TaskStatus, string> = {
+    idle: labels.idleLabel,
+    queued: labels.queuedLabel ?? labels.runningLabel,
+    running: labels.runningLabel,
+    paused: labels.pausedLabel ?? labels.runningLabel,
+    stopping: labels.stoppingLabel ?? labels.runningLabel,
+    succeeded: labels.succeededLabel,
+    failed: labels.failedLabel,
+    cancelled: labels.cancelledLabel,
+  };
+
+  return {
+    status: state.status,
+    isActive,
+    isBusy,
+    canStart: !isActive,
+    canCancel: state.status === "queued" || state.status === "running" || state.status === "paused",
+    canRetry: state.status === "failed" || state.status === "cancelled",
+    label: labelByStatus[state.status],
+    message: state.error == null ? formatTaskProgress(state.progress) : String(state.error),
+    progress: state.progress,
+    error: state.error,
+  };
 }

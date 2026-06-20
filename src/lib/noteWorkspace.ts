@@ -380,6 +380,27 @@ export function removeDeletedNoteWorkspaceReferences(
   };
 }
 
+export interface NoteWorkingCopyReference {
+  kind?: string;
+  path?: string | null;
+}
+
+export function removeDeletedNoteWorkingCopies<TCopy extends NoteWorkingCopyReference>(
+  workingCopies: Record<string, TCopy>,
+  deletedPath: string,
+  isDirectory: boolean,
+): Record<string, TCopy> {
+  const nextWorkingCopies: Record<string, TCopy> = {};
+  for (const [id, copy] of Object.entries(workingCopies)) {
+    const notePath = copy.kind === "note" ? copy.path : null;
+    if (notePath && isNotePathAffectedByTarget(notePath, deletedPath, isDirectory)) {
+      continue;
+    }
+    nextWorkingCopies[id] = copy;
+  }
+  return nextWorkingCopies;
+}
+
 export interface NoteWorkspacePendingFileSelection {
   path: string;
   [key: string]: unknown;
