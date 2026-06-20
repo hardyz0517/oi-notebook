@@ -51,12 +51,15 @@ Already completed foundation commits:
 - `7ff4be0 refactor(notes): extract note workspace helpers`
 - `05681cc refactor(notes): centralize note creation rules`
 - `0dd51b8 refactor(blog): extract config draft normalization`
+- `db2703d refactor(editor): extract cursor context helper`
+- `1781efe refactor(preview): extract sync timing rules`
+- `5b99f44 refactor(app): extract status label helpers`
 
 Progress calibration, 2026-06-20:
 
 - Completed from this plan: app preference helpers, collection/tag helpers, local index display helpers, settings render guards, settings registry/search helpers, Luogu import controller, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
-- Newly added during continued execution: `src/lib/noteWorkspace.ts` with tests and `src/lib/blogConfig.ts` with tests.
-- Remaining foundation focus: further `App.tsx` shell decomposition, non-AI status/label helpers, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
+- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, and `src/lib/appStatusLabels.ts`, each with focused tests.
+- Remaining foundation focus: further `App.tsx` shell decomposition, tag taxonomy helper consolidation, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
 
 Hard guardrails for every task:
@@ -1459,12 +1462,13 @@ git commit -m "docs(ai): add upgrade entry criteria"
 When the user is away, execute these low-risk tasks in order:
 
 1. Update this plan whenever execution reality diverges from the original queue.
-2. Extract remaining non-AI status/label helpers from `App.tsx` when they are pure and testable.
-3. Extract `extractCursorParagraph` into a small editor-context helper with focused tests, without touching `MarkdownEditor` or `MarkdownPreview` ref patterns.
-4. Extract prompt usage metadata helpers only if the task can avoid changing prompt content or AI behavior.
-5. Continue reducing note/file workspace orchestration by moving pure path rewrite helpers, leaving side effects in `App.tsx`.
-6. Add or update tests for every pure helper module touched in the same commit.
-7. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
+2. Continue extracting remaining non-AI status/label helpers from `App.tsx` when they are pure and testable; status bar and Luogu connection labels are now covered by `src/lib/appStatusLabels.ts`.
+3. Keep editor-context behavior pinned in `src/lib/editorContext.ts`; do not change cursor paragraph semantics unless a later behavior task explicitly asks for it.
+4. Keep preview sync timing rules in `src/lib/previewSyncTiming.ts`; future performance tuning should update its tests with the rule change.
+5. Extract prompt usage metadata helpers only if the task can avoid changing prompt content or AI behavior.
+6. Continue reducing note/file workspace orchestration by moving pure path rewrite helpers, leaving side effects in `App.tsx`.
+7. Add or update tests for every pure helper module touched in the same commit.
+8. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
 
 Hold these for user-visible review before continuing:
 
