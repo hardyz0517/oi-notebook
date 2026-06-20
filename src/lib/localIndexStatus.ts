@@ -1,5 +1,12 @@
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
 
+export type LocalIndexStatusBadgeTone = "info" | "success" | "danger" | "warning";
+
+export interface LocalIndexActionBusyState {
+  isLoading: boolean;
+  isRebuilding: boolean;
+}
+
 export function getLocalIndexStatusLabel(
   status: LocalNoteIndexStatusResult | null,
   isBuilding: boolean,
@@ -11,6 +18,38 @@ export function getLocalIndexStatusLabel(
   if (status.status === "error") return "读取失败";
   if (!status.exists) return "尚未建立";
   return status.status || "未知";
+}
+
+export function getLocalIndexStatusBadgeTone(
+  status: LocalNoteIndexStatusResult | null,
+  isBuilding: boolean,
+): LocalIndexStatusBadgeTone {
+  if (isBuilding) return "info";
+  if (status?.status === "ready") return "success";
+  if (status?.status === "error") return "danger";
+  return "warning";
+}
+
+export function getLocalIndexStatusBadgeClassName(tone: LocalIndexStatusBadgeTone): string {
+  if (tone === "info") return "settings-v2-status-badge-info";
+  if (tone === "success") return "settings-v2-status-badge-success";
+  if (tone === "danger") return "settings-v2-status-badge-danger";
+  return "settings-v2-status-badge-warning";
+}
+
+export function buildLocalIndexStatusMessage(status: LocalNoteIndexStatusResult): string | null {
+  if (!status.exists) return "本地索引尚未建立，首次搜索或点击重建后会生成。";
+  if (status.status === "stale") return "本地索引版本已更新，建议重建索引。";
+  if (status.status === "error") return "本地索引读取失败，可尝试重建。";
+  return null;
+}
+
+export function isLocalIndexActionDisabled(state: LocalIndexActionBusyState): boolean {
+  return state.isLoading || state.isRebuilding;
+}
+
+export function getLocalIndexRebuildButtonLabel(isRebuilding: boolean): string {
+  return isRebuilding ? "正在建立..." : "重建索引";
 }
 
 export function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {

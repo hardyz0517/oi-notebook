@@ -247,7 +247,17 @@ import {
   writeStoredLeftSidebarWidth,
 } from "@/lib/layoutPreferences";
 import { formatSearchDate } from "@/lib/localSearchResults";
-import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
+import {
+  buildLocalIndexStatusMessage,
+  formatLocalIndexSize,
+  getLocalIndexAccessLabel,
+  getLocalIndexRebuildButtonLabel,
+  getLocalIndexStatusBadgeClassName,
+  getLocalIndexStatusBadgeTone,
+  getLocalIndexStatusLabel,
+  getLocalIndexUpdatedLabel,
+  isLocalIndexActionDisabled,
+} from "@/lib/localIndexStatus";
 import { LUOGU_DIFFICULTY_OPTIONS, getDifficultyOptionClassName, getDifficultyOptionTextColor } from "@/lib/luoguDifficulty";
 import {
   buildOpenFileTabs,
@@ -1987,6 +1997,12 @@ export default function App() {
     () => getTagManagerAvailableCandidateCount(tagTaxonomyUserConfig),
     [tagTaxonomyUserConfig],
   );
+  const localIndexStatusBadgeTone = getLocalIndexStatusBadgeTone(localIndexStatus, isRebuildingLocalIndex);
+  const localIndexActionDisabled = isLocalIndexActionDisabled({
+    isLoading: isLoadingLocalIndexStatus,
+    isRebuilding: isRebuildingLocalIndex,
+  });
+  const localIndexRebuildButtonLabel = getLocalIndexRebuildButtonLabel(isRebuildingLocalIndex);
   const openTagManagerWorkspace = useCallback((initialFilterMode: TagManagerFilterMode = "all") => {
     const returnTarget: SettingsTarget = { type: "page", page: "blog-tag-manager" };
     debugTagManager("app.openTagManager.request", {
@@ -3740,13 +3756,7 @@ export default function App() {
     try {
       const status = await getLocalNoteIndexStatus();
       setLocalIndexStatus(status);
-      if (!status.exists) {
-        setLocalIndexMessage("本地索引尚未建立，首次搜索或点击重建后会生成。");
-      } else if (status.status === "stale") {
-        setLocalIndexMessage("本地索引版本已更新，建议重建索引。");
-      } else if (status.status === "error") {
-        setLocalIndexMessage("本地索引读取失败，可尝试重建。");
-      }
+      setLocalIndexMessage(buildLocalIndexStatusMessage(status));
     } catch (e) {
       const message = getErrorMessage(e);
       setLocalIndexMessage(message);
@@ -7854,13 +7864,7 @@ export default function App() {
                             <SettingsV2Row title="状态" description="本地笔记索引当前是否可用。">
                               <span className={cn(
                                 "settings-v2-status-badge",
-                                isRebuildingLocalIndex
-                                  ? "settings-v2-status-badge-info"
-                                  : localIndexStatus?.status === "ready"
-                                    ? "settings-v2-status-badge-success"
-                                    : localIndexStatus?.status === "error"
-                                      ? "settings-v2-status-badge-danger"
-                                      : "settings-v2-status-badge-warning",
+                                getLocalIndexStatusBadgeClassName(localIndexStatusBadgeTone),
                               )}>
                                 {getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}
                               </span>
@@ -7906,15 +7910,15 @@ export default function App() {
                         <SettingsV2Section title="维护">
                           <SettingsV2Card>
                             <SettingsV2Row title="刷新状态" description="重新读取当前本地索引状态。">
-                              <Button type="button" variant="secondary" size="compact" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void refreshLocalIndexStatus()} disabled={localIndexActionDisabled}>
                                 {isLoadingLocalIndexStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                                 刷新状态
                               </Button>
                             </SettingsV2Row>
                             <SettingsV2Row title="重建本地笔记索引" description="当搜索不准确或索引版本更新时重建。不会修改笔记正文。">
-                              <Button type="button" variant="secondary" size="compact" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void handleRebuildLocalIndex()} disabled={localIndexActionDisabled}>
                                 {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                                {isRebuildingLocalIndex ? "正在建立..." : "重建索引"}
+                                {localIndexRebuildButtonLabel}
                               </Button>
                             </SettingsV2Row>
                           </SettingsV2Card>
