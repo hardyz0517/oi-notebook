@@ -6,6 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import type { TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import type {
+  TagNormalizationApplyResult,
+  TagNormalizationScanResult,
+  TagNormalizationScanStats,
+} from "@/components/tag-manager/tagNormalizationScan";
 import { cn } from "@/lib/utils";
 import type { TagNormalizationReason, TagNormalizationSuggestion, TagTaxonomyEntry } from "@/lib/tagTaxonomy";
 
@@ -25,32 +30,6 @@ interface TagTaxonomyStats {
 interface TagTaxonomyStatItem {
   label: string;
   value: string | number;
-}
-
-interface TagNormalizationScanStats {
-  noteCount: number;
-  suggestionCount: number;
-  rewriteCount: number;
-  aliasCount: number;
-  mergeCount: number;
-  aliasToMergedSourceCount: number;
-  duplicateCount: number;
-  unknownCount: number;
-  hiddenSkippedCount: number;
-}
-
-interface TagNormalizationScanResult {
-  path: string;
-  title: string;
-  suggestions: TagNormalizationSuggestion[];
-}
-
-interface TagNormalizationApplyResult {
-  successCount: number;
-  normalizedTagCount: number;
-  duplicateTagCount: number;
-  skippedCount: number;
-  failures: Array<{ path: string; error: string }>;
 }
 
 export interface BlogTaxonomySettingsPageProps {

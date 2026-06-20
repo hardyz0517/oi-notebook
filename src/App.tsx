@@ -133,6 +133,15 @@ import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
 import {
+  addTagNormalizationPlanStats,
+  createEmptyTagNormalizationScanStats,
+  formatTagNormalizationReason,
+  type TagNormalizationApplyFailure,
+  type TagNormalizationApplyResult,
+  type TagNormalizationScanResult,
+  type TagNormalizationScanStats,
+} from "@/components/tag-manager/tagNormalizationScan";
+import {
   COMMON_COLLECTIONS,
   buildCollectionCandidates,
   getDisplayTags,
@@ -210,7 +219,7 @@ import {
 } from "@/lib/layoutPreferences";
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
-import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { TaskProgress } from "@/lib/taskStatus";
 import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
@@ -425,86 +434,6 @@ function recordTagManagerDebugEvent(event: string, payload?: unknown): void {
     window.localStorage.setItem(TAG_MANAGER_DEBUG_LOG_STORAGE_KEY, entries.slice(-TAG_MANAGER_DEBUG_LOG_LIMIT).join("\n"));
   } catch {
     // Debug logging must never affect app behavior.
-  }
-}
-
-type TagNormalizationScanResult = {
-  path: string;
-  title: string;
-  plan: TagNormalizationPlan;
-  suggestions: TagNormalizationSuggestion[];
-};
-
-type TagNormalizationApplyFailure = {
-  path: string;
-  error: string;
-};
-
-type TagNormalizationApplyResult = {
-  successCount: number;
-  normalizedTagCount: number;
-  duplicateTagCount: number;
-  skippedCount: number;
-  failures: TagNormalizationApplyFailure[];
-};
-
-type TagNormalizationScanStats = {
-  noteCount: number;
-  suggestionCount: number;
-  rewriteCount: number;
-  aliasCount: number;
-  mergeCount: number;
-  aliasToMergedSourceCount: number;
-  duplicateCount: number;
-  unknownCount: number;
-  hiddenSkippedCount: number;
-};
-
-function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
-  return {
-    noteCount: 0,
-    suggestionCount: 0,
-    rewriteCount: 0,
-    aliasCount: 0,
-    mergeCount: 0,
-    aliasToMergedSourceCount: 0,
-    duplicateCount: 0,
-    unknownCount: 0,
-    hiddenSkippedCount: 0,
-  };
-}
-
-function addTagNormalizationPlanStats(stats: TagNormalizationScanStats, plan: TagNormalizationPlan): TagNormalizationScanStats {
-  return {
-    noteCount: stats.noteCount + 1,
-    suggestionCount: stats.suggestionCount + plan.suggestions.length,
-    rewriteCount: stats.rewriteCount + plan.stats.rewriteCount,
-    aliasCount: stats.aliasCount + plan.stats.aliasCount,
-    mergeCount: stats.mergeCount + plan.stats.mergeCount,
-    aliasToMergedSourceCount: stats.aliasToMergedSourceCount + plan.stats.aliasToMergedSourceCount,
-    duplicateCount: stats.duplicateCount + plan.stats.duplicateCount,
-    unknownCount: stats.unknownCount + plan.stats.unknownCount,
-    hiddenSkippedCount: stats.hiddenSkippedCount + plan.stats.hiddenSkippedCount,
-  };
-}
-
-function formatTagNormalizationReason(reason: TagNormalizationReason) {
-  switch (reason) {
-    case "alias_to_canonical":
-      return "别名";
-    case "merge_to_target":
-      return "已合并";
-    case "alias_to_merged_source":
-      return "别名指向已合并标签";
-    case "duplicate_after_normalize":
-      return "去重";
-    case "hidden_no_change":
-      return "隐藏，跳过";
-    case "unknown_freeform":
-      return "自由标签，跳过";
-    case "already_canonical":
-    default:
-      return "已规范";
   }
 }
 
