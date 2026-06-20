@@ -55,12 +55,13 @@ Already completed foundation commits:
 - `1781efe refactor(preview): extract sync timing rules`
 - `5b99f44 refactor(app): extract status label helpers`
 - `c6f09fd refactor(luogu): extract difficulty display model`
+- `c6de2e3 refactor(tags): extract user taxonomy helpers`
 
 Progress calibration, 2026-06-20:
 
 - Completed from this plan: app preference helpers, collection/tag helpers, local index display helpers, settings render guards, settings registry/search helpers, Luogu import controller, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
-- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, and `src/lib/luoguDifficulty.ts`, each with focused tests.
-- Remaining foundation focus: further `App.tsx` shell decomposition, tag taxonomy helper consolidation, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
+- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, `src/lib/luoguDifficulty.ts`, and `src/lib/tagTaxonomyUserConfig.ts`, each with focused tests.
+- Remaining foundation focus: further `App.tsx` shell decomposition, tag manager config helper consolidation where behavior can be preserved, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
 
 Hard guardrails for every task:
@@ -1470,6 +1471,7 @@ When the user is away, execute these low-risk tasks in order:
 6. Continue reducing note/file workspace orchestration by moving pure path rewrite helpers, leaving side effects in `App.tsx`.
 7. Add or update tests for every pure helper module touched in the same commit.
 8. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
+9. Treat `src/lib/tagTaxonomyUserConfig.ts` as the App-facing user taxonomy helper boundary; keep `src/components/tag-manager/tagManagerConfig.ts` ID behavior separate unless a later task deliberately preserves and tests both algorithms.
 
 Hold these for user-visible review before continuing:
 
