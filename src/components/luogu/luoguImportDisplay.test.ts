@@ -310,6 +310,7 @@ describe("luoguImportDisplay", () => {
     const view = deriveLuoguImportCenterView({
       isConfigured: true,
       isLoadingConfig: false,
+      isTestingConnection: false,
       isImporting: false,
       isSyncing: false,
       selectedCount: 2,
@@ -340,6 +341,8 @@ describe("luoguImportDisplay", () => {
       writeButtonLabel: "写入选中 4",
       isManualImportDisabled: true,
       manualImportButtonLabel: "手动导入",
+      isOpenImportCenterDisabled: true,
+      isActivityButtonDisabled: true,
     });
   });
 
@@ -355,6 +358,7 @@ describe("luoguImportDisplay", () => {
     const view = deriveLuoguImportCenterView({
       isConfigured: true,
       isLoadingConfig: false,
+      isTestingConnection: false,
       isImporting: true,
       isSyncing: false,
       selectedCount: 0,
@@ -379,6 +383,51 @@ describe("luoguImportDisplay", () => {
       isBackToSelectionDisabled: true,
       writeButtonLabel: "写入中...",
       manualImportButtonLabel: "导入中...",
+      isOpenImportCenterDisabled: true,
+      isActivityButtonDisabled: true,
+    });
+  });
+
+  it("derives Luogu entry button disabled states for settings and activity bar", () => {
+    const idleScanTask = { status: "idle", progress: null, error: null } as const;
+    const idlePrepareTask = { status: "idle", progress: null, error: null } as const;
+    const idleWriteTask = { status: "idle", progress: null, error: null } as const;
+
+    const baseInput = {
+      isConfigured: true,
+      isLoadingConfig: false,
+      isTestingConnection: false,
+      isImporting: false,
+      isSyncing: false,
+      selectedCount: 0,
+      selectableCount: 0,
+      prepareQueueCount: 0,
+      reusablePreviewCount: 0,
+      writableCount: 0,
+      scanTask: idleScanTask,
+      prepareTask: idlePrepareTask,
+      writeTask: idleWriteTask,
+      scanView: deriveLuoguTaskView(idleScanTask, "scan"),
+      prepareView: deriveLuoguTaskView(idlePrepareTask, "prepare"),
+      writeView: deriveLuoguTaskView(idleWriteTask, "write"),
+      prepareProgress: null,
+    };
+
+    expect(deriveLuoguImportCenterView(baseInput)).toMatchObject({
+      isOpenImportCenterDisabled: false,
+      isActivityButtonDisabled: false,
+    });
+    expect(deriveLuoguImportCenterView({ ...baseInput, isLoadingConfig: true })).toMatchObject({
+      isOpenImportCenterDisabled: true,
+      isActivityButtonDisabled: true,
+    });
+    expect(deriveLuoguImportCenterView({ ...baseInput, isTestingConnection: true })).toMatchObject({
+      isOpenImportCenterDisabled: false,
+      isActivityButtonDisabled: true,
+    });
+    expect(deriveLuoguImportCenterView({ ...baseInput, isSyncing: true })).toMatchObject({
+      isOpenImportCenterDisabled: false,
+      isActivityButtonDisabled: true,
     });
   });
 

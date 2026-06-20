@@ -1937,6 +1937,7 @@ export default function App() {
   const luoguImportCenterView = deriveLuoguImportCenterView({
     isConfigured: luoguConfigured,
     isLoadingConfig: isLoadingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
     isImporting: isImportingLuogu,
     isSyncing: isSyncingLuogu,
     selectedCount: selectedLuoguImportCount,
@@ -7977,7 +7978,7 @@ export default function App() {
                       accountLabel={luoguImportCenterAccountLabel}
                       aiLabel={luoguImportCenterAiLabel}
                       rangeLabel={luoguImportCenterRangeLabel}
-                      disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                      disabled={luoguImportCenterView.isOpenImportCenterDisabled}
                       onOpenImportCenter={() => void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-import-center" } })}
                     />
                     </SettingsSectionAnchor>
@@ -8230,7 +8231,7 @@ export default function App() {
               title="洛谷导入中心"
               aria-label="洛谷导入中心"
               selected={activeActivityItem === "luogu"}
-              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+              disabled={luoguImportCenterView.isActivityButtonDisabled}
             >
               <RefreshCw size={24} strokeWidth={2.18} />
             </ToolbarButton>

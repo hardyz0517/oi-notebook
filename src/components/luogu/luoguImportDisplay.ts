@@ -63,6 +63,7 @@ export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): bool
 export interface LuoguImportCenterViewInput {
   isConfigured: boolean;
   isLoadingConfig: boolean;
+  isTestingConnection: boolean;
   isImporting: boolean;
   isSyncing: boolean;
   selectedCount: number;
@@ -99,6 +100,8 @@ export interface LuoguImportCenterView {
   writeButtonLabel: string;
   isManualImportDisabled: boolean;
   manualImportButtonLabel: string;
+  isOpenImportCenterDisabled: boolean;
+  isActivityButtonDisabled: boolean;
 }
 
 export function deriveLuoguImportCenterView(input: LuoguImportCenterViewInput): LuoguImportCenterView {
@@ -147,6 +150,8 @@ export function deriveLuoguImportCenterView(input: LuoguImportCenterViewInput): 
     writeButtonLabel: input.writeView.status === "running" ? `${input.writeView.label}...` : `写入选中 ${input.writableCount}`,
     isManualImportDisabled: input.isImporting || isPrepareOrWriteBusy || isScanBusy || input.isSyncing,
     manualImportButtonLabel: input.isImporting ? "导入中..." : "手动导入",
+    isOpenImportCenterDisabled: input.isLoadingConfig || isScanBusy || isPrepareOrWriteBusy,
+    isActivityButtonDisabled: input.isLoadingConfig || input.isTestingConnection || isScanBusy || isPrepareOrWriteBusy || input.isSyncing,
   };
 }
 
