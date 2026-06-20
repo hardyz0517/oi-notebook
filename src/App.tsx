@@ -256,6 +256,16 @@ import {
 } from "@/lib/openTabs";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import {
+  buildTagTaxonomyStatItems,
+  buildTagTaxonomyStats,
+  filterTagTaxonomyUserAliases,
+  filterTagTaxonomyUserEntries,
+  getDisplayedTagTaxonomyList,
+  getTagManagerAvailableCandidateCount,
+  getTagTaxonomyUserAliases,
+  getTagTaxonomyUserEntries,
+} from "@/lib/tagTaxonomySettingsModel";
+import {
   createUserTagEntryId,
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
@@ -1915,46 +1925,17 @@ export default function App() {
   const blogStatusLabel = getBlogStatusLabel(isRestartingBlog);
   const aiStatusLabel =
     !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
-  const tagTaxonomyStats = useMemo(() => {
-    const entriesCount = tagTaxonomyConfig?.entries?.length ?? 0;
-    const aliasesCount = Object.keys(tagTaxonomyConfig?.aliases ?? {}).length;
-    const hiddenIdsCount = tagTaxonomyConfig?.hiddenIds?.length ?? 0;
-    const orderOverridesCount = Object.keys(tagTaxonomyConfig?.orderOverrides ?? {}).length;
-    const mergesCount = Object.keys(tagTaxonomyConfig?.merges ?? {}).length;
-    const customCollectionsCount = tagTaxonomyConfig?.customCollections?.length ?? 0;
-    const userConfigItemCount = entriesCount + aliasesCount + hiddenIdsCount + orderOverridesCount + mergesCount + customCollectionsCount;
-    const availableCandidateCount = getTagSuggestionList(tagTaxonomyUserConfig)
-      .filter((suggestion) => !suggestion.hidden && !suggestion.deprecated)
-      .length;
-    const statusLabel = isLoadingTagTaxonomyConfig
-      ? "正在读取"
-      : tagTaxonomyConfigError
-        ? "加载失败，已回退内置默认配置"
-        : userConfigItemCount > 0
-          ? "已加载用户配置"
-          : "使用内置默认配置";
-
-    return {
-      statusLabel,
-      entriesCount,
-      aliasesCount,
-      hiddenIdsCount,
-      orderOverridesCount,
-      mergesCount,
-      customCollectionsCount,
-      availableCandidateCount,
-      userConfigItemCount,
-    };
-  }, [isLoadingTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyConfigError, tagTaxonomyUserConfig]);
+  const tagTaxonomyStats = useMemo(
+    () => buildTagTaxonomyStats({
+      config: tagTaxonomyConfig,
+      userConfig: tagTaxonomyUserConfig,
+      isLoading: isLoadingTagTaxonomyConfig,
+      loadError: tagTaxonomyConfigError,
+    }),
+    [isLoadingTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyConfigError, tagTaxonomyUserConfig],
+  );
   const tagTaxonomyStatItems = useMemo(
-    () => [
-      { label: "自定义标签", value: tagTaxonomyStats.entriesCount },
-      { label: "自定义别名", value: tagTaxonomyStats.aliasesCount },
-      { label: "隐藏默认标签", value: tagTaxonomyStats.hiddenIdsCount },
-      { label: "排序覆盖", value: tagTaxonomyStats.orderOverridesCount },
-      { label: "合并规则", value: tagTaxonomyStats.mergesCount },
-      { label: "自定义文集", value: tagTaxonomyStats.customCollectionsCount },
-    ],
+    () => buildTagTaxonomyStatItems(tagTaxonomyStats),
     [tagTaxonomyStats],
   );
   const tagNormalizationScanStats = useMemo(
@@ -1981,47 +1962,29 @@ export default function App() {
     );
   }, [selectedTagNormalizationScanPaths, tagNormalizationScanResults]);
   const tagTaxonomyUserEntries = useMemo(
-    () => [...(tagTaxonomyConfig?.entries ?? [])].sort((left, right) => left.path.join("/").localeCompare(right.path.join("/"), "zh-Hans-CN")),
+    () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
     [tagTaxonomyConfig],
   );
   const tagTaxonomyUserAliases = useMemo(
-    () => Object.entries(tagTaxonomyConfig?.aliases ?? {}).sort(([left], [right]) => left.localeCompare(right, "zh-Hans-CN")),
+    () => getTagTaxonomyUserAliases(tagTaxonomyConfig),
     [tagTaxonomyConfig],
   );
-  const filteredTagTaxonomyUserEntries = useMemo(() => {
-    const query = tagTaxonomyEntryListQuery.trim().toLowerCase();
-    if (!query) return tagTaxonomyUserEntries;
-    return tagTaxonomyUserEntries.filter((entry) => {
-      const searchText = [
-        entry.id,
-        entry.path.join("/"),
-        entry.path.join(" / "),
-        ...(entry.aliases ?? []),
-      ].join("\n").toLowerCase();
-      return searchText.includes(query);
-    });
-  }, [tagTaxonomyEntryListQuery, tagTaxonomyUserEntries]);
+  const filteredTagTaxonomyUserEntries = useMemo(
+    () => filterTagTaxonomyUserEntries(tagTaxonomyUserEntries, tagTaxonomyEntryListQuery),
+    [tagTaxonomyEntryListQuery, tagTaxonomyUserEntries],
+  );
   const displayedTagTaxonomyUserEntries = useMemo(() => {
-    if (tagTaxonomyEntryListQuery.trim() || isTagTaxonomyEntryListExpanded) {
-      return filteredTagTaxonomyUserEntries;
-    }
-    return filteredTagTaxonomyUserEntries.slice(0, 5);
+    return getDisplayedTagTaxonomyList(filteredTagTaxonomyUserEntries, tagTaxonomyEntryListQuery, isTagTaxonomyEntryListExpanded);
   }, [filteredTagTaxonomyUserEntries, isTagTaxonomyEntryListExpanded, tagTaxonomyEntryListQuery]);
-  const filteredTagTaxonomyUserAliases = useMemo(() => {
-    const query = tagTaxonomyAliasListQuery.trim().toLowerCase();
-    if (!query) return tagTaxonomyUserAliases;
-    return tagTaxonomyUserAliases.filter(([aliasName, target]) =>
-      `${aliasName}\n${target}`.toLowerCase().includes(query),
-    );
-  }, [tagTaxonomyAliasListQuery, tagTaxonomyUserAliases]);
+  const filteredTagTaxonomyUserAliases = useMemo(
+    () => filterTagTaxonomyUserAliases(tagTaxonomyUserAliases, tagTaxonomyAliasListQuery),
+    [tagTaxonomyAliasListQuery, tagTaxonomyUserAliases],
+  );
   const displayedTagTaxonomyUserAliases = useMemo(() => {
-    if (tagTaxonomyAliasListQuery.trim() || isTagTaxonomyAliasListExpanded) {
-      return filteredTagTaxonomyUserAliases;
-    }
-    return filteredTagTaxonomyUserAliases.slice(0, 5);
+    return getDisplayedTagTaxonomyList(filteredTagTaxonomyUserAliases, tagTaxonomyAliasListQuery, isTagTaxonomyAliasListExpanded);
   }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
   const tagManagerAvailableCandidateCount = useMemo(
-    () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden).length,
+    () => getTagManagerAvailableCandidateCount(tagTaxonomyUserConfig),
     [tagTaxonomyUserConfig],
   );
   const openTagManagerWorkspace = useCallback((initialFilterMode: TagManagerFilterMode = "all") => {
