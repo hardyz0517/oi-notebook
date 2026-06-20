@@ -136,6 +136,7 @@ import {
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
+import { normalizeBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
@@ -753,14 +754,6 @@ function createAiModelDraft(modelId: string, source: "manual" | "synced" = "manu
     supports_stream: true,
     source,
     updated_at: Date.now(),
-  };
-}
-
-function normalizeBlogConfigDraft(config: BlogConfig): BlogConfig {
-  const normalizeText = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
-  return {
-    title: normalizeText(config.title),
-    subtitle: normalizeText(config.subtitle),
   };
 }
 
