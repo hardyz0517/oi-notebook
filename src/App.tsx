@@ -133,10 +133,11 @@ import {
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
 import { getCommittedMarkdownSyncDelayMs, getPreviewMarkdownSyncDelayMs } from "@/lib/previewSyncTiming";
-import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
+import { buildLuoguConfigFormState, buildLuoguConfigSavePayload } from "@/lib/luoguConfigForm";
 import {
   formatZoomLabel,
   getBlogStatusLabel,
@@ -1474,6 +1475,13 @@ export default function App() {
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
+  const applyLuoguConfigFormState = useCallback((config: LuoguConfig) => {
+    const formState = buildLuoguConfigFormState(config);
+    setLuoguConfigUid(formState.uid);
+    setLuoguConfigClientId(formState.clientId);
+    setLuoguConfigLastSubmissionId(formState.lastSubmissionId);
+    setLuoguConfigAiConfigured(formState.aiConfigured);
+  }, []);
   const isUpdatingLuoguLastSubmissionId = false;
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
@@ -2909,16 +2917,7 @@ export default function App() {
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
-      setLuoguConfigUid(config.luogu.uid);
-      setLuoguConfigClientId(config.luogu.client_id);
-      setLuoguConfigLastSubmissionId(
-        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-      );
-      setLuoguConfigAiConfigured(
-        config.ai.base_url.trim() !== "" &&
-        config.ai.api_key.trim() !== "" &&
-        config.ai.model.trim() !== "",
-      );
+      applyLuoguConfigFormState(config);
     } catch (e) {
       toast.error(`洛谷配置读取失败：${e}`);
     } finally {
@@ -2951,26 +2950,19 @@ export default function App() {
   };
 
   const handleSaveLuoguConfig = async () => {
-    const lastSubmissionId = luoguConfigLastSubmissionId.trim();
-    const parsedLastSubmissionId =
-      lastSubmissionId === "" ? null : Number(lastSubmissionId);
-    if (
-      parsedLastSubmissionId !== null &&
-      (!Number.isInteger(parsedLastSubmissionId) || parsedLastSubmissionId < 0)
-    ) {
-      toast.error("last_submission_id 必须是非负整数或留空");
+    const payload = buildLuoguConfigSavePayload({
+      uid: luoguConfigUid,
+      clientId: luoguConfigClientId,
+      lastSubmissionId: luoguConfigLastSubmissionId,
+    });
+    if (!payload.ok) {
+      toast.error(payload.error);
       return;
     }
 
     setIsSavingLuoguConfig(true);
     try {
-      await saveLuoguConfig({
-        luogu: {
-          uid: luoguConfigUid.trim(),
-          client_id: luoguConfigClientId.trim(),
-          last_submission_id: parsedLastSubmissionId,
-        },
-      });
+      await saveLuoguConfig(payload.config);
       setLuoguConnectionError(null);
       toast.success("洛谷配置已保存");
       returnFromLuoguSettings();
@@ -3814,16 +3806,7 @@ export default function App() {
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
-      setLuoguConfigUid(config.luogu.uid);
-      setLuoguConfigClientId(config.luogu.client_id);
-      setLuoguConfigLastSubmissionId(
-        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-      );
-      setLuoguConfigAiConfigured(
-        config.ai.base_url.trim() !== "" &&
-        config.ai.api_key.trim() !== "" &&
-        config.ai.model.trim() !== "",
-      );
+      applyLuoguConfigFormState(config);
     } catch (e) {
       toast.error(`洛谷配置读取失败：${getErrorMessage(e)}`);
     } finally {
@@ -6093,16 +6076,7 @@ export default function App() {
     getLuoguConfig()
       .then((config) => {
         if (cancelled) return;
-        setLuoguConfigUid(config.luogu.uid);
-        setLuoguConfigClientId(config.luogu.client_id);
-        setLuoguConfigLastSubmissionId(
-          config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-        );
-        setLuoguConfigAiConfigured(
-          config.ai.base_url.trim() !== "" &&
-          config.ai.api_key.trim() !== "" &&
-          config.ai.model.trim() !== "",
-        );
+        applyLuoguConfigFormState(config);
       })
       .catch((e: Error) => {
         if (!cancelled) {
