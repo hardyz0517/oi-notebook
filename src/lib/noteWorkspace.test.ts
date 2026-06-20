@@ -10,6 +10,7 @@ import {
   getTreeSelectionAfterClear,
   getTreeSelectionAfterFileSelect,
   getTreeSelectionAfterDirectorySelect,
+  getTreeSelectionAfterRootSelect,
   normalizeCustomNoteDirectory,
   quoteYamlString,
   removeDeletedNoteWorkspaceReferences,
@@ -98,6 +99,10 @@ describe("noteWorkspace", () => {
     });
     expect(getTreeSelectionAfterClear()).toEqual({
       activeTreeDirectoryPath: null,
+      activeTreeFilePath: null,
+    });
+    expect(getTreeSelectionAfterRootSelect()).toEqual({
+      activeTreeDirectoryPath: "",
       activeTreeFilePath: null,
     });
   });

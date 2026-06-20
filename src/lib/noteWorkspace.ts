@@ -99,6 +99,13 @@ export function getTreeSelectionAfterFileSelect(path: string): NoteTreeSelection
   };
 }
 
+export function getTreeSelectionAfterRootSelect(): NoteTreeSelectionState {
+  return {
+    activeTreeDirectoryPath: "",
+    activeTreeFilePath: null,
+  };
+}
+
 export function getTreeSelectionAfterClear(): NoteTreeSelectionState {
   return {
     activeTreeDirectoryPath: null,

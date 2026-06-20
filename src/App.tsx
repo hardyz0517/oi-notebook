@@ -290,6 +290,7 @@ import {
   getTreeSelectionAfterClear,
   getTreeSelectionAfterDirectorySelect,
   getTreeSelectionAfterFileSelect,
+  getTreeSelectionAfterRootSelect,
   removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   rewriteNoteWorkspaceReferences,
@@ -2660,6 +2661,13 @@ export default function App() {
     const selection = getTreeSelectionAfterClear();
     setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
     setActiveTreeFilePath(selection.activeTreeFilePath);
+  }, []);
+
+  const handleSelectTreeRoot = useCallback(() => {
+    const selection = getTreeSelectionAfterRootSelect();
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
+    setIsTreeRootCollapsed((current) => !current);
   }, []);
 
   const openRenameDialog = (path: string, isDirectory = false) => {
@@ -8299,11 +8307,7 @@ export default function App() {
                   data-active={activeTreeDirectoryPath === "" ? "true" : "false"}
                   data-app-context-menu="file-tree-folder"
                   data-app-context-path=""
-                  onClick={() => {
-                    setActiveTreeDirectoryPath("");
-                    setActiveTreeFilePath(null);
-                    setIsTreeRootCollapsed((current) => !current);
-                  }}
+                  onClick={handleSelectTreeRoot}
                   aria-expanded={!isTreeRootCollapsed}
                   title="notes"
                 >
