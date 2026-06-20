@@ -2854,6 +2854,7 @@ export default function App() {
           openTabPaths,
           currentFilePath,
           activeWorkspaceTabId,
+          activeWorkingCopyId,
           activeTreeDirectoryPath,
           activeTreeFilePath,
         },
@@ -2863,6 +2864,7 @@ export default function App() {
       setOpenTabPaths(references.openTabPaths);
       setCurrentFilePath(references.currentFilePath);
       setActiveWorkspaceTabId(references.activeWorkspaceTabId);
+      setActiveWorkingCopyId(references.activeWorkingCopyId);
       setActiveTreeDirectoryPath(references.activeTreeDirectoryPath);
       setActiveTreeFilePath(references.activeTreeFilePath);
       if (references.shouldClearDirty) {

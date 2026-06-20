@@ -293,6 +293,7 @@ export interface DeletedNoteWorkspaceReferences {
   openTabPaths: string[];
   currentFilePath: string | null;
   activeWorkspaceTabId: string | null;
+  activeWorkingCopyId: string | null;
   activeTreeDirectoryPath: string | null;
   activeTreeFilePath: string | null;
 }
@@ -314,6 +315,7 @@ export function removeDeletedNoteWorkspaceReferences(
     openTabPaths: filterDeletedNoteTabs(references.openTabPaths, deletedPath, isDirectory),
     currentFilePath: currentFileAffected ? null : references.currentFilePath,
     activeWorkspaceTabId: currentFileAffected ? null : references.activeWorkspaceTabId,
+    activeWorkingCopyId: currentFileAffected ? null : references.activeWorkingCopyId,
     activeTreeDirectoryPath:
       isDirectory && references.activeTreeDirectoryPath && isNotePathAffectedByTarget(references.activeTreeDirectoryPath, deletedPath, true)
         ? null
