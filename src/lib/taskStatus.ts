@@ -36,6 +36,10 @@ export function startTaskState<TError = string>(total = 0): TaskState<TError> {
   return { status: "running", progress: createTaskProgress(total), error: null };
 }
 
+export function queueTaskState<TError = string>(total = 0): TaskState<TError> {
+  return { status: "queued", progress: createTaskProgress(total), error: null };
+}
+
 export function updateTaskProgress<TError = string>(
   state: TaskState<TError>,
   patch: Partial<TaskProgress>,
@@ -69,6 +73,18 @@ export function finishTaskState<TError = string>(state: TaskState<TError>): Task
 
 export function failTaskState<TError>(state: TaskState<TError>, error: TError): TaskState<TError> {
   return { ...state, status: "failed", error };
+}
+
+export function pauseTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {
+  return { ...state, status: "paused", error: null };
+}
+
+export function resumeTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {
+  return { ...state, status: "running", error: null };
+}
+
+export function stopTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {
+  return { ...state, status: "stopping", error: null };
 }
 
 export function cancelTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {

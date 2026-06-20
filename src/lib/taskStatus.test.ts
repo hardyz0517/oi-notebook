@@ -8,6 +8,10 @@ import {
   startTaskState,
   updateTaskProgress,
   updateTaskProgressValue,
+  pauseTaskState,
+  queueTaskState,
+  resumeTaskState,
+  stopTaskState,
 } from "./taskStatus";
 
 describe("taskStatus", () => {
@@ -75,6 +79,33 @@ describe("taskStatus", () => {
     expect(cancelTaskState(running)).toEqual({
       status: "cancelled",
       progress: { current: 4, total: 4, succeeded: 3, failed: 1, skipped: 0 },
+      error: null,
+    });
+  });
+
+  it("models queued, paused, resumed, and stopping task states", () => {
+    const queued = queueTaskState(3);
+    expect(queued).toEqual({
+      status: "queued",
+      progress: { current: 0, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    const running = startTaskState(3);
+    const paused = pauseTaskState(updateTaskProgress(running, { current: 1 }));
+    expect(paused).toEqual({
+      status: "paused",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    });
+    expect(resumeTaskState(paused)).toEqual({
+      status: "running",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    });
+    expect(stopTaskState(paused)).toEqual({
+      status: "stopping",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
       error: null,
     });
   });
