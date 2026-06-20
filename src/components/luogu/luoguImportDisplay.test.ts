@@ -5,7 +5,9 @@ import {
   createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
+  deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
+  deriveLuoguWriteTaskState,
   finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
@@ -99,6 +101,28 @@ describe("luoguImportDisplay", () => {
       isScanning: false,
       isSyncing: false,
     })).toBe(true);
+
+    expect(isLuoguImportCenterBusy({
+      isImporting: false,
+      isPreparing: false,
+      isWriting: false,
+      isScanning: false,
+      isSyncing: false,
+      scanTask: { status: "queued", progress: null, error: null },
+      prepareTask: { status: "idle", progress: null, error: null },
+      writeTask: { status: "idle", progress: null, error: null },
+    })).toBe(true);
+
+    expect(isLuoguImportCenterBusy({
+      isImporting: false,
+      isPreparing: false,
+      isWriting: false,
+      isScanning: false,
+      isSyncing: false,
+      scanTask: { status: "paused", progress: null, error: null },
+      prepareTask: { status: "idle", progress: null, error: null },
+      writeTask: { status: "idle", progress: null, error: null },
+    })).toBe(false);
   });
 
   it("derives task state for running, paused, failed, completed, and idle scan states", () => {
@@ -148,6 +172,42 @@ describe("luoguImportDisplay", () => {
       progress: null,
       summary: null,
       error: null,
+    })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
+  it("derives task states for prepare and write phases", () => {
+    expect(deriveLuoguPrepareTaskState({
+      isPreparing: true,
+      isStopping: false,
+      progress: { current: 2, total: 5, succeeded: 1, failed: 0, skipped: 0 },
+    })).toEqual({
+      status: "running",
+      progress: { current: 2, total: 5, succeeded: 1, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveLuoguPrepareTaskState({
+      isPreparing: true,
+      isStopping: true,
+      progress: { current: 3, total: 5, succeeded: 2, failed: 0, skipped: 0 },
+    })).toEqual({
+      status: "stopping",
+      progress: { current: 3, total: 5, succeeded: 2, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveLuoguWriteTaskState({
+      isWriting: true,
+      progress: { current: 1, total: 4, succeeded: 1, failed: 0, skipped: 0 },
+    })).toEqual({
+      status: "running",
+      progress: { current: 1, total: 4, succeeded: 1, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveLuoguWriteTaskState({
+      isWriting: false,
+      progress: null,
     })).toEqual({ status: "idle", progress: null, error: null });
   });
 

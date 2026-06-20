@@ -72,7 +72,9 @@ import {
   createInitialLuoguPrepareProgress,
   createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
+  deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
+  deriveLuoguWriteTaskState,
   finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
@@ -1897,6 +1899,15 @@ export default function App() {
   const isLuoguScanTaskRunning = isTaskRunning(luoguScanTaskState);
   const isLuoguScanTaskPaused = isTaskPaused(luoguScanTaskState);
   const isLuoguScanTaskFailed = isTaskFailed(luoguScanTaskState);
+  const luoguPrepareTaskState = deriveLuoguPrepareTaskState({
+    isPreparing: isPreparingSelectedLuogu,
+    isStopping: isStoppingLuoguPrepare,
+    progress: luoguPrepareProgress,
+  });
+  const luoguWriteTaskState = deriveLuoguWriteTaskState({
+    isWriting: isWritingPreparedLuogu,
+    progress: luoguWriteProgress,
+  });
   const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
     isPreparing: isPreparingSelectedLuogu,
     progress: luoguPrepareProgress,
@@ -1915,6 +1926,9 @@ export default function App() {
     isWriting: isWritingPreparedLuogu,
     isScanning: isScanningLuoguPreview,
     isSyncing: isSyncingLuogu,
+    scanTask: luoguScanTaskState,
+    prepareTask: luoguPrepareTaskState,
+    writeTask: luoguWriteTaskState,
   });
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {

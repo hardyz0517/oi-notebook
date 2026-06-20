@@ -1,4 +1,4 @@
-import { createIdleTaskState, createTaskProgress, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, isTaskActive, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import type { PreviewLuoguSubmission } from "@/lib/api";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
@@ -37,10 +37,22 @@ export interface LuoguImportCenterBusyInput {
   isWriting: boolean;
   isScanning: boolean;
   isSyncing: boolean;
+  scanTask?: TaskState;
+  prepareTask?: TaskState;
+  writeTask?: TaskState;
 }
 
 export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): boolean {
-  return input.isImporting || input.isPreparing || input.isWriting || input.isScanning || input.isSyncing;
+  return (
+    input.isImporting ||
+    input.isPreparing ||
+    input.isWriting ||
+    input.isScanning ||
+    input.isSyncing ||
+    Boolean(input.scanTask && isTaskActive(input.scanTask) && input.scanTask.status !== "paused") ||
+    Boolean(input.prepareTask && isTaskActive(input.prepareTask) && input.prepareTask.status !== "paused") ||
+    Boolean(input.writeTask && isTaskActive(input.writeTask) && input.writeTask.status !== "paused")
+  );
 }
 
 export interface LuoguScanCompletionSelectionInput {
@@ -305,6 +317,34 @@ export function deriveLuoguScanTaskState(input: LuoguScanTaskStateInput): TaskSt
     };
   }
 
+  return createIdleTaskState();
+}
+
+export interface LuoguPrepareTaskStateInput {
+  isPreparing: boolean;
+  isStopping: boolean;
+  progress: TaskProgress | null;
+}
+
+export function deriveLuoguPrepareTaskState(input: LuoguPrepareTaskStateInput): TaskState {
+  if (input.isStopping) {
+    return { status: "stopping", progress: input.progress, error: null };
+  }
+  if (input.isPreparing) {
+    return { status: "running", progress: input.progress, error: null };
+  }
+  return createIdleTaskState();
+}
+
+export interface LuoguWriteTaskStateInput {
+  isWriting: boolean;
+  progress: TaskProgress | null;
+}
+
+export function deriveLuoguWriteTaskState(input: LuoguWriteTaskStateInput): TaskState {
+  if (input.isWriting) {
+    return { status: "running", progress: input.progress, error: null };
+  }
   return createIdleTaskState();
 }
 
