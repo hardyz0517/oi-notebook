@@ -56,12 +56,16 @@ Already completed foundation commits:
 - `5b99f44 refactor(app): extract status label helpers`
 - `c6f09fd refactor(luogu): extract difficulty display model`
 - `c6de2e3 refactor(tags): extract user taxonomy helpers`
+- `372c985 refactor(notes): extract path reference helpers`
+- `f1cf297 refactor(app): extract activity shell helpers`
+- `0000d62 refactor(tasks): add task state helpers`
+- `de7c460 refactor(api): extract error normalization`
 
 Progress calibration, 2026-06-20:
 
 - Completed from this plan: app preference helpers, collection/tag helpers, local index display helpers, settings render guards, settings registry/search helpers, Luogu import controller, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
-- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, `src/lib/luoguDifficulty.ts`, and `src/lib/tagTaxonomyUserConfig.ts`, each with focused tests.
-- Remaining foundation focus: further `App.tsx` shell decomposition, tag manager config helper consolidation where behavior can be preserved, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
+- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, `src/lib/luoguDifficulty.ts`, `src/lib/tagTaxonomyUserConfig.ts`, `src/lib/appAsync.ts`, `src/lib/appShell.ts`, and `src/lib/apiError.ts`, each with focused tests where pure logic is present.
+- Remaining foundation focus: further `App.tsx` shell decomposition, task-controller adoption of `src/lib/taskStatus.ts`, tag manager config helper consolidation where behavior can be preserved, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
 
 Hard guardrails for every task:

@@ -28,7 +28,7 @@ pnpm tauri dev    # Starts Vite + Rust with hot reload
 pnpm tauri build  # Full production bundle
 ```
 
-Frontend test framework is not configured yet. Rust unit tests exist under `src-tauri/src/`.
+Frontend pure-helper tests run with Vitest via `pnpm test:run`. Rust unit tests exist under `src-tauri/src/`.
 
 ## Architecture
 
@@ -58,6 +58,8 @@ oi-notebook/
 ```
 
 **IPC pattern:** Frontend calls Rust commands through wrappers in `src/lib/api.ts`. Commands are defined with `#[tauri::command]` in Rust and registered in the builder's `invoke_handler`.
+
+**Foundation upgrade status:** The current engineering pass is foundation-first with AI behavior frozen. Theme Engine lives under `src/theme/**`; Settings V2 visual styling is protected; App shell helpers, note workspace rules, long-task state helpers, and API error normalization are being extracted into focused `src/lib/**` modules with Vitest coverage.
 
 **Planned data flow:**
 - User edits in CodeMirror -> real-time remark/rehype preview
