@@ -163,6 +163,7 @@ import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft }
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationScanTaskState,
   formatTagNormalizationReason,
   getAllTagNormalizationScanSelection,
   getSelectedTagNormalizationScanStats,
@@ -1993,6 +1994,13 @@ export default function App() {
     () => getTagNormalizationScanStats(tagNormalizationScanAllStats, tagNormalizationScanResults),
     [tagNormalizationScanAllStats, tagNormalizationScanResults],
   );
+  const tagNormalizationScanTaskState = deriveTagNormalizationScanTaskState({
+    isScanning: isScanningTagNormalization,
+    error: tagNormalizationScanError,
+    results: tagNormalizationScanResults,
+    stats: tagNormalizationScanStats,
+  });
+  const isTagNormalizationScanTaskRunning = isTaskRunning(tagNormalizationScanTaskState);
   const selectedTagNormalizationScanStats = useMemo(
     () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
     [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
@@ -4723,7 +4731,7 @@ export default function App() {
     setIsTagNormalizationDetailsOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatterDisplayTags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
   const handleScanLegacyTags = useCallback(async () => {
-    if (isScanningTagNormalization) return;
+    if (isTagNormalizationScanTaskRunning) return;
 
     setIsScanningTagNormalization(true);
     setTagNormalizationScanError(null);
@@ -4775,7 +4783,7 @@ export default function App() {
     } finally {
       setIsScanningTagNormalization(false);
     }
-  }, [isScanningTagNormalization, noteFiles, tagTaxonomyUserConfig]);
+  }, [isTagNormalizationScanTaskRunning, noteFiles, tagTaxonomyUserConfig]);
   const toggleTagNormalizationScanSelection = useCallback((path: string) => {
     setSelectedTagNormalizationScanPaths((current) => {
       const next = new Set(current);

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationScanTaskState,
   formatTagNormalizationReason,
   getAllTagNormalizationScanSelection,
   getSelectedTagNormalizationScanStats,
@@ -85,6 +86,48 @@ describe("tagNormalizationScan", () => {
       duplicateCount: 2,
       unknownCount: 3,
       hiddenSkippedCount: 4,
+    });
+  });
+
+  it("derives task state for idle, running, failed, and completed scans", () => {
+    const stats = addTagNormalizationPlanStats(createEmptyTagNormalizationScanStats(), createPlan({
+      hiddenSkippedCount: 1,
+    }));
+
+    expect(deriveTagNormalizationScanTaskState({
+      isScanning: false,
+      error: null,
+      results: null,
+      stats,
+    })).toEqual({ status: "idle", progress: null, error: null });
+
+    expect(deriveTagNormalizationScanTaskState({
+      isScanning: true,
+      error: null,
+      results: null,
+      stats,
+    })).toEqual({
+      status: "running",
+      progress: { current: 1, total: 1, succeeded: 1, failed: 0, skipped: 1 },
+      error: null,
+    });
+
+    expect(deriveTagNormalizationScanTaskState({
+      isScanning: false,
+      error: "scan failed",
+      results: null,
+      stats,
+    })).toEqual({ status: "failed", progress: null, error: "scan failed" });
+
+    expect(deriveTagNormalizationScanTaskState({
+      isScanning: false,
+      error: null,
+      results: [createScanResult("a.md", createPlan())],
+      stats,
+    })).toEqual({
+      status: "succeeded",
+      progress: { current: 1, total: 1, succeeded: 1, failed: 0, skipped: 1 },
+      error: null,
     });
   });
 

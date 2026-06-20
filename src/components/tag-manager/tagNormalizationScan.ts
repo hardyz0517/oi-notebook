@@ -3,6 +3,7 @@ import type {
   TagNormalizationReason,
   TagNormalizationSuggestion,
 } from "@/lib/tagTaxonomy";
+import { createIdleTaskState, type TaskState } from "@/lib/taskStatus";
 
 export interface TagNormalizationScanResult {
   path: string;
@@ -36,6 +37,13 @@ export interface TagNormalizationScanStats {
   hiddenSkippedCount: number;
 }
 
+export interface TagNormalizationScanTaskInput {
+  isScanning: boolean;
+  error: string | null;
+  results: TagNormalizationScanResult[] | null;
+  stats: TagNormalizationScanStats;
+}
+
 export function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
   return {
     noteCount: 0,
@@ -48,6 +56,42 @@ export function createEmptyTagNormalizationScanStats(): TagNormalizationScanStat
     unknownCount: 0,
     hiddenSkippedCount: 0,
   };
+}
+
+export function deriveTagNormalizationScanTaskState(input: TagNormalizationScanTaskInput): TaskState {
+  if (input.isScanning) {
+    return {
+      status: "running",
+      progress: {
+        current: input.stats.noteCount,
+        total: input.stats.noteCount,
+        succeeded: input.stats.noteCount,
+        failed: 0,
+        skipped: input.stats.hiddenSkippedCount,
+      },
+      error: null,
+    };
+  }
+
+  if (input.error) {
+    return { status: "failed", progress: null, error: input.error };
+  }
+
+  if (input.results) {
+    return {
+      status: "succeeded",
+      progress: {
+        current: input.stats.noteCount,
+        total: input.stats.noteCount,
+        succeeded: input.stats.noteCount,
+        failed: 0,
+        skipped: input.stats.hiddenSkippedCount,
+      },
+      error: null,
+    };
+  }
+
+  return createIdleTaskState();
 }
 
 export function addTagNormalizationPlanStats(
