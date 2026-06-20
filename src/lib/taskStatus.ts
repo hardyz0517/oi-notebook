@@ -90,3 +90,15 @@ export function stopTaskState<TError = string>(state: TaskState<TError>): TaskSt
 export function cancelTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {
   return { ...state, status: "cancelled", error: null };
 }
+
+export function isTaskRunning(state: TaskState): boolean {
+  return state.status === "running";
+}
+
+export function isTaskActive(state: TaskState): boolean {
+  return state.status === "queued" || state.status === "running" || state.status === "paused" || state.status === "stopping";
+}
+
+export function isTaskFailed(state: TaskState): boolean {
+  return state.status === "failed";
+}

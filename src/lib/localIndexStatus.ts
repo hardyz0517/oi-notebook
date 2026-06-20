@@ -1,5 +1,5 @@
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
-import type { TaskState } from "@/lib/taskStatus";
+import { isTaskFailed, isTaskRunning, type TaskState } from "@/lib/taskStatus";
 
 export type LocalIndexStatusBadgeTone = "info" | "success" | "danger" | "warning";
 
@@ -68,12 +68,12 @@ export function getLocalIndexRebuildButtonLabel(isRebuilding: boolean): string {
 }
 
 export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalIndexTaskView {
-  const isLoading = input.loadTask.status === "running";
-  const isRebuilding = input.rebuildTask.status === "running";
+  const isLoading = isTaskRunning(input.loadTask);
+  const isRebuilding = isTaskRunning(input.rebuildTask);
   const taskError =
-    input.rebuildTask.status === "failed"
+    isTaskFailed(input.rebuildTask)
       ? input.rebuildTask.error
-      : input.loadTask.status === "failed"
+      : isTaskFailed(input.loadTask)
         ? input.loadTask.error
         : null;
   return {

@@ -12,6 +12,9 @@ import {
   queueTaskState,
   resumeTaskState,
   stopTaskState,
+  isTaskActive,
+  isTaskFailed,
+  isTaskRunning,
 } from "./taskStatus";
 
 describe("taskStatus", () => {
@@ -108,5 +111,26 @@ describe("taskStatus", () => {
       progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
       error: null,
     });
+  });
+
+  it("derives common task status predicates", () => {
+    const idle = createIdleTaskState();
+    const running = startTaskState();
+    const paused = pauseTaskState(running);
+    const stopping = stopTaskState(running);
+    const failed = failTaskState(running, "boom");
+
+    expect(isTaskRunning(running)).toBe(true);
+    expect(isTaskRunning(paused)).toBe(false);
+
+    expect(isTaskActive(idle)).toBe(false);
+    expect(isTaskActive(queueTaskState())).toBe(true);
+    expect(isTaskActive(running)).toBe(true);
+    expect(isTaskActive(paused)).toBe(true);
+    expect(isTaskActive(stopping)).toBe(true);
+    expect(isTaskActive(finishTaskState(running))).toBe(false);
+
+    expect(isTaskFailed(failed)).toBe(true);
+    expect(isTaskFailed(cancelTaskState(running))).toBe(false);
   });
 });
