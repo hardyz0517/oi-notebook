@@ -149,6 +149,12 @@ import {
   getSaveStatusLabel,
 } from "@/lib/appStatusLabels";
 import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yieldToUi } from "@/lib/appAsync";
+import {
+  getActiveActivityItem,
+  getActivityButtonClassName,
+  isAiActivitySelected,
+  type ActivityBarItem,
+} from "@/lib/appShell";
 import { DEFAULT_BLOG_CONFIG, normalizeBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
@@ -442,7 +448,6 @@ type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareProgress = TaskProgress;
 type LuoguWriteProgress = Pick<TaskProgress, "current" | "total">;
 type AppTheme = ThemeMode;
-type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
 
@@ -2406,21 +2411,18 @@ export default function App() {
   } = useLocalNoteSearchController(noteFiles);
   const isSettingsCenterOpenForRender = settingsCenterOpenRef.current;
   const editorViewModeLabel = getEditorViewModeLabel(editorViewMode);
-  const activeActivityItem: ActivityBarItem | null =
-    isSettingsCenterOpenForRender
-      ? "settings"
-      : isLuoguDialogOpen
-        ? "luogu"
-        : isRestartingBlog
-          ? "blog"
-          : isSearchOpen
-            ? "search"
-            : isNotesSidebarOpen
-              ? "notes"
-              : null;
-  const isAiActivityActive =
-    isAiSidebarOpen ||
-    (isSettingsCenterOpenForRender && SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId === "ai");
+  const activeActivityItem: ActivityBarItem | null = getActiveActivityItem({
+    isSettingsCenterOpen: isSettingsCenterOpenForRender,
+    isLuoguDialogOpen,
+    isRestartingBlog,
+    isSearchOpen,
+    isNotesSidebarOpen,
+  });
+  const isAiActivityActive = isAiActivitySelected({
+    isAiSidebarOpen,
+    isSettingsCenterOpen: isSettingsCenterOpenForRender,
+    activeSettingsGroupId: SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId,
+  });
   const appZoomLabel = formatZoomLabel(appZoom);
   const contentZoomLabel = formatZoomLabel(contentZoom);
   const selectedPromptUsage = useMemo(
@@ -5962,10 +5964,7 @@ export default function App() {
     void handleOpenBlog();
   };
 
-  const activityButtonClass = (_item: ActivityBarItem) =>
-    cn(
-      "app-activity-button relative h-12 w-12 rounded-md",
-    );
+  const activityButtonClass = (_item: ActivityBarItem) => getActivityButtonClassName();
 
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
