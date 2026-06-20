@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { LocalNoteIndexStatusResult } from "@/lib/api";
 import {
+  buildLocalIndexRebuildSuccessMessage,
   buildLocalIndexStatusMessage,
   deriveLocalIndexTaskView,
+  getLocalIndexRebuildRunningMessage,
   getLocalIndexRebuildButtonLabel,
   getLocalIndexStatusBadgeTone,
   isLocalIndexActionDisabled,
@@ -53,6 +55,13 @@ describe("localIndexStatus model helpers", () => {
 
     expect(getLocalIndexRebuildButtonLabel(false)).toBe("重建索引");
     expect(getLocalIndexRebuildButtonLabel(true)).toBe("正在建立...");
+  });
+
+  it("builds local index rebuild messages", () => {
+    expect(getLocalIndexRebuildRunningMessage()).toBe("正在建立本地笔记索引...");
+    expect(buildLocalIndexRebuildSuccessMessage({ noteCount: 12, chunkCount: 34 })).toBe(
+      "重建完成：12 篇笔记，34 个片段。",
+    );
   });
 
   it("derives legacy local index UI flags from task states", () => {

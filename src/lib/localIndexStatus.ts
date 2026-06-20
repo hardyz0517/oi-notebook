@@ -67,6 +67,16 @@ export function getLocalIndexRebuildButtonLabel(isRebuilding: boolean): string {
   return isRebuilding ? "正在建立..." : "重建索引";
 }
 
+export function getLocalIndexRebuildRunningMessage(): string {
+  return "正在建立本地笔记索引...";
+}
+
+export function buildLocalIndexRebuildSuccessMessage(
+  status: Pick<LocalNoteIndexStatusResult, "noteCount" | "chunkCount">,
+): string {
+  return `重建完成：${status.noteCount} 篇笔记，${status.chunkCount} 个片段。`;
+}
+
 export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalIndexTaskView {
   const isLoading = isTaskRunning(input.loadTask);
   const isRebuilding = isTaskRunning(input.rebuildTask);
