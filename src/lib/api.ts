@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
+import { toApiError } from "@/lib/apiError";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -515,13 +516,6 @@ export interface SyncLuoguInsightsResult {
  * 所有函数均为 async，与 Tauri invoke 的 Promise 语义一致。
  */
 
-/** 将 invoke 抛出的 unknown 值统一转成 Error */
-function toError(e: unknown): Error {
-  if (e instanceof Error) return e;
-  if (typeof e === "string") return new Error(e);
-  return new Error(String(e));
-}
-
 /**
  * 列出 notes/ 目录下所有 .md 文件，按最后修改时间降序排列。
  * 对应 Rust 命令：list_notes
@@ -530,7 +524,7 @@ export async function listNotes(): Promise<NoteFileInfo[]> {
   try {
     return await invoke<NoteFileInfo[]>("list_notes");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -544,7 +538,7 @@ export async function readNote(relativePath: string): Promise<string> {
   try {
     return await invoke<string>("read_note", { relativePath });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -552,7 +546,7 @@ export async function searchNotes(query: string): Promise<NoteSearchResult[]> {
   try {
     return await invoke<NoteSearchResult[]>("search_notes", { query });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -571,7 +565,7 @@ export async function writeNote(
   try {
     return await invoke<string | null>("write_note", { relativePath, content });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -595,7 +589,7 @@ export async function getNotesRootPath(): Promise<string> {
   try {
     return await invoke<string>("get_notes_root_path");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -603,7 +597,7 @@ export async function classifyMarkdownSavePath(absolutePath: string): Promise<Ma
   try {
     return await invoke<MarkdownSavePathClassification>("classify_markdown_save_path", { absolutePath });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -611,7 +605,7 @@ export async function writeExternalMarkdownFile(absolutePath: string, content: s
   try {
     await invoke<void>("write_external_markdown_file", { absolutePath, content });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -631,7 +625,7 @@ export async function saveNoteAsset(
       mimeType,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -645,7 +639,7 @@ export async function resolveNoteAssetUrl(
       imageSrc,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -663,7 +657,7 @@ export async function importLuoguInsight(
       sourceCode,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -671,7 +665,7 @@ export async function getLuoguConfig(): Promise<LuoguConfig> {
   try {
     return await invoke<LuoguConfig>("get_luogu_config");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -679,7 +673,7 @@ export async function saveLuoguConfig(config: Pick<LuoguConfig, "luogu">): Promi
   try {
     await invoke<void>("save_luogu_config", { config });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -689,7 +683,7 @@ export async function updateLuoguLastSubmissionId(
   try {
     await invoke<void>("update_luogu_last_submission_id", { lastSubmissionId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -697,7 +691,7 @@ export async function testLuoguConnection(): Promise<TestLuoguConnectionResult> 
   try {
     return await invoke<TestLuoguConnectionResult>("test_luogu_connection");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -707,7 +701,7 @@ export async function readLuoguProblemContent(
   try {
     return await invoke<ReadLuoguProblemContentResult>("read_luogu_problem_content", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -717,7 +711,7 @@ export async function previewLuoguSubmissions(
   try {
     return await invoke<PreviewLuoguSubmissionsResult>("preview_luogu_submissions", { limit });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -727,7 +721,7 @@ export async function previewLuoguSubmissionPage(
   try {
     return await invoke<PreviewLuoguSubmissionPageResult>("preview_luogu_submission_page", { page });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -741,7 +735,7 @@ export async function importLuoguSubmission(
       autoCommit,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -755,7 +749,7 @@ export async function prepareLuoguSubmissionNote(
       rules,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -773,7 +767,7 @@ export async function writeLuoguPreparedNote(
       writeMode,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -781,7 +775,7 @@ export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
   try {
     return await invoke<SyncLuoguInsightsResult>("sync_luogu_insights");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -789,7 +783,7 @@ export async function getTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
   try {
     return await invoke<UserTagTaxonomyConfig>("get_tag_taxonomy_config");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -797,7 +791,7 @@ export async function saveTagTaxonomyConfig(config: UserTagTaxonomyConfig): Prom
   try {
     await invoke<void>("save_tag_taxonomy_config", { config });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -805,7 +799,7 @@ export async function getBlogConfig(): Promise<BlogConfig> {
   try {
     return await invoke<BlogConfig>("get_blog_config");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -813,7 +807,7 @@ export async function saveBlogConfig(config: BlogConfig): Promise<void> {
   try {
     await invoke<void>("save_blog_config", { config });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -821,7 +815,7 @@ export async function resetTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
   try {
     return await invoke<UserTagTaxonomyConfig>("reset_tag_taxonomy_config");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -829,7 +823,7 @@ export async function getAiConfig(): Promise<AiConfig> {
   try {
     return await invoke<AiConfig>("get_ai_config");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -837,7 +831,7 @@ export async function saveAiConfig(config: AiConfig): Promise<void> {
   try {
     await invoke<void>("save_ai_config", { config });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -845,7 +839,7 @@ export async function testAiConnection(): Promise<TestAiConnectionResult> {
   try {
     return await invoke<TestAiConnectionResult>("test_ai_connection");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -853,7 +847,7 @@ export async function saveAiProvider(provider: AiProvider): Promise<AiProviderAc
   try {
     return await invoke<AiProviderActionResult>("save_ai_provider", { provider });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -861,7 +855,7 @@ export async function deleteAiProvider(providerId: string): Promise<AiConfig> {
   try {
     return await invoke<AiConfig>("delete_ai_provider", { providerId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -869,7 +863,7 @@ export async function setDefaultAiModel(providerId: string, modelId: string): Pr
   try {
     return await invoke<AiConfig>("set_default_ai_model", { providerId, modelId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -877,7 +871,7 @@ export async function syncAiProviderModels(providerId: string): Promise<SyncAiPr
   try {
     return await invoke<SyncAiProviderModelsResult>("sync_ai_provider_models", { providerId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -885,7 +879,7 @@ export async function syncAiProviderModelsDraft(provider: AiProvider): Promise<S
   try {
     return await invoke<SyncAiProviderDraftModelsResult>("sync_ai_provider_models_draft", { provider });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -893,7 +887,7 @@ export async function testAiProvider(providerId: string): Promise<TestAiProvider
   try {
     return await invoke<TestAiProviderResult>("test_ai_provider", { providerId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -901,7 +895,7 @@ export async function testAiProviderDraft(provider: AiProvider): Promise<TestAiP
   try {
     return await invoke<TestAiProviderResult>("test_ai_provider_draft", { provider });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -909,7 +903,7 @@ export async function addAiProviderModel(providerId: string, modelId: string): P
   try {
     return await invoke<AiProviderActionResult>("add_ai_provider_model", { providerId, modelId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -917,7 +911,7 @@ export async function deleteAiProviderModel(providerId: string, modelId: string)
   try {
     return await invoke<AiProviderActionResult>("delete_ai_provider_model", { providerId, modelId });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -925,7 +919,7 @@ export async function searchWebSources(input: SearchWebSourcesInput): Promise<We
   try {
     return await invoke<WebSearchResult[]>("search_web_sources", { request: input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -933,7 +927,7 @@ export async function planSearchQueries(input: PlanSearchQueriesInput): Promise<
   try {
     return await invoke<AiSearchQueryPlan>("plan_search_queries", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -941,7 +935,7 @@ export async function fetchWebSourceExcerpts(input: WebSourceExcerptRequest & { 
   try {
     return await invoke<WebSourceExcerptResult[]>("fetch_web_source_excerpts", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -949,7 +943,7 @@ export async function searchLocalNotes(input: SearchLocalNotesInput): Promise<Lo
   try {
     return await invoke<LocalNoteSearchResult[]>("search_local_notes", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -957,7 +951,7 @@ export async function clearWebCache(): Promise<void> {
   try {
     await invoke("clear_web_cache");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -967,7 +961,7 @@ export async function testWebSearchConnection(
   try {
     return await invoke<TestWebSearchConnectionResult>("test_web_search_connection", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -975,7 +969,7 @@ export async function getWebCacheStatus(): Promise<WebCacheStatusResult> {
   try {
     return await invoke<WebCacheStatusResult>("get_web_cache_status");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -983,7 +977,7 @@ export async function getLocalNoteIndexStatus(): Promise<LocalNoteIndexStatusRes
   try {
     return await invoke<LocalNoteIndexStatusResult>("get_local_note_index_status");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -991,7 +985,7 @@ export async function rebuildLocalNoteIndex(): Promise<LocalNoteIndexStatusResul
   try {
     return await invoke<LocalNoteIndexStatusResult>("rebuild_local_note_index");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -999,7 +993,7 @@ export async function getPromptCitationContractStatus(): Promise<PromptCitationC
   try {
     return await invoke<PromptCitationContractStatusResult>("get_prompt_citation_contract_status");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1007,7 +1001,7 @@ export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckRes
   try {
     return await invoke<NotexSearchSelfCheckResult>("run_notex_search_self_check");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1023,7 +1017,7 @@ export async function generateNoteMetadata(
       tagTaxonomyContext,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1037,7 +1031,7 @@ export async function polishNoteBody(
       markdownContent,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1055,7 +1049,7 @@ export async function chatWithCurrentNote(
       modelId,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1071,7 +1065,7 @@ export async function suggestNoteTags(
       modelId,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1087,7 +1081,7 @@ export async function polishSelectedText(
       modelId,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1105,7 +1099,7 @@ export async function polishFullNote(
       modelId,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1113,7 +1107,7 @@ export async function startCurrentNoteChatStream(input: NoteChatStreamInput): Pr
   try {
     await invoke<void>("chat_with_current_note_stream", { input });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1121,7 +1115,7 @@ export async function listAiPrompts(): Promise<PromptTemplateSummary[]> {
   try {
     return await invoke<PromptTemplateSummary[]>("list_ai_prompts");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1129,7 +1123,7 @@ export async function readAiPrompt(fileName: string): Promise<PromptTemplateCont
   try {
     return await invoke<PromptTemplateContent>("read_ai_prompt", { fileName });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1137,7 +1131,7 @@ export async function saveAiPrompt(fileName: string, content: string): Promise<v
   try {
     await invoke<void>("save_ai_prompt", { fileName, content });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1145,7 +1139,7 @@ export async function resetAiPromptToDefault(fileName: string): Promise<PromptTe
   try {
     return await invoke<PromptTemplateContent>("reset_ai_prompt_to_default", { fileName });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1156,7 +1150,7 @@ export async function polishAiPromptTemplate(
   try {
     return await invoke<PolishedAiPromptTemplate>("polish_ai_prompt_template", { fileName, content });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1170,7 +1164,7 @@ export async function deleteNote(relativePath: string): Promise<void> {
   try {
     await invoke<void>("delete_note", { relativePath });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1191,7 +1185,7 @@ export async function renameNote(
       newRelativePath,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1199,7 +1193,7 @@ export async function createNoteFolder(relativePath: string): Promise<void> {
   try {
     await invoke<void>("create_note_folder", { relativePath });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1213,7 +1207,7 @@ export async function renameNoteFolder(
       newRelativePath,
     });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1221,7 +1215,7 @@ export async function deleteNoteFolder(relativePath: string): Promise<void> {
   try {
     await invoke<void>("delete_note_folder", { relativePath });
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1233,7 +1227,7 @@ export async function openBlog(): Promise<void> {
   try {
     await invoke<void>("open_blog");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1245,7 +1239,7 @@ export async function restartBlogServer(): Promise<void> {
   try {
     await invoke<void>("restart_blog_server");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1258,7 +1252,7 @@ export async function openNotesFolder(): Promise<void> {
   try {
     await invoke<void>("open_notes_folder");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
 
@@ -1266,6 +1260,6 @@ export async function hideMainWindow(): Promise<void> {
   try {
     await invoke<void>("hide_main_window");
   } catch (e) {
-    throw toError(e);
+    throw toApiError(e);
   }
 }
