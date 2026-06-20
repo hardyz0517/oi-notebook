@@ -285,8 +285,7 @@ import {
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getNoteDirectories,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
-  filterDeletedNoteTabs,
-  isNotePathAffectedByTarget,
+  removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   rewriteNoteWorkspaceReferences,
   resolveNewNoteDirectory,
@@ -2870,18 +2869,23 @@ export default function App() {
       }
       const updated = await listNotes();
       setFiles(updated);
-      setOpenTabPaths((current) => filterDeletedNoteTabs(current, path, isDirectory));
-      if (isDirectory) {
-        setActiveTreeDirectoryPath((current) =>
-          current && isNotePathAffectedByTarget(current, path, true) ? null : current,
-        );
-      }
-      setActiveTreeFilePath((current) =>
-        current && isNotePathAffectedByTarget(current, path, isDirectory) ? null : current,
+      const references = removeDeletedNoteWorkspaceReferences(
+        {
+          openTabPaths,
+          currentFilePath,
+          activeWorkspaceTabId,
+          activeTreeDirectoryPath,
+          activeTreeFilePath,
+        },
+        path,
+        isDirectory,
       );
-      if (currentFilePath && isNotePathAffectedByTarget(currentFilePath, path, isDirectory)) {
-        setCurrentFilePath(null);
-        setActiveWorkspaceTabId(null);
+      setOpenTabPaths(references.openTabPaths);
+      setCurrentFilePath(references.currentFilePath);
+      setActiveWorkspaceTabId(references.activeWorkspaceTabId);
+      setActiveTreeDirectoryPath(references.activeTreeDirectoryPath);
+      setActiveTreeFilePath(references.activeTreeFilePath);
+      if (references.shouldClearDirty) {
         setIsDirty(false);
       }
       toast.success(isDirectory ? "已删除文件夹" : "已删除笔记");

@@ -94,6 +94,43 @@ export function filterDeletedNoteTabs(tabPaths: string[], deletedPath: string, i
   return tabPaths.filter((tabPath) => !isNotePathAffectedByTarget(tabPath, deletedPath, isDirectory));
 }
 
+export interface DeletedNoteWorkspaceReferences {
+  openTabPaths: string[];
+  currentFilePath: string | null;
+  activeWorkspaceTabId: string | null;
+  activeTreeDirectoryPath: string | null;
+  activeTreeFilePath: string | null;
+}
+
+export interface RemovedDeletedNoteWorkspaceReferences extends DeletedNoteWorkspaceReferences {
+  shouldClearDirty: boolean;
+}
+
+export function removeDeletedNoteWorkspaceReferences(
+  references: DeletedNoteWorkspaceReferences,
+  deletedPath: string,
+  isDirectory: boolean,
+): RemovedDeletedNoteWorkspaceReferences {
+  const currentFileAffected = references.currentFilePath
+    ? isNotePathAffectedByTarget(references.currentFilePath, deletedPath, isDirectory)
+    : false;
+
+  return {
+    openTabPaths: filterDeletedNoteTabs(references.openTabPaths, deletedPath, isDirectory),
+    currentFilePath: currentFileAffected ? null : references.currentFilePath,
+    activeWorkspaceTabId: currentFileAffected ? null : references.activeWorkspaceTabId,
+    activeTreeDirectoryPath:
+      isDirectory && references.activeTreeDirectoryPath && isNotePathAffectedByTarget(references.activeTreeDirectoryPath, deletedPath, true)
+        ? null
+        : references.activeTreeDirectoryPath,
+    activeTreeFilePath:
+      references.activeTreeFilePath && isNotePathAffectedByTarget(references.activeTreeFilePath, deletedPath, isDirectory)
+        ? null
+        : references.activeTreeFilePath,
+    shouldClearDirty: currentFileAffected,
+  };
+}
+
 export interface NoteWorkspacePendingFileSelection {
   path: string;
   [key: string]: unknown;

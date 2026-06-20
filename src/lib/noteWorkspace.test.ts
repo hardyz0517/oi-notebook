@@ -8,6 +8,7 @@ import {
   getSelectedTreeCreateParent,
   normalizeCustomNoteDirectory,
   quoteYamlString,
+  removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   filterDeletedNoteTabs,
   rewriteNoteWorkspaceReferences,
@@ -102,6 +103,50 @@ describe("noteWorkspace", () => {
       "A/dir2/c.md",
       "A/root.md",
     ]);
+  });
+
+  it("removes workspace references affected by deleted files and directories", () => {
+    expect(
+      removeDeletedNoteWorkspaceReferences(
+        {
+          openTabPaths: ["A/dir/a.md", "A/dir2/b.md", "A/root.md"],
+          currentFilePath: "A/dir/a.md",
+          activeWorkspaceTabId: "note:A/dir/a.md",
+          activeTreeDirectoryPath: "A/dir",
+          activeTreeFilePath: "A/dir/nested/b.md",
+        },
+        "A/dir",
+        true,
+      ),
+    ).toEqual({
+      openTabPaths: ["A/dir2/b.md", "A/root.md"],
+      currentFilePath: null,
+      activeWorkspaceTabId: null,
+      activeTreeDirectoryPath: null,
+      activeTreeFilePath: null,
+      shouldClearDirty: true,
+    });
+
+    expect(
+      removeDeletedNoteWorkspaceReferences(
+        {
+          openTabPaths: ["A/dir/a.md", "A/root.md"],
+          currentFilePath: "A/root.md",
+          activeWorkspaceTabId: "note:A/root.md",
+          activeTreeDirectoryPath: "A/dir",
+          activeTreeFilePath: "A/dir/a.md",
+        },
+        "A/dir/a.md",
+        false,
+      ),
+    ).toEqual({
+      openTabPaths: ["A/root.md"],
+      currentFilePath: "A/root.md",
+      activeWorkspaceTabId: "note:A/root.md",
+      activeTreeDirectoryPath: "A/dir",
+      activeTreeFilePath: null,
+      shouldClearDirty: false,
+    });
   });
 
   it("rewrites workspace path references for a directory rename", () => {
