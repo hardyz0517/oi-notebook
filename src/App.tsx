@@ -231,6 +231,13 @@ import {
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { TaskProgress } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
+import {
+  findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
+  getCurrentNoteDirectory,
+  getNoteDirectories,
+  resolveNewNoteDirectory,
+  type NewNoteLocationOption,
+} from "@/lib/noteWorkspace";
 import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
   createExternalWorkingCopy,
@@ -399,7 +406,7 @@ type ConfirmDialogState = {
   danger?: boolean;
   resolve: (confirmed: boolean) => void;
 };
-type NoteLocationOptionId = "root" | "current" | "tricks" | "problems" | "custom";
+type NoteLocationOptionId = NewNoteLocationOption;
 type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "manual";
 type LuoguImportStep = "scan" | "preview";
@@ -2790,13 +2797,10 @@ export default function App() {
     rewriteDisplayTitlePaths,
   } = useDisplayNoteFiles(files, currentFilePath);
   const noteDirectories = useMemo(
-    () => files.filter((file) => file.isDirectory).map((file) => file.path).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" })),
+    () => getNoteDirectories(files),
     [files],
   );
-  const currentNoteDirectory = useMemo(() => {
-    if (!currentFilePath || !currentFilePath.includes("/")) return "";
-    return currentFilePath.slice(0, currentFilePath.lastIndexOf("/"));
-  }, [currentFilePath]);
+  const currentNoteDirectory = useMemo(() => getCurrentNoteDirectory(currentFilePath), [currentFilePath]);
   const openTabs = useMemo<OpenFileTab[]>(
     () => buildOpenFileTabs(workingCopies, openTabPaths, displayFiles),
     [displayFiles, openTabPaths, workingCopies],
@@ -2935,16 +2939,11 @@ export default function App() {
   };
 
   const getResolvedNewNoteDirectory = (): string => {
-    if (newNoteLocationOption === "root") return "";
-    if (newNoteLocationOption === "tricks") return "tricks";
-    if (newNoteLocationOption === "problems") return "problems";
-    if (newNoteLocationOption === "custom") return newNoteCustomDirectory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return currentNoteDirectory;
+    return resolveNewNoteDirectory(newNoteLocationOption, newNoteCustomDirectory, currentNoteDirectory);
   };
 
   const findEntryCaseInsensitive = (path: string, isDirectory: boolean) => {
-    const normalized = path.toLowerCase();
-    return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
+    return findNoteEntryCaseInsensitive(files, path, isDirectory);
   };
 
   const updatePathReferences = (oldPath: string, newPath: string, isDirectory: boolean) => {
