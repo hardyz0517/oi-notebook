@@ -210,6 +210,7 @@ import {
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import type { TaskProgress } from "@/lib/taskStatus";
 import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
   createExternalWorkingCopy,
@@ -387,13 +388,8 @@ type LuoguImportCenterTab = "scan" | "manual";
 type LuoguImportStep = "scan" | "preview";
 type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguWriteMode = "createNew" | "overwrite";
-type LuoguPrepareProgress = {
-  current: number;
-  total: number;
-  succeeded: number;
-  failed: number;
-  skipped: number;
-};
+type LuoguPrepareProgress = TaskProgress;
+type LuoguWriteProgress = Pick<TaskProgress, "current" | "total">;
 type AppTheme = ThemeMode;
 type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
@@ -1915,7 +1911,7 @@ export default function App() {
   const [isWritingPreparedLuogu, setIsWritingPreparedLuogu] = useState(false);
   const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
   const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
-  const [luoguWriteProgress, setLuoguWriteProgress] = useState<{ current: number; total: number } | null>(null);
+  const [luoguWriteProgress, setLuoguWriteProgress] = useState<LuoguWriteProgress | null>(null);
   const [activeLuoguPreparedPreviewId, setActiveLuoguPreparedPreviewId] = useState<string | null>(null);
   const [activeLuoguPreviewDetailTab, setActiveLuoguPreviewDetailTab] = useState<LuoguPreviewDetailTab>("rendered");
   const [editedLuoguPreparedMarkdownIds, setEditedLuoguPreparedMarkdownIds] = useState<Set<string>>(() => new Set());
