@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import { mergeConfigWithStoredCustomCollections, normalizeCustomCollections, parseUserTagTaxonomyConfigJson, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import { useCollectionCandidatesFromNotes } from "@/components/tag-manager/useCollectionCandidatesFromNotes";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
@@ -1653,7 +1654,6 @@ export default function App() {
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
-  const [collectionCandidatesFromNotes, setCollectionCandidatesFromNotes] = useState<string[]>([]);
   const [isTagNormalizationDetailsOpen, setIsTagNormalizationDetailsOpen] = useState(false);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
   const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
@@ -2020,6 +2020,8 @@ export default function App() {
   useEffect(() => {
     setEditorSelectedTextLength(null);
   }, [currentFilePath, editorViewMode]);
+  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  const collectionCandidatesFromNotes = useCollectionCandidatesFromNotes(noteFiles);
   const deferredFullMarkdown = useMemo(
     () => (currentFilePath === null ? previewMarkdown : combineMarkdown(frontmatterPrefix, previewMarkdown)),
     [currentFilePath, previewMarkdown, frontmatterPrefix],
@@ -2664,7 +2666,6 @@ export default function App() {
     })),
     [promptTemplates],
   );
-  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
   const { openTabPaths, setOpenTabPaths } = useOpenTabsController({
     currentFilePath,
     setCurrentFilePath,
@@ -2773,33 +2774,6 @@ export default function App() {
     transition: "none",
     animation: "none",
   } as CSSProperties;
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadCollectionCandidates = async () => {
-      const candidates: string[] = [];
-
-      for (const file of noteFiles) {
-        try {
-          const content = await readNote(file.path);
-          const parsed = parseFrontmatterFields(content);
-          candidates.push(...getEffectiveCollections(parsed.fields));
-        } catch (error) {
-          console.warn("Failed to read note collection candidates", file.path, error);
-        }
-      }
-
-      if (!cancelled) {
-        setCollectionCandidatesFromNotes(normalizeCollectionValues(candidates));
-      }
-    };
-
-    void loadCollectionCandidates();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [noteFiles]);
   const displayFiles = useMemo<NoteFileInfo[]>(
     () =>
       files.map((file) => ({
