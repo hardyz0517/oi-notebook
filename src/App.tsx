@@ -68,6 +68,11 @@ import {
   type LuoguScanMode,
 } from "@/components/settings/pages/luoguImportDomain";
 import {
+  formatLuoguPrepareButtonLabel,
+  formatLuoguPreviewReviewSummary,
+  formatLuoguScanResultSummary,
+} from "@/components/luogu/luoguImportDisplay";
+import {
   formatLuoguSubmissionStatus,
   formatLuoguSubmissionTime,
   getLuoguCandidateDisplayState,
@@ -1809,6 +1814,25 @@ export default function App() {
     reviewSelectedLuoguSubmissionIds,
     currentlyPreparingLuoguId,
     activeLuoguPreparedPreviewId,
+  });
+  const luoguScanResultSummaryLabel = formatLuoguScanResultSummary({
+    isPaused: isLuoguScanPaused,
+    progress: luoguScanProgress,
+    summary: luoguScanSummary,
+    hasPreviewResult: Boolean(luoguPreviewResult),
+    stats: luoguScanResultStats,
+  });
+  const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
+    isPreparing: isPreparingSelectedLuogu,
+    progress: luoguPrepareProgress,
+    prepareQueueCount: luoguPrepareQueueSubmissions.length,
+    reusablePreviewCount: luoguReusablePreviewCount,
+  });
+  const luoguPreviewReviewSummaryLabel = formatLuoguPreviewReviewSummary({
+    prepareProgress: luoguPrepareProgress,
+    writeProgress: luoguWriteProgress,
+    preparedCount: preparedLuoguNotes.length,
+    writableCount: writableLuoguPreparedNotes.length,
   });
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {
@@ -7055,15 +7079,7 @@ export default function App() {
                           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                             <div className="shrink-0 text-base font-medium text-foreground">扫描结果</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
-                              {isLuoguScanPaused
-                                ? `扫描已暂停 — ${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
-                                : luoguScanProgress
-                                  ? `正在扫描，已发现 ${luoguScanProgress.foundCount} 条`
-                                  : luoguScanSummary
-                                    ? `${luoguScanSummary.foundCount} 条 / 可导入 ${luoguScanSummary.candidateCount} / 跳过 ${luoguScanSummary.skippedCount}`
-                                    : luoguPreviewResult
-                                      ? `${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
-                                      : "还没有扫描结果。"}
+                              {luoguScanResultSummaryLabel}
                               {!isLuoguScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
                             </div>
                           </div>
@@ -7086,11 +7102,7 @@ export default function App() {
                                   isSyncingLuogu
                                 }
                               >
-                                {isPreparingSelectedLuogu
-                                  ? `生成中 ${luoguPrepareProgress?.current ?? 0}/${luoguPrepareProgress?.total ?? luoguPrepareQueueSubmissions.length}`
-                                  : luoguPrepareQueueSubmissions.length > 0
-                                    ? `生成预览（${luoguPrepareQueueSubmissions.length}）`
-                                    : `查看预览（${luoguReusablePreviewCount}）`}
+                                {luoguPrepareButtonLabel}
                               </Button>
                               {isPreparingSelectedLuogu && (
                                 <Button
@@ -7285,11 +7297,7 @@ export default function App() {
                           <div className="flex min-w-0 items-baseline gap-2">
                             <div className="shrink-0 text-base font-medium text-foreground">审阅预览</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
-                            {luoguPrepareProgress
-                              ? `生成中 ${luoguPrepareProgress.current}/${luoguPrepareProgress.total} 路 成功 ${luoguPrepareProgress.succeeded} 路 失败 ${luoguPrepareProgress.failed}`
-                              : luoguWriteProgress
-                                ? `写入中 ${luoguWriteProgress.current}/${luoguWriteProgress.total}`
-                                : `已生成 ${preparedLuoguNotes.length} 个 路 已选 ${writableLuoguPreparedNotes.length} 个`}
+                            {luoguPreviewReviewSummaryLabel}
                             </div>
                           </div>
                         </div>
