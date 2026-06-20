@@ -177,7 +177,6 @@ import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft }
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
-  deriveTagNormalizationApplyTaskState,
   deriveTagNormalizationScanTaskState,
   deriveTagNormalizationTaskView,
   formatTagNormalizationReason,
@@ -304,7 +303,7 @@ import {
   normalizeUserTagTaxonomyConfig,
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import {
   buildNewNoteMarkdown,
   getCreateFolderPlan,
@@ -1211,7 +1210,7 @@ export default function App() {
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
   const [tagNormalizationScanIssueCount, setTagNormalizationScanIssueCount] = useState(0);
   const [selectedTagNormalizationScanPaths, setSelectedTagNormalizationScanPaths] = useState<Set<string>>(() => new Set());
-  const [isApplyingTagNormalizationScan, setIsApplyingTagNormalizationScan] = useState(false);
+  const [tagNormalizationApplyTaskState, setTagNormalizationApplyTaskState] = useState<TaskState>(createIdleTaskState);
   const [tagNormalizationApplyResult, setTagNormalizationApplyResult] = useState<TagNormalizationApplyResult | null>(null);
   const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
   const tagManagerSessionRef = useRef(tagManagerSession);
@@ -2044,10 +2043,6 @@ export default function App() {
     () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
     [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
   );
-  const tagNormalizationApplyTaskState = deriveTagNormalizationApplyTaskState({
-    isApplying: isApplyingTagNormalizationScan,
-    selectedStats: selectedTagNormalizationScanStats,
-  });
   const tagNormalizationApplyTaskView = deriveTagNormalizationTaskView(tagNormalizationApplyTaskState, "apply");
   const tagTaxonomyUserEntries = useMemo(
     () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
@@ -4795,12 +4790,13 @@ export default function App() {
     });
     if (!confirmed) return;
 
-    setIsApplyingTagNormalizationScan(true);
+    setTagNormalizationApplyTaskState(startTaskState(selectedTagNormalizationScanStats.noteCount));
     const failures: TagNormalizationApplyFailure[] = [];
     let successCount = 0;
     let normalizedTagCount = 0;
     let duplicateTagCount = 0;
     let skippedCount = 0;
+    let processedCount = 0;
 
     for (const result of tagNormalizationScanResults) {
       if (!selectedPaths.has(result.path)) continue;
@@ -4850,6 +4846,14 @@ export default function App() {
           path: result.path,
           error: getErrorMessage(error),
         });
+      } finally {
+        processedCount += 1;
+        setTagNormalizationApplyTaskState((task) => updateTaskProgress(task, {
+          current: processedCount,
+          succeeded: successCount,
+          failed: failures.length,
+          skipped: skippedCount,
+        }));
       }
     }
 
@@ -4861,7 +4865,7 @@ export default function App() {
       failures,
     });
     setSelectedTagNormalizationScanPaths(new Set());
-    setIsApplyingTagNormalizationScan(false);
+    setTagNormalizationApplyTaskState((task) => finishTaskState(task));
     void handleScanLegacyTags();
   }, [
     applyLoadedMarkdown,
@@ -8001,7 +8005,7 @@ export default function App() {
                       tagNormalizationScanResults={tagNormalizationScanResults}
                       tagNormalizationScanIssueCount={tagNormalizationScanIssueCount}
                       tagNormalizationScanStats={tagNormalizationScanStats}
-                      isApplyingTagNormalizationScan={isApplyingTagNormalizationScan}
+                      isApplyingTagNormalizationScan={tagNormalizationApplyTaskView.isBusy}
                       selectedTagNormalizationScanStats={selectedTagNormalizationScanStats}
                       selectedTagNormalizationScanPaths={selectedTagNormalizationScanPaths}
                       loadTagTaxonomyConfig={loadTagTaxonomyConfig}
