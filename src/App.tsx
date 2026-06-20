@@ -285,6 +285,9 @@ import {
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getNoteDirectories,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
+  getTreeSelectionAfterClear,
+  getTreeSelectionAfterDirectorySelect,
+  getTreeSelectionAfterFileSelect,
   removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
   rewriteNoteWorkspaceReferences,
@@ -2680,13 +2683,15 @@ export default function App() {
   };
 
   const handleSelectTreeDirectory = useCallback((path: string) => {
-    setActiveTreeDirectoryPath(path);
-    setActiveTreeFilePath(null);
+    const selection = getTreeSelectionAfterDirectorySelect(path);
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
   }, []);
 
   const handleClearTreeSelection = useCallback(() => {
-    setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(null);
+    const selection = getTreeSelectionAfterClear();
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
   }, []);
 
   const openRenameDialog = (path: string, isDirectory = false) => {
@@ -5170,8 +5175,9 @@ export default function App() {
   };
 
   const handleSelectFile = (path: string, options?: { closeSearchOnSuccess?: boolean }): boolean => {
-    setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(path);
+    const selection = getTreeSelectionAfterFileSelect(path);
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
     if (path === currentFilePath) {
       setActiveWorkingCopyId(getNoteWorkingCopyId(path));
       setActiveWorkspaceTabId(getNoteWorkingCopyId(path));

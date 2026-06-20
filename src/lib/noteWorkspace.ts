@@ -72,6 +72,32 @@ export function getDefaultNewNoteCreateParent(
   return currentDirectory;
 }
 
+export interface NoteTreeSelectionState {
+  activeTreeDirectoryPath: string | null;
+  activeTreeFilePath: string | null;
+}
+
+export function getTreeSelectionAfterDirectorySelect(path: string): NoteTreeSelectionState {
+  return {
+    activeTreeDirectoryPath: path,
+    activeTreeFilePath: null,
+  };
+}
+
+export function getTreeSelectionAfterFileSelect(path: string): NoteTreeSelectionState {
+  return {
+    activeTreeDirectoryPath: null,
+    activeTreeFilePath: path,
+  };
+}
+
+export function getTreeSelectionAfterClear(): NoteTreeSelectionState {
+  return {
+    activeTreeDirectoryPath: null,
+    activeTreeFilePath: null,
+  };
+}
+
 export function rewriteNotePathReference(
   path: string,
   oldPath: string,

@@ -6,6 +6,9 @@ import {
   getDefaultNewNoteCreateParent,
   getNoteDirectories,
   getSelectedTreeCreateParent,
+  getTreeSelectionAfterClear,
+  getTreeSelectionAfterFileSelect,
+  getTreeSelectionAfterDirectorySelect,
   normalizeCustomNoteDirectory,
   quoteYamlString,
   removeDeletedNoteWorkspaceReferences,
@@ -75,6 +78,21 @@ describe("noteWorkspace", () => {
     expect(getDefaultNewNoteCreateParent(null, null, "current")).toBe("current");
     expect(getDefaultNewNoteCreateParent("A", null, "current")).toBe("A");
     expect(getDefaultNewNoteCreateParent(null, "A/note.md", "current")).toBe("A");
+  });
+
+  it("derives tree selection state from file tree actions", () => {
+    expect(getTreeSelectionAfterDirectorySelect("A/B")).toEqual({
+      activeTreeDirectoryPath: "A/B",
+      activeTreeFilePath: null,
+    });
+    expect(getTreeSelectionAfterFileSelect("A/B/note.md")).toEqual({
+      activeTreeDirectoryPath: null,
+      activeTreeFilePath: "A/B/note.md",
+    });
+    expect(getTreeSelectionAfterClear()).toEqual({
+      activeTreeDirectoryPath: null,
+      activeTreeFilePath: null,
+    });
   });
 
   it("rewrites note path references for file and directory renames", () => {
