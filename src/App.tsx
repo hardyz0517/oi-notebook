@@ -263,7 +263,7 @@ import {
   parseTagPathInput,
   resolveTagTaxonomyAliasTarget,
 } from "@/lib/tagTaxonomyUserConfig";
-import type { TaskProgress } from "@/lib/taskStatus";
+import { createTaskProgress, updateTaskProgressValue, type TaskProgress } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
@@ -451,7 +451,7 @@ type LuoguImportStep = "scan" | "preview";
 type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareProgress = TaskProgress;
-type LuoguWriteProgress = Pick<TaskProgress, "current" | "total">;
+type LuoguWriteProgress = TaskProgress;
 type AppTheme = ThemeMode;
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
@@ -4506,7 +4506,7 @@ export default function App() {
     }
 
     setIsWritingPreparedLuogu(true);
-    setLuoguWriteProgress({ current: 0, total: preparedNotesToWrite.length });
+    setLuoguWriteProgress(createTaskProgress(preparedNotesToWrite.length));
     let writtenCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
@@ -4516,7 +4516,9 @@ export default function App() {
       for (let index = 0; index < preparedNotesToWrite.length; index += 1) {
         const prepared = preparedNotesToWrite[index];
         setCurrentlyWritingLuoguId(prepared.submissionId);
-        setLuoguWriteProgress({ current: index + 1, total: preparedNotesToWrite.length });
+        setLuoguWriteProgress((current) =>
+          updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), { current: index + 1 }),
+        );
 
         try {
           const initialWriteMode: LuoguWriteMode = luoguImportRules.writeStrategy === "overwrite" ? "overwrite" : "createNew";
@@ -4548,6 +4550,13 @@ export default function App() {
             writtenCount += 1;
             if (result.relativePath) lastWrittenPath = result.relativePath;
           }
+          setLuoguWriteProgress((current) =>
+            updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), {
+              succeeded: writtenCount,
+              failed: failedCount,
+              skipped: skippedCount,
+            }),
+          );
         } catch (e) {
           failedCount += 1;
           setLuoguWriteResultsById((current) => ({
@@ -4562,6 +4571,13 @@ export default function App() {
               commitStatus: "failed",
             },
           }));
+          setLuoguWriteProgress((current) =>
+            updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), {
+              succeeded: writtenCount,
+              failed: failedCount,
+              skipped: skippedCount,
+            }),
+          );
         }
       }
 

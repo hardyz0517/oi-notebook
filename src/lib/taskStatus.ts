@@ -53,6 +53,16 @@ export function updateTaskProgress<TError = string>(
   };
 }
 
+export function updateTaskProgressValue(progress: TaskProgress, patch: Partial<TaskProgress>): TaskProgress {
+  return {
+    current: normalizeProgressValue(patch.current ?? progress.current),
+    total: normalizeProgressValue(patch.total ?? progress.total),
+    succeeded: normalizeProgressValue(patch.succeeded ?? progress.succeeded),
+    failed: normalizeProgressValue(patch.failed ?? progress.failed),
+    skipped: normalizeProgressValue(patch.skipped ?? progress.skipped),
+  };
+}
+
 export function finishTaskState<TError = string>(state: TaskState<TError>): TaskState<TError> {
   return { ...state, status: "succeeded", error: null };
 }

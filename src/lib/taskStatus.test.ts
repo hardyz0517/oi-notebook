@@ -7,6 +7,7 @@ import {
   finishTaskState,
   startTaskState,
   updateTaskProgress,
+  updateTaskProgressValue,
 } from "./taskStatus";
 
 describe("taskStatus", () => {
@@ -34,6 +35,20 @@ describe("taskStatus", () => {
       error: null,
     });
     expect(state.progress?.current).toBe(0);
+  });
+
+  it("updates standalone progress values for legacy task state migration", () => {
+    const progress = createTaskProgress(5);
+    const next = updateTaskProgressValue(progress, { current: 2, succeeded: 1, skipped: 1 });
+
+    expect(next).toEqual({
+      current: 2,
+      total: 5,
+      succeeded: 1,
+      failed: 0,
+      skipped: 1,
+    });
+    expect(progress.current).toBe(0);
   });
 
   it("uses zeroed progress when updating an idle task", () => {
