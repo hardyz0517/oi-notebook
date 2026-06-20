@@ -25,6 +25,7 @@ import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreviewScrollSync";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
+import { useLocalNoteSearchController } from "@/components/search/useLocalNoteSearchController";
 import AiConfigManager from "@/components/settings/AiConfigManager";
 import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
 import SettingsCenterHost, { type SettingsCenterHostHandle } from "@/components/settings/SettingsCenterHost";
@@ -116,7 +117,7 @@ import {
   type SettingsCenterRect,
 } from "@/components/settings/settingsGeometry";
 import { cn } from "@/lib/utils";
-import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -128,7 +129,7 @@ import {
   markPreviewEditorChange,
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
-import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
 import {
@@ -216,7 +217,7 @@ import {
   writeStoredEditorPreviewRatio,
   writeStoredLeftSidebarWidth,
 } from "@/lib/layoutPreferences";
-import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
+import { formatSearchDate } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import {
   OPEN_TABS_ACTIVE_STORAGE_KEY,
@@ -1756,7 +1757,6 @@ export default function App() {
   const [promptContent, setPromptContent] = useState("");
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [settingsCenterRect, setSettingsCenterRect] = useState<SettingsCenterRect>(getDefaultSettingsCenterRect);
   const [isSettingsCenterMaximized, setIsSettingsCenterMaximized] = useState(false);
   const [luoguDialogRect, setLuoguDialogRect] = useState<SettingsCenterRect>(getDefaultLuoguDialogRect);
@@ -1766,10 +1766,6 @@ export default function App() {
   const [promptPolishMessage, setPromptPolishMessage] = useState<string | null>(null);
   const [promptEditorFontSize, setPromptEditorFontSize] = useState(PROMPT_EDITOR_FONT_SIZE_DEFAULT);
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(getInitialDeveloperMode);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
-  const [isSearchLoading, setIsSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [pendingFileSelection, setPendingFileSelection] = useState<{ path: string; closeSearchOnSuccess: boolean } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
@@ -1781,7 +1777,6 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const [previewMarkdown, setPreviewMarkdown] = useState(INITIAL_MARKDOWN);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsCenterHostRef = useRef<SettingsCenterHostHandle>(null);
   const settingsCenterOpenRef = useRef(false);
   const settingsCenterMaximizedRef = useRef(false);
@@ -1800,7 +1795,6 @@ export default function App() {
   const promptPolishRunRef = useRef(0);
   const settingsCloseCleanupRafRef = useRef<number | null>(null);
   const settingsCloseCleanupTimeoutRef = useRef<number | null>(null);
-  const searchRequestSeqRef = useRef(0);
   const luoguPrepareRunSeqRef = useRef(0);
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
   const isMountedRef = useRef(true);
@@ -2686,6 +2680,18 @@ export default function App() {
     })),
     [promptTemplates],
   );
+  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  const {
+    isSearchOpen,
+    setIsSearchOpen,
+    searchQuery,
+    setSearchQuery,
+    trimmedSearchQuery,
+    searchResults,
+    isSearchLoading,
+    searchError,
+    searchInputRef,
+  } = useLocalNoteSearchController(noteFiles);
   const isSettingsCenterOpenForRender = settingsCenterOpenRef.current;
   const editorViewModeLabel =
     editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
@@ -2777,7 +2783,6 @@ export default function App() {
     transition: "none",
     animation: "none",
   } as CSSProperties;
-  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
   useEffect(() => {
     let cancelled = false;
 
@@ -2896,15 +2901,6 @@ export default function App() {
     ...appearanceStyle,
     ...(isEditorPreviewSplit ? { flex: `0 0 ${(1 - editorPreviewRatio) * 100}%` } : {}),
   } as CSSProperties;
-  const trimmedSearchQuery = searchQuery.trim();
-  const searchResults = useMemo(() => {
-    if (trimmedSearchQuery === "") return buildLocalSearchResults(noteFiles, "");
-
-    if (searchError) return buildLocalSearchResults(noteFiles, searchQuery);
-
-    return backendSearchResults.map(toSearchResultItem);
-  }, [backendSearchResults, noteFiles, searchError, searchQuery, trimmedSearchQuery]);
-
   const updateAppZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setAppZoom((currentZoom) => {
       const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
@@ -6640,56 +6636,6 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
-
-  useEffect(() => {
-    if (!isSearchOpen) return;
-
-    const timer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [isSearchOpen]);
-
-  useEffect(() => {
-    const query = searchQuery.trim();
-
-    if (!isSearchOpen || query === "") {
-      searchRequestSeqRef.current += 1;
-      setBackendSearchResults([]);
-      setSearchError(null);
-      setIsSearchLoading(false);
-      return;
-    }
-
-    const requestId = searchRequestSeqRef.current + 1;
-    searchRequestSeqRef.current = requestId;
-    setSearchError(null);
-    setBackendSearchResults([]);
-    setIsSearchLoading(true);
-
-    const timer = window.setTimeout(() => {
-      searchNotes(query)
-        .then((results) => {
-          if (searchRequestSeqRef.current !== requestId) return;
-          setBackendSearchResults(results);
-          setSearchError(null);
-        })
-        .catch((e: Error) => {
-          if (searchRequestSeqRef.current !== requestId) return;
-          setBackendSearchResults([]);
-          setSearchError(e.message || "搜索失败");
-        })
-        .finally(() => {
-          if (searchRequestSeqRef.current === requestId) {
-            setIsSearchLoading(false);
-          }
-        });
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [isSearchOpen, searchQuery]);
 
   // 挂载时从后端加载笔记列表
   useEffect(() => {
