@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TagTaxonomyEntry, UserTagTaxonomyConfig } from "./tagTaxonomy";
 import {
+  buildTagTaxonomyConfigExport,
   createUserTagEntryId,
   formatTagSuggestionPath,
   mergeTagsStable,
@@ -11,6 +12,31 @@ import {
 } from "./tagTaxonomyUserConfig";
 
 describe("tagTaxonomyUserConfig", () => {
+  it("builds deterministic export payloads", () => {
+    const config: UserTagTaxonomyConfig = {
+      version: 2,
+      entries: [{ id: "user.dp", path: ["算法", "动态规划"], source: "user" }],
+      aliases: { dp: "user.dp" },
+      hiddenIds: [],
+      orderOverrides: {},
+      merges: {},
+      customCollections: ["  tricks  "],
+    };
+
+    expect(buildTagTaxonomyConfigExport(config, new Date("2026-06-20T08:00:00.000Z"))).toEqual({
+      json: `${JSON.stringify({
+        version: 2,
+        entries: [{ id: "user.dp", path: ["算法", "动态规划"], source: "user" }],
+        aliases: { dp: "user.dp" },
+        hiddenIds: [],
+        orderOverrides: {},
+        merges: {},
+        customCollections: ["tricks"],
+      }, null, 2)}\n`,
+      fileName: "oi-notebook-tag-taxonomy-2026-06-20.json",
+    });
+  });
+
   it("normalizes missing user config to mutable default collections", () => {
     const config = normalizeUserTagTaxonomyConfig(null);
 

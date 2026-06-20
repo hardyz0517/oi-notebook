@@ -19,6 +19,22 @@ export function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | 
   };
 }
 
+export interface TagTaxonomyConfigExportPayload {
+  json: string;
+  fileName: string;
+}
+
+export function buildTagTaxonomyConfigExport(
+  config?: UserTagTaxonomyConfig | null,
+  exportedAt = new Date(),
+): TagTaxonomyConfigExportPayload {
+  const exportConfig = normalizeUserTagTaxonomyConfig(config);
+  return {
+    json: `${JSON.stringify(exportConfig, null, 2)}\n`,
+    fileName: `oi-notebook-tag-taxonomy-${exportedAt.toISOString().slice(0, 10)}.json`,
+  };
+}
+
 export function parseTagPathInput(value: string): string[] {
   return value
     .split("/")

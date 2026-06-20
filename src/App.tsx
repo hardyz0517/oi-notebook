@@ -269,6 +269,7 @@ import {
   getTagTaxonomyUserEntries,
 } from "@/lib/tagTaxonomySettingsModel";
 import {
+  buildTagTaxonomyConfigExport,
   createUserTagEntryId,
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
@@ -2073,16 +2074,15 @@ export default function App() {
     }
   }, []);
   const handleExportTagTaxonomyConfig = useCallback(async () => {
-    const exportConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const json = `${JSON.stringify(exportConfig, null, 2)}\n`;
+    const exportPayload = buildTagTaxonomyConfigExport(tagTaxonomyConfig);
     setTagTaxonomyImportError(null);
 
     try {
-      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const blob = new Blob([exportPayload.json], { type: "application/json;charset=utf-8" });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `oi-notebook-tag-taxonomy-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = exportPayload.fileName;
       link.rel = "noopener";
       document.body.appendChild(link);
       link.click();
@@ -2091,7 +2091,7 @@ export default function App() {
       setTagTaxonomyImportMessage("已导出标签配置 JSON");
     } catch {
       try {
-        await navigator.clipboard.writeText(json);
+        await navigator.clipboard.writeText(exportPayload.json);
         setTagTaxonomyImportMessage("已复制标签配置 JSON");
       } catch (clipboardError) {
         setTagTaxonomyImportMessage(null);
