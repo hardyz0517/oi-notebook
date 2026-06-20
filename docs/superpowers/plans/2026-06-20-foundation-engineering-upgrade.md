@@ -54,11 +54,12 @@ Already completed foundation commits:
 - `db2703d refactor(editor): extract cursor context helper`
 - `1781efe refactor(preview): extract sync timing rules`
 - `5b99f44 refactor(app): extract status label helpers`
+- `c6f09fd refactor(luogu): extract difficulty display model`
 
 Progress calibration, 2026-06-20:
 
 - Completed from this plan: app preference helpers, collection/tag helpers, local index display helpers, settings render guards, settings registry/search helpers, Luogu import controller, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
-- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, and `src/lib/appStatusLabels.ts`, each with focused tests.
+- Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, and `src/lib/luoguDifficulty.ts`, each with focused tests.
 - Remaining foundation focus: further `App.tsx` shell decomposition, tag taxonomy helper consolidation, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
 
