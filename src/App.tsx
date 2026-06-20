@@ -7192,7 +7192,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={isReviewSelected}
-                                        disabled={!canReviewSelect || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                                        disabled={!canReviewSelect || luoguImportCenterView.isReviewSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         aria-label={`选择写入 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguReviewSelection(submission.submissionId)}
@@ -7253,7 +7253,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={reviewSelectedLuoguSubmissionIds.has(activeLuoguPreparedPreview.submissionId)}
-                                        disabled={Boolean(luoguWriteResultsById[activeLuoguPreparedPreview.submissionId]) || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                                        disabled={Boolean(luoguWriteResultsById[activeLuoguPreparedPreview.submissionId]) || luoguImportCenterView.isReviewSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         onChange={() => toggleLuoguReviewSelection(activeLuoguPreparedPreview.submissionId)}
                                       />
@@ -7340,7 +7340,7 @@ export default function App() {
                           id="luogu-problem-id"
                           value={luoguProblemId}
                           placeholder="P1234 或 1234"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguProblemId(e.target.value)}
                         />
                       </div>
@@ -7350,7 +7350,7 @@ export default function App() {
                           id="luogu-submission-id"
                           value={luoguSubmissionId}
                           placeholder="12345678"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguSubmissionId(e.target.value)}
                         />
                       </div>
@@ -7360,7 +7360,7 @@ export default function App() {
                           id="luogu-problem-title"
                           value={luoguProblemTitle}
                           placeholder="题目标题"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguProblemTitle(e.target.value)}
                         />
                       </div>
@@ -7370,7 +7370,7 @@ export default function App() {
                       <textarea
                         id="luogu-source-code"
                         value={luoguSourceCode}
-                        disabled={isImportingLuogu}
+                        disabled={luoguImportCenterView.isManualImportFormDisabled}
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="none"

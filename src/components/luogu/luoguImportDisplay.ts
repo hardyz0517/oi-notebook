@@ -88,6 +88,7 @@ export interface LuoguImportCenterView {
   isScanRangeDisabled: boolean;
   isRulesDisabled: boolean;
   isSubmissionSelectionDisabled: boolean;
+  isReviewSelectionDisabled: boolean;
   isSelectAllDisabled: boolean;
   isStartScanDisabled: boolean;
   isPrepareDisabled: boolean;
@@ -99,6 +100,7 @@ export interface LuoguImportCenterView {
   isWriteDisabled: boolean;
   writeButtonLabel: string;
   isManualImportDisabled: boolean;
+  isManualImportFormDisabled: boolean;
   manualImportButtonLabel: string;
   isOpenImportCenterDisabled: boolean;
   isActivityButtonDisabled: boolean;
@@ -129,6 +131,7 @@ export function deriveLuoguImportCenterView(input: LuoguImportCenterViewInput): 
     isScanRangeDisabled: isScanBusy,
     isRulesDisabled: isPrepareOrWriteBusy || isScanBusy || input.isSyncing,
     isSubmissionSelectionDisabled: isPrepareOrWriteBusy,
+    isReviewSelectionDisabled: isPrepareOrWriteBusy,
     isSelectAllDisabled: input.selectableCount === 0 || isPrepareOrWriteBusy || input.isSyncing,
     isStartScanDisabled: !input.isConfigured || input.isLoadingConfig || isPrepareOrWriteBusy || input.isSyncing,
     isPrepareDisabled:
@@ -149,6 +152,7 @@ export function deriveLuoguImportCenterView(input: LuoguImportCenterViewInput): 
     isWriteDisabled: input.writableCount === 0 || input.isLoadingConfig || isScanBusy || isPrepareOrWriteBusy || input.isSyncing,
     writeButtonLabel: input.writeView.status === "running" ? `${input.writeView.label}...` : `写入选中 ${input.writableCount}`,
     isManualImportDisabled: input.isImporting || isPrepareOrWriteBusy || isScanBusy || input.isSyncing,
+    isManualImportFormDisabled: input.isImporting,
     manualImportButtonLabel: input.isImporting ? "导入中..." : "手动导入",
     isOpenImportCenterDisabled: input.isLoadingConfig || isScanBusy || isPrepareOrWriteBusy,
     isActivityButtonDisabled: input.isLoadingConfig || input.isTestingConnection || isScanBusy || isPrepareOrWriteBusy || input.isSyncing,

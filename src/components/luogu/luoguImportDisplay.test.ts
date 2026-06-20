@@ -333,6 +333,7 @@ describe("luoguImportDisplay", () => {
       isScanPaused: false,
       isScanFailed: false,
       isStartScanDisabled: true,
+      isReviewSelectionDisabled: true,
       isPrepareDisabled: true,
       showPrepareStopButton: true,
       isPrepareStopDisabled: false,
@@ -340,6 +341,7 @@ describe("luoguImportDisplay", () => {
       isWriteDisabled: true,
       writeButtonLabel: "写入选中 4",
       isManualImportDisabled: true,
+      isManualImportFormDisabled: false,
       manualImportButtonLabel: "手动导入",
       isOpenImportCenterDisabled: true,
       isActivityButtonDisabled: true,
@@ -381,7 +383,9 @@ describe("luoguImportDisplay", () => {
       isScanRangeDisabled: false,
       isSelectAllDisabled: true,
       isBackToSelectionDisabled: true,
+      isReviewSelectionDisabled: true,
       writeButtonLabel: "写入中...",
+      isManualImportFormDisabled: true,
       manualImportButtonLabel: "导入中...",
       isOpenImportCenterDisabled: true,
       isActivityButtonDisabled: true,
@@ -416,6 +420,8 @@ describe("luoguImportDisplay", () => {
     expect(deriveLuoguImportCenterView(baseInput)).toMatchObject({
       isOpenImportCenterDisabled: false,
       isActivityButtonDisabled: false,
+      isReviewSelectionDisabled: false,
+      isManualImportFormDisabled: false,
     });
     expect(deriveLuoguImportCenterView({ ...baseInput, isLoadingConfig: true })).toMatchObject({
       isOpenImportCenterDisabled: true,
