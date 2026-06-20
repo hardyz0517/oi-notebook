@@ -164,6 +164,9 @@ import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
   formatTagNormalizationReason,
+  getAllTagNormalizationScanSelection,
+  getSelectedTagNormalizationScanStats,
+  getTagNormalizationScanStats,
   type TagNormalizationApplyFailure,
   type TagNormalizationApplyResult,
   type TagNormalizationScanResult,
@@ -1987,28 +1990,13 @@ export default function App() {
     [tagTaxonomyStats],
   );
   const tagNormalizationScanStats = useMemo(
-    () => tagNormalizationScanAllStats ?? tagNormalizationScanResults?.reduce(
-      (stats, result) => addTagNormalizationPlanStats(stats, result.plan),
-      createEmptyTagNormalizationScanStats(),
-    ) ?? createEmptyTagNormalizationScanStats(),
+    () => getTagNormalizationScanStats(tagNormalizationScanAllStats, tagNormalizationScanResults),
     [tagNormalizationScanAllStats, tagNormalizationScanResults],
   );
-  const selectedTagNormalizationScanStats = useMemo(() => {
-    if (!tagNormalizationScanResults) {
-      return createEmptyTagNormalizationScanStats();
-    }
-
-    return tagNormalizationScanResults.reduce(
-      (stats, result) => {
-        if (!selectedTagNormalizationScanPaths.has(result.path)) {
-          return stats;
-        }
-
-        return addTagNormalizationPlanStats(stats, result.plan);
-      },
-      createEmptyTagNormalizationScanStats(),
-    );
-  }, [selectedTagNormalizationScanPaths, tagNormalizationScanResults]);
+  const selectedTagNormalizationScanStats = useMemo(
+    () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
+    [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
+  );
   const tagTaxonomyUserEntries = useMemo(
     () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
     [tagTaxonomyConfig],
@@ -4800,7 +4788,7 @@ export default function App() {
     });
   }, []);
   const selectAllTagNormalizationScanResults = useCallback(() => {
-    setSelectedTagNormalizationScanPaths(new Set(tagNormalizationScanResults?.map((result) => result.path) ?? []));
+    setSelectedTagNormalizationScanPaths(getAllTagNormalizationScanSelection(tagNormalizationScanResults));
   }, [tagNormalizationScanResults]);
   const clearTagNormalizationScanSelection = useCallback(() => {
     setSelectedTagNormalizationScanPaths(new Set());

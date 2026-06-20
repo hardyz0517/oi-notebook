@@ -67,6 +67,42 @@ export function addTagNormalizationPlanStats(
   };
 }
 
+export function getTagNormalizationScanStats(
+  allStats: TagNormalizationScanStats | null,
+  results: TagNormalizationScanResult[] | null,
+): TagNormalizationScanStats {
+  return allStats ?? results?.reduce(
+    (stats, result) => addTagNormalizationPlanStats(stats, result.plan),
+    createEmptyTagNormalizationScanStats(),
+  ) ?? createEmptyTagNormalizationScanStats();
+}
+
+export function getSelectedTagNormalizationScanStats(
+  results: TagNormalizationScanResult[] | null,
+  selectedPaths: Set<string>,
+): TagNormalizationScanStats {
+  if (!results) {
+    return createEmptyTagNormalizationScanStats();
+  }
+
+  return results.reduce(
+    (stats, result) => {
+      if (!selectedPaths.has(result.path)) {
+        return stats;
+      }
+
+      return addTagNormalizationPlanStats(stats, result.plan);
+    },
+    createEmptyTagNormalizationScanStats(),
+  );
+}
+
+export function getAllTagNormalizationScanSelection(
+  results: TagNormalizationScanResult[] | null,
+): Set<string> {
+  return new Set(results?.map((result) => result.path) ?? []);
+}
+
 export function formatTagNormalizationReason(reason: TagNormalizationReason): string {
   switch (reason) {
     case "alias_to_canonical":
