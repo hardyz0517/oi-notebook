@@ -68,6 +68,7 @@ import {
   type LuoguScanMode,
 } from "@/components/settings/pages/luoguImportDomain";
 import {
+  deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
@@ -1830,6 +1831,16 @@ export default function App() {
     hasPreviewResult: Boolean(luoguPreviewResult),
     stats: luoguScanResultStats,
   });
+  const luoguScanTaskState = deriveLuoguScanTaskState({
+    isScanning: isScanningLuoguPreview,
+    isPaused: isLuoguScanPaused,
+    progress: luoguScanProgress,
+    summary: luoguScanSummary,
+    error: luoguScanError,
+  });
+  const isLuoguScanTaskRunning = luoguScanTaskState.status === "running";
+  const isLuoguScanTaskPaused = luoguScanTaskState.status === "paused";
+  const isLuoguScanTaskFailed = luoguScanTaskState.status === "failed";
   const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
     isPreparing: isPreparingSelectedLuogu,
     progress: luoguPrepareProgress,
@@ -6884,7 +6895,7 @@ export default function App() {
                               </button>
                             ))}
                           </div>
-                          {isScanningLuoguPreview ? (
+                          {isLuoguScanTaskRunning ? (
                             <Button
                               size="sm"
                               variant="secondary"
@@ -6894,7 +6905,7 @@ export default function App() {
                               <Pause className="mr-1.5 h-4 w-4" />
                               暂停扫描
                             </Button>
-                          ) : isLuoguScanPaused ? (
+                          ) : isLuoguScanTaskPaused ? (
                             <div className="mt-1 grid gap-1.5">
                               <Button
                                 size="sm"
@@ -6966,7 +6977,7 @@ export default function App() {
                             <div className="shrink-0 text-base font-medium text-foreground">扫描结果</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
                               {luoguScanResultSummaryLabel}
-                              {!isLuoguScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
+                              {!isLuoguScanTaskPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center justify-end gap-2">
@@ -7017,7 +7028,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {isScanningLuoguPreview && !luoguPreviewResult ? (
+                      {isLuoguScanTaskRunning && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
@@ -7025,7 +7036,7 @@ export default function App() {
                             <div className="mt-1 text-xs text-muted-foreground">请稍候，结果会自动出现在右侧表格。</div>
                           </div>
                         </div>
-                      ) : isLuoguScanPaused && !luoguPreviewResult ? (
+                      ) : isLuoguScanTaskPaused && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Pause className="mx-auto h-7 w-7 text-muted-foreground" />
@@ -7035,7 +7046,7 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                      ) : luoguScanError && !luoguPreviewResult ? (
+                      ) : isLuoguScanTaskFailed && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <div className="text-sm font-medium text-destructive">扫描失败，请检查洛谷连接或稍后重试。</div>
