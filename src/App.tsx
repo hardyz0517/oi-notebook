@@ -69,12 +69,17 @@ import {
 } from "@/components/settings/pages/luoguImportDomain";
 import {
   createEmptyLuoguPreparationWorkspace,
+  createIdleLuoguPrepareSourceState,
+  createIdleLuoguScanSourceState,
+  createIdleLuoguWriteSourceState,
   createInitialLuoguPrepareProgress,
   createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
   deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
   deriveLuoguWriteTaskState,
+  failLuoguScanSourceState,
+  finishLuoguScanSourceState,
   finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
@@ -84,7 +89,15 @@ import {
   getLuoguScanCompletionSelection,
   getLuoguSubmissionIdSet,
   isLuoguImportCenterBusy,
+  pauseLuoguScanSourceState,
+  startLuoguPrepareSourceState,
+  startLuoguScanSourceState,
+  startLuoguWriteSourceState,
   stopQueuedLuoguPrepareStatuses,
+  stopLuoguPrepareSourceState,
+  updateLuoguPrepareSourceProgress,
+  updateLuoguScanSourceProgress,
+  updateLuoguWriteSourceProgress,
   type LuoguImportStep,
   type LuoguPreviewDetailTab,
 } from "@/components/luogu/luoguImportDisplay";
@@ -303,7 +316,7 @@ import {
   normalizeUserTagTaxonomyConfig,
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import {
   buildNewNoteMarkdown,
   getCreateFolderPlan,
@@ -1461,8 +1474,9 @@ export default function App() {
   const [isTestingLuoguConnection, setIsTestingLuoguConnection] = useState(false);
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
   const [luoguConnectionError, setLuoguConnectionError] = useState<string | null>(null);
-  const [isScanningLuoguPreview, setIsScanningLuoguPreview] = useState(false);
-  const [isLuoguScanPaused, setIsLuoguScanPaused] = useState(false);
+  const [luoguScanSourceState, setLuoguScanSourceState] = useState(createIdleLuoguScanSourceState);
+  const isScanningLuoguPreview = luoguScanSourceState.isScanning;
+  const isLuoguScanPaused = luoguScanSourceState.isPaused;
   const luoguScanPauseFlagRef = useRef(false);
   const luoguScanResumeRef = useRef<{
     submissions: PreviewLuoguSubmission[];
@@ -1474,28 +1488,30 @@ export default function App() {
     rangeLabel: string;
   } | null>(null);
   const [luoguPreviewResult, setLuoguPreviewResult] = useState<PreviewLuoguSubmissionsResult | null>(null);
-  const [luoguScanError, setLuoguScanError] = useState<string | null>(null);
+  const luoguScanError = luoguScanSourceState.error;
   const [luoguScanMode, setLuoguScanMode] = useState<LuoguScanMode>("count");
   const [luoguScanCountLimit, setLuoguScanCountLimit] = useState<LuoguScanCountLimit>(20);
   const [luoguScanDaysLimit, setLuoguScanDaysLimit] = useState<LuoguScanDaysLimit>(30);
   const [luoguImportRules, setLuoguImportRules] = useState<LuoguImportRules>(readStoredLuoguImportRules);
   const [expandedLuoguRuleId, setExpandedLuoguRuleId] = useState<string | null>(null);
   const [expandedWebSearchSelectId, setExpandedWebSearchSelectId] = useState<string | null>(null);
-  const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
-  const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
+  const luoguScanProgress = luoguScanSourceState.progress as LuoguScanProgress | null;
+  const luoguScanSummary = luoguScanSourceState.summary as LuoguScanSummary | null;
   const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
   const [skippedLuoguSubmissionIds, setSkippedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [isPreparingSelectedLuogu, setIsPreparingSelectedLuogu] = useState(false);
+  const [luoguPrepareSourceState, setLuoguPrepareSourceState] = useState(createIdleLuoguPrepareSourceState);
+  const isPreparingSelectedLuogu = luoguPrepareSourceState.isPreparing;
   const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
   const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
   const [luoguPrepareStatusesById, setLuoguPrepareStatusesById] = useState<Record<string, LuoguPrepareItemStatus>>({});
   const [currentlyPreparingLuoguId, setCurrentlyPreparingLuoguId] = useState<string | null>(null);
-  const [luoguPrepareProgress, setLuoguPrepareProgress] = useState<LuoguPrepareProgress | null>(null);
-  const [isStoppingLuoguPrepare, setIsStoppingLuoguPrepare] = useState(false);
-  const [isWritingPreparedLuogu, setIsWritingPreparedLuogu] = useState(false);
+  const luoguPrepareProgress = luoguPrepareSourceState.progress as LuoguPrepareProgress | null;
+  const isStoppingLuoguPrepare = luoguPrepareSourceState.isStopping;
+  const [luoguWriteSourceState, setLuoguWriteSourceState] = useState(createIdleLuoguWriteSourceState);
+  const isWritingPreparedLuogu = luoguWriteSourceState.isWriting;
   const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
   const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
-  const [luoguWriteProgress, setLuoguWriteProgress] = useState<LuoguWriteProgress | null>(null);
+  const luoguWriteProgress = luoguWriteSourceState.progress as LuoguWriteProgress | null;
   const [activeLuoguPreparedPreviewId, setActiveLuoguPreparedPreviewId] = useState<string | null>(null);
   const [activeLuoguPreviewDetailTab, setActiveLuoguPreviewDetailTab] = useState<LuoguPreviewDetailTab>("rendered");
   const [editedLuoguPreparedMarkdownIds, setEditedLuoguPreparedMarkdownIds] = useState<Set<string>>(() => new Set());
@@ -1517,11 +1533,10 @@ export default function App() {
     setEditedLuoguPreparedMarkdownIds(workspace.editedPreparedMarkdownIds);
     setReviewSelectedLuoguSubmissionIds(workspace.reviewSelectedSubmissionIds);
     setCurrentlyPreparingLuoguId(workspace.currentlyPreparingId);
-    setLuoguPrepareProgress(workspace.prepareProgress);
-    setIsStoppingLuoguPrepare(workspace.isStoppingPrepare);
+    setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
     setLuoguWriteResultsById(workspace.writeResultsById);
     setCurrentlyWritingLuoguId(workspace.currentlyWritingId);
-    setLuoguWriteProgress(workspace.writeProgress);
+    setLuoguWriteSourceState(createIdleLuoguWriteSourceState());
     setActiveLuoguPreparedPreviewId(workspace.activePreparedPreviewId);
     setActiveLuoguPreviewDetailTab(workspace.activePreviewDetailTab);
     setLuoguImportStep(workspace.importStep);
@@ -3086,15 +3101,15 @@ export default function App() {
     const rangeLabel = isResume ? saved.rangeLabel : getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
     const cutoffMs = isResume ? saved.cutoffMs : (luoguScanMode === "days" ? Date.now() - luoguScanDaysLimit * 24 * 60 * 60 * 1000 : null);
 
-    setIsScanningLuoguPreview(true);
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState((current) =>
+      isResume
+        ? { ...current, isScanning: true, isPaused: false, error: null }
+        : startLuoguScanSourceState({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false }),
+    );
     luoguScanPauseFlagRef.current = false;
 
     if (!isResume) {
       setLuoguPreviewResult(null);
-      setLuoguScanError(null);
-      setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
-      setLuoguScanSummary(null);
       setSelectedLuoguSubmissionIds(new Set<string>());
       resetLuoguPreparationWorkspace();
     }
@@ -3120,17 +3135,19 @@ export default function App() {
           };
 
           setLuoguPreviewResult(buildLuoguPreviewResult(submissions, latestPageResult));
-          setLuoguScanSummary(null);
-          setIsLuoguScanPaused(true);
+          setLuoguScanSourceState((current) => pauseLuoguScanSourceState({
+            ...current,
+            summary: null,
+          }));
           return;
         }
 
-        setLuoguScanProgress({
+        setLuoguScanSourceState((current) => updateLuoguScanSourceProgress(current, {
           currentPage: page,
           foundCount: submissions.length,
           rangeLabel,
           waiting: false,
-        });
+        }));
 
         const pageResult = await previewLuoguSubmissionPage(page);
         latestPageResult = pageResult;
@@ -3183,12 +3200,12 @@ export default function App() {
           });
         }
 
-        setLuoguScanProgress({
+        setLuoguScanSourceState((current) => updateLuoguScanSourceProgress(current, {
           currentPage: page,
           foundCount: submissions.length,
           rangeLabel,
           waiting: !shouldStop && pageResult.hasMore && page < LUOGU_SCAN_MAX_PAGES,
-        });
+        }));
 
         if (shouldStop || !pageResult.hasMore || page >= LUOGU_SCAN_MAX_PAGES) {
           break;
@@ -3220,13 +3237,13 @@ export default function App() {
       });
 
       setLuoguPreviewResult(result);
-      setLuoguScanSummary({
+      setLuoguScanSourceState(finishLuoguScanSourceState({
         scannedPages,
         foundCount: result.submissions.length,
         candidateCount: scanCompletionSelection.candidateCount,
         skippedCount: scanCompletionSelection.skippedCount,
         rangeLabel,
-      });
+      }));
       setSelectedLuoguSubmissionIds(scanCompletionSelection.defaultSelectedSubmissionIds);
       setLuoguConfigAiConfigured(result.aiConfigured);
       setLuoguConfigLastSubmissionId(
@@ -3235,13 +3252,16 @@ export default function App() {
       toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${scanCompletionSelection.candidateCount} 条`);
     } catch (e) {
       const message = getErrorMessage(e);
-      setLuoguScanError(message);
+      setLuoguScanSourceState(failLuoguScanSourceState(message));
       toast.error(`洛谷扫描失败：${message}`);
     } finally {
       if (!luoguScanPauseFlagRef.current) {
-        setLuoguScanProgress(null);
+        setLuoguScanSourceState((current) => ({
+          ...current,
+          isScanning: false,
+          progress: null,
+        }));
       }
-      setIsScanningLuoguPreview(false);
     }
   };
 
@@ -3258,10 +3278,8 @@ export default function App() {
   const handleRestartLuoguScan = () => {
     luoguScanResumeRef.current = null;
     luoguScanPauseFlagRef.current = false;
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState(createIdleLuoguScanSourceState());
     setLuoguPreviewResult(null);
-    setLuoguScanError(null);
-    setLuoguScanSummary(null);
     handlePreviewLuoguSubmissions();
   };
 
@@ -3862,13 +3880,10 @@ export default function App() {
     const returnTarget = luoguDialogReturnTarget;
     setIsLuoguDialogOpen(false);
     setLuoguDialogReturnTarget(null);
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState(createIdleLuoguScanSourceState());
     luoguScanResumeRef.current = null;
     luoguScanPauseFlagRef.current = false;
     setLuoguPreviewResult(null);
-    setLuoguScanError(null);
-    setLuoguScanProgress(null);
-    setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
     resetLuoguPreparationWorkspace();
     setLuoguProblemId("");
@@ -3968,7 +3983,7 @@ export default function App() {
     if (!isPreparingSelectedLuogu) return;
 
     luoguPrepareRunRef.current.cancelled = true;
-    setIsStoppingLuoguPrepare(true);
+    setLuoguPrepareSourceState(stopLuoguPrepareSourceState);
     setLuoguPrepareStatusesById(stopQueuedLuoguPrepareStatuses);
     toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
@@ -4135,10 +4150,8 @@ export default function App() {
 
     if (queue.length === 0) {
       luoguPrepareRunRef.current.cancelled = true;
-      setIsPreparingSelectedLuogu(false);
-      setIsStoppingLuoguPrepare(false);
+      setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
       setCurrentlyPreparingLuoguId(null);
-      setLuoguPrepareProgress(null);
       setLuoguPrepareStatusesById({});
       if (reusablePreviewSubmissions.length > 0) {
         setReviewSelectedLuoguSubmissionIds(getLuoguSubmissionIdSet(reusablePreviewSubmissions));
@@ -4159,13 +4172,11 @@ export default function App() {
     const runId = luoguPrepareRunSeqRef.current + 1;
     luoguPrepareRunSeqRef.current = runId;
     luoguPrepareRunRef.current = { id: runId, cancelled: false };
-    setIsPreparingSelectedLuogu(true);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguPrepareProgress(createInitialLuoguPrepareProgress({
+    setLuoguPrepareSourceState(startLuoguPrepareSourceState(createInitialLuoguPrepareProgress({
       queueCount: queue.length,
       reusablePreviewCount: reusablePreviewSubmissions.length,
       ignoredCount,
-    }));
+    })));
     setLuoguPrepareErrorsById({});
     setLuoguPrepareStatusesById(createQueuedLuoguPrepareStatuses(queue));
     setLuoguWriteResultsById({});
@@ -4179,13 +4190,13 @@ export default function App() {
     const reviewSelectionIds = getLuoguSubmissionIdSet(reusablePreviewSubmissions);
 
     const refreshProgress = () => {
-      setLuoguPrepareProgress({
+      setLuoguPrepareSourceState((current) => updateLuoguPrepareSourceProgress(current, {
         current: completedCount,
         total: queue.length,
         succeeded: preparedCount,
         failed: failedCount,
         skipped: skippedCount + ignoredCount,
-      });
+      }));
     };
 
     const syncCurrentlyPreparingId = () => {
@@ -4300,9 +4311,7 @@ export default function App() {
           return next;
         });
         setCurrentlyPreparingLuoguId(null);
-        setLuoguPrepareProgress(null);
-        setIsPreparingSelectedLuogu(false);
-        setIsStoppingLuoguPrepare(false);
+        setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
       }
     }
   };
@@ -4314,8 +4323,7 @@ export default function App() {
       return;
     }
 
-    setIsWritingPreparedLuogu(true);
-    setLuoguWriteProgress(createTaskProgress(preparedNotesToWrite.length));
+    setLuoguWriteSourceState(startLuoguWriteSourceState(preparedNotesToWrite.length));
     let writtenCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
@@ -4325,15 +4333,15 @@ export default function App() {
       for (let index = 0; index < preparedNotesToWrite.length; index += 1) {
         const prepared = preparedNotesToWrite[index];
         setCurrentlyWritingLuoguId(prepared.submissionId);
-        setLuoguWriteProgress((current) =>
+        setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
           createLuoguWriteProgress({
-            total: current?.total ?? preparedNotesToWrite.length,
+            total: current.progress?.total ?? preparedNotesToWrite.length,
             current: index + 1,
             writtenCount,
             failedCount,
             skippedCount,
           }),
-        );
+        ));
 
         try {
           const initialWriteMode: LuoguWriteMode = luoguImportRules.writeStrategy === "overwrite" ? "overwrite" : "createNew";
@@ -4365,15 +4373,15 @@ export default function App() {
             writtenCount += 1;
             if (result.relativePath) lastWrittenPath = result.relativePath;
           }
-          setLuoguWriteProgress((current) =>
+          setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
             createLuoguWriteProgress({
-              total: current?.total ?? preparedNotesToWrite.length,
-              current: current?.current ?? index + 1,
+              total: current.progress?.total ?? preparedNotesToWrite.length,
+              current: current.progress?.current ?? index + 1,
               writtenCount,
               failedCount,
               skippedCount,
             }),
-          );
+          ));
         } catch (e) {
           failedCount += 1;
           setLuoguWriteResultsById((current) => ({
@@ -4388,15 +4396,15 @@ export default function App() {
               commitStatus: "failed",
             },
           }));
-          setLuoguWriteProgress((current) =>
+          setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
             createLuoguWriteProgress({
-              total: current?.total ?? preparedNotesToWrite.length,
-              current: current?.current ?? index + 1,
+              total: current.progress?.total ?? preparedNotesToWrite.length,
+              current: current.progress?.current ?? index + 1,
               writtenCount,
               failedCount,
               skippedCount,
             }),
-          );
+          ));
         }
       }
 
@@ -4412,8 +4420,7 @@ export default function App() {
       toast.success(`写入完成：成功 ${writtenCount}，跳过 ${skippedCount}，失败 ${failedCount}`);
     } finally {
       setCurrentlyWritingLuoguId(null);
-      setLuoguWriteProgress(null);
-      setIsWritingPreparedLuogu(false);
+      setLuoguWriteSourceState(createIdleLuoguWriteSourceState());
     }
   };
 

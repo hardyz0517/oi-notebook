@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInitialLuoguPrepareProgress,
+  createIdleLuoguPrepareSourceState,
+  createIdleLuoguScanSourceState,
+  createIdleLuoguWriteSourceState,
   createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
   deriveLuoguWriteTaskState,
+  failLuoguScanSourceState,
+  finishLuoguScanSourceState,
   finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
@@ -17,7 +22,15 @@ import {
   getLuoguScanCompletionSelection,
   getLuoguSubmissionIdSet,
   isLuoguImportCenterBusy,
+  pauseLuoguScanSourceState,
+  startLuoguPrepareSourceState,
+  startLuoguScanSourceState,
+  startLuoguWriteSourceState,
   stopQueuedLuoguPrepareStatuses,
+  stopLuoguPrepareSourceState,
+  updateLuoguPrepareSourceProgress,
+  updateLuoguScanSourceProgress,
+  updateLuoguWriteSourceProgress,
 } from "./luoguImportDisplay";
 import { normalizeLuoguImportRules } from "@/components/settings/pages/luoguImportRules";
 import type { PreviewLuoguSubmission } from "@/lib/api";
@@ -175,6 +188,40 @@ describe("luoguImportDisplay", () => {
     })).toEqual({ status: "idle", progress: null, error: null });
   });
 
+  it("models scan source state transitions from a single source object", () => {
+    const idle = createIdleLuoguScanSourceState();
+    expect(idle).toEqual({
+      isScanning: false,
+      isPaused: false,
+      progress: null,
+      summary: null,
+      error: null,
+    });
+
+    const running = startLuoguScanSourceState({ foundCount: 0, waiting: false });
+    expect(deriveLuoguScanTaskState(running).status).toBe("running");
+
+    const progressed = updateLuoguScanSourceProgress(running, { foundCount: 8, waiting: true });
+    expect(progressed.progress).toEqual({ foundCount: 8, waiting: true });
+    expect(deriveLuoguScanTaskState(progressed).progress?.succeeded).toBe(8);
+
+    const paused = pauseLuoguScanSourceState(progressed);
+    expect(paused).toMatchObject({ isScanning: false, isPaused: true, summary: null, error: null });
+    expect(deriveLuoguScanTaskState(paused).status).toBe("paused");
+
+    const finished = finishLuoguScanSourceState({ foundCount: 10, candidateCount: 6, skippedCount: 4 });
+    expect(finished).toMatchObject({ isScanning: false, isPaused: false, progress: null, error: null });
+    expect(deriveLuoguScanTaskState(finished)).toEqual({
+      status: "succeeded",
+      progress: { current: 10, total: 10, succeeded: 6, failed: 0, skipped: 4 },
+      error: null,
+    });
+
+    const failed = failLuoguScanSourceState("network");
+    expect(failed).toMatchObject({ isScanning: false, isPaused: false, progress: null, summary: null, error: "network" });
+    expect(deriveLuoguScanTaskState(failed).status).toBe("failed");
+  });
+
   it("derives task states for prepare and write phases", () => {
     expect(deriveLuoguPrepareTaskState({
       isPreparing: true,
@@ -209,6 +256,58 @@ describe("luoguImportDisplay", () => {
       isWriting: false,
       progress: null,
     })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
+  it("models prepare and write source state transitions", () => {
+    expect(createIdleLuoguPrepareSourceState()).toEqual({
+      isPreparing: false,
+      isStopping: false,
+      progress: null,
+    });
+
+    const preparing = startLuoguPrepareSourceState({
+      current: 0,
+      total: 3,
+      succeeded: 1,
+      failed: 0,
+      skipped: 2,
+    });
+    expect(deriveLuoguPrepareTaskState(preparing).status).toBe("running");
+
+    const progressedPrepare = updateLuoguPrepareSourceProgress(preparing, {
+      current: 2,
+      total: 3,
+      succeeded: 2,
+      failed: 0,
+      skipped: 2,
+    });
+    expect(progressedPrepare.progress?.current).toBe(2);
+
+    const stopping = stopLuoguPrepareSourceState(progressedPrepare);
+    expect(stopping.isPreparing).toBe(true);
+    expect(stopping.isStopping).toBe(true);
+    expect(deriveLuoguPrepareTaskState(stopping).status).toBe("stopping");
+
+    expect(createIdleLuoguWriteSourceState()).toEqual({
+      isWriting: false,
+      progress: null,
+    });
+
+    const writing = startLuoguWriteSourceState(4);
+    expect(writing).toEqual({
+      isWriting: true,
+      progress: { current: 0, total: 4, succeeded: 0, failed: 0, skipped: 0 },
+    });
+
+    const progressedWrite = updateLuoguWriteSourceProgress(writing, {
+      current: 3,
+      total: 4,
+      succeeded: 2,
+      failed: 1,
+      skipped: 0,
+    });
+    expect(progressedWrite.progress?.failed).toBe(1);
+    expect(deriveLuoguWriteTaskState(progressedWrite).status).toBe("running");
   });
 
   it("derives scan completion counts and default selection from import rules", () => {

@@ -13,14 +13,18 @@ export type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 export type LuoguImportStep = "scan" | "preview";
 
 export interface LuoguScanProgressDisplay {
+  currentPage?: number;
   foundCount: number;
+  rangeLabel?: string;
   waiting?: boolean;
 }
 
 export interface LuoguScanSummaryDisplay {
+  scannedPages?: number;
   foundCount: number;
   candidateCount: number;
   skippedCount: number;
+  rangeLabel?: string;
 }
 
 export interface LuoguScanResultSummaryInput {
@@ -279,6 +283,68 @@ export interface LuoguScanTaskStateInput {
   error: string | null;
 }
 
+export interface LuoguScanSourceState extends LuoguScanTaskStateInput {}
+
+export function createIdleLuoguScanSourceState(): LuoguScanSourceState {
+  return {
+    isScanning: false,
+    isPaused: false,
+    progress: null,
+    summary: null,
+    error: null,
+  };
+}
+
+export function startLuoguScanSourceState(progress: LuoguScanProgressDisplay): LuoguScanSourceState {
+  return {
+    isScanning: true,
+    isPaused: false,
+    progress,
+    summary: null,
+    error: null,
+  };
+}
+
+export function updateLuoguScanSourceProgress(
+  state: LuoguScanSourceState,
+  progress: LuoguScanProgressDisplay,
+): LuoguScanSourceState {
+  return {
+    ...state,
+    progress,
+  };
+}
+
+export function pauseLuoguScanSourceState(state: LuoguScanSourceState): LuoguScanSourceState {
+  return {
+    ...state,
+    isScanning: false,
+    isPaused: true,
+    summary: null,
+    error: null,
+  };
+}
+
+export function finishLuoguScanSourceState(summary: LuoguScanSummaryDisplay): LuoguScanSourceState {
+  return {
+    isScanning: false,
+    isPaused: false,
+    progress: null,
+    summary,
+    error: null,
+  };
+}
+
+export function failLuoguScanSourceState(error: string): LuoguScanSourceState {
+  return {
+    isScanning: false,
+    isPaused: false,
+    progress: null,
+    summary: null,
+    error,
+  };
+}
+
 export function deriveLuoguScanTaskState(input: LuoguScanTaskStateInput): TaskState {
   if (input.isScanning) {
     const foundCount = input.progress?.foundCount ?? 0;
@@ -326,6 +392,41 @@ export interface LuoguPrepareTaskStateInput {
   progress: TaskProgress | null;
 }
 
+export interface LuoguPrepareSourceState extends LuoguPrepareTaskStateInput {}
+
+export function createIdleLuoguPrepareSourceState(): LuoguPrepareSourceState {
+  return {
+    isPreparing: false,
+    isStopping: false,
+    progress: null,
+  };
+}
+
+export function startLuoguPrepareSourceState(progress: TaskProgress): LuoguPrepareSourceState {
+  return {
+    isPreparing: true,
+    isStopping: false,
+    progress,
+  };
+}
+
+export function stopLuoguPrepareSourceState(state: LuoguPrepareSourceState): LuoguPrepareSourceState {
+  return {
+    ...state,
+    isStopping: true,
+  };
+}
+
+export function updateLuoguPrepareSourceProgress(
+  state: LuoguPrepareSourceState,
+  progress: TaskProgress,
+): LuoguPrepareSourceState {
+  return {
+    ...state,
+    progress,
+  };
+}
+
 export function deriveLuoguPrepareTaskState(input: LuoguPrepareTaskStateInput): TaskState {
   if (input.isStopping) {
     return { status: "stopping", progress: input.progress, error: null };
@@ -339,6 +440,32 @@ export function deriveLuoguPrepareTaskState(input: LuoguPrepareTaskStateInput): 
 export interface LuoguWriteTaskStateInput {
   isWriting: boolean;
   progress: TaskProgress | null;
+}
+
+export interface LuoguWriteSourceState extends LuoguWriteTaskStateInput {}
+
+export function createIdleLuoguWriteSourceState(): LuoguWriteSourceState {
+  return {
+    isWriting: false,
+    progress: null,
+  };
+}
+
+export function startLuoguWriteSourceState(total: number): LuoguWriteSourceState {
+  return {
+    isWriting: true,
+    progress: createTaskProgress(total),
+  };
+}
+
+export function updateLuoguWriteSourceProgress(
+  state: LuoguWriteSourceState,
+  progress: TaskProgress,
+): LuoguWriteSourceState {
+  return {
+    ...state,
+    progress,
+  };
 }
 
 export function deriveLuoguWriteTaskState(input: LuoguWriteTaskStateInput): TaskState {
