@@ -266,10 +266,12 @@ import {
 } from "@/lib/layoutPreferences";
 import { formatSearchDate } from "@/lib/localSearchResults";
 import {
+  buildLocalIndexRebuildSuccessMessage,
   buildLocalIndexStatusMessage,
   deriveLocalIndexTaskView,
   formatLocalIndexSize,
   getLocalIndexAccessLabel,
+  getLocalIndexRebuildRunningMessage,
   getLocalIndexStatusBadgeClassName,
   getLocalIndexStatusBadgeTone,
   getLocalIndexStatusLabel,
@@ -3647,11 +3649,11 @@ export default function App() {
 
   const handleRebuildLocalIndex = async () => {
     setLocalIndexRebuildTask(startTaskState());
-    setLocalIndexMessage("正在建立本地笔记索引...");
+    setLocalIndexMessage(getLocalIndexRebuildRunningMessage());
     try {
       const status = await rebuildLocalNoteIndex();
       setLocalIndexStatus(status);
-      setLocalIndexMessage(`重建完成：${status.noteCount} 篇笔记，${status.chunkCount} 个片段。`);
+      setLocalIndexMessage(buildLocalIndexRebuildSuccessMessage(status));
       setLocalIndexRebuildTask((task) => finishTaskState(task));
       toast.success("本地笔记索引已重建");
     } catch (e) {
