@@ -63,6 +63,7 @@ Examples already following this pattern:
 
 - Luogu scan/prepare/write source state and import center view state in
   `src/components/luogu/luoguImportDisplay.ts`.
+- Luogu account settings button state in `src/lib/luoguConfigForm.ts`.
 - Tag normalization scan/apply task and panel state in
   `src/components/tag-manager/tagNormalizationScan.ts`.
 - Local index task view state in `src/lib/localIndexStatus.ts`.
@@ -104,15 +105,22 @@ Use domain modules as the home for stable rules:
 - `src/components/tag-manager/tagNormalizationScan.ts`: tag normalization
   scan/apply task state, stats, panel state, and selection summaries.
 - `src/lib/localIndexStatus.ts`: local index status labels, task view state,
-  rebuild messages, and size/date formatting.
+  rebuild messages, details view state, and size/date/access formatting.
 - `src/lib/blogConfig.ts`: blog identity defaults, loaded config fallback,
   draft normalization, save validation, and Blog settings view state such as
   field disabled state, button labels, and Blog operation entry state.
+- `src/lib/luoguConfigForm.ts`: Luogu account form state, save payload
+  validation, AI-configured detection, and Luogu account settings view state.
+- `src/lib/tagTaxonomySettingsModel.ts`: tag taxonomy statistics, visible
+  entry/alias lists, status tone, and settings action disabled/spinner state.
 - `src/lib/appStatusLabels.ts`: status bar and settings status labels.
 - `src/lib/api.ts`: the only frontend boundary for Rust command invocation.
+- `src/components/settings/settingsRenderGuards.ts`: settings group/page render
+  guards used by the Settings shell.
 
-Future work should continue this pattern for blog configuration, Luogu account
-settings, Tag Manager details, and other non-AI areas.
+Future work should continue this pattern for remaining Tag Manager details,
+Luogu import edge cases, and other non-AI areas only when the extracted rule
+has a stable owner and focused test value.
 
 ## Blog Domain Boundary
 
@@ -155,6 +163,20 @@ Do not move side effects just to reduce `App.tsx` line count. Move them when
 there is a clear ownership boundary and the resulting controller can be tested
 or reasoned about independently.
 
+## API Boundary Contract
+
+Rust command invocation is centralized in `src/lib/api.ts`. Frontend modules
+should import typed wrapper functions from that file instead of importing
+`@tauri-apps/api/core` or calling `invoke` directly.
+
+`src/lib/apiBoundary.test.ts` enforces this contract for non-AI source files.
+The test intentionally allows existing frozen AI boundary files and test files,
+but ordinary app, settings, notes, Luogu, blog, local index, and tag taxonomy
+code should not bypass `src/lib/api.ts`.
+
+Tauri event/window utilities are not Rust command calls and may remain in shell
+or quick-note code when they are part of local window/event orchestration.
+
 ## Testing Rules
 
 Every extracted pure rule should get focused tests when it handles:
@@ -174,6 +196,12 @@ pnpm.cmd test:run
 pnpm.cmd build
 rg -n 'invoke\(|@tauri-apps/api/core|from "@tauri-apps/api' src --glob '!lib/api.ts' --glob '!components/ai/**' --glob '!lib/aiWebSearch.ts'
 git status --short -- . ":(exclude)notes/**"
+```
+
+In PowerShell, a narrower audit that avoids quote parsing issues is:
+
+```powershell
+rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'
 ```
 
 For small documentation-only changes, focused tests and build may be skipped,
