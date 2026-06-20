@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationApplyTaskState,
   deriveTagNormalizationScanTaskState,
+  deriveTagNormalizationTaskView,
   formatTagNormalizationReason,
   getAllTagNormalizationScanSelection,
   getSelectedTagNormalizationScanStats,
@@ -128,6 +130,64 @@ describe("tagNormalizationScan", () => {
       status: "succeeded",
       progress: { current: 1, total: 1, succeeded: 1, failed: 0, skipped: 1 },
       error: null,
+    });
+  });
+
+  it("derives task state for applying selected scan results", () => {
+    expect(deriveTagNormalizationApplyTaskState({
+      isApplying: true,
+      selectedStats: {
+        ...createEmptyTagNormalizationScanStats(),
+        noteCount: 3,
+        rewriteCount: 5,
+      },
+    })).toEqual({
+      status: "running",
+      progress: { current: 0, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveTagNormalizationApplyTaskState({
+      isApplying: false,
+      selectedStats: {
+        ...createEmptyTagNormalizationScanStats(),
+        noteCount: 3,
+      },
+    })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
+  it("derives a common task view for scan and apply controls", () => {
+    const runningScan = deriveTagNormalizationTaskView(
+      { status: "running", progress: null, error: null },
+      "scan",
+    );
+    expect(runningScan).toMatchObject({
+      status: "running",
+      isBusy: true,
+      canStart: false,
+      label: "扫描中",
+    });
+
+    const failedScan = deriveTagNormalizationTaskView(
+      { status: "failed", progress: null, error: "scan failed" },
+      "scan",
+    );
+    expect(failedScan).toMatchObject({
+      status: "failed",
+      canRetry: true,
+      label: "扫描失败",
+      message: "scan failed",
+    });
+
+    const runningApply = deriveTagNormalizationTaskView(
+      { status: "running", progress: { current: 0, total: 3, succeeded: 0, failed: 0, skipped: 0 }, error: null },
+      "apply",
+    );
+    expect(runningApply).toMatchObject({
+      status: "running",
+      isBusy: true,
+      label: "应用中",
+      message: "0/3",
     });
   });
 

@@ -177,7 +177,9 @@ import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft }
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationApplyTaskState,
   deriveTagNormalizationScanTaskState,
+  deriveTagNormalizationTaskView,
   formatTagNormalizationReason,
   getAllTagNormalizationScanSelection,
   getSelectedTagNormalizationScanStats,
@@ -2034,11 +2036,17 @@ export default function App() {
     results: tagNormalizationScanResults,
     stats: tagNormalizationScanStats,
   });
-  const isTagNormalizationScanTaskRunning = isTaskRunning(tagNormalizationScanTaskState);
+  const tagNormalizationScanTaskView = deriveTagNormalizationTaskView(tagNormalizationScanTaskState, "scan");
+  const isTagNormalizationScanTaskRunning = tagNormalizationScanTaskView.isBusy;
   const selectedTagNormalizationScanStats = useMemo(
     () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
     [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
   );
+  const tagNormalizationApplyTaskState = deriveTagNormalizationApplyTaskState({
+    isApplying: isApplyingTagNormalizationScan,
+    selectedStats: selectedTagNormalizationScanStats,
+  });
+  const tagNormalizationApplyTaskView = deriveTagNormalizationTaskView(tagNormalizationApplyTaskState, "apply");
   const tagTaxonomyUserEntries = useMemo(
     () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
     [tagTaxonomyConfig],
@@ -4763,7 +4771,7 @@ export default function App() {
     setSelectedTagNormalizationScanPaths(new Set());
   }, []);
   const applySelectedTagNormalizationScanResults = useCallback(async () => {
-    if (!tagNormalizationScanResults || selectedTagNormalizationScanStats.noteCount === 0 || isApplyingTagNormalizationScan) return;
+    if (!tagNormalizationScanResults || selectedTagNormalizationScanStats.noteCount === 0 || tagNormalizationApplyTaskView.isBusy) return;
 
     const selectedPaths = new Set(selectedTagNormalizationScanPaths);
     const confirmMessage = [
@@ -4857,7 +4865,6 @@ export default function App() {
     applyLoadedMarkdown,
     currentFilePath,
     handleScanLegacyTags,
-    isApplyingTagNormalizationScan,
     isDirty,
     requestConfirm,
     selectedTagNormalizationScanPaths,
@@ -4865,6 +4872,7 @@ export default function App() {
     selectedTagNormalizationScanStats.duplicateCount,
     selectedTagNormalizationScanStats.rewriteCount,
     selectedTagNormalizationScanStats.suggestionCount,
+    tagNormalizationApplyTaskView.isBusy,
     tagNormalizationScanResults,
     tagTaxonomyUserConfig,
   ]);

@@ -3,7 +3,7 @@ import type {
   TagNormalizationReason,
   TagNormalizationSuggestion,
 } from "@/lib/tagTaxonomy";
-import { createIdleTaskState, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, deriveTaskView, type TaskState, type TaskView } from "@/lib/taskStatus";
 
 export interface TagNormalizationScanResult {
   path: string;
@@ -43,6 +43,13 @@ export interface TagNormalizationScanTaskInput {
   results: TagNormalizationScanResult[] | null;
   stats: TagNormalizationScanStats;
 }
+
+export interface TagNormalizationApplyTaskInput {
+  isApplying: boolean;
+  selectedStats: TagNormalizationScanStats;
+}
+
+export type TagNormalizationTaskKind = "scan" | "apply";
 
 export function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
   return {
@@ -92,6 +99,39 @@ export function deriveTagNormalizationScanTaskState(input: TagNormalizationScanT
   }
 
   return createIdleTaskState();
+}
+
+export function deriveTagNormalizationApplyTaskState(input: TagNormalizationApplyTaskInput): TaskState {
+  if (!input.isApplying) {
+    return createIdleTaskState();
+  }
+
+  return {
+    status: "running",
+    progress: createTaskProgress(input.selectedStats.noteCount),
+    error: null,
+  };
+}
+
+export function deriveTagNormalizationTaskView(
+  state: TaskState,
+  kind: TagNormalizationTaskKind,
+): TaskView {
+  return deriveTaskView(state, kind === "scan"
+    ? {
+      idleLabel: "开始扫描",
+      runningLabel: "扫描中",
+      succeededLabel: "扫描完成",
+      failedLabel: "扫描失败",
+      cancelledLabel: "扫描已取消",
+    }
+    : {
+      idleLabel: "应用",
+      runningLabel: "应用中",
+      succeededLabel: "应用完成",
+      failedLabel: "应用失败",
+      cancelledLabel: "应用已取消",
+    });
 }
 
 export function addTagNormalizationPlanStats(
