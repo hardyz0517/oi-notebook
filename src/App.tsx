@@ -27,6 +27,7 @@ import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreview
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import { useOpenTabsController } from "@/components/layout/useOpenTabsController";
+import { useDisplayNoteFiles } from "@/components/notes/useDisplayNoteFiles";
 import { useNotesListController } from "@/components/notes/useNotesListController";
 import { useLocalNoteSearchController } from "@/components/search/useLocalNoteSearchController";
 import AiConfigManager from "@/components/settings/AiConfigManager";
@@ -240,7 +241,6 @@ import {
   updateWorkingCopyContent,
   type WorkingCopy,
 } from "@/lib/workingCopies";
-import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
 const INITIAL_MARKDOWN = `# OI Notebook
@@ -1672,7 +1672,6 @@ export default function App() {
   const [isTreeRootCollapsed, setIsTreeRootCollapsed] = useState(false);
   const [createFileRequest, setCreateFileRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
   const [createFolderRequest, setCreateFolderRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
-  const [displayTitleByPath, setDisplayTitleByPath] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameTargetIsDirectory, setRenameTargetIsDirectory] = useState(false);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
@@ -2784,18 +2783,12 @@ export default function App() {
     transition: "none",
     animation: "none",
   } as CSSProperties;
-  const displayFiles = useMemo<NoteFileInfo[]>(
-    () =>
-      files.map((file) => ({
-        ...file,
-        displayTitle: file.isDirectory ? undefined : displayTitleByPath[file.path]?.trim() || undefined,
-      })),
-    [displayTitleByPath, files],
-  );
-  const activeNoteFile = useMemo(
-    () => displayFiles.find((file) => !file.isDirectory && file.path === currentFilePath) ?? null,
-    [displayFiles, currentFilePath],
-  );
+  const {
+    displayFiles,
+    activeNoteFile,
+    setDisplayTitleForPath,
+    rewriteDisplayTitlePaths,
+  } = useDisplayNoteFiles(files, currentFilePath);
   const noteDirectories = useMemo(
     () => files.filter((file) => file.isDirectory).map((file) => file.path).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" })),
     [files],
@@ -2954,20 +2947,6 @@ export default function App() {
     return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
   };
 
-  const setDisplayTitleForPath = (path: string, title: string) => {
-    const trimmed = title.trim();
-    setDisplayTitleByPath((current) => {
-      if (trimmed) {
-        if (current[path] === trimmed) return current;
-        return { ...current, [path]: trimmed };
-      }
-      if (!(path in current)) return current;
-      const next = { ...current };
-      delete next[path];
-      return next;
-    });
-  };
-
   const updatePathReferences = (oldPath: string, newPath: string, isDirectory: boolean) => {
     const rewritePath = (path: string) => {
       if (isDirectory) {
@@ -2990,16 +2969,7 @@ export default function App() {
       }
       return changed ? next : current;
     });
-    setDisplayTitleByPath((current) => {
-      let changed = false;
-      const next: Record<string, string> = {};
-      for (const [path, title] of Object.entries(current)) {
-        const rewritten = rewritePath(path);
-        if (rewritten !== path) changed = true;
-        next[rewritten] = title;
-      }
-      return changed ? next : current;
-    });
+    rewriteDisplayTitlePaths(rewritePath);
     setOpenReviewTabs((current) =>
       current.map((tab) => {
         const rewritten = rewritePath(tab.preview.notePath);
