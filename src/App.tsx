@@ -220,6 +220,7 @@ import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { TaskProgress } from "@/lib/taskStatus";
+import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
   createExternalWorkingCopy,
@@ -3035,35 +3036,6 @@ export default function App() {
     );
   };
 
-  const normalizeFileName = (name: string): string => {
-    const trimmed = name.trim();
-    return trimmed.toLowerCase().endsWith(".md") ? trimmed : `${trimmed}.md`;
-  };
-
-  const validateNamePart = (name: string, kind: "file" | "folder"): string | null => {
-    const trimmed = name.trim();
-    if (!trimmed) return kind === "file" ? "文件名不能为空" : "文件夹名不能为空";
-    if (/[<>:"/\\|?*]/.test(trimmed)) return "名称不能包含 Windows 非法字符 < > : \" / \\ | ? *";
-    if (trimmed.includes("..")) return "名称不能包含路径穿越片段 ..";
-    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "名称不能是绝对路径";
-    return null;
-  };
-
-  const validateDirectoryPathInput = (path: string): string | null => {
-    const trimmed = path.trim();
-    if (!trimmed) return null;
-    if (/[<>:"\\|?*]/.test(trimmed)) return "目录不能包含 Windows 非法字符 < > : \" \\ | ? *";
-    if (trimmed.includes("..")) return "目录不能包含路径穿越片段 ..";
-    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "目录不能是绝对路径";
-    if (trimmed.split("/").some((part) => part.trim() === "")) return "目录不能包含空路径段";
-    return null;
-  };
-
-  const joinNotePath = (directory: string, filename: string): string => {
-    const normalizedDirectory = directory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return normalizedDirectory ? `${normalizedDirectory}/${filename}` : filename;
-  };
-
   const getResolvedNewNoteDirectory = (): string => {
     if (newNoteLocationOption === "root") return "";
     if (newNoteLocationOption === "tricks") return "tricks";
@@ -3271,13 +3243,13 @@ export default function App() {
   };
 
   const handleCreate = async () => {
-    const fileErr = validateNamePart(dialogValue, "file");
+    const fileErr = validateNoteNamePart(dialogValue, "file");
     if (fileErr) { toast.error(fileErr); return; }
     const directory = getResolvedNewNoteDirectory();
-    const directoryErr = validateDirectoryPathInput(directory);
+    const directoryErr = validateNoteDirectoryPathInput(directory);
     if (directoryErr) { toast.error(directoryErr); return; }
 
-    const filename = normalizeFileName(dialogValue);
+    const filename = normalizeNoteFileName(dialogValue);
     const newPath = joinNotePath(directory, filename);
     if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
 
@@ -3303,9 +3275,9 @@ export default function App() {
   };
 
   const handleCreateFolder = async () => {
-    const nameErr = validateNamePart(dialogValue, "folder");
+    const nameErr = validateNoteNamePart(dialogValue, "folder");
     if (nameErr) { toast.error(nameErr); return; }
-    const parentErr = validateDirectoryPathInput(folderParentDirectory);
+    const parentErr = validateNoteDirectoryPathInput(folderParentDirectory);
     if (parentErr) { toast.error(parentErr); return; }
 
     const newPath = joinNotePath(folderParentDirectory, dialogValue.trim());
@@ -3333,9 +3305,9 @@ export default function App() {
   };
 
   const handleCreateFolderAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNamePart(name, "folder");
+    const nameErr = validateNoteNamePart(name, "folder");
     if (nameErr) throw new Error(nameErr);
-    const parentErr = validateDirectoryPathInput(parentPath);
+    const parentErr = validateNoteDirectoryPathInput(parentPath);
     if (parentErr) throw new Error(parentErr);
 
     const newPath = joinNotePath(parentPath, name.trim());
@@ -3351,12 +3323,12 @@ export default function App() {
   }, [files]);
 
   const handleCreateFileAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNamePart(name, "file");
+    const nameErr = validateNoteNamePart(name, "file");
     if (nameErr) throw new Error(nameErr);
-    const parentErr = validateDirectoryPathInput(parentPath);
+    const parentErr = validateNoteDirectoryPathInput(parentPath);
     if (parentErr) throw new Error(parentErr);
 
-    const filename = normalizeFileName(name);
+    const filename = normalizeNoteFileName(name);
     const newPath = joinNotePath(parentPath, filename);
     if (findEntryCaseInsensitive(newPath, false)) throw new Error("同目录已存在同名笔记");
 
@@ -3378,12 +3350,12 @@ export default function App() {
 
   const handleRename = async () => {
     if (!renameTarget) return;
-    const nameErr = validateNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
+    const nameErr = validateNoteNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
     if (nameErr) { toast.error(nameErr); return; }
 
     const lastSlashIdx = renameTarget.lastIndexOf("/");
     const dirPrefix = lastSlashIdx === -1 ? "" : renameTarget.slice(0, lastSlashIdx + 1);
-    const normalizedName = renameTargetIsDirectory ? dialogValue.trim() : normalizeFileName(dialogValue);
+    const normalizedName = renameTargetIsDirectory ? dialogValue.trim() : normalizeNoteFileName(dialogValue);
     const newPath = `${dirPrefix}${normalizedName}`;
     if (newPath === renameTarget) { closeDialog(); return; }
 
@@ -6982,11 +6954,11 @@ export default function App() {
 
   const folderNameValidationMessage =
     dialogMode === "create-folder" && dialogValue.trim()
-      ? validateNamePart(dialogValue, "folder")
+      ? validateNoteNamePart(dialogValue, "folder")
       : null;
   const folderParentValidationMessage =
     dialogMode === "create-folder" && folderParentDirectory.trim()
-      ? validateDirectoryPathInput(folderParentDirectory)
+      ? validateNoteDirectoryPathInput(folderParentDirectory)
       : null;
   const folderDialogHelpText =
     folderNameValidationMessage ??
