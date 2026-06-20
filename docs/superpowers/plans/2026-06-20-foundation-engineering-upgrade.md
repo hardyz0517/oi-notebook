@@ -69,10 +69,11 @@ Already completed foundation commits:
 - `10df1a4 refactor(search): drive local index with task state`
 - `2ddd238 refactor(blog): centralize config draft rules`
 - `983a0ee refactor(notes): centralize workspace path rewrites`
+- `440e880 refactor(luogu): centralize rule update patches`
 
 Progress calibration, 2026-06-20:
 
-- Completed from this plan: app preference helpers, collection/tag helpers, local index display/status/task-state helpers, blog config draft rules, note workspace path rewrite helpers, settings render guards, settings registry/search helpers, Luogu import controller/rule settings model, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
+- Completed from this plan: app preference helpers, collection/tag helpers, local index display/status/task-state helpers, blog config draft rules, note workspace path rewrite helpers, settings render guards, settings registry/search helpers, Luogu import controller/rule settings model/update patch helpers, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
 - Newly added during continued execution: `src/lib/noteWorkspace.ts`, `src/lib/blogConfig.ts`, `src/lib/editorContext.ts`, `src/lib/previewSyncTiming.ts`, `src/lib/appStatusLabels.ts`, `src/lib/luoguDifficulty.ts`, `src/lib/tagTaxonomyUserConfig.ts`, `src/lib/appAsync.ts`, `src/lib/appShell.ts`, `src/lib/apiError.ts`, `src/components/luogu/luoguImportDisplay.ts`, and `src/lib/tagTaxonomySettingsModel.ts`, each with focused tests where pure logic is present. Existing `src/components/settings/pages/luoguImportRules.ts` now also owns the Luogu rule settings row model.
 - Remaining foundation focus: further `App.tsx` shell decomposition, broader task-controller adoption of `src/lib/taskStatus.ts` beyond Luogu write progress and local index status/load/rebuild state, note workspace delete/rename side-effect cleanup where it can stay pure, tag manager config helper consolidation where behavior can be preserved, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, continued API boundary audits, and documentation/handoff sync.
 - Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
