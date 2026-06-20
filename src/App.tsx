@@ -68,11 +68,14 @@ import {
   type LuoguScanMode,
 } from "@/components/settings/pages/luoguImportDomain";
 import {
+  createEmptyLuoguPreparationWorkspace,
   deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
   isLuoguImportCenterBusy,
+  type LuoguImportStep,
+  type LuoguPreviewDetailTab,
 } from "@/components/luogu/luoguImportDisplay";
 import {
   formatLuoguSubmissionStatus,
@@ -467,8 +470,6 @@ type ConfirmDialogState = {
 type NoteLocationOptionId = NewNoteLocationOption;
 type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "manual";
-type LuoguImportStep = "scan" | "preview";
-type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareProgress = TaskProgress;
 type LuoguWriteProgress = TaskProgress;
@@ -1478,6 +1479,24 @@ export default function App() {
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
+  const resetLuoguPreparationWorkspace = useCallback(() => {
+    const workspace = createEmptyLuoguPreparationWorkspace<PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult>();
+    setSkippedLuoguSubmissionIds(workspace.skippedSubmissionIds);
+    setLuoguPreparedNotesById(workspace.preparedNotesById);
+    setLuoguPrepareErrorsById(workspace.prepareErrorsById);
+    setLuoguPrepareStatusesById(workspace.prepareStatusesById);
+    setEditedLuoguPreparedMarkdownIds(workspace.editedPreparedMarkdownIds);
+    setReviewSelectedLuoguSubmissionIds(workspace.reviewSelectedSubmissionIds);
+    setCurrentlyPreparingLuoguId(workspace.currentlyPreparingId);
+    setLuoguPrepareProgress(workspace.prepareProgress);
+    setIsStoppingLuoguPrepare(workspace.isStoppingPrepare);
+    setLuoguWriteResultsById(workspace.writeResultsById);
+    setCurrentlyWritingLuoguId(workspace.currentlyWritingId);
+    setLuoguWriteProgress(workspace.writeProgress);
+    setActiveLuoguPreparedPreviewId(workspace.activePreparedPreviewId);
+    setActiveLuoguPreviewDetailTab(workspace.activePreviewDetailTab);
+    setLuoguImportStep(workspace.importStep);
+  }, []);
   const applyLuoguConfigFormState = useCallback((config: LuoguConfig) => {
     const formState = buildLuoguConfigFormState(config);
     setLuoguConfigUid(formState.uid);
@@ -3035,21 +3054,7 @@ export default function App() {
       setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
       setLuoguScanSummary(null);
       setSelectedLuoguSubmissionIds(new Set<string>());
-      setSkippedLuoguSubmissionIds(new Set<string>());
-      setLuoguPreparedNotesById({});
-      setLuoguPrepareErrorsById({});
-      setLuoguPrepareStatusesById({});
-      setEditedLuoguPreparedMarkdownIds(new Set<string>());
-      setReviewSelectedLuoguSubmissionIds(new Set<string>());
-      setCurrentlyPreparingLuoguId(null);
-      setLuoguPrepareProgress(null);
-      setIsStoppingLuoguPrepare(false);
-      setLuoguWriteResultsById({});
-      setCurrentlyWritingLuoguId(null);
-      setLuoguWriteProgress(null);
-      setActiveLuoguPreparedPreviewId(null);
-      setActiveLuoguPreviewDetailTab("rendered");
-      setLuoguImportStep("scan");
+      resetLuoguPreparationWorkspace();
     }
 
     try {
@@ -3841,26 +3846,12 @@ export default function App() {
     setLuoguScanProgress(null);
     setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
-    setSkippedLuoguSubmissionIds(new Set<string>());
-    setLuoguPreparedNotesById({});
-    setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById({});
-    setEditedLuoguPreparedMarkdownIds(new Set<string>());
-    setReviewSelectedLuoguSubmissionIds(new Set<string>());
-    setCurrentlyPreparingLuoguId(null);
-    setLuoguPrepareProgress(null);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguWriteResultsById({});
-    setCurrentlyWritingLuoguId(null);
-    setLuoguWriteProgress(null);
-    setActiveLuoguPreparedPreviewId(null);
-    setActiveLuoguPreviewDetailTab("rendered");
+    resetLuoguPreparationWorkspace();
     setLuoguProblemId("");
     setLuoguProblemTitle("");
     setLuoguSubmissionId("");
     setLuoguSourceCode("");
     setLuoguImportCenterTab("scan");
-    setLuoguImportStep("scan");
     if (returnTarget) {
       openSettingsSection(returnTarget.type === "category" ? returnTarget.category : returnTarget.page);
     }
@@ -3928,21 +3919,7 @@ export default function App() {
       toast.success("导入规则已保存");
     }
 
-    setSkippedLuoguSubmissionIds(new Set<string>());
-    setLuoguPreparedNotesById({});
-    setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById({});
-    setEditedLuoguPreparedMarkdownIds(new Set<string>());
-    setReviewSelectedLuoguSubmissionIds(new Set<string>());
-    setCurrentlyPreparingLuoguId(null);
-    setLuoguPrepareProgress(null);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguWriteResultsById({});
-    setCurrentlyWritingLuoguId(null);
-    setLuoguWriteProgress(null);
-    setActiveLuoguPreparedPreviewId(null);
-    setActiveLuoguPreviewDetailTab("rendered");
-    setLuoguImportStep("scan");
+    resetLuoguPreparationWorkspace();
   };
 
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {

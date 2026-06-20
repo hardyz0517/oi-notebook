@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createEmptyLuoguPreparationWorkspace,
   deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
@@ -11,6 +12,26 @@ import {
 const emptyStats = { total: 0, candidateCount: 0, skippedCount: 0 };
 
 describe("luoguImportDisplay", () => {
+  it("creates an empty preparation workspace state", () => {
+    const workspace = createEmptyLuoguPreparationWorkspace();
+
+    expect(workspace.skippedSubmissionIds).toEqual(new Set());
+    expect(workspace.preparedNotesById).toEqual({});
+    expect(workspace.prepareErrorsById).toEqual({});
+    expect(workspace.prepareStatusesById).toEqual({});
+    expect(workspace.editedPreparedMarkdownIds).toEqual(new Set());
+    expect(workspace.reviewSelectedSubmissionIds).toEqual(new Set());
+    expect(workspace.currentlyPreparingId).toBeNull();
+    expect(workspace.prepareProgress).toBeNull();
+    expect(workspace.isStoppingPrepare).toBe(false);
+    expect(workspace.writeResultsById).toEqual({});
+    expect(workspace.currentlyWritingId).toBeNull();
+    expect(workspace.writeProgress).toBeNull();
+    expect(workspace.activePreparedPreviewId).toBeNull();
+    expect(workspace.activePreviewDetailTab).toBe("rendered");
+    expect(workspace.importStep).toBe("scan");
+  });
+
   it("derives whether the import center is globally busy", () => {
     expect(isLuoguImportCenterBusy({
       isImporting: false,

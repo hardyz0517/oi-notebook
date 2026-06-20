@@ -1,6 +1,10 @@
 import { createIdleTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
+import type { LuoguPrepareItemStatus } from "./luoguDisplay";
+
+export type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
+export type LuoguImportStep = "scan" | "preview";
 
 export interface LuoguScanProgressDisplay {
   foundCount: number;
@@ -31,6 +35,44 @@ export interface LuoguImportCenterBusyInput {
 
 export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): boolean {
   return input.isImporting || input.isPreparing || input.isWriting || input.isScanning || input.isSyncing;
+}
+
+export interface LuoguPreparationWorkspaceState<TPreparedNote = unknown, TWriteResult = unknown> {
+  skippedSubmissionIds: Set<string>;
+  preparedNotesById: Record<string, TPreparedNote>;
+  prepareErrorsById: Record<string, string>;
+  prepareStatusesById: Record<string, LuoguPrepareItemStatus>;
+  editedPreparedMarkdownIds: Set<string>;
+  reviewSelectedSubmissionIds: Set<string>;
+  currentlyPreparingId: string | null;
+  prepareProgress: TaskProgress | null;
+  isStoppingPrepare: boolean;
+  writeResultsById: Record<string, TWriteResult>;
+  currentlyWritingId: string | null;
+  writeProgress: TaskProgress | null;
+  activePreparedPreviewId: string | null;
+  activePreviewDetailTab: LuoguPreviewDetailTab;
+  importStep: LuoguImportStep;
+}
+
+export function createEmptyLuoguPreparationWorkspace<TPreparedNote = unknown, TWriteResult = unknown>(): LuoguPreparationWorkspaceState<TPreparedNote, TWriteResult> {
+  return {
+    skippedSubmissionIds: new Set<string>(),
+    preparedNotesById: {},
+    prepareErrorsById: {},
+    prepareStatusesById: {},
+    editedPreparedMarkdownIds: new Set<string>(),
+    reviewSelectedSubmissionIds: new Set<string>(),
+    currentlyPreparingId: null,
+    prepareProgress: null,
+    isStoppingPrepare: false,
+    writeResultsById: {},
+    currentlyWritingId: null,
+    writeProgress: null,
+    activePreparedPreviewId: null,
+    activePreviewDetailTab: "rendered",
+    importStep: "scan",
+  };
 }
 
 export interface LuoguScanTaskStateInput {
