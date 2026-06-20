@@ -1,4 +1,4 @@
-import { createIdleTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import type { PreviewLuoguSubmission } from "@/lib/api";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
@@ -169,6 +169,25 @@ export function stopQueuedLuoguPrepareStatuses(
       status === "queued" ? "stopped" : status,
     ]),
   ) as Record<string, LuoguPrepareItemStatus>;
+}
+
+export function getLuoguSubmissionIdSet(submissions: PreviewLuoguSubmission[]): Set<string> {
+  return new Set(submissions.map((submission) => submission.submissionId));
+}
+
+export interface LuoguInitialPrepareProgressInput {
+  queueCount: number;
+  reusablePreviewCount: number;
+  ignoredCount: number;
+}
+
+export function createInitialLuoguPrepareProgress(
+  input: LuoguInitialPrepareProgressInput,
+): TaskProgress {
+  return updateTaskProgressValue(createTaskProgress(input.queueCount), {
+    succeeded: input.reusablePreviewCount,
+    skipped: input.ignoredCount,
+  });
 }
 
 export interface LuoguPreparationWorkspaceState<TPreparedNote = unknown, TWriteResult = unknown> {

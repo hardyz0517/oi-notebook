@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createInitialLuoguPrepareProgress,
   createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguScanTaskState,
@@ -10,6 +11,7 @@ import {
   getNextLuoguSelectableSelection,
   getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
+  getLuoguSubmissionIdSet,
   isLuoguImportCenterBusy,
   stopQueuedLuoguPrepareStatuses,
 } from "./luoguImportDisplay";
@@ -246,6 +248,21 @@ describe("luoguImportDisplay", () => {
       "103": "stopped",
       "102": "running",
       "101": "stopped",
+    });
+  });
+
+  it("derives submission id sets and initial prepare progress", () => {
+    expect(getLuoguSubmissionIdSet(luoguSubmissions.slice(0, 2))).toEqual(new Set(["103", "102"]));
+    expect(createInitialLuoguPrepareProgress({
+      queueCount: 4,
+      reusablePreviewCount: 2,
+      ignoredCount: 1,
+    })).toEqual({
+      current: 0,
+      total: 4,
+      succeeded: 2,
+      failed: 0,
+      skipped: 1,
     });
   });
 

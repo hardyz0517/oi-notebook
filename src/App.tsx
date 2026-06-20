@@ -69,6 +69,7 @@ import {
 } from "@/components/settings/pages/luoguImportDomain";
 import {
   createEmptyLuoguPreparationWorkspace,
+  createInitialLuoguPrepareProgress,
   createQueuedLuoguPrepareStatuses,
   deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
@@ -77,6 +78,7 @@ import {
   getNextLuoguSelectableSelection,
   getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
+  getLuoguSubmissionIdSet,
   isLuoguImportCenterBusy,
   stopQueuedLuoguPrepareStatuses,
   type LuoguImportStep,
@@ -4095,7 +4097,7 @@ export default function App() {
       setLuoguPrepareProgress(null);
       setLuoguPrepareStatusesById({});
       if (reusablePreviewSubmissions.length > 0) {
-        setReviewSelectedLuoguSubmissionIds(new Set(reusablePreviewSubmissions.map((submission) => submission.submissionId)));
+        setReviewSelectedLuoguSubmissionIds(getLuoguSubmissionIdSet(reusablePreviewSubmissions));
         setActiveLuoguPreparedPreviewId(reusablePreviewSubmissions[0].submissionId);
         setActiveLuoguPreviewDetailTab("rendered");
         setLuoguImportStep("preview");
@@ -4115,13 +4117,11 @@ export default function App() {
     luoguPrepareRunRef.current = { id: runId, cancelled: false };
     setIsPreparingSelectedLuogu(true);
     setIsStoppingLuoguPrepare(false);
-    setLuoguPrepareProgress({
-      current: 0,
-      total: queue.length,
-      succeeded: reusablePreviewSubmissions.length,
-      failed: 0,
-      skipped: ignoredCount,
-    });
+    setLuoguPrepareProgress(createInitialLuoguPrepareProgress({
+      queueCount: queue.length,
+      reusablePreviewCount: reusablePreviewSubmissions.length,
+      ignoredCount,
+    }));
     setLuoguPrepareErrorsById({});
     setLuoguPrepareStatusesById(createQueuedLuoguPrepareStatuses(queue));
     setLuoguWriteResultsById({});
@@ -4132,7 +4132,7 @@ export default function App() {
     let firstPreparedId: string | null = reusablePreviewSubmissions[0]?.submissionId ?? null;
     let completedCount = 0;
     const runningIds = new Set<string>();
-    const reviewSelectionIds = new Set(reusablePreviewSubmissions.map((submission) => submission.submissionId));
+    const reviewSelectionIds = getLuoguSubmissionIdSet(reusablePreviewSubmissions);
 
     const refreshProgress = () => {
       setLuoguPrepareProgress({
