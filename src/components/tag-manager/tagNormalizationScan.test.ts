@@ -189,6 +189,16 @@ describe("tagNormalizationScan", () => {
       label: "应用中",
       message: "0/3",
     });
+
+    expect(deriveTagNormalizationTaskView(
+      { status: "stopping", progress: null, error: null },
+      "scan",
+    )).toMatchObject({
+      status: "stopping",
+      isBusy: true,
+      canCancel: false,
+      label: "停止中",
+    });
   });
 
   it("derives scan stats from cached all-stats when available", () => {

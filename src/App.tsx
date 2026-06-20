@@ -286,8 +286,6 @@ import {
   getLocalIndexAccessLabel,
   getLocalIndexRebuildRunningMessage,
   getLocalIndexStatusBadgeClassName,
-  getLocalIndexStatusBadgeTone,
-  getLocalIndexStatusLabel,
   getLocalIndexUpdatedLabel,
 } from "@/lib/localIndexStatus";
 import { LUOGU_DIFFICULTY_OPTIONS, getDifficultyOptionClassName, getDifficultyOptionTextColor } from "@/lib/luoguDifficulty";
@@ -2057,7 +2055,6 @@ export default function App() {
     stats: tagNormalizationScanStats,
   });
   const tagNormalizationScanTaskView = deriveTagNormalizationTaskView(tagNormalizationScanTaskState, "scan");
-  const isTagNormalizationScanTaskRunning = tagNormalizationScanTaskView.isBusy;
   const selectedTagNormalizationScanStats = useMemo(
     () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
     [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
@@ -2090,13 +2087,13 @@ export default function App() {
     [tagTaxonomyUserConfig],
   );
   const localIndexTaskView = deriveLocalIndexTaskView({
+    status: localIndexStatus,
     loadTask: localIndexLoadTask,
     rebuildTask: localIndexRebuildTask,
     fallbackMessage: localIndexMessage,
   });
   const isLoadingLocalIndexStatus = localIndexTaskView.isLoading;
   const isRebuildingLocalIndex = localIndexTaskView.isRebuilding;
-  const localIndexStatusBadgeTone = getLocalIndexStatusBadgeTone(localIndexStatus, isRebuildingLocalIndex);
   const localIndexActionDisabled = localIndexTaskView.actionDisabled;
   const localIndexRebuildButtonLabel = localIndexTaskView.rebuildButtonLabel;
   const localIndexDisplayMessage = localIndexTaskView.message;
@@ -4742,7 +4739,7 @@ export default function App() {
     setIsTagNormalizationDetailsOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatterDisplayTags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
   const handleScanLegacyTags = useCallback(async () => {
-    if (isTagNormalizationScanTaskRunning) return;
+    if (tagNormalizationScanTaskView.isBusy) return;
 
     setIsScanningTagNormalization(true);
     setTagNormalizationScanError(null);
@@ -4794,7 +4791,7 @@ export default function App() {
     } finally {
       setIsScanningTagNormalization(false);
     }
-  }, [isTagNormalizationScanTaskRunning, noteFiles, tagTaxonomyUserConfig]);
+  }, [noteFiles, tagNormalizationScanTaskView.isBusy, tagTaxonomyUserConfig]);
   const toggleTagNormalizationScanSelection = useCallback((path: string) => {
     setSelectedTagNormalizationScanPaths((current) => {
       const next = new Set(current);
@@ -7710,9 +7707,9 @@ export default function App() {
                             <SettingsV2Row title="状态" description="本地笔记索引当前是否可用。">
                               <span className={cn(
                                 "settings-v2-status-badge",
-                                getLocalIndexStatusBadgeClassName(localIndexStatusBadgeTone),
+                                getLocalIndexStatusBadgeClassName(localIndexTaskView.statusBadgeTone),
                               )}>
-                                {getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}
+                                {localIndexTaskView.statusLabel}
                               </span>
                             </SettingsV2Row>
                             <SettingsV2Row title="笔记数量" description="已纳入索引的 Markdown 笔记数量。">

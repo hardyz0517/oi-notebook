@@ -67,11 +67,12 @@ describe("localIndexStatus model helpers", () => {
   it("derives legacy local index UI flags from task states", () => {
     expect(
       deriveLocalIndexTaskView({
+        status: baseStatus,
         loadTask: { status: "running", progress: null, error: null },
         rebuildTask: { status: "idle", progress: null, error: null },
         fallbackMessage: null,
       }),
-    ).toEqual({
+    ).toMatchObject({
       isLoading: true,
       isRebuilding: false,
       actionDisabled: true,
@@ -81,11 +82,12 @@ describe("localIndexStatus model helpers", () => {
 
     expect(
       deriveLocalIndexTaskView({
+        status: baseStatus,
         loadTask: { status: "idle", progress: null, error: null },
         rebuildTask: { status: "running", progress: null, error: null },
         fallbackMessage: "old message",
       }),
-    ).toEqual({
+    ).toMatchObject({
       isLoading: false,
       isRebuilding: true,
       actionDisabled: true,
@@ -95,6 +97,7 @@ describe("localIndexStatus model helpers", () => {
 
     expect(
       deriveLocalIndexTaskView({
+        status: baseStatus,
         loadTask: { status: "idle", progress: null, error: null },
         rebuildTask: { status: "failed", progress: null, error: "boom" },
         fallbackMessage: null,
@@ -105,6 +108,7 @@ describe("localIndexStatus model helpers", () => {
   it("derives local index busy flags from the common task view model", () => {
     expect(
       deriveLocalIndexTaskView({
+        status: baseStatus,
         loadTask: { status: "queued", progress: null, error: null },
         rebuildTask: { status: "idle", progress: null, error: null },
         fallbackMessage: null,
@@ -118,6 +122,7 @@ describe("localIndexStatus model helpers", () => {
 
     expect(
       deriveLocalIndexTaskView({
+        status: baseStatus,
         loadTask: { status: "idle", progress: null, error: null },
         rebuildTask: { status: "stopping", progress: null, error: null },
         fallbackMessage: "old message",
@@ -128,6 +133,32 @@ describe("localIndexStatus model helpers", () => {
       actionDisabled: true,
       rebuildButtonLabel: getLocalIndexRebuildButtonLabel(true),
       message: getLocalIndexRebuildRunningMessage(),
+    });
+  });
+
+  it("derives local index status label and badge tone from the same task view", () => {
+    expect(
+      deriveLocalIndexTaskView({
+        status: baseStatus,
+        loadTask: { status: "idle", progress: null, error: null },
+        rebuildTask: { status: "idle", progress: null, error: null },
+        fallbackMessage: null,
+      }),
+    ).toMatchObject({
+      statusLabel: "可用",
+      statusBadgeTone: "success",
+    });
+
+    expect(
+      deriveLocalIndexTaskView({
+        status: { ...baseStatus, status: "stale" },
+        loadTask: { status: "idle", progress: null, error: null },
+        rebuildTask: { status: "running", progress: null, error: null },
+        fallbackMessage: null,
+      }),
+    ).toMatchObject({
+      statusLabel: "正在建立本地笔记索引...",
+      statusBadgeTone: "info",
     });
   });
 });

@@ -9,6 +9,7 @@ export interface LocalIndexActionBusyState {
 }
 
 export interface LocalIndexTaskViewInput {
+  status: LocalNoteIndexStatusResult | null;
   loadTask: TaskState;
   rebuildTask: TaskState;
   fallbackMessage: string | null;
@@ -20,6 +21,8 @@ export interface LocalIndexTaskView {
   actionDisabled: boolean;
   rebuildButtonLabel: string;
   message: string | null;
+  statusLabel: string;
+  statusBadgeTone: LocalIndexStatusBadgeTone;
 }
 
 export function getLocalIndexStatusLabel(
@@ -107,6 +110,8 @@ export function deriveLocalIndexTaskView(input: LocalIndexTaskViewInput): LocalI
     actionDisabled: isLocalIndexActionDisabled({ isLoading, isRebuilding }),
     rebuildButtonLabel: rebuildView.label,
     message: isRebuilding ? "正在建立本地笔记索引..." : taskError ?? input.fallbackMessage,
+    statusLabel: getLocalIndexStatusLabel(input.status, isRebuilding),
+    statusBadgeTone: getLocalIndexStatusBadgeTone(input.status, isRebuilding),
   };
 }
 

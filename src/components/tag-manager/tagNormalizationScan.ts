@@ -121,6 +121,7 @@ export function deriveTagNormalizationTaskView(
     ? {
       idleLabel: "开始扫描",
       runningLabel: "扫描中",
+      stoppingLabel: "停止中",
       succeededLabel: "扫描完成",
       failedLabel: "扫描失败",
       cancelledLabel: "扫描已取消",
@@ -128,6 +129,7 @@ export function deriveTagNormalizationTaskView(
     : {
       idleLabel: "应用",
       runningLabel: "应用中",
+      stoppingLabel: "停止中",
       succeededLabel: "应用完成",
       failedLabel: "应用失败",
       cancelledLabel: "应用已取消",
