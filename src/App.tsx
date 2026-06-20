@@ -25,6 +25,7 @@ import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreviewScrollSync";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
+import { useOpenTabsController } from "@/components/layout/useOpenTabsController";
 import { useLocalNoteSearchController } from "@/components/search/useLocalNoteSearchController";
 import AiConfigManager from "@/components/settings/AiConfigManager";
 import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
@@ -220,15 +221,9 @@ import {
 import { formatSearchDate } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import {
-  OPEN_TABS_ACTIVE_STORAGE_KEY,
-  OPEN_TABS_STORAGE_KEY,
   buildOpenFileTabs,
-  filterValidOpenTabPaths,
   getNoteDisplayName,
   getNextOpenTabPathAfterClose,
-  parseStoredOpenTabPaths,
-  parseStoredOpenTabsActivePath,
-  serializeOpenTabPaths,
 } from "@/lib/openTabs";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { TaskProgress } from "@/lib/taskStatus";
@@ -1042,14 +1037,6 @@ function clampAiSidebarWidth(value: number): number {
   return clampNumberRange(value, AI_SIDEBAR_WIDTH_MIN, maxWidth);
 }
 
-function getInitialOpenTabPaths(): string[] {
-  return parseStoredOpenTabPaths(window.localStorage.getItem(OPEN_TABS_STORAGE_KEY));
-}
-
-function getInitialOpenTabsActivePath(): string | null {
-  return parseStoredOpenTabsActivePath(window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY));
-}
-
 interface PromptUsageInfo {
   title: string;
   scope: string;
@@ -1312,7 +1299,6 @@ export default function App() {
   const [files, setFiles] = useState<NoteFileInfo[]>([]);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [openTabPaths, setOpenTabPaths] = useState<string[]>(getInitialOpenTabPaths);
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
   const [workingCopies, setWorkingCopies] = useState<Record<string, WorkingCopy>>({});
@@ -1823,8 +1809,6 @@ export default function App() {
   const pendingChatResponseStyleRef = useRef<string | null>(null);
   const chatResponseStyleAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingChatResponseStyleRef = useRef(false);
-  const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
-  const hasRestoredOpenTabsRef = useRef(false);
   const skipNextReadForPathRef = useRef<string | null>(null);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
@@ -2681,6 +2665,12 @@ export default function App() {
     [promptTemplates],
   );
   const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  const { openTabPaths, setOpenTabPaths } = useOpenTabsController({
+    currentFilePath,
+    setCurrentFilePath,
+    noteFiles,
+    hasLoadedNotes,
+  });
   const {
     isSearchOpen,
     setIsSearchOpen,
@@ -6687,26 +6677,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedNotes) return;
-
-    const validPaths = new Set(noteFiles.map((file) => file.path));
-    setOpenTabPaths((current) => filterValidOpenTabPaths(current, validPaths));
-
-    if (currentFilePath && !validPaths.has(currentFilePath)) {
-      setCurrentFilePath(null);
-    }
-  }, [currentFilePath, noteFiles, hasLoadedNotes]);
-
-  useEffect(() => {
-    if (!currentFilePath) return;
-
-    setOpenTabPaths((current) => {
-      if (current.includes(currentFilePath)) return current;
-      return [...current, currentFilePath];
-    });
-  }, [currentFilePath]);
-
-  useEffect(() => {
     if (!currentFilePath) return;
     const isReviewActive = openReviewTabs.some((tab) => tab.id === activeWorkspaceTabId);
     const noteWorkingCopyId = getNoteWorkingCopyId(currentFilePath);
@@ -6714,38 +6684,6 @@ export default function App() {
       setActiveWorkspaceTabId(noteWorkingCopyId);
     }
   }, [activeWorkspaceTabId, currentFilePath, openReviewTabs]);
-
-  useEffect(() => {
-    if (!hasLoadedNotes || hasRestoredOpenTabsRef.current) return;
-
-    const validPaths = new Set(noteFiles.map((file) => file.path));
-    const restoredPaths = filterValidOpenTabPaths(openTabPaths, validPaths);
-    const storedActivePath = initialOpenTabsActivePathRef.current;
-    const activePath =
-      storedActivePath && validPaths.has(storedActivePath)
-        ? storedActivePath
-        : restoredPaths[0] ?? null;
-
-    hasRestoredOpenTabsRef.current = true;
-    if (restoredPaths.length !== openTabPaths.length) {
-      setOpenTabPaths(restoredPaths);
-    }
-    if (!currentFilePath && activePath) {
-      setCurrentFilePath(activePath);
-    }
-  }, [currentFilePath, noteFiles, hasLoadedNotes, openTabPaths]);
-
-  useEffect(() => {
-    window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, serializeOpenTabPaths(openTabPaths));
-  }, [openTabPaths]);
-
-  useEffect(() => {
-    if (currentFilePath) {
-      window.localStorage.setItem(OPEN_TABS_ACTIVE_STORAGE_KEY, currentFilePath);
-    } else {
-      window.localStorage.removeItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
-    }
-  }, [currentFilePath]);
 
   // 当选中文件变化时，从后端读取内容
   // 使用 cancelled flag 防御 race condition：
