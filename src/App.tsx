@@ -261,6 +261,9 @@ import {
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getNoteDirectories,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
+  filterDeletedNoteTabs,
+  isNotePathAffectedByTarget,
+  rewriteNotePathReference,
   resolveNewNoteDirectory,
   type NewNoteLocationOption,
 } from "@/lib/noteWorkspace";
@@ -2649,12 +2652,7 @@ export default function App() {
 
   const updatePathReferences = (oldPath: string, newPath: string, isDirectory: boolean) => {
     const rewritePath = (path: string) => {
-      if (isDirectory) {
-        return path === oldPath || path.startsWith(`${oldPath}/`)
-          ? `${newPath}${path.slice(oldPath.length)}`
-          : path;
-      }
-      return path === oldPath ? newPath : path;
+      return rewriteNotePathReference(path, oldPath, newPath, isDirectory);
     };
 
     setOpenTabPaths((current) => current.map(rewritePath));
@@ -2966,12 +2964,16 @@ export default function App() {
       }
       const updated = await listNotes();
       setFiles(updated);
-      setOpenTabPaths((current) => current.filter((tabPath) => isDirectory ? tabPath !== path && !tabPath.startsWith(`${path}/`) : tabPath !== path));
+      setOpenTabPaths((current) => filterDeletedNoteTabs(current, path, isDirectory));
       if (isDirectory) {
-        setActiveTreeDirectoryPath((current) => current && (current === path || current.startsWith(`${path}/`)) ? null : current);
+        setActiveTreeDirectoryPath((current) =>
+          current && isNotePathAffectedByTarget(current, path, true) ? null : current,
+        );
       }
-      setActiveTreeFilePath((current) => current && (current === path || (isDirectory && current.startsWith(`${path}/`))) ? null : current);
-      if (currentFilePath && (currentFilePath === path || (isDirectory && currentFilePath.startsWith(`${path}/`)))) {
+      setActiveTreeFilePath((current) =>
+        current && isNotePathAffectedByTarget(current, path, isDirectory) ? null : current,
+      );
+      if (currentFilePath && isNotePathAffectedByTarget(currentFilePath, path, isDirectory)) {
         setCurrentFilePath(null);
         setActiveWorkspaceTabId(null);
         setIsDirty(false);

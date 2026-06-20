@@ -71,3 +71,25 @@ export function getDefaultNewNoteCreateParent(
   }
   return currentDirectory;
 }
+
+export function rewriteNotePathReference(
+  path: string,
+  oldPath: string,
+  newPath: string,
+  isDirectory: boolean,
+): string {
+  if (isDirectory) {
+    return path === oldPath || path.startsWith(`${oldPath}/`)
+      ? `${newPath}${path.slice(oldPath.length)}`
+      : path;
+  }
+  return path === oldPath ? newPath : path;
+}
+
+export function isNotePathAffectedByTarget(path: string, targetPath: string, isDirectory: boolean): boolean {
+  return path === targetPath || (isDirectory && path.startsWith(`${targetPath}/`));
+}
+
+export function filterDeletedNoteTabs(tabPaths: string[], deletedPath: string, isDirectory: boolean): string[] {
+  return tabPaths.filter((tabPath) => !isNotePathAffectedByTarget(tabPath, deletedPath, isDirectory));
+}
