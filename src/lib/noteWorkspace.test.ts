@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNewNoteMarkdown,
+  buildRenameNotePath,
   findEntryCaseInsensitive,
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent,
@@ -48,6 +49,12 @@ describe("noteWorkspace", () => {
     expect(resolveNewNoteDirectory("problems", "ignored", "current")).toBe("problems");
     expect(resolveNewNoteDirectory("custom", " custom/path ", "current")).toBe("custom/path");
     expect(resolveNewNoteDirectory("current", "ignored", "current")).toBe("current");
+  });
+
+  it("builds rename target paths in the original directory", () => {
+    expect(buildRenameNotePath("A/old.md", "new", false)).toBe("A/new.md");
+    expect(buildRenameNotePath("old.md", "new.md", false)).toBe("new.md");
+    expect(buildRenameNotePath("A/old-folder", "new-folder", true)).toBe("A/new-folder");
   });
 
   it("finds entries case-insensitively by kind", () => {

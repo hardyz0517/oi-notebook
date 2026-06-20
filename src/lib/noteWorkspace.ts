@@ -1,4 +1,5 @@
 import type { NoteFileInfo } from "@/types/note";
+import { normalizeNoteFileName } from "@/lib/notePathHelpers";
 
 export type NewNoteLocationOption = "root" | "current" | "tricks" | "problems" | "custom";
 
@@ -28,6 +29,13 @@ export function resolveNewNoteDirectory(
   if (option === "problems") return "problems";
   if (option === "custom") return normalizeCustomNoteDirectory(customDirectory);
   return currentDirectory;
+}
+
+export function buildRenameNotePath(targetPath: string, nextName: string, isDirectory: boolean): string {
+  const lastSlashIndex = targetPath.lastIndexOf("/");
+  const directoryPrefix = lastSlashIndex === -1 ? "" : targetPath.slice(0, lastSlashIndex + 1);
+  const normalizedName = isDirectory ? nextName.trim() : normalizeNoteFileName(nextName);
+  return `${directoryPrefix}${normalizedName}`;
 }
 
 export function findEntryCaseInsensitive(

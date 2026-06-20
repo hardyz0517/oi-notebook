@@ -281,6 +281,7 @@ import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
+  buildRenameNotePath,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
@@ -2797,10 +2798,7 @@ export default function App() {
     const nameErr = validateNoteNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
     if (nameErr) { toast.error(nameErr); return; }
 
-    const lastSlashIdx = renameTarget.lastIndexOf("/");
-    const dirPrefix = lastSlashIdx === -1 ? "" : renameTarget.slice(0, lastSlashIdx + 1);
-    const normalizedName = renameTargetIsDirectory ? dialogValue.trim() : normalizeNoteFileName(dialogValue);
-    const newPath = `${dirPrefix}${normalizedName}`;
+    const newPath = buildRenameNotePath(renameTarget, dialogValue, renameTargetIsDirectory);
     if (newPath === renameTarget) { closeDialog(); return; }
 
     const existing = findEntryCaseInsensitive(newPath, renameTargetIsDirectory);
