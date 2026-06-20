@@ -1,4 +1,4 @@
-import type { TaskProgress } from "@/lib/taskStatus";
+import { createIdleTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
 
@@ -19,6 +19,55 @@ export interface LuoguScanResultSummaryInput {
   summary: LuoguScanSummaryDisplay | null;
   hasPreviewResult: boolean;
   stats: Pick<LuoguScanResultStats, "total" | "candidateCount" | "skippedCount">;
+}
+
+export interface LuoguScanTaskStateInput {
+  isScanning: boolean;
+  isPaused: boolean;
+  progress: LuoguScanProgressDisplay | null;
+  summary: LuoguScanSummaryDisplay | null;
+  error: string | null;
+}
+
+export function deriveLuoguScanTaskState(input: LuoguScanTaskStateInput): TaskState {
+  if (input.isScanning) {
+    const foundCount = input.progress?.foundCount ?? 0;
+    return {
+      status: "running",
+      progress: {
+        current: foundCount,
+        total: foundCount,
+        succeeded: foundCount,
+        failed: 0,
+        skipped: 0,
+      },
+      error: null,
+    };
+  }
+
+  if (input.isPaused) {
+    return { status: "paused", progress: null, error: null };
+  }
+
+  if (input.error) {
+    return { status: "failed", progress: null, error: input.error };
+  }
+
+  if (input.summary) {
+    return {
+      status: "succeeded",
+      progress: {
+        current: input.summary.foundCount,
+        total: input.summary.foundCount,
+        succeeded: input.summary.candidateCount,
+        failed: 0,
+        skipped: input.summary.skippedCount,
+      },
+      error: null,
+    };
+  }
+
+  return createIdleTaskState();
 }
 
 export function formatLuoguScanResultSummary(input: LuoguScanResultSummaryInput): string {

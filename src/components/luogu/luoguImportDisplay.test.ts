@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
@@ -9,6 +10,56 @@ import {
 const emptyStats = { total: 0, candidateCount: 0, skippedCount: 0 };
 
 describe("luoguImportDisplay", () => {
+  it("derives task state for running, paused, failed, completed, and idle scan states", () => {
+    expect(deriveLuoguScanTaskState({
+      isScanning: true,
+      isPaused: false,
+      progress: { foundCount: 12, waiting: true },
+      summary: null,
+      error: null,
+    })).toEqual({
+      status: "running",
+      progress: { current: 12, total: 12, succeeded: 12, failed: 0, skipped: 0 },
+      error: null,
+    });
+
+    expect(deriveLuoguScanTaskState({
+      isScanning: false,
+      isPaused: true,
+      progress: null,
+      summary: null,
+      error: null,
+    }).status).toBe("paused");
+
+    expect(deriveLuoguScanTaskState({
+      isScanning: false,
+      isPaused: false,
+      progress: null,
+      summary: null,
+      error: "network",
+    })).toEqual({ status: "failed", progress: null, error: "network" });
+
+    expect(deriveLuoguScanTaskState({
+      isScanning: false,
+      isPaused: false,
+      progress: null,
+      summary: { foundCount: 20, candidateCount: 9, skippedCount: 11 },
+      error: null,
+    })).toEqual({
+      status: "succeeded",
+      progress: { current: 20, total: 20, succeeded: 9, failed: 0, skipped: 11 },
+      error: null,
+    });
+
+    expect(deriveLuoguScanTaskState({
+      isScanning: false,
+      isPaused: false,
+      progress: null,
+      summary: null,
+      error: null,
+    })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
   it("formats paused scan summary before other states", () => {
     expect(formatLuoguScanResultSummary({
       isPaused: true,
