@@ -20,8 +20,9 @@ import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
-import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
-import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
+import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
+import MarkdownPreview from "@/components/editor/MarkdownPreview";
+import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreviewScrollSync";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
 import AiConfigManager from "@/components/settings/AiConfigManager";
@@ -125,7 +126,6 @@ import {
   markPreviewMarkdownSet,
   markPreviewScheduleCancelled,
   markPreviewEditorChange,
-  markPreviewScrollSync,
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
@@ -1462,11 +1462,13 @@ export default function App() {
   const currentFilePathRef = useRef(currentFilePath);
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
-  const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
-  const previewScrollApiRef = useRef<MarkdownPreviewScrollApi | null>(null);
-  const scrollSyncRafRef = useRef<number | null>(null);
-  const scrollSyncSuppressRafRef = useRef<number | null>(null);
-  const suppressedScrollPaneRef = useRef<"editor" | "preview" | null>(null);
+  const {
+    handleEditorScroll,
+    handlePreviewScroll,
+    handleEditorScrollApiChange,
+    handlePreviewScrollApiChange,
+    requestEditorMeasure,
+  } = useEditorPreviewScrollSync();
 
   useEffect(() => {
     tagManagerSessionRef.current = tagManagerSession;
@@ -1489,36 +1491,6 @@ export default function App() {
     aiSidebarWidthRef.current = aiSidebarWidth;
     aiSidebarDragWidthRef.current = aiSidebarWidth;
   }, [aiSidebarWidth]);
-
-  const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
-    if (suppressedScrollPaneRef.current === source) return;
-
-    if (scrollSyncRafRef.current !== null) {
-      window.cancelAnimationFrame(scrollSyncRafRef.current);
-    }
-
-    scrollSyncRafRef.current = window.requestAnimationFrame(() => {
-      scrollSyncRafRef.current = null;
-      markPreviewScrollSync();
-
-      const targetPane = source === "editor" ? "preview" : "editor";
-      const targetApi = source === "editor" ? previewScrollApiRef.current : editorScrollApiRef.current;
-      if (!targetApi) return;
-
-      suppressedScrollPaneRef.current = targetPane;
-      targetApi.scrollToRatio(ratio);
-
-      if (scrollSyncSuppressRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
-      }
-      scrollSyncSuppressRafRef.current = window.requestAnimationFrame(() => {
-        scrollSyncSuppressRafRef.current = null;
-        if (suppressedScrollPaneRef.current === targetPane) {
-          suppressedScrollPaneRef.current = null;
-        }
-      });
-    });
-  }, []);
 
   const loadTagTaxonomyConfig = useCallback(async () => {
     setIsLoadingTagTaxonomyConfig(true);
@@ -1698,16 +1670,6 @@ export default function App() {
     }
 
     setEditorPreviewRatio(EDITOR_PREVIEW_RATIO_DEFAULT);
-  }, []);
-  useEffect(() => {
-    return () => {
-      if (scrollSyncRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncRafRef.current);
-      }
-      if (scrollSyncSuppressRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
-      }
-    };
   }, []);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
@@ -5115,22 +5077,6 @@ export default function App() {
     });
   }, []);
 
-  const handleEditorScroll = useCallback((ratio: number) => {
-    syncEditorPreviewScroll("editor", ratio);
-  }, [syncEditorPreviewScroll]);
-
-  const handlePreviewScroll = useCallback((ratio: number) => {
-    syncEditorPreviewScroll("preview", ratio);
-  }, [syncEditorPreviewScroll]);
-
-  const handleEditorScrollApiChange = useCallback((api: MarkdownEditorScrollApi | null) => {
-    editorScrollApiRef.current = api;
-  }, []);
-
-  const handlePreviewScrollApiChange = useCallback((api: MarkdownPreviewScrollApi | null) => {
-    previewScrollApiRef.current = api;
-  }, []);
-
   const applyLoadedMarkdown = useCallback((content: string, path: string | null) => {
     const loaded = splitLoadedMarkdown(content);
     savedSnapshotRef.current = {
@@ -6466,8 +6412,8 @@ export default function App() {
   }, [contentZoom]);
 
   useLayoutEffect(() => {
-    editorScrollApiRef.current?.requestMeasure();
-  }, [appZoom, contentZoom, editorFontSize, readingDensity]);
+    requestEditorMeasure();
+  }, [appZoom, contentZoom, editorFontSize, readingDensity, requestEditorMeasure]);
 
   useEffect(() => {
     return () => {
