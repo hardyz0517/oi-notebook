@@ -2882,22 +2882,56 @@ export default function App() {
       const references = removeDeletedNoteWorkspaceReferences(
         {
           openTabPaths,
+          pendingFileSelection,
+          pendingAssetsByFile: {},
+          openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
           currentFilePath,
           activeWorkspaceTabId,
           activeWorkingCopyId,
           activeTreeDirectoryPath,
           activeTreeFilePath,
+          savedSnapshotPath: savedSnapshotRef.current.path,
         },
         path,
         isDirectory,
       );
       setOpenTabPaths(references.openTabPaths);
+      setPendingFileSelection(references.pendingFileSelection as { path: string; closeSearchOnSuccess: boolean } | null);
+      setPendingAssetsByFile((current) =>
+        removeDeletedNoteWorkspaceReferences(
+          {
+            openTabPaths: [],
+            pendingFileSelection: null,
+            pendingAssetsByFile: current,
+            openReviewTabs: [],
+            currentFilePath: null,
+            activeWorkspaceTabId: null,
+            activeWorkingCopyId: null,
+            activeTreeDirectoryPath: null,
+            activeTreeFilePath: null,
+            savedSnapshotPath: null,
+          },
+          path,
+          isDirectory,
+        ).pendingAssetsByFile,
+      );
+      setOpenReviewTabs((current) =>
+        current.filter((tab) =>
+          references.openReviewTabs.some((reference) => reference.id === tab.id),
+        ),
+      );
       setCurrentFilePath(references.currentFilePath);
       setActiveWorkspaceTabId(references.activeWorkspaceTabId);
       setActiveWorkingCopyId(references.activeWorkingCopyId);
       setWorkingCopies((current) => removeDeletedNoteWorkingCopies(current, path, isDirectory));
       setActiveTreeDirectoryPath(references.activeTreeDirectoryPath);
       setActiveTreeFilePath(references.activeTreeFilePath);
+      if (references.savedSnapshotPath !== savedSnapshotRef.current.path) {
+        savedSnapshotRef.current = {
+          ...savedSnapshotRef.current,
+          path: references.savedSnapshotPath,
+        };
+      }
       if (references.shouldClearDirty) {
         setIsDirty(false);
       }

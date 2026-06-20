@@ -343,15 +343,33 @@ export function filterDeletedNoteTabs(tabPaths: string[], deletedPath: string, i
 
 export interface DeletedNoteWorkspaceReferences {
   openTabPaths: string[];
+  pendingFileSelection: NoteWorkspacePendingFileSelection | null;
+  pendingAssetsByFile: Record<string, string[]>;
+  openReviewTabs: NoteWorkspaceReviewTabReference[];
   currentFilePath: string | null;
   activeWorkspaceTabId: string | null;
   activeWorkingCopyId: string | null;
   activeTreeDirectoryPath: string | null;
   activeTreeFilePath: string | null;
+  savedSnapshotPath: string | null;
 }
 
 export interface RemovedDeletedNoteWorkspaceReferences extends DeletedNoteWorkspaceReferences {
   shouldClearDirty: boolean;
+}
+
+function filterDeletedPendingAssets(
+  pendingAssetsByFile: Record<string, string[]>,
+  deletedPath: string,
+  isDirectory: boolean,
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const [path, assets] of Object.entries(pendingAssetsByFile)) {
+    if (!isNotePathAffectedByTarget(path, deletedPath, isDirectory)) {
+      next[path] = assets;
+    }
+  }
+  return next;
 }
 
 export function removeDeletedNoteWorkspaceReferences(
@@ -365,6 +383,12 @@ export function removeDeletedNoteWorkspaceReferences(
 
   return {
     openTabPaths: filterDeletedNoteTabs(references.openTabPaths, deletedPath, isDirectory),
+    pendingFileSelection:
+      references.pendingFileSelection && isNotePathAffectedByTarget(references.pendingFileSelection.path, deletedPath, isDirectory)
+        ? null
+        : references.pendingFileSelection,
+    pendingAssetsByFile: filterDeletedPendingAssets(references.pendingAssetsByFile, deletedPath, isDirectory),
+    openReviewTabs: references.openReviewTabs.filter((tab) => !isNotePathAffectedByTarget(tab.notePath, deletedPath, isDirectory)),
     currentFilePath: currentFileAffected ? null : references.currentFilePath,
     activeWorkspaceTabId: currentFileAffected ? null : references.activeWorkspaceTabId,
     activeWorkingCopyId: currentFileAffected ? null : references.activeWorkingCopyId,
@@ -376,6 +400,10 @@ export function removeDeletedNoteWorkspaceReferences(
       references.activeTreeFilePath && isNotePathAffectedByTarget(references.activeTreeFilePath, deletedPath, isDirectory)
         ? null
         : references.activeTreeFilePath,
+    savedSnapshotPath:
+      references.savedSnapshotPath && isNotePathAffectedByTarget(references.savedSnapshotPath, deletedPath, isDirectory)
+        ? null
+        : references.savedSnapshotPath,
     shouldClearDirty: currentFileAffected,
   };
 }

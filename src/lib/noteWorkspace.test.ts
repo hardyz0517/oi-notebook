@@ -289,22 +289,41 @@ describe("noteWorkspace", () => {
       removeDeletedNoteWorkspaceReferences(
         {
           openTabPaths: ["A/dir/a.md", "A/dir2/b.md", "A/root.md"],
+          pendingFileSelection: { path: "A/dir/nested/b.md" },
+          pendingAssetsByFile: {
+            "A/dir/a.md": ["a.png"],
+            "A/dir/nested/b.md": ["b.png"],
+            "A/dir2/c.md": ["c.png"],
+          },
+          openReviewTabs: [
+            { id: "review-1", notePath: "A/dir/a.md" },
+            { id: "review-2", notePath: "A/dir2/b.md" },
+          ],
           currentFilePath: "A/dir/a.md",
           activeWorkspaceTabId: "note:A/dir/a.md",
           activeWorkingCopyId: "note:A/dir/a.md",
           activeTreeDirectoryPath: "A/dir",
           activeTreeFilePath: "A/dir/nested/b.md",
+          savedSnapshotPath: "A/dir/a.md",
         },
         "A/dir",
         true,
       ),
     ).toEqual({
       openTabPaths: ["A/dir2/b.md", "A/root.md"],
+      pendingFileSelection: null,
+      pendingAssetsByFile: {
+        "A/dir2/c.md": ["c.png"],
+      },
+      openReviewTabs: [
+        { id: "review-2", notePath: "A/dir2/b.md" },
+      ],
       currentFilePath: null,
       activeWorkspaceTabId: null,
       activeWorkingCopyId: null,
       activeTreeDirectoryPath: null,
       activeTreeFilePath: null,
+      savedSnapshotPath: null,
       shouldClearDirty: true,
     });
 
@@ -312,22 +331,40 @@ describe("noteWorkspace", () => {
       removeDeletedNoteWorkspaceReferences(
         {
           openTabPaths: ["A/dir/a.md", "A/root.md"],
+          pendingFileSelection: { path: "A/root.md" },
+          pendingAssetsByFile: {
+            "A/dir/a.md": ["a.png"],
+            "A/root.md": ["root.png"],
+          },
+          openReviewTabs: [
+            { id: "review-1", notePath: "A/dir/a.md" },
+            { id: "review-2", notePath: "A/root.md" },
+          ],
           currentFilePath: "A/root.md",
           activeWorkspaceTabId: "note:A/root.md",
           activeWorkingCopyId: "note:A/root.md",
           activeTreeDirectoryPath: "A/dir",
           activeTreeFilePath: "A/dir/a.md",
+          savedSnapshotPath: "A/root.md",
         },
         "A/dir/a.md",
         false,
       ),
     ).toEqual({
       openTabPaths: ["A/root.md"],
+      pendingFileSelection: { path: "A/root.md" },
+      pendingAssetsByFile: {
+        "A/root.md": ["root.png"],
+      },
+      openReviewTabs: [
+        { id: "review-2", notePath: "A/root.md" },
+      ],
       currentFilePath: "A/root.md",
       activeWorkspaceTabId: "note:A/root.md",
       activeWorkingCopyId: "note:A/root.md",
       activeTreeDirectoryPath: "A/dir",
       activeTreeFilePath: null,
+      savedSnapshotPath: "A/root.md",
       shouldClearDirty: false,
     });
   });
