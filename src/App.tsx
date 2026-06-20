@@ -313,6 +313,7 @@ import {
   getTreeSelectionAfterClear,
   getTreeSelectionAfterDirectorySelect,
   getTreeSelectionAfterFileSelect,
+  getTreeInlineCreateState,
   getTreeSelectionAfterRootSelect,
   removeDeletedNoteWorkspaceReferences,
   rewriteNotePathReference,
@@ -2669,14 +2670,18 @@ export default function App() {
 
   const requestInlineCreateFolderAt = (parentPath: string) => {
     closeDialog();
-    setIsTreeRootCollapsed(false);
-    setCreateFolderRequest({ parentPath, requestId: Date.now() });
+    const createState = getTreeInlineCreateState("folder", parentPath, Date.now());
+    setIsTreeRootCollapsed(createState.isTreeRootCollapsed);
+    setCreateFileRequest(createState.createFileRequest);
+    setCreateFolderRequest(createState.createFolderRequest);
   };
 
   const requestInlineCreateFileAt = (parentPath: string) => {
     closeDialog();
-    setIsTreeRootCollapsed(false);
-    setCreateFileRequest({ parentPath, requestId: Date.now() });
+    const createState = getTreeInlineCreateState("file", parentPath, Date.now());
+    setIsTreeRootCollapsed(createState.isTreeRootCollapsed);
+    setCreateFileRequest(createState.createFileRequest);
+    setCreateFolderRequest(createState.createFolderRequest);
   };
 
   const requestInlineCreateFolder = () => {

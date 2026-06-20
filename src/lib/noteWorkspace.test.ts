@@ -18,6 +18,7 @@ import {
   getTreeSelectionAfterFileSelect,
   getTreeSelectionAfterDirectorySelect,
   getTreeSelectionAfterRootSelect,
+  getTreeInlineCreateState,
   normalizeCustomNoteDirectory,
   quoteYamlString,
   removeDeletedNoteWorkspaceReferences,
@@ -238,6 +239,19 @@ describe("noteWorkspace", () => {
     expect(getTreeSelectionAfterRootSelect()).toEqual({
       activeTreeDirectoryPath: "",
       activeTreeFilePath: null,
+    });
+  });
+
+  it("derives inline create state for the file tree", () => {
+    expect(getTreeInlineCreateState("file", "A/B", 123)).toEqual({
+      isTreeRootCollapsed: false,
+      createFileRequest: { parentPath: "A/B", requestId: 123 },
+      createFolderRequest: null,
+    });
+    expect(getTreeInlineCreateState("folder", "", 456)).toEqual({
+      isTreeRootCollapsed: false,
+      createFileRequest: null,
+      createFolderRequest: { parentPath: "", requestId: 456 },
     });
   });
 

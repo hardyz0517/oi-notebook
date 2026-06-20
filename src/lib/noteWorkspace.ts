@@ -265,6 +265,19 @@ export interface NoteTreeSelectionState {
   activeTreeFilePath: string | null;
 }
 
+export interface NoteTreeInlineCreateRequest {
+  parentPath: string;
+  requestId: number;
+}
+
+export interface NoteTreeInlineCreateState {
+  isTreeRootCollapsed: boolean;
+  createFileRequest: NoteTreeInlineCreateRequest | null;
+  createFolderRequest: NoteTreeInlineCreateRequest | null;
+}
+
+export type NoteTreeInlineCreateKind = "file" | "folder";
+
 export function getTreeSelectionAfterDirectorySelect(path: string): NoteTreeSelectionState {
   return {
     activeTreeDirectoryPath: path,
@@ -290,6 +303,19 @@ export function getTreeSelectionAfterClear(): NoteTreeSelectionState {
   return {
     activeTreeDirectoryPath: null,
     activeTreeFilePath: null,
+  };
+}
+
+export function getTreeInlineCreateState(
+  kind: NoteTreeInlineCreateKind,
+  parentPath: string,
+  requestId: number,
+): NoteTreeInlineCreateState {
+  const request = { parentPath, requestId };
+  return {
+    isTreeRootCollapsed: false,
+    createFileRequest: kind === "file" ? request : null,
+    createFolderRequest: kind === "folder" ? request : null,
   };
 }
 
