@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getNextLuoguSelectableSelection,
   getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
+  stopQueuedLuoguPrepareStatuses,
 } from "./luoguImportDisplay";
 import { normalizeLuoguImportRules } from "@/components/settings/pages/luoguImportRules";
 import type { PreviewLuoguSubmission } from "@/lib/api";
@@ -213,6 +216,37 @@ describe("luoguImportDisplay", () => {
     expect(plan.queue).toEqual([]);
     expect(plan.reusablePreviewSubmissions.map((submission) => submission.submissionId)).toEqual(["103", "103"]);
     expect(plan.ignoredCount).toBe(2);
+  });
+
+  it("adds or removes selectable submission ids from the current selection", () => {
+    expect(getNextLuoguSelectableSelection({
+      currentSelection: new Set(["keep", "102"]),
+      selectableSubmissionIds: ["101", "102"],
+      areAllSelectableSelected: false,
+    })).toEqual(new Set(["keep", "101", "102"]));
+
+    expect(getNextLuoguSelectableSelection({
+      currentSelection: new Set(["keep", "101", "102"]),
+      selectableSubmissionIds: ["101", "102"],
+      areAllSelectableSelected: true,
+    })).toEqual(new Set(["keep"]));
+  });
+
+  it("creates queued prepare statuses and stops only queued statuses", () => {
+    expect(createQueuedLuoguPrepareStatuses(luoguSubmissions.slice(0, 2))).toEqual({
+      "103": "queued",
+      "102": "queued",
+    });
+
+    expect(stopQueuedLuoguPrepareStatuses({
+      "103": "queued",
+      "102": "running",
+      "101": "stopped",
+    })).toEqual({
+      "103": "stopped",
+      "102": "running",
+      "101": "stopped",
+    });
   });
 
   it("formats paused scan summary before other states", () => {

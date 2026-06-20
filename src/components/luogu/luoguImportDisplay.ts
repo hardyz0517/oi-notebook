@@ -131,6 +131,46 @@ export function getLuoguPrepareSelectionPlan(
   };
 }
 
+export interface LuoguSelectableSelectionInput {
+  currentSelection: Set<string>;
+  selectableSubmissionIds: string[];
+  areAllSelectableSelected: boolean;
+}
+
+export function getNextLuoguSelectableSelection(input: LuoguSelectableSelectionInput): Set<string> {
+  const next = new Set(input.currentSelection);
+  if (input.areAllSelectableSelected) {
+    for (const submissionId of input.selectableSubmissionIds) {
+      next.delete(submissionId);
+    }
+    return next;
+  }
+
+  for (const submissionId of input.selectableSubmissionIds) {
+    next.add(submissionId);
+  }
+  return next;
+}
+
+export function createQueuedLuoguPrepareStatuses(
+  submissions: PreviewLuoguSubmission[],
+): Record<string, LuoguPrepareItemStatus> {
+  return Object.fromEntries(
+    submissions.map((submission) => [submission.submissionId, "queued"]),
+  ) as Record<string, LuoguPrepareItemStatus>;
+}
+
+export function stopQueuedLuoguPrepareStatuses(
+  statuses: Record<string, LuoguPrepareItemStatus>,
+): Record<string, LuoguPrepareItemStatus> {
+  return Object.fromEntries(
+    Object.entries(statuses).map(([submissionId, status]) => [
+      submissionId,
+      status === "queued" ? "stopped" : status,
+    ]),
+  ) as Record<string, LuoguPrepareItemStatus>;
+}
+
 export interface LuoguPreparationWorkspaceState<TPreparedNote = unknown, TWriteResult = unknown> {
   skippedSubmissionIds: Set<string>;
   preparedNotesById: Record<string, TPreparedNote>;

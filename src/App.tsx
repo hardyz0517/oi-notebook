@@ -69,13 +69,16 @@ import {
 } from "@/components/settings/pages/luoguImportDomain";
 import {
   createEmptyLuoguPreparationWorkspace,
+  createQueuedLuoguPrepareStatuses,
   deriveLuoguScanTaskState,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  getNextLuoguSelectableSelection,
   getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
   isLuoguImportCenterBusy,
+  stopQueuedLuoguPrepareStatuses,
   type LuoguImportStep,
   type LuoguPreviewDetailTab,
 } from "@/components/luogu/luoguImportDisplay";
@@ -3906,17 +3909,13 @@ export default function App() {
   const handleToggleAllLuoguSelectableSubmissions = () => {
     if (luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
 
-    const selectableIds = new Set(luoguSelectableSubmissionIds);
-    setSelectedLuoguSubmissionIds((current) => {
-      if (areAllLuoguSelectableSubmissionsSelected) {
-        const next = new Set(current);
-        selectableIds.forEach((submissionId) => next.delete(submissionId));
-        return next;
-      }
-      const next = new Set(current);
-      selectableIds.forEach((submissionId) => next.add(submissionId));
-      return next;
-    });
+    setSelectedLuoguSubmissionIds((current) =>
+      getNextLuoguSelectableSelection({
+        currentSelection: current,
+        selectableSubmissionIds: luoguSelectableSubmissionIds,
+        areAllSelectableSelected: areAllLuoguSelectableSubmissionsSelected,
+      }),
+    );
   };
 
   const handleStopPreparingLuoguPreviews = () => {
@@ -3924,14 +3923,7 @@ export default function App() {
 
     luoguPrepareRunRef.current.cancelled = true;
     setIsStoppingLuoguPrepare(true);
-    setLuoguPrepareStatusesById((current) =>
-      Object.fromEntries(
-        Object.entries(current).map(([submissionId, status]) => [
-          submissionId,
-          status === "queued" ? "stopped" : status,
-        ]),
-      ) as Record<string, LuoguPrepareItemStatus>,
-    );
+    setLuoguPrepareStatusesById(stopQueuedLuoguPrepareStatuses);
     toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
 
@@ -4131,11 +4123,7 @@ export default function App() {
       skipped: ignoredCount,
     });
     setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById(
-      Object.fromEntries(
-        queue.map((submission) => [submission.submissionId, "queued"]),
-      ) as Record<string, LuoguPrepareItemStatus>,
-    );
+    setLuoguPrepareStatusesById(createQueuedLuoguPrepareStatuses(queue));
     setLuoguWriteResultsById({});
     let preparedCount = reusablePreviewSubmissions.length;
     let draftCount = 0;
