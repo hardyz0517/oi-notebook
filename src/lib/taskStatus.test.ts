@@ -14,6 +14,7 @@ import {
   stopTaskState,
   isTaskActive,
   isTaskFailed,
+  isTaskPaused,
   isTaskRunning,
 } from "./taskStatus";
 
@@ -122,6 +123,9 @@ describe("taskStatus", () => {
 
     expect(isTaskRunning(running)).toBe(true);
     expect(isTaskRunning(paused)).toBe(false);
+
+    expect(isTaskPaused(paused)).toBe(true);
+    expect(isTaskPaused(running)).toBe(false);
 
     expect(isTaskActive(idle)).toBe(false);
     expect(isTaskActive(queueTaskState())).toBe(true);

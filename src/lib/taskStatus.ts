@@ -95,6 +95,10 @@ export function isTaskRunning(state: TaskState): boolean {
   return state.status === "running";
 }
 
+export function isTaskPaused(state: TaskState): boolean {
+  return state.status === "paused";
+}
+
 export function isTaskActive(state: TaskState): boolean {
   return state.status === "queued" || state.status === "running" || state.status === "paused" || state.status === "stopping";
 }

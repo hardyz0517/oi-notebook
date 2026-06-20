@@ -277,7 +277,7 @@ import {
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
@@ -1850,9 +1850,9 @@ export default function App() {
     summary: luoguScanSummary,
     error: luoguScanError,
   });
-  const isLuoguScanTaskRunning = luoguScanTaskState.status === "running";
-  const isLuoguScanTaskPaused = luoguScanTaskState.status === "paused";
-  const isLuoguScanTaskFailed = luoguScanTaskState.status === "failed";
+  const isLuoguScanTaskRunning = isTaskRunning(luoguScanTaskState);
+  const isLuoguScanTaskPaused = isTaskPaused(luoguScanTaskState);
+  const isLuoguScanTaskFailed = isTaskFailed(luoguScanTaskState);
   const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
     isPreparing: isPreparingSelectedLuogu,
     progress: luoguPrepareProgress,
