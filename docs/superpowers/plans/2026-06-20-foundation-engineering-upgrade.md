@@ -27,6 +27,37 @@ Already completed foundation commits:
 - `87fd1c9 refactor(luogu): extract import rules helpers`
 - `6bd23f6 refactor(luogu): extract import candidate domain`
 - `6cdb451 refactor(search): extract local result helpers`
+- `2441517 refactor(markdown): extract document helpers`
+- `e332fc9 test: add vitest runner`
+- `e21071f test(markdown): cover document helpers`
+- `abe1fc5 docs: record rust service boundary audit`
+- `466b473 refactor(tasks): add rust task status model`
+- `fa58082 refactor(blog): extract config service helpers`
+- `580622b test: add frontend helper test config`
+- `aad74ed refactor(tags): extract normalization scan helpers`
+- `fe5cd39 test(tags): cover normalization scan helpers`
+- `1fd87d0 refactor(luogu): introduce import controller`
+- `21b8406 test(luogu): cover candidate reasons`
+- `98c146d refactor(notes): extract path helpers`
+- `40ce378 test(markdown): cover renderer plugins`
+- `c4ba3fb refactor(markdown): share table merge plugin`
+- `3fbc969 refactor(editor): extract preview scroll sync hook`
+- `eac409a refactor(tabs): extract open tab helpers`
+- `ad29e61 refactor(search): extract local note search controller`
+- `8fbe5e9 refactor(tabs): extract open tabs controller`
+- `230f92c refactor(tags): extract collection candidates hook`
+- `14da101 refactor(notes): extract notes list controller`
+- `52752f8 refactor(notes): extract display note files hook`
+- `7ff4be0 refactor(notes): extract note workspace helpers`
+- `05681cc refactor(notes): centralize note creation rules`
+- `0dd51b8 refactor(blog): extract config draft normalization`
+
+Progress calibration, 2026-06-20:
+
+- Completed from this plan: app preference helpers, collection/tag helpers, local index display helpers, settings render guards, settings registry/search helpers, Luogu import controller, markdown document helpers and tests, shared frontend/Rust task status models, Rust blog service helpers, foundation release checklist, AI freeze boundary, and AI upgrade entry criteria.
+- Newly added during continued execution: `src/lib/noteWorkspace.ts` with tests and `src/lib/blogConfig.ts` with tests.
+- Remaining foundation focus: further `App.tsx` shell decomposition, non-AI status/label helpers, blog frontend controller helpers if useful, safer Luogu/task-controller consolidation, and documentation/handoff sync.
+- Still frozen: `src/components/ai/AiSidebar.tsx`, `src/lib/aiWebSearch.ts`, `src-tauri/src/ai.rs`, prompts, model/provider behavior, and web search behavior.
 
 Hard guardrails for every task:
 
@@ -1427,21 +1458,21 @@ git commit -m "docs(ai): add upgrade entry criteria"
 
 When the user is away, execute these low-risk tasks in order:
 
-1. Task 0.1: Save this master plan.
-2. Task 3.3: Extract local index display helpers.
-3. Task 3.1: Extract app preference helpers.
-4. Task 3.2: Extract collection and legacy tag helpers.
-5. Task 2.3: Extract settings render guards.
-6. Task 8.2: Add foundation release checklist.
-7. Task 9.1: Document AI freeze boundary.
-8. Task 9.2: Define AI upgrade entry criteria.
+1. Update this plan whenever execution reality diverges from the original queue.
+2. Extract remaining non-AI status/label helpers from `App.tsx` when they are pure and testable.
+3. Extract `extractCursorParagraph` into a small editor-context helper with focused tests, without touching `MarkdownEditor` or `MarkdownPreview` ref patterns.
+4. Extract prompt usage metadata helpers only if the task can avoid changing prompt content or AI behavior.
+5. Continue reducing note/file workspace orchestration by moving pure path rewrite helpers, leaving side effects in `App.tsx`.
+6. Add or update tests for every pure helper module touched in the same commit.
+7. Keep verifying with `pnpm.cmd test:run` and `pnpm.cmd build` after each small slice.
 
 Hold these for user-visible review before continuing:
 
-1. Task 2.1: Settings registry metadata, because it affects Settings search/navigation semantics.
-2. Task 4.3: Luogu import controller hook, because it changes orchestration shape.
-3. Task 7.3: Blog service helpers, because it touches Rust service boundaries.
-4. Task 8.3: Playwright Settings smoke, if it requires adding a new dependency.
+1. Any Settings visual JSX/CSS change.
+2. Any AI behavior, prompt, provider, model, or web-search behavior change.
+3. Any edit to `src-tauri/src/notes.rs` path safety.
+4. Any Rust service extraction that changes Tauri command signatures.
+5. Playwright Settings smoke if it requires adding a new dependency.
 
 ---
 
