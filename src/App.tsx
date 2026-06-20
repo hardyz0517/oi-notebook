@@ -75,6 +75,7 @@ import {
   createInitialLuoguPrepareProgress,
   createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
+  deriveLuoguImportCenterView,
   deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
   deriveLuoguTaskView,
@@ -82,14 +83,12 @@ import {
   failLuoguScanSourceState,
   finishLuoguScanSourceState,
   finishLuoguPrepareStatuses,
-  formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
   getNextLuoguSelectableSelection,
   getLuoguPrepareSelectionPlan,
   getLuoguScanCompletionSelection,
   getLuoguSubmissionIdSet,
-  isLuoguImportCenterBusy,
   pauseLuoguScanSourceState,
   startLuoguPrepareSourceState,
   startLuoguScanSourceState,
@@ -1922,34 +1921,37 @@ export default function App() {
     isWriting: isWritingPreparedLuogu,
     progress: luoguWriteProgress,
   });
+  const luoguConfigured =
+    luoguConfigUid.trim() !== "" &&
+    luoguConfigClientId.trim() !== "";
   const luoguScanTaskView = deriveLuoguTaskView(luoguScanTaskState, "scan");
   const luoguPrepareTaskView = deriveLuoguTaskView(luoguPrepareTaskState, "prepare");
   const luoguWriteTaskView = deriveLuoguTaskView(luoguWriteTaskState, "write");
-  const isLuoguScanTaskRunning = luoguScanTaskView.status === "running";
-  const isLuoguScanTaskPaused = luoguScanTaskView.status === "paused";
-  const isLuoguScanTaskFailed = luoguScanTaskView.status === "failed";
-  const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
-    isPreparing: isPreparingSelectedLuogu,
-    progress: luoguPrepareProgress,
-    prepareQueueCount: luoguPrepareQueueSubmissions.length,
-    reusablePreviewCount: luoguReusablePreviewCount,
-  });
   const luoguPreviewReviewSummaryLabel = formatLuoguPreviewReviewSummary({
     prepareProgress: luoguPrepareProgress,
     writeProgress: luoguWriteProgress,
     preparedCount: preparedLuoguNotes.length,
     writableCount: writableLuoguPreparedNotes.length,
   });
-  const isLuoguImportCenterBusyNow = isLuoguImportCenterBusy({
+  const luoguImportCenterView = deriveLuoguImportCenterView({
+    isConfigured: luoguConfigured,
+    isLoadingConfig: isLoadingLuoguConfig,
     isImporting: isImportingLuogu,
-    isPreparing: isPreparingSelectedLuogu,
-    isWriting: isWritingPreparedLuogu,
-    isScanning: isScanningLuoguPreview,
     isSyncing: isSyncingLuogu,
+    selectedCount: selectedLuoguImportCount,
+    selectableCount: luoguSelectableSubmissionIds.length,
+    prepareQueueCount: luoguPrepareQueueSubmissions.length,
+    reusablePreviewCount: luoguReusablePreviewCount,
+    writableCount: writableLuoguPreparedNotes.length,
     scanTask: luoguScanTaskState,
     prepareTask: luoguPrepareTaskState,
     writeTask: luoguWriteTaskState,
+    scanView: luoguScanTaskView,
+    prepareView: luoguPrepareTaskView,
+    writeView: luoguWriteTaskView,
+    prepareProgress: luoguPrepareProgress,
   });
+  const isLuoguImportCenterBusyNow = luoguImportCenterView.isBusy;
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {
       luoguSelectAllCheckboxRef.current.indeterminate = isLuoguSelectableSelectionMixed;
@@ -2017,9 +2019,6 @@ export default function App() {
       model.source.toLowerCase().includes(query),
     );
   }, [aiModelSearchQuery, selectedAiProvider]);
-  const luoguConfigured =
-    luoguConfigUid.trim() !== "" &&
-    luoguConfigClientId.trim() !== "";
   const activeWorkingCopy = activeWorkingCopyId ? workingCopies[activeWorkingCopyId] ?? null : null;
   const hasActiveEditorDocument = Boolean(currentFilePath || activeWorkingCopy);
   const activeEditorDirty = activeWorkingCopy?.dirty ?? isDirty;
@@ -3917,7 +3916,7 @@ export default function App() {
   });
 
   const updateLuoguImportRules = (patch: Partial<LuoguImportRules>) => {
-    if (isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (luoguImportCenterView.isRulesDisabled) return;
 
     let didSave = false;
     let saveError: unknown = null;
@@ -3956,7 +3955,7 @@ export default function App() {
 
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {
     const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-    if (!candidateState?.canSelect || isPreparingSelectedLuogu || isWritingPreparedLuogu) return;
+    if (!candidateState?.canSelect || luoguImportCenterView.isSubmissionSelectionDisabled) return;
     setSelectedLuoguSubmissionIds((current) => {
       const next = new Set(current);
       if (next.has(submission.submissionId)) {
@@ -3969,7 +3968,7 @@ export default function App() {
   };
 
   const handleToggleAllLuoguSelectableSubmissions = () => {
-    if (luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (luoguImportCenterView.isSelectAllDisabled) return;
 
     setSelectedLuoguSubmissionIds((current) =>
       getNextLuoguSelectableSelection({
@@ -6824,13 +6823,13 @@ export default function App() {
                                   setLuoguScanMode(option.mode);
                                   setLuoguScanCountLimit(option.count);
                                 }}
-                                disabled={isScanningLuoguPreview}
+                                disabled={luoguImportCenterView.isScanRangeDisabled}
                               >
                                 {option.label}
                               </button>
                             ))}
                           </div>
-                          {isLuoguScanTaskRunning ? (
+                          {luoguImportCenterView.isScanRunning ? (
                             <Button
                               size="sm"
                               variant="secondary"
@@ -6840,7 +6839,7 @@ export default function App() {
                               <Pause className="mr-1.5 h-4 w-4" />
                               暂停扫描
                             </Button>
-                          ) : isLuoguScanTaskPaused ? (
+                          ) : luoguImportCenterView.isScanPaused ? (
                             <div className="mt-1 grid gap-1.5">
                               <Button
                                 size="sm"
@@ -6864,7 +6863,7 @@ export default function App() {
                               size="sm"
                               className="mt-1 h-10 w-full text-base font-semibold"
                               onClick={handlePreviewLuoguSubmissions}
-                              disabled={!luoguConfigured || isLoadingLuoguConfig || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+                              disabled={luoguImportCenterView.isStartScanDisabled}
                             >
                               开始扫描
                             </Button>
@@ -6880,7 +6879,7 @@ export default function App() {
                                     setLuoguScanMode("count");
                                     setLuoguScanCountLimit(200);
                                   }}
-                                  disabled={isScanningLuoguPreview}
+                                  disabled={luoguImportCenterView.isScanRangeDisabled}
                                 >
                                   最近 200 条
                                 </button>
@@ -6893,7 +6892,7 @@ export default function App() {
                                       setLuoguScanMode("days");
                                       setLuoguScanDaysLimit(option);
                                     }}
-                                    disabled={isScanningLuoguPreview}
+                                    disabled={luoguImportCenterView.isScanRangeDisabled}
                                   >
                                     {option} 天
                                   </button>
@@ -6912,7 +6911,7 @@ export default function App() {
                             <div className="shrink-0 text-base font-medium text-foreground">扫描结果</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
                               {luoguScanResultSummaryLabel}
-                              {!isLuoguScanTaskPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
+                              {!luoguImportCenterView.isScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center justify-end gap-2">
@@ -6926,26 +6925,20 @@ export default function App() {
                                 size="sm"
                                 className="h-8 px-3 text-xs"
                                 onClick={handlePrepareSelectedLuoguSubmissions}
-                                disabled={
-                                  selectedLuoguImportCount === 0 ||
-                                  (luoguPrepareQueueSubmissions.length === 0 && luoguReusablePreviewCount === 0) ||
-                                  isPreparingSelectedLuogu ||
-                                  isWritingPreparedLuogu ||
-                                  isSyncingLuogu
-                                }
+                                disabled={luoguImportCenterView.isPrepareDisabled}
                               >
-                                {luoguPrepareButtonLabel}
+                                {luoguImportCenterView.prepareButtonLabel}
                               </Button>
-                              {isPreparingSelectedLuogu && (
+                              {luoguImportCenterView.showPrepareStopButton && (
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
                                   className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                                   onClick={handleStopPreparingLuoguPreviews}
-                                  disabled={!luoguPrepareTaskView.canCancel || luoguPrepareTaskView.status === "stopping"}
+                                  disabled={luoguImportCenterView.isPrepareStopDisabled}
                                 >
-                                  {luoguPrepareTaskView.status === "stopping" ? `${luoguPrepareTaskView.label}...` : "停止生成"}
+                                  {luoguImportCenterView.prepareStopButtonLabel}
                                 </Button>
                               )}
                               </>
@@ -6963,7 +6956,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {isLuoguScanTaskRunning && !luoguPreviewResult ? (
+                      {luoguImportCenterView.isScanRunning && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
@@ -6971,7 +6964,7 @@ export default function App() {
                             <div className="mt-1 text-xs text-muted-foreground">请稍候，结果会自动出现在右侧表格。</div>
                           </div>
                         </div>
-                      ) : isLuoguScanTaskPaused && !luoguPreviewResult ? (
+                      ) : luoguImportCenterView.isScanPaused && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Pause className="mx-auto h-7 w-7 text-muted-foreground" />
@@ -6981,7 +6974,7 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                      ) : isLuoguScanTaskFailed && !luoguPreviewResult ? (
+                      ) : luoguImportCenterView.isScanFailed && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <div className="text-sm font-medium text-destructive">扫描失败，请检查洛谷连接或稍后重试。</div>
@@ -7021,7 +7014,7 @@ export default function App() {
                                     ref={luoguSelectAllCheckboxRef}
                                     type="checkbox"
                                     checked={areAllLuoguSelectableSubmissionsSelected}
-                                    disabled={luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
+                                    disabled={luoguImportCenterView.isSelectAllDisabled}
                                     className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label={areAllLuoguSelectableSubmissionsSelected ? "取消选择当前可选提交" : "选择当前可选提交"}
                                     onChange={handleToggleAllLuoguSelectableSubmissions}
@@ -7073,7 +7066,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={selectedLuoguSubmissionIds.has(submission.submissionId)}
-                                        disabled={!canSelect || (isPreparingSelectedLuogu || isWritingPreparedLuogu)}
+                                        disabled={!canSelect || luoguImportCenterView.isSubmissionSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         aria-label={`选择提交 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguSubmissionSelection(submission)}
@@ -7139,7 +7132,7 @@ export default function App() {
                             size="sm"
                             className="h-8 px-3 text-sm"
                             onClick={() => setLuoguImportStep("scan")}
-                            disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                            disabled={luoguImportCenterView.isBackToSelectionDisabled}
                           >
                             返回选择
                           </Button>
@@ -7147,17 +7140,10 @@ export default function App() {
                             size="sm"
                             className="h-8 px-3 text-sm"
                             onClick={handleWritePreparedLuoguNotes}
-                            disabled={
-                              writableLuoguPreparedNotes.length === 0 ||
-                              isLoadingLuoguConfig ||
-                              isScanningLuoguPreview ||
-                              isPreparingSelectedLuogu ||
-                              isWritingPreparedLuogu ||
-                              isSyncingLuogu
-                            }
+                            disabled={luoguImportCenterView.isWriteDisabled}
                             title="写入时仅新建文件，不覆盖已有文件"
                           >
-                            {luoguWriteTaskView.status === "running" ? `${luoguWriteTaskView.label}...` : `写入选中 ${writableLuoguPreparedNotes.length}`}
+                            {luoguImportCenterView.writeButtonLabel}
                           </Button>
                         </div>
                       </section>
@@ -7336,8 +7322,8 @@ export default function App() {
                         <div className="font-medium text-foreground">手动粘贴源码导入</div>
                         <div>填写题号、提交 ID 和源码后生成单篇笔记。</div>
                       </div>
-                      <Button onClick={handleImportLuogu} disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}>
-                        {isImportingLuogu ? "导入中..." : "手动导入"}
+                      <Button onClick={handleImportLuogu} disabled={luoguImportCenterView.isManualImportDisabled}>
+                        {luoguImportCenterView.manualImportButtonLabel}
                       </Button>
                     </section>
                     <section className="grid shrink-0 grid-cols-3 gap-3">

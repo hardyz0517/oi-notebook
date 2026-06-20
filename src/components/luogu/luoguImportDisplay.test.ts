@@ -9,6 +9,7 @@ import {
   createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguPrepareTaskState,
+  deriveLuoguImportCenterView,
   deriveLuoguScanTaskState,
   deriveLuoguTaskView,
   deriveLuoguWriteTaskState,
@@ -294,6 +295,90 @@ describe("luoguImportDisplay", () => {
       label: "写入中",
       message: "1/3",
       canStart: false,
+    });
+  });
+
+  it("derives import center view flags from task states", () => {
+    const idleScanTask = { status: "idle", progress: null, error: null } as const;
+    const runningPrepareTask = {
+      status: "running",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    } as const;
+    const idleWriteTask = { status: "idle", progress: null, error: null } as const;
+
+    const view = deriveLuoguImportCenterView({
+      isConfigured: true,
+      isLoadingConfig: false,
+      isImporting: false,
+      isSyncing: false,
+      selectedCount: 2,
+      selectableCount: 2,
+      prepareQueueCount: 3,
+      reusablePreviewCount: 1,
+      writableCount: 4,
+      scanTask: idleScanTask,
+      prepareTask: runningPrepareTask,
+      writeTask: idleWriteTask,
+      scanView: deriveLuoguTaskView(idleScanTask, "scan"),
+      prepareView: deriveLuoguTaskView(runningPrepareTask, "prepare"),
+      writeView: deriveLuoguTaskView(idleWriteTask, "write"),
+      prepareProgress: runningPrepareTask.progress,
+    });
+
+    expect(view).toMatchObject({
+      isBusy: true,
+      isScanRunning: false,
+      isScanPaused: false,
+      isScanFailed: false,
+      isStartScanDisabled: true,
+      isPrepareDisabled: true,
+      showPrepareStopButton: true,
+      isPrepareStopDisabled: false,
+      prepareButtonLabel: "生成中 1/3",
+      isWriteDisabled: true,
+      writeButtonLabel: "写入选中 4",
+      isManualImportDisabled: true,
+      manualImportButtonLabel: "手动导入",
+    });
+  });
+
+  it("derives paused scan and manual import labels for the import center view", () => {
+    const pausedScanTask = { status: "paused", progress: null, error: null } as const;
+    const idlePrepareTask = { status: "idle", progress: null, error: null } as const;
+    const runningWriteTask = {
+      status: "running",
+      progress: { current: 2, total: 4, succeeded: 1, failed: 0, skipped: 0 },
+      error: null,
+    } as const;
+
+    const view = deriveLuoguImportCenterView({
+      isConfigured: true,
+      isLoadingConfig: false,
+      isImporting: true,
+      isSyncing: false,
+      selectedCount: 0,
+      selectableCount: 0,
+      prepareQueueCount: 0,
+      reusablePreviewCount: 0,
+      writableCount: 4,
+      scanTask: pausedScanTask,
+      prepareTask: idlePrepareTask,
+      writeTask: runningWriteTask,
+      scanView: deriveLuoguTaskView(pausedScanTask, "scan"),
+      prepareView: deriveLuoguTaskView(idlePrepareTask, "prepare"),
+      writeView: deriveLuoguTaskView(runningWriteTask, "write"),
+      prepareProgress: null,
+    });
+
+    expect(view).toMatchObject({
+      isBusy: true,
+      isScanPaused: true,
+      isScanRangeDisabled: false,
+      isSelectAllDisabled: true,
+      isBackToSelectionDisabled: true,
+      writeButtonLabel: "写入中...",
+      manualImportButtonLabel: "导入中...",
     });
   });
 

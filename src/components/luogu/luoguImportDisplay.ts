@@ -60,6 +60,96 @@ export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): bool
   );
 }
 
+export interface LuoguImportCenterViewInput {
+  isConfigured: boolean;
+  isLoadingConfig: boolean;
+  isImporting: boolean;
+  isSyncing: boolean;
+  selectedCount: number;
+  selectableCount: number;
+  prepareQueueCount: number;
+  reusablePreviewCount: number;
+  writableCount: number;
+  scanTask: TaskState;
+  prepareTask: TaskState;
+  writeTask: TaskState;
+  scanView: TaskView;
+  prepareView: TaskView;
+  writeView: TaskView;
+  prepareProgress: Pick<TaskProgress, "current" | "total"> | null;
+}
+
+export interface LuoguImportCenterView {
+  isBusy: boolean;
+  isScanRunning: boolean;
+  isScanPaused: boolean;
+  isScanFailed: boolean;
+  isScanRangeDisabled: boolean;
+  isRulesDisabled: boolean;
+  isSubmissionSelectionDisabled: boolean;
+  isSelectAllDisabled: boolean;
+  isStartScanDisabled: boolean;
+  isPrepareDisabled: boolean;
+  showPrepareStopButton: boolean;
+  isPrepareStopDisabled: boolean;
+  prepareButtonLabel: string;
+  prepareStopButtonLabel: string;
+  isBackToSelectionDisabled: boolean;
+  isWriteDisabled: boolean;
+  writeButtonLabel: string;
+  isManualImportDisabled: boolean;
+  manualImportButtonLabel: string;
+}
+
+export function deriveLuoguImportCenterView(input: LuoguImportCenterViewInput): LuoguImportCenterView {
+  const isPreparing = input.prepareTask.status === "running" || input.prepareTask.status === "stopping";
+  const isWriting = input.writeTask.status === "running" || input.writeTask.status === "stopping";
+  const isScanning = input.scanTask.status === "running";
+  const isPrepareOrWriteBusy = input.prepareView.isBusy || input.writeView.isBusy;
+  const isScanBusy = input.scanView.isBusy;
+  const isBusy = isLuoguImportCenterBusy({
+    isImporting: input.isImporting,
+    isPreparing,
+    isWriting,
+    isScanning,
+    isSyncing: input.isSyncing,
+    scanTask: input.scanTask,
+    prepareTask: input.prepareTask,
+    writeTask: input.writeTask,
+  });
+
+  return {
+    isBusy,
+    isScanRunning: input.scanView.status === "running",
+    isScanPaused: input.scanView.status === "paused",
+    isScanFailed: input.scanView.status === "failed",
+    isScanRangeDisabled: isScanBusy,
+    isRulesDisabled: isPrepareOrWriteBusy || isScanBusy || input.isSyncing,
+    isSubmissionSelectionDisabled: isPrepareOrWriteBusy,
+    isSelectAllDisabled: input.selectableCount === 0 || isPrepareOrWriteBusy || input.isSyncing,
+    isStartScanDisabled: !input.isConfigured || input.isLoadingConfig || isPrepareOrWriteBusy || input.isSyncing,
+    isPrepareDisabled:
+      input.selectedCount === 0 ||
+      (input.prepareQueueCount === 0 && input.reusablePreviewCount === 0) ||
+      isPrepareOrWriteBusy ||
+      input.isSyncing,
+    showPrepareStopButton: isPreparing,
+    isPrepareStopDisabled: !input.prepareView.canCancel || input.prepareView.status === "stopping",
+    prepareButtonLabel: formatLuoguPrepareButtonLabel({
+      isPreparing,
+      progress: input.prepareProgress,
+      prepareQueueCount: input.prepareQueueCount,
+      reusablePreviewCount: input.reusablePreviewCount,
+    }),
+    prepareStopButtonLabel: input.prepareView.status === "stopping" ? `${input.prepareView.label}...` : "停止生成",
+    isBackToSelectionDisabled: isPrepareOrWriteBusy,
+    isWriteDisabled: input.writableCount === 0 || input.isLoadingConfig || isScanBusy || isPrepareOrWriteBusy || input.isSyncing,
+    writeButtonLabel: input.writeView.status === "running" ? `${input.writeView.label}...` : `写入选中 ${input.writableCount}`,
+    isManualImportDisabled: input.isImporting || isPrepareOrWriteBusy || isScanBusy || input.isSyncing,
+    manualImportButtonLabel: input.isImporting ? "导入中..." : "手动导入",
+  };
+}
+
 export interface LuoguScanCompletionSelectionInput {
   submissions: PreviewLuoguSubmission[];
   rules: LuoguImportRules;
