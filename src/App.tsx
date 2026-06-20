@@ -218,6 +218,17 @@ import {
 } from "@/lib/layoutPreferences";
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
+import {
+  OPEN_TABS_ACTIVE_STORAGE_KEY,
+  OPEN_TABS_STORAGE_KEY,
+  buildOpenFileTabs,
+  filterValidOpenTabPaths,
+  getNoteDisplayName,
+  getNextOpenTabPathAfterClose,
+  parseStoredOpenTabPaths,
+  parseStoredOpenTabsActivePath,
+  serializeOpenTabPaths,
+} from "@/lib/openTabs";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { TaskProgress } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
@@ -264,8 +275,6 @@ const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).hr
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const OPEN_TABS_STORAGE_KEY = "oi-notebook.openTabs";
-const OPEN_TABS_ACTIVE_STORAGE_KEY = "oi-notebook.openTabs.activePath";
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 function isAiPerfDebugEnabled(): boolean {
@@ -1032,38 +1041,12 @@ function clampAiSidebarWidth(value: number): number {
   return clampNumberRange(value, AI_SIDEBAR_WIDTH_MIN, maxWidth);
 }
 
-function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
-  const file = files.find((item) => item.path === path);
-  const title = file?.displayTitle?.trim();
-  if (title) return title;
-  const name = file?.name ?? path.split("/").pop() ?? path;
-  return name.replace(/\.md$/i, "") || path;
-}
-
 function getInitialOpenTabPaths(): string[] {
-  const stored = window.localStorage.getItem(OPEN_TABS_STORAGE_KEY);
-  if (stored === null) return [];
-
-  try {
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-    const paths: string[] = [];
-    for (const value of parsed) {
-      if (typeof value !== "string") continue;
-      const path = value.trim();
-      if (!path || paths.includes(path)) continue;
-      paths.push(path);
-    }
-    return paths;
-  } catch {
-    return [];
-  }
+  return parseStoredOpenTabPaths(window.localStorage.getItem(OPEN_TABS_STORAGE_KEY));
 }
 
 function getInitialOpenTabsActivePath(): string | null {
-  const stored = window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
-  const path = stored?.trim();
-  return path || null;
+  return parseStoredOpenTabsActivePath(window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY));
 }
 
 interface PromptUsageInfo {
@@ -2843,17 +2826,7 @@ export default function App() {
     return currentFilePath.slice(0, currentFilePath.lastIndexOf("/"));
   }, [currentFilePath]);
   const openTabs = useMemo<OpenFileTab[]>(
-    () =>
-      Object.values(workingCopies)
-        .filter((copy) => copy.kind !== "note" || openTabPaths.includes(copy.path ?? ""))
-        .map((copy) => ({
-          kind: "file",
-          id: copy.id,
-          path: copy.path,
-          externalPath: copy.absolutePath,
-          displayName: copy.kind === "note" && copy.path ? getNoteDisplayName(copy.path, displayFiles) : copy.displayName,
-          dirty: copy.dirty,
-        })),
+    () => buildOpenFileTabs(workingCopies, openTabPaths, displayFiles),
     [displayFiles, openTabPaths, workingCopies],
   );
   const reviewTabs = useMemo<OpenReviewTab[]>(
@@ -5711,10 +5684,10 @@ export default function App() {
 
     const noteWorkingCopyId = getNoteWorkingCopyId(path);
     const isClosingActiveTab = currentFilePath === path || activeWorkspaceTabId === noteWorkingCopyId;
-    const visibleNoteTabsAfterClose = openTabs.filter((item) => item.kind === "file" && item.path && item.path !== path);
+    const nextPathAfterClose = getNextOpenTabPathAfterClose(openTabs, path);
 
     const nextTabs = openTabPaths.filter((tabPath) => tabPath !== path);
-    setOpenTabPaths(visibleNoteTabsAfterClose.length === 0 ? [] : nextTabs);
+    setOpenTabPaths(nextPathAfterClose === null ? [] : nextTabs);
     setWorkingCopies((current) => {
       const next = { ...current };
       delete next[noteWorkingCopyId];
@@ -5726,13 +5699,8 @@ export default function App() {
     setPendingFileSelection(null);
     setIsDirty(false);
 
-    const visibleTabIndex = openTabs.findIndex((item) => item.kind === "file" && item.path === path);
-    const nextPath =
-      visibleNoteTabsAfterClose[visibleTabIndex]?.path ??
-      visibleNoteTabsAfterClose[visibleTabIndex - 1]?.path ??
-      null;
-    if (nextPath) {
-      finishFileSelection(nextPath, false);
+    if (nextPathAfterClose) {
+      finishFileSelection(nextPathAfterClose, false);
     } else {
       setActiveWorkingCopyId(null);
       setCurrentFilePath(null);
@@ -6776,7 +6744,7 @@ export default function App() {
     if (!hasLoadedNotes) return;
 
     const validPaths = new Set(noteFiles.map((file) => file.path));
-    setOpenTabPaths((current) => current.filter((path) => validPaths.has(path)));
+    setOpenTabPaths((current) => filterValidOpenTabPaths(current, validPaths));
 
     if (currentFilePath && !validPaths.has(currentFilePath)) {
       setCurrentFilePath(null);
@@ -6805,7 +6773,7 @@ export default function App() {
     if (!hasLoadedNotes || hasRestoredOpenTabsRef.current) return;
 
     const validPaths = new Set(noteFiles.map((file) => file.path));
-    const restoredPaths = openTabPaths.filter((path) => validPaths.has(path));
+    const restoredPaths = filterValidOpenTabPaths(openTabPaths, validPaths);
     const storedActivePath = initialOpenTabsActivePathRef.current;
     const activePath =
       storedActivePath && validPaths.has(storedActivePath)
@@ -6822,7 +6790,7 @@ export default function App() {
   }, [currentFilePath, noteFiles, hasLoadedNotes, openTabPaths]);
 
   useEffect(() => {
-    window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, JSON.stringify(openTabPaths));
+    window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, serializeOpenTabPaths(openTabPaths));
   }, [openTabPaths]);
 
   useEffect(() => {
