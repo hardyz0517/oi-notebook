@@ -138,6 +138,16 @@ import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, PrepareLuoguSubm
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
+import {
+  formatZoomLabel,
+  getBlogStatusLabel,
+  getEditorViewModeLabel,
+  getLuoguImportCenterAccountLabel,
+  getLuoguSettingsStatusDescription,
+  getLuoguSettingsStatusTone,
+  getLuoguStatusLabel,
+  getSaveStatusLabel,
+} from "@/lib/appStatusLabels";
 import { normalizeBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
@@ -2051,9 +2061,12 @@ export default function App() {
   const activeWorkingCopy = activeWorkingCopyId ? workingCopies[activeWorkingCopyId] ?? null : null;
   const hasActiveEditorDocument = Boolean(currentFilePath || activeWorkingCopy);
   const activeEditorDirty = activeWorkingCopy?.dirty ?? isDirty;
-  const saveStatusLabel =
-    !hasActiveEditorDocument ? "未选择文件" : isSavingNote ? "保存中" : activeEditorDirty ? "未保存" : "已保存";
-  const blogStatusLabel = isRestartingBlog ? "重启中" : "打开 / 重启";
+  const saveStatusLabel = getSaveStatusLabel({
+    hasActiveEditorDocument,
+    isSavingNote,
+    isDirty: activeEditorDirty,
+  });
+  const blogStatusLabel = getBlogStatusLabel(isRestartingBlog);
   const aiStatusLabel =
     !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
   const tagTaxonomyStats = useMemo(() => {
@@ -2401,32 +2414,18 @@ export default function App() {
       aliases: nextAliases,
     });
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
-  const luoguStatusLabel =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "读取中"
-      : !luoguConfigured
-        ? "未配置"
-        : luoguConnectionError
-          ? "连接失败"
-          : "已配置";
-  const luoguSettingsStatusTone =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "border-sky-300/50 bg-sky-500/10 text-sky-700 dark:text-sky-200"
-      : !luoguConfigured
-        ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-        : luoguConnectionError
-          ? "border-red-300/60 bg-red-500/10 text-red-700 dark:text-red-200"
-          : "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200";
-  const luoguSettingsStatusDescription =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "正在读取本机洛谷配置。"
-      : !luoguConfigured
-        ? "尚未配置 _uid 和 __client_id，请先配置账号。"
-        : luoguConnectionError
-          ? "最近一次测试连接失败，请检查 Cookie 后重试。"
-          : luoguConnectionResult
-            ? "最近测试正常。"
-            : "账号 Cookie 已保存，可手动测试连接。";
+  const luoguStatusInput = {
+    hasLoadedLuoguConfigStatus,
+    isLoadingLuoguConfig,
+    isConfigured: luoguConfigured,
+    hasConnectionError: Boolean(luoguConnectionError),
+  };
+  const luoguStatusLabel = getLuoguStatusLabel(luoguStatusInput);
+  const luoguSettingsStatusTone = getLuoguSettingsStatusTone(luoguStatusInput);
+  const luoguSettingsStatusDescription = getLuoguSettingsStatusDescription({
+    ...luoguStatusInput,
+    hasConnectionResult: Boolean(luoguConnectionResult),
+  });
   const isLuoguRuleControlDisabled =
     isLoadingLuoguConfig ||
     isTestingLuoguConnection ||
@@ -2551,8 +2550,7 @@ export default function App() {
       ],
     },
   ];
-  const luoguImportCenterAccountLabel =
-    isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已连接" : "未配置";
+  const luoguImportCenterAccountLabel = getLuoguImportCenterAccountLabel(isLoadingLuoguConfig, luoguConfigured);
   const luoguImportCenterAiLabel =
     isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置";
   const luoguImportCenterRangeLabel = getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
@@ -2590,8 +2588,7 @@ export default function App() {
     searchInputRef,
   } = useLocalNoteSearchController(noteFiles);
   const isSettingsCenterOpenForRender = settingsCenterOpenRef.current;
-  const editorViewModeLabel =
-    editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
+  const editorViewModeLabel = getEditorViewModeLabel(editorViewMode);
   const activeActivityItem: ActivityBarItem | null =
     isSettingsCenterOpenForRender
       ? "settings"
@@ -2607,8 +2604,8 @@ export default function App() {
   const isAiActivityActive =
     isAiSidebarOpen ||
     (isSettingsCenterOpenForRender && SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId === "ai");
-  const appZoomLabel = `${Math.round(appZoom * 100)}%`;
-  const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
+  const appZoomLabel = formatZoomLabel(appZoom);
+  const contentZoomLabel = formatZoomLabel(contentZoom);
   const selectedPromptUsage = useMemo(
     () => getPromptUsageInfo(selectedPromptFileName),
     [selectedPromptFileName],
