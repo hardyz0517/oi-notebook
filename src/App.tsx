@@ -182,6 +182,21 @@ import {
   getInitialScale,
   type ReadingDensity,
 } from "@/lib/appPreferences";
+import {
+  AI_SIDEBAR_WIDTH_DEFAULT,
+  AI_SIDEBAR_WIDTH_MIN,
+  EDITOR_PREVIEW_RATIO_DEFAULT,
+  LEFT_SIDEBAR_WIDTH_DEFAULT,
+  LEFT_SIDEBAR_WIDTH_MAX,
+  LEFT_SIDEBAR_WIDTH_MIN,
+  clampEditorPreviewRatio,
+  getInitialAiSidebarWidth,
+  getInitialEditorPreviewRatio,
+  getInitialLeftSidebarWidth,
+  writeStoredAiSidebarWidth,
+  writeStoredEditorPreviewRatio,
+  writeStoredLeftSidebarWidth,
+} from "@/lib/layoutPreferences";
 import { buildLocalSearchResults, formatSearchDate, toSearchResultItem } from "@/lib/localSearchResults";
 import { formatLocalIndexSize, getLocalIndexAccessLabel, getLocalIndexStatusLabel, getLocalIndexUpdatedLabel } from "@/lib/localIndexStatus";
 import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
@@ -228,16 +243,8 @@ const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).hr
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const DEFAULT_BLOG_TITLE = "OI Notebook";
 const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
-const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
-const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
 const OPEN_TABS_STORAGE_KEY = "oi-notebook.openTabs";
 const OPEN_TABS_ACTIVE_STORAGE_KEY = "oi-notebook.openTabs.activePath";
-const LEFT_SIDEBAR_WIDTH_DEFAULT = 260;
-const LEFT_SIDEBAR_WIDTH_MIN = 200;
-const LEFT_SIDEBAR_WIDTH_MAX = 420;
-const AI_SIDEBAR_WIDTH_DEFAULT = 390;
-const AI_SIDEBAR_WIDTH_MIN = 320;
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 function isAiPerfDebugEnabled(): boolean {
@@ -355,11 +362,6 @@ const setNoteXAiPerfEvent = (name: string, value: unknown) => {
   perf.lastEvents[name] = value;
 };
 const ACTIVITY_BAR_BASE_WIDTH = 52;
-const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
-const EDITOR_PREVIEW_RATIO_MIN = 0.2;
-const EDITOR_PREVIEW_RATIO_MAX = 0.8;
-const EDITOR_PREVIEW_MIN_PANE_WIDTH = 320;
-
 type DialogMode = "create" | "rename" | "create-folder";
 type ConfirmDialogState = {
   title: string;
@@ -1307,36 +1309,6 @@ function clampAiSidebarWidth(value: number): number {
   return clampNumberRange(value, AI_SIDEBAR_WIDTH_MIN, maxWidth);
 }
 
-function getInitialAiSidebarWidth(): number {
-  const stored = window.localStorage.getItem(AI_SIDEBAR_WIDTH_STORAGE_KEY);
-  if (stored === null) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
-  return clampAiSidebarWidth(parsed);
-}
-
-function clampEditorPreviewRatio(value: number, containerWidth?: number): number {
-  let minRatio = EDITOR_PREVIEW_RATIO_MIN;
-  let maxRatio = EDITOR_PREVIEW_RATIO_MAX;
-
-  if (containerWidth && containerWidth > EDITOR_PREVIEW_MIN_PANE_WIDTH * 2) {
-    minRatio = Math.max(minRatio, EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
-    maxRatio = Math.min(maxRatio, 1 - EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
-  }
-
-  return Math.min(maxRatio, Math.max(minRatio, value));
-}
-
-function getInitialEditorPreviewRatio(): number {
-  const stored = window.localStorage.getItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY);
-  if (stored === null) return EDITOR_PREVIEW_RATIO_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return EDITOR_PREVIEW_RATIO_DEFAULT;
-  return clampEditorPreviewRatio(parsed);
-}
-
 function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
   const file = files.find((item) => item.path === path);
   const title = file?.displayTitle?.trim();
@@ -1706,15 +1678,8 @@ export default function App() {
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(() =>
-    getInitialNumberRange(
-      LEFT_SIDEBAR_WIDTH_STORAGE_KEY,
-      LEFT_SIDEBAR_WIDTH_DEFAULT,
-      LEFT_SIDEBAR_WIDTH_MIN,
-      LEFT_SIDEBAR_WIDTH_MAX,
-    ),
-  );
-  const [aiSidebarWidth, setAiSidebarWidth] = useState(getInitialAiSidebarWidth);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
+  const [aiSidebarWidth, setAiSidebarWidth] = useState(() => getInitialAiSidebarWidth(clampAiSidebarWidth));
   const [editorPreviewRatio, setEditorPreviewRatio] = useState(getInitialEditorPreviewRatio);
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandleId | null>(null);
   const [editorSelectedText, setEditorSelectedText] = useState("");
@@ -7034,7 +6999,7 @@ export default function App() {
   }, [isLoadingPrompt, selectedPromptFileName]);
 
   useEffect(() => {
-    window.localStorage.setItem(LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
+    writeStoredLeftSidebarWidth(leftSidebarWidth);
   }, [leftSidebarWidth]);
 
   useEffect(() => {
@@ -7042,7 +7007,7 @@ export default function App() {
       aiSidebarResizePerfRef.current.widthStateCommitCount += 1;
       incrementNoteXAiPerfCounter("appResizeStateCommit");
     }
-    window.localStorage.setItem(AI_SIDEBAR_WIDTH_STORAGE_KEY, String(aiSidebarWidth));
+    writeStoredAiSidebarWidth(aiSidebarWidth);
     if (APP_RESIZE_PERF_DEBUG) {
       aiSidebarResizePerfRef.current.localStorageWriteCount += 1;
       incrementNoteXAiPerfCounter("appResizeLocalStorageWrite");
@@ -7050,7 +7015,7 @@ export default function App() {
   }, [aiSidebarWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY, String(editorPreviewRatio));
+    writeStoredEditorPreviewRatio(editorPreviewRatio);
   }, [editorPreviewRatio]);
 
   useEffect(() => {
