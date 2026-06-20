@@ -72,6 +72,7 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  isLuoguImportCenterBusy,
 } from "@/components/luogu/luoguImportDisplay";
 import {
   formatLuoguSubmissionStatus,
@@ -1864,6 +1865,13 @@ export default function App() {
     writeProgress: luoguWriteProgress,
     preparedCount: preparedLuoguNotes.length,
     writableCount: writableLuoguPreparedNotes.length,
+  });
+  const isLuoguImportCenterBusyNow = isLuoguImportCenterBusy({
+    isImporting: isImportingLuogu,
+    isPreparing: isPreparingSelectedLuogu,
+    isWriting: isWritingPreparedLuogu,
+    isScanning: isScanningLuoguPreview,
+    isSyncing: isSyncingLuogu,
   });
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {
@@ -3821,7 +3829,7 @@ export default function App() {
   };
 
   const closeLuoguDialog = () => {
-    if (isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (isLuoguImportCenterBusyNow) return;
     const returnTarget = luoguDialogReturnTarget;
     setIsLuoguDialogOpen(false);
     setLuoguDialogReturnTarget(null);
@@ -3859,7 +3867,7 @@ export default function App() {
   };
 
   const openLuoguRulesSettingsFromDialog = () => {
-    if (isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (isLuoguImportCenterBusyNow) return;
     closeLuoguDialog();
     openSettingsSection("luogu-rules");
   };
@@ -6745,7 +6753,7 @@ export default function App() {
                       type="button"
                       className="text-foreground underline-offset-4 hover:underline disabled:pointer-events-none disabled:opacity-50"
                       onClick={openLuoguRulesSettingsFromDialog}
-                      disabled={isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                      disabled={isLuoguImportCenterBusyNow}
                       data-no-window-drag="true"
                     >
                       规则设置
@@ -6771,7 +6779,7 @@ export default function App() {
                           : "border-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                       )}
                       onClick={() => setLuoguImportCenterTab(tab.id)}
-                      disabled={isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                      disabled={isLuoguImportCenterBusyNow}
                       title={tab.label}
                       aria-label={tab.label}
                     >
@@ -6792,7 +6800,7 @@ export default function App() {
                   type="button"
                   className="flex h-8 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50"
                     onClick={closeLuoguDialog}
-                    disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}
+                    disabled={isLuoguImportCenterBusyNow}
                   title={luoguDialogReturnTarget ? "返回设置中心" : "关闭洛谷导入中心"}
                     aria-label="关闭洛谷导入中心"
                   >

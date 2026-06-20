@@ -21,6 +21,18 @@ export interface LuoguScanResultSummaryInput {
   stats: Pick<LuoguScanResultStats, "total" | "candidateCount" | "skippedCount">;
 }
 
+export interface LuoguImportCenterBusyInput {
+  isImporting: boolean;
+  isPreparing: boolean;
+  isWriting: boolean;
+  isScanning: boolean;
+  isSyncing: boolean;
+}
+
+export function isLuoguImportCenterBusy(input: LuoguImportCenterBusyInput): boolean {
+  return input.isImporting || input.isPreparing || input.isWriting || input.isScanning || input.isSyncing;
+}
+
 export interface LuoguScanTaskStateInput {
   isScanning: boolean;
   isPaused: boolean;

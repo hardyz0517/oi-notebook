@@ -5,11 +5,38 @@ import {
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
+  isLuoguImportCenterBusy,
 } from "./luoguImportDisplay";
 
 const emptyStats = { total: 0, candidateCount: 0, skippedCount: 0 };
 
 describe("luoguImportDisplay", () => {
+  it("derives whether the import center is globally busy", () => {
+    expect(isLuoguImportCenterBusy({
+      isImporting: false,
+      isPreparing: false,
+      isWriting: false,
+      isScanning: false,
+      isSyncing: false,
+    })).toBe(false);
+
+    expect(isLuoguImportCenterBusy({
+      isImporting: true,
+      isPreparing: false,
+      isWriting: false,
+      isScanning: false,
+      isSyncing: false,
+    })).toBe(true);
+
+    expect(isLuoguImportCenterBusy({
+      isImporting: false,
+      isPreparing: false,
+      isWriting: true,
+      isScanning: false,
+      isSyncing: false,
+    })).toBe(true);
+  });
+
   it("derives task state for running, paused, failed, completed, and idle scan states", () => {
     expect(deriveLuoguScanTaskState({
       isScanning: true,
