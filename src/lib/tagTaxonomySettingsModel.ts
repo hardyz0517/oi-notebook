@@ -17,6 +17,25 @@ export interface TagTaxonomySettingsStatItem {
   value: number;
 }
 
+export type TagTaxonomySettingsStatusTone = "warning" | "success" | "muted";
+
+export interface TagTaxonomySettingsViewInput {
+  isLoading: boolean;
+  isSaving: boolean;
+  hasLoadError: boolean;
+  userConfigItemCount: number;
+}
+
+export interface TagTaxonomySettingsView {
+  statusTone: TagTaxonomySettingsStatusTone;
+  isReloadDisabled: boolean;
+  showReloadSpinner: boolean;
+  areConfigActionsDisabled: boolean;
+  isConfirmImportDisabled: boolean;
+  showConfirmImportSpinner: boolean;
+  areEditActionsDisabled: boolean;
+}
+
 export interface BuildTagTaxonomyStatsInput {
   config: UserTagTaxonomyConfig | null | undefined;
   userConfig: UserTagTaxonomyConfig | null | undefined;
@@ -53,6 +72,24 @@ export function buildTagTaxonomyStats(input: BuildTagTaxonomyStatsInput): TagTax
     customCollectionsCount,
     availableCandidateCount,
     userConfigItemCount,
+  };
+}
+
+export function deriveTagTaxonomySettingsView(input: TagTaxonomySettingsViewInput): TagTaxonomySettingsView {
+  const statusTone: TagTaxonomySettingsStatusTone = input.hasLoadError
+    ? "warning"
+    : input.userConfigItemCount > 0
+      ? "success"
+      : "muted";
+
+  return {
+    statusTone,
+    isReloadDisabled: input.isLoading,
+    showReloadSpinner: input.isLoading,
+    areConfigActionsDisabled: input.isSaving,
+    isConfirmImportDisabled: input.isSaving,
+    showConfirmImportSpinner: input.isSaving,
+    areEditActionsDisabled: input.isSaving,
   };
 }
 

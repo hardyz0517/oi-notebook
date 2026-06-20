@@ -296,6 +296,7 @@ import { analyzeTagListNormalization, applyTagNormalizationPlan, type UserTagTax
 import {
   buildTagTaxonomyStatItems,
   buildTagTaxonomyStats,
+  deriveTagTaxonomySettingsView,
   filterTagTaxonomyUserAliases,
   filterTagTaxonomyUserEntries,
   getDisplayedTagTaxonomyList,
@@ -2048,6 +2049,12 @@ export default function App() {
     () => buildTagTaxonomyStatItems(tagTaxonomyStats),
     [tagTaxonomyStats],
   );
+  const tagTaxonomySettingsView = deriveTagTaxonomySettingsView({
+    isLoading: isLoadingTagTaxonomyConfig,
+    isSaving: isSavingTagTaxonomyConfig,
+    hasLoadError: Boolean(tagTaxonomyConfigError),
+    userConfigItemCount: tagTaxonomyStats.userConfigItemCount,
+  });
   const tagNormalizationScanStats = useMemo(
     () => getTagNormalizationScanStats(tagNormalizationScanAllStats, tagNormalizationScanResults),
     [tagNormalizationScanAllStats, tagNormalizationScanResults],
@@ -8013,16 +8020,15 @@ export default function App() {
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
                       embedded
-                      isLoadingTagTaxonomyConfig={isLoadingTagTaxonomyConfig}
                       tagTaxonomyConfigError={tagTaxonomyConfigError}
                       tagTaxonomyStats={tagTaxonomyStats}
+                      tagTaxonomySettingsView={tagTaxonomySettingsView}
                       tagTaxonomyStatItems={tagTaxonomyStatItems}
                       tagTaxonomyImportFileInputRef={tagTaxonomyImportFileInputRef}
                       tagTaxonomyImportMessage={tagTaxonomyImportMessage}
                       tagTaxonomyImportJsonInput={tagTaxonomyImportJsonInput}
                       tagTaxonomyImportPreview={tagTaxonomyImportPreview}
                       tagTaxonomyImportError={tagTaxonomyImportError}
-                      isSavingTagTaxonomyConfig={isSavingTagTaxonomyConfig}
                       tagTaxonomyUserEntries={tagTaxonomyUserEntries}
                       displayedTagTaxonomyUserEntries={displayedTagTaxonomyUserEntries}
                       isTagTaxonomyEntryListExpanded={isTagTaxonomyEntryListExpanded}

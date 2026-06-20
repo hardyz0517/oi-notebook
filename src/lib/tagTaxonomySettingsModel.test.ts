@@ -4,6 +4,7 @@ import type { UserTagTaxonomyConfig } from "./tagTaxonomy";
 import {
   buildTagTaxonomyStatItems,
   buildTagTaxonomyStats,
+  deriveTagTaxonomySettingsView,
   filterTagTaxonomyUserAliases,
   filterTagTaxonomyUserEntries,
   getDisplayedTagTaxonomyList,
@@ -78,6 +79,56 @@ describe("tagTaxonomySettingsModel", () => {
       isLoading: false,
       loadError: null,
     }).statusLabel).toBe("使用内置默认配置");
+  });
+
+  it("derives settings action state from loading, saving, and config status", () => {
+    expect(deriveTagTaxonomySettingsView({
+      isLoading: false,
+      isSaving: false,
+      hasLoadError: false,
+      userConfigItemCount: 0,
+    })).toEqual({
+      statusTone: "muted",
+      isReloadDisabled: false,
+      showReloadSpinner: false,
+      areConfigActionsDisabled: false,
+      isConfirmImportDisabled: false,
+      showConfirmImportSpinner: false,
+      areEditActionsDisabled: false,
+    });
+
+    expect(deriveTagTaxonomySettingsView({
+      isLoading: true,
+      isSaving: false,
+      hasLoadError: false,
+      userConfigItemCount: 0,
+    })).toMatchObject({
+      statusTone: "muted",
+      isReloadDisabled: true,
+      showReloadSpinner: true,
+      areConfigActionsDisabled: false,
+    });
+
+    expect(deriveTagTaxonomySettingsView({
+      isLoading: false,
+      isSaving: true,
+      hasLoadError: false,
+      userConfigItemCount: 2,
+    })).toMatchObject({
+      statusTone: "success",
+      isReloadDisabled: false,
+      areConfigActionsDisabled: true,
+      isConfirmImportDisabled: true,
+      showConfirmImportSpinner: true,
+      areEditActionsDisabled: true,
+    });
+
+    expect(deriveTagTaxonomySettingsView({
+      isLoading: false,
+      isSaving: false,
+      hasLoadError: true,
+      userConfigItemCount: 2,
+    }).statusTone).toBe("warning");
   });
 
   it("sorts, filters, and folds user entries", () => {
