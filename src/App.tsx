@@ -232,9 +232,12 @@ import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestio
 import type { TaskProgress } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
+  buildNewNoteMarkdown,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
   getCurrentNoteDirectory,
+  getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getNoteDirectories,
+  getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
   resolveNewNoteDirectory,
   type NewNoteLocationOption,
 } from "@/lib/noteWorkspace";
@@ -761,10 +764,6 @@ function normalizeBlogConfigDraft(config: BlogConfig): BlogConfig {
   };
 }
 
-function quoteYamlString(value: string): string {
-  return JSON.stringify(value);
-}
-
 function extractCursorParagraph(markdownContent: string, cursorOffset: number | null): CursorParagraphContext | null {
   if (cursorOffset === null || markdownContent.trim().length === 0) return null;
 
@@ -826,12 +825,6 @@ function extractCursorParagraph(markdownContent: string, cursorOffset: number | 
   const paragraphText = markdownContent.slice(paragraphStart, paragraphEnd).trim();
 
   return paragraphText ? { text: paragraphText, isCode: false } : null;
-}
-
-function buildNewNoteMarkdown(title: string, tags: string[]): string {
-  const quotedTitle = quoteYamlString(title);
-  const tagText = tags.length > 0 ? `[${tags.map(quoteYamlString).join(", ")}]` : "[]";
-  return `---\ntitle: ${quotedTitle}\ntags: ${tagText}\ncreatedAt: ${quoteYamlString(new Date().toISOString())}\n---\n`;
 }
 
 function getErrorMessage(e: unknown): string {
@@ -3037,17 +3030,11 @@ export default function App() {
   };
 
   const getSelectedTreeCreateParent = () => {
-    if (activeTreeDirectoryPath !== null) return activeTreeDirectoryPath;
-    if (activeTreeFilePath) {
-      const slashIndex = activeTreeFilePath.lastIndexOf("/");
-      return slashIndex === -1 ? "" : activeTreeFilePath.slice(0, slashIndex);
-    }
-    return "";
+    return getSelectedTreeCreateParentPath(activeTreeDirectoryPath, activeTreeFilePath);
   };
 
   const getDefaultNewNoteCreateParent = () => {
-    if (activeTreeDirectoryPath !== null || activeTreeFilePath) return getSelectedTreeCreateParent();
-    return currentNoteDirectory;
+    return getDefaultNewNoteCreateParentPath(activeTreeDirectoryPath, activeTreeFilePath, currentNoteDirectory);
   };
 
   const openCreateFolderDialog = () => {

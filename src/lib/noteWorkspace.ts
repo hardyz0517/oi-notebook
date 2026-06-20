@@ -38,3 +38,36 @@ export function findEntryCaseInsensitive(
   const normalized = path.toLowerCase();
   return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
 }
+
+export function quoteYamlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+export function buildNewNoteMarkdown(title: string, tags: string[], createdAt = new Date().toISOString()): string {
+  const quotedTitle = quoteYamlString(title);
+  const tagText = tags.length > 0 ? `[${tags.map(quoteYamlString).join(", ")}]` : "[]";
+  return `---\ntitle: ${quotedTitle}\ntags: ${tagText}\ncreatedAt: ${quoteYamlString(createdAt)}\n---\n`;
+}
+
+export function getSelectedTreeCreateParent(
+  activeTreeDirectoryPath: string | null,
+  activeTreeFilePath: string | null,
+): string {
+  if (activeTreeDirectoryPath !== null) return activeTreeDirectoryPath;
+  if (activeTreeFilePath) {
+    const slashIndex = activeTreeFilePath.lastIndexOf("/");
+    return slashIndex === -1 ? "" : activeTreeFilePath.slice(0, slashIndex);
+  }
+  return "";
+}
+
+export function getDefaultNewNoteCreateParent(
+  activeTreeDirectoryPath: string | null,
+  activeTreeFilePath: string | null,
+  currentDirectory: string,
+): string {
+  if (activeTreeDirectoryPath !== null || activeTreeFilePath) {
+    return getSelectedTreeCreateParent(activeTreeDirectoryPath, activeTreeFilePath);
+  }
+  return currentDirectory;
+}
