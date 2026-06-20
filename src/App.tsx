@@ -57,11 +57,9 @@ import {
 import {
   getLuoguScanRangeLabel,
   getLuoguSubmissionCandidateState,
-  isLuoguProblemIdAllowedByRules,
   type LuoguScanCountLimit,
   type LuoguScanDaysLimit,
   type LuoguScanMode,
-  type LuoguSubmissionCandidateState,
 } from "@/components/settings/pages/luoguImportDomain";
 import {
   formatLuoguSubmissionStatus,
@@ -73,6 +71,7 @@ import {
   parseLuoguSubmitTimeMs,
   type LuoguPrepareItemStatus,
 } from "@/components/luogu/luoguDisplay";
+import { useLuoguImportController } from "@/components/luogu/useLuoguImportController";
 import {
   applyLuoguPreparedRules,
   normalizeLuoguImportRules,
@@ -627,16 +626,6 @@ interface LuoguScanSummary {
   candidateCount: number;
   skippedCount: number;
   rangeLabel: string;
-}
-
-interface LuoguScanResultStats {
-  total: number;
-  candidateCount: number;
-  skippedCount: number;
-  acCount: number;
-  nonAcCount: number;
-  oldSubmissionCount: number;
-  sameProblemOldAcCount: number;
 }
 
 const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
@@ -2129,70 +2118,39 @@ export default function App() {
       setIsTagNormalizationDetailsOpen(false);
     }
   }, [tagNormalizationSuggestions.length]);
-  const luoguSubmissionCandidateStates = useMemo(() => {
-    const submissions = luoguPreviewResult?.submissions ?? [];
-    return Object.fromEntries(
-      submissions.map((submission) => [
-        submission.submissionId,
-        getLuoguSubmissionCandidateState(
-          submission,
-          submissions,
-          luoguImportRules,
-          luoguPreviewResult?.lastSubmissionId ?? null,
-          skippedLuoguSubmissionIds,
-        ),
-      ]),
-    ) as Record<string, LuoguSubmissionCandidateState>;
-  }, [luoguImportRules, luoguPreviewResult, skippedLuoguSubmissionIds]);
-  const luoguCurrentCandidateCount = Object.values(luoguSubmissionCandidateStates).filter(
-    (state) => state.canSelect,
-  ).length;
-  const luoguScanResultStats = useMemo<LuoguScanResultStats>(() => {
-    const submissions = luoguPreviewResult?.submissions ?? [];
-    const states = submissions.map((submission) => luoguSubmissionCandidateStates[submission.submissionId] ?? { canSelect: false, defaultSelected: false, statusLabel: submission.statusLabel });
-    const candidateCount = states.filter((state) => state.canSelect).length;
-    return {
-      total: submissions.length,
-      candidateCount,
-      skippedCount: Math.max(0, submissions.length - candidateCount),
-      acCount: submissions.filter((submission) => submission.isAc).length,
-      nonAcCount: submissions.filter((submission) => !submission.isAc).length,
-      oldSubmissionCount: states.filter((state) => state.statusLabel.includes("旧提交")).length,
-      sameProblemOldAcCount: states.filter((state) => state.statusLabel.includes("同题旧 AC")).length,
-    };
-  }, [luoguPreviewResult, luoguSubmissionCandidateStates]);
-  const luoguSelectableSubmissionIds = useMemo(
-    () =>
-      luoguPreviewResult?.submissions
-        .filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect)
-        .map((submission) => submission.submissionId) ?? [],
-    [luoguPreviewResult, luoguSubmissionCandidateStates],
-  );
-  const displayedLuoguPreviewSubmissions = useMemo(
-    () => {
-      const submissions = luoguPreviewResult?.submissions ?? [];
-      const allowedSubmissions = submissions.filter((submission) =>
-        isLuoguProblemIdAllowedByRules(submission.problemId, luoguImportRules),
-      );
-      if (luoguImportRules.scanResultVisibility !== "hideSkipped") return allowedSubmissions;
-      return allowedSubmissions.filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect);
-    },
-    [luoguImportRules, luoguPreviewResult, luoguSubmissionCandidateStates],
-  );
-  const selectedLuoguSelectableCount = useMemo(
-    () => luoguSelectableSubmissionIds.filter((submissionId) => selectedLuoguSubmissionIds.has(submissionId)).length,
-    [luoguSelectableSubmissionIds, selectedLuoguSubmissionIds],
-  );
-  const areAllLuoguSelectableSubmissionsSelected =
-    luoguSelectableSubmissionIds.length > 0 && selectedLuoguSelectableCount === luoguSelectableSubmissionIds.length;
-  const isLuoguSelectableSelectionMixed =
-    selectedLuoguSelectableCount > 0 && selectedLuoguSelectableCount < luoguSelectableSubmissionIds.length;
+  const {
+    luoguSubmissionCandidateStates,
+    luoguCurrentCandidateCount,
+    luoguScanResultStats,
+    luoguSelectableSubmissionIds,
+    displayedLuoguPreviewSubmissions,
+    areAllLuoguSelectableSubmissionsSelected,
+    isLuoguSelectableSelectionMixed,
+    selectedLuoguImportCount,
+    preparedLuoguNotes,
+    writableLuoguPreparedNotes,
+    hasReusableLuoguPreparedPreview,
+    selectedLuoguPreviewSubmissions,
+    luoguPrepareQueueSubmissions,
+    luoguReusablePreviewCount,
+    currentlyPreparingLuoguSubmission,
+    activeLuoguPreparedPreview,
+  } = useLuoguImportController({
+    luoguPreviewResult,
+    luoguImportRules,
+    selectedLuoguSubmissionIds,
+    skippedLuoguSubmissionIds,
+    luoguPreparedNotesById,
+    luoguWriteResultsById,
+    reviewSelectedLuoguSubmissionIds,
+    currentlyPreparingLuoguId,
+    activeLuoguPreparedPreviewId,
+  });
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {
       luoguSelectAllCheckboxRef.current.indeterminate = isLuoguSelectableSelectionMixed;
     }
   }, [isLuoguSelectableSelectionMixed]);
-  const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
   const showEditorPane = editorViewMode !== "preview";
   const showPreviewPane = editorViewMode !== "editor";
   const editorViewModeButtons: Array<{
@@ -2231,62 +2189,6 @@ export default function App() {
       })}
     </div>
   );
-  const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
-    (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
-  );
-  const writableLuoguPreparedNotes = preparedLuoguNotes.filter(
-    (prepared) => reviewSelectedLuoguSubmissionIds.has(prepared.submissionId) && !luoguWriteResultsById[prepared.submissionId],
-  );
-  const hasReusableLuoguPreparedPreview = (submissionId: string): boolean => {
-    const prepared = luoguPreparedNotesById[submissionId];
-    return Boolean(prepared && !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "");
-  };
-  const selectedLuoguPreviewSubmissions = useMemo(
-    () => luoguPreviewResult?.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId)) ?? [],
-    [luoguPreviewResult, selectedLuoguSubmissionIds],
-  );
-  const luoguPrepareQueueSubmissions = useMemo(
-    () =>
-      selectedLuoguPreviewSubmissions.filter((submission) => {
-        const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-        return (
-          candidateState?.canSelect &&
-          !skippedLuoguSubmissionIds.has(submission.submissionId) &&
-          !hasReusableLuoguPreparedPreview(submission.submissionId)
-        );
-      }),
-    [selectedLuoguPreviewSubmissions, luoguSubmissionCandidateStates, skippedLuoguSubmissionIds, luoguPreparedNotesById],
-  );
-  const luoguReusablePreviewCount = selectedLuoguPreviewSubmissions.filter((submission) =>
-    hasReusableLuoguPreparedPreview(submission.submissionId),
-  ).length;
-  const luoguReadyPreviewSubmissions = useMemo(
-    () =>
-      selectedLuoguPreviewSubmissions.filter((submission) => {
-        const prepared = luoguPreparedNotesById[submission.submissionId];
-        return Boolean(
-          prepared &&
-            !prepared.skipped &&
-            prepared.aiStatus !== "failed" &&
-            prepared.markdown.trim() !== "" &&
-            prepared.suggestedRelativePath.trim() !== "",
-        );
-      }),
-    [selectedLuoguPreviewSubmissions, luoguPreparedNotesById],
-  );
-  const currentlyPreparingLuoguSubmission = useMemo(
-    () => selectedLuoguPreviewSubmissions.find((submission) => submission.submissionId === currentlyPreparingLuoguId) ?? null,
-    [currentlyPreparingLuoguId, selectedLuoguPreviewSubmissions],
-  );
-  const activeLuoguPreparedPreviewCandidate =
-    activeLuoguPreparedPreviewId && luoguReadyPreviewSubmissions.some((submission) => submission.submissionId === activeLuoguPreparedPreviewId)
-      ? luoguPreparedNotesById[activeLuoguPreparedPreviewId]
-      : undefined;
-  const activeLuoguPreparedPreview =
-    activeLuoguPreparedPreviewCandidate ??
-    (luoguReadyPreviewSubmissions[0] ? luoguPreparedNotesById[luoguReadyPreviewSubmissions[0].submissionId] : undefined) ??
-    null;
-
   const aiConfigured =
     aiConfig?.providers.some((provider) => (
       provider.enabled &&

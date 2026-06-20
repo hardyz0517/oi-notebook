@@ -4,8 +4,21 @@ import type { LuoguImportRules } from "./luoguImportRules";
 export interface LuoguSubmissionCandidateState {
   canSelect: boolean;
   defaultSelected: boolean;
+  reason?: LuoguSubmissionCandidateReason;
   statusLabel: string;
 }
+
+export type LuoguSubmissionCandidateReason =
+  | "skippedByUser"
+  | "problemIdBlocked"
+  | "importedRegenerate"
+  | "importedShowUnselected"
+  | "imported"
+  | "nonAcRequired"
+  | "nonAcOptional"
+  | "sameProblemOldAcSkipped"
+  | "sameProblemOldAcManual"
+  | "candidate";
 
 export type LuoguScanMode = "count" | "days";
 export type LuoguScanCountLimit = 20 | 50 | 100 | 200;
@@ -23,6 +36,47 @@ export function isLuoguProblemIdAllowedByRules(problemId: string, rules: LuoguIm
 function parseLuoguSubmissionId(value: string): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getLuoguSubmissionCandidateReason(
+  submission: PreviewLuoguSubmission,
+  submissions: PreviewLuoguSubmission[],
+  rules: LuoguImportRules,
+  lastSubmissionId: number | null,
+  skippedIds: Set<string>,
+): LuoguSubmissionCandidateReason {
+  if (skippedIds.has(submission.submissionId)) return "skippedByUser";
+
+  if (!isLuoguProblemIdAllowedByRules(submission.problemId, rules)) return "problemIdBlocked";
+
+  const submissionId = parseLuoguSubmissionId(submission.submissionId);
+  if (lastSubmissionId !== null && submissionId !== null && submissionId <= lastSubmissionId) {
+    if (rules.importedProblemPolicy === "regenerate") return "importedRegenerate";
+    if (rules.importedProblemPolicy === "showUnselected") return "importedShowUnselected";
+    return "imported";
+  }
+
+  if (rules.requireAc && !submission.isAc) return "nonAcRequired";
+
+  if (!submission.isAc) return "nonAcOptional";
+
+  const latestSameProblemAcId = submissions.reduce<number | null>((latest, item) => {
+    if (!item.isAc || item.problemId !== submission.problemId) return latest;
+    const itemId = parseLuoguSubmissionId(item.submissionId);
+    if (itemId === null) return latest;
+    return latest === null ? itemId : Math.max(latest, itemId);
+  }, null);
+
+  if (
+    latestSameProblemAcId !== null &&
+    submissionId !== null &&
+    submissionId < latestSameProblemAcId
+  ) {
+    if (rules.sameProblemStrategy === "latestAc") return "sameProblemOldAcSkipped";
+    if (rules.sameProblemStrategy === "manual") return "sameProblemOldAcManual";
+  }
+
+  return "candidate";
 }
 
 export function getLuoguSubmissionCandidateState(
