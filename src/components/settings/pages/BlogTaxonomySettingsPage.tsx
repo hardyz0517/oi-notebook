@@ -8,6 +8,7 @@ import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import type { TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
 import type {
   TagNormalizationApplyResult,
+  TagNormalizationPanelView,
   TagNormalizationScanResult,
   TagNormalizationScanStats,
 } from "@/components/tag-manager/tagNormalizationScan";
@@ -58,13 +59,12 @@ export interface BlogTaxonomySettingsPageProps {
   tagTaxonomyAliasTargetInput: string;
   tagTaxonomyAliasListQuery: string;
   tagTaxonomySaveError: string | null;
-  isScanningTagNormalization: boolean;
   tagNormalizationScanError: string | null;
   tagNormalizationApplyResult: TagNormalizationApplyResult | null;
   tagNormalizationScanResults: TagNormalizationScanResult[] | null;
   tagNormalizationScanIssueCount: number;
   tagNormalizationScanStats: TagNormalizationScanStats;
-  isApplyingTagNormalizationScan: boolean;
+  tagNormalizationPanelView: TagNormalizationPanelView;
   selectedTagNormalizationScanStats: TagNormalizationScanStats;
   selectedTagNormalizationScanPaths: Set<string>;
   loadTagTaxonomyConfig: () => void | Promise<void>;
@@ -465,9 +465,9 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 扫描已有笔记中的自由标签，按当前标签体系生成规范化建议。
               </div>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => void props.handleScanLegacyTags()} disabled={props.isScanningTagNormalization}>
-              {props.isScanningTagNormalization ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              扫描旧标签
+            <Button type="button" variant="outline" size="sm" onClick={() => void props.handleScanLegacyTags()} disabled={props.tagNormalizationPanelView.isScanDisabled}>
+              {props.tagNormalizationPanelView.showScanSpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+              {props.tagNormalizationPanelView.scanButtonLabel}
             </Button>
           </div>
 
@@ -507,10 +507,10 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                     variant="outline"
                     size="sm"
                     onClick={() => void props.applySelectedTagNormalizationScanResults()}
-                    disabled={props.isApplyingTagNormalizationScan || selectedCount === 0}
+                    disabled={props.tagNormalizationPanelView.isApplyDisabled}
                   >
-                    {props.isApplyingTagNormalizationScan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                    应用选择
+                    {props.tagNormalizationPanelView.showApplySpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    {props.tagNormalizationPanelView.applyButtonLabel}
                   </Button>
                 </div>
               </div>

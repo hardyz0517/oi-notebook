@@ -190,6 +190,7 @@ import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft }
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationPanelView,
   deriveTagNormalizationScanTaskState,
   deriveTagNormalizationTaskView,
   formatTagNormalizationReason,
@@ -2059,6 +2060,11 @@ export default function App() {
     [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
   );
   const tagNormalizationApplyTaskView = deriveTagNormalizationTaskView(tagNormalizationApplyTaskState, "apply");
+  const tagNormalizationPanelView = deriveTagNormalizationPanelView({
+    scanTaskView: tagNormalizationScanTaskView,
+    applyTaskView: tagNormalizationApplyTaskView,
+    selectedCount: selectedTagNormalizationScanPaths.size,
+  });
   const tagTaxonomyUserEntries = useMemo(
     () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
     [tagTaxonomyConfig],
@@ -8027,13 +8033,12 @@ export default function App() {
                       tagTaxonomyAliasTargetInput={tagTaxonomyAliasTargetInput}
                       tagTaxonomyAliasListQuery={tagTaxonomyAliasListQuery}
                       tagTaxonomySaveError={tagTaxonomySaveError}
-                      isScanningTagNormalization={isScanningTagNormalization}
                       tagNormalizationScanError={tagNormalizationScanError}
                       tagNormalizationApplyResult={tagNormalizationApplyResult}
                       tagNormalizationScanResults={tagNormalizationScanResults}
                       tagNormalizationScanIssueCount={tagNormalizationScanIssueCount}
                       tagNormalizationScanStats={tagNormalizationScanStats}
-                      isApplyingTagNormalizationScan={tagNormalizationApplyTaskView.isBusy}
+                      tagNormalizationPanelView={tagNormalizationPanelView}
                       selectedTagNormalizationScanStats={selectedTagNormalizationScanStats}
                       selectedTagNormalizationScanPaths={selectedTagNormalizationScanPaths}
                       loadTagTaxonomyConfig={loadTagTaxonomyConfig}

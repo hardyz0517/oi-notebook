@@ -4,6 +4,7 @@ import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
   deriveTagNormalizationApplyTaskState,
+  deriveTagNormalizationPanelView,
   deriveTagNormalizationScanTaskState,
   deriveTagNormalizationTaskView,
   formatTagNormalizationReason,
@@ -198,6 +199,39 @@ describe("tagNormalizationScan", () => {
       isBusy: true,
       canCancel: false,
       label: "停止中",
+    });
+  });
+
+  it("derives panel button state from task views and selection", () => {
+    const idleScan = deriveTagNormalizationTaskView(
+      { status: "idle", progress: null, error: null },
+      "scan",
+    );
+    const runningApply = deriveTagNormalizationTaskView(
+      { status: "running", progress: { current: 1, total: 3, succeeded: 1, failed: 0, skipped: 0 }, error: null },
+      "apply",
+    );
+
+    expect(deriveTagNormalizationPanelView({
+      scanTaskView: idleScan,
+      applyTaskView: runningApply,
+      selectedCount: 2,
+    })).toMatchObject({
+      isScanDisabled: false,
+      showScanSpinner: false,
+      isApplyDisabled: true,
+      showApplySpinner: true,
+      scanButtonLabel: "扫描旧标签",
+      applyButtonLabel: "应用选择",
+    });
+
+    expect(deriveTagNormalizationPanelView({
+      scanTaskView: idleScan,
+      applyTaskView: deriveTagNormalizationTaskView({ status: "idle", progress: null, error: null }, "apply"),
+      selectedCount: 0,
+    })).toMatchObject({
+      isApplyDisabled: true,
+      showApplySpinner: false,
     });
   });
 

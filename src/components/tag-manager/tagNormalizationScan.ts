@@ -51,6 +51,21 @@ export interface TagNormalizationApplyTaskInput {
 
 export type TagNormalizationTaskKind = "scan" | "apply";
 
+export interface TagNormalizationPanelViewInput {
+  scanTaskView: TaskView;
+  applyTaskView: TaskView;
+  selectedCount: number;
+}
+
+export interface TagNormalizationPanelView {
+  isScanDisabled: boolean;
+  scanButtonLabel: string;
+  showScanSpinner: boolean;
+  isApplyDisabled: boolean;
+  applyButtonLabel: string;
+  showApplySpinner: boolean;
+}
+
 export function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
   return {
     noteCount: 0,
@@ -134,6 +149,17 @@ export function deriveTagNormalizationTaskView(
       failedLabel: "应用失败",
       cancelledLabel: "应用已取消",
     });
+}
+
+export function deriveTagNormalizationPanelView(input: TagNormalizationPanelViewInput): TagNormalizationPanelView {
+  return {
+    isScanDisabled: input.scanTaskView.isBusy,
+    scanButtonLabel: "扫描旧标签",
+    showScanSpinner: input.scanTaskView.isBusy,
+    isApplyDisabled: input.applyTaskView.isBusy || input.selectedCount === 0,
+    applyButtonLabel: "应用选择",
+    showApplySpinner: input.applyTaskView.isBusy,
+  };
 }
 
 export function addTagNormalizationPlanStats(
