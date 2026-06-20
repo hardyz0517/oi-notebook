@@ -8,6 +8,7 @@ mod notes;
 mod paths;
 mod prompts;
 mod tag_taxonomy;
+mod task_status;
 mod web_cache;
 mod web_extract;
 
