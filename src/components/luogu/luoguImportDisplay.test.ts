@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInitialLuoguPrepareProgress,
+  createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguScanTaskState,
+  finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
@@ -251,6 +253,21 @@ describe("luoguImportDisplay", () => {
     });
   });
 
+  it("finishes prepare statuses after cancellation", () => {
+    const statuses = {
+      "103": "queued",
+      "102": "running",
+      "101": "stopped",
+    } as const;
+
+    expect(finishLuoguPrepareStatuses(statuses, false)).toBe(statuses);
+    expect(finishLuoguPrepareStatuses(statuses, true)).toEqual({
+      "103": "stopped",
+      "102": "stopped",
+      "101": "stopped",
+    });
+  });
+
   it("derives submission id sets and initial prepare progress", () => {
     expect(getLuoguSubmissionIdSet(luoguSubmissions.slice(0, 2))).toEqual(new Set(["103", "102"]));
     expect(createInitialLuoguPrepareProgress({
@@ -263,6 +280,22 @@ describe("luoguImportDisplay", () => {
       succeeded: 2,
       failed: 0,
       skipped: 1,
+    });
+  });
+
+  it("creates write progress from write counters", () => {
+    expect(createLuoguWriteProgress({
+      total: 5,
+      current: 3,
+      writtenCount: 2,
+      failedCount: 1,
+      skippedCount: 4,
+    })).toEqual({
+      current: 3,
+      total: 5,
+      succeeded: 2,
+      failed: 1,
+      skipped: 4,
     });
   });
 

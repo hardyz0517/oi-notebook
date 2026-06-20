@@ -70,8 +70,10 @@ import {
 import {
   createEmptyLuoguPreparationWorkspace,
   createInitialLuoguPrepareProgress,
+  createLuoguWriteProgress,
   createQueuedLuoguPrepareStatuses,
   deriveLuoguScanTaskState,
+  finishLuoguPrepareStatuses,
   formatLuoguPrepareButtonLabel,
   formatLuoguPreviewReviewSummary,
   formatLuoguScanResultSummary,
@@ -293,7 +295,7 @@ import {
   normalizeUserTagTaxonomyConfig,
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
@@ -4226,15 +4228,7 @@ export default function App() {
       );
 
       if (luoguPrepareRunRef.current.cancelled) {
-        setLuoguPrepareStatusesById((current) => {
-          const next = { ...current };
-          queue.forEach((item) => {
-            if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
-              next[item.submissionId] = "stopped";
-            }
-          });
-          return next;
-        });
+        setLuoguPrepareStatusesById((current) => finishLuoguPrepareStatuses(current, true));
       }
 
       if (firstPreparedId) {
@@ -4290,7 +4284,13 @@ export default function App() {
         const prepared = preparedNotesToWrite[index];
         setCurrentlyWritingLuoguId(prepared.submissionId);
         setLuoguWriteProgress((current) =>
-          updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), { current: index + 1 }),
+          createLuoguWriteProgress({
+            total: current?.total ?? preparedNotesToWrite.length,
+            current: index + 1,
+            writtenCount,
+            failedCount,
+            skippedCount,
+          }),
         );
 
         try {
@@ -4324,10 +4324,12 @@ export default function App() {
             if (result.relativePath) lastWrittenPath = result.relativePath;
           }
           setLuoguWriteProgress((current) =>
-            updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), {
-              succeeded: writtenCount,
-              failed: failedCount,
-              skipped: skippedCount,
+            createLuoguWriteProgress({
+              total: current?.total ?? preparedNotesToWrite.length,
+              current: current?.current ?? index + 1,
+              writtenCount,
+              failedCount,
+              skippedCount,
             }),
           );
         } catch (e) {
@@ -4345,10 +4347,12 @@ export default function App() {
             },
           }));
           setLuoguWriteProgress((current) =>
-            updateTaskProgressValue(current ?? createTaskProgress(preparedNotesToWrite.length), {
-              succeeded: writtenCount,
-              failed: failedCount,
-              skipped: skippedCount,
+            createLuoguWriteProgress({
+              total: current?.total ?? preparedNotesToWrite.length,
+              current: current?.current ?? index + 1,
+              writtenCount,
+              failedCount,
+              skippedCount,
             }),
           );
         }

@@ -171,6 +171,20 @@ export function stopQueuedLuoguPrepareStatuses(
   ) as Record<string, LuoguPrepareItemStatus>;
 }
 
+export function finishLuoguPrepareStatuses(
+  statuses: Record<string, LuoguPrepareItemStatus>,
+  cancelled: boolean,
+): Record<string, LuoguPrepareItemStatus> {
+  if (!cancelled) return statuses;
+
+  return Object.fromEntries(
+    Object.entries(statuses).map(([submissionId, status]) => [
+      submissionId,
+      status === "queued" || status === "running" ? "stopped" : status,
+    ]),
+  ) as Record<string, LuoguPrepareItemStatus>;
+}
+
 export function getLuoguSubmissionIdSet(submissions: PreviewLuoguSubmission[]): Set<string> {
   return new Set(submissions.map((submission) => submission.submissionId));
 }
@@ -187,6 +201,23 @@ export function createInitialLuoguPrepareProgress(
   return updateTaskProgressValue(createTaskProgress(input.queueCount), {
     succeeded: input.reusablePreviewCount,
     skipped: input.ignoredCount,
+  });
+}
+
+export interface LuoguWriteProgressCounts {
+  total: number;
+  current: number;
+  writtenCount: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
+export function createLuoguWriteProgress(input: LuoguWriteProgressCounts): TaskProgress {
+  return updateTaskProgressValue(createTaskProgress(input.total), {
+    current: input.current,
+    succeeded: input.writtenCount,
+    failed: input.failedCount,
+    skipped: input.skippedCount,
   });
 }
 
