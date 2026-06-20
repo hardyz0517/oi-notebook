@@ -25,6 +25,16 @@ export interface LocalIndexTaskView {
   statusBadgeTone: LocalIndexStatusBadgeTone;
 }
 
+export interface LocalIndexDetailsView {
+  noteCountLabel: string;
+  chunkCountLabel: string;
+  updatedLabel: string;
+  versionLabel: string;
+  pathLabel: string | null;
+  sizeLabel: string | null;
+  accessLabel: string | null;
+}
+
 export function getLocalIndexStatusLabel(
   status: LocalNoteIndexStatusResult | null,
   isBuilding: boolean,
@@ -139,4 +149,27 @@ export function getLocalIndexAccessLabel(status: LocalNoteIndexStatusResult): st
   if (status.readable) return "只读";
   if (status.writable) return "仅可写入";
   return "不可读取";
+}
+export function deriveLocalIndexDetailsView(status: LocalNoteIndexStatusResult | null): LocalIndexDetailsView {
+  if (!status) {
+    return {
+      noteCountLabel: "未获取",
+      chunkCountLabel: "未获取",
+      updatedLabel: "尚未记录",
+      versionLabel: "未获取",
+      pathLabel: null,
+      sizeLabel: null,
+      accessLabel: null,
+    };
+  }
+
+  return {
+    noteCountLabel: status.noteCount.toLocaleString(),
+    chunkCountLabel: status.chunkCount.toLocaleString(),
+    updatedLabel: getLocalIndexUpdatedLabel(status),
+    versionLabel: `${status.version ?? "尚未建立"} / 当前 ${status.currentVersion ?? 3}`,
+    pathLabel: status.pathLabel,
+    sizeLabel: formatLocalIndexSize(status.approxSizeBytes),
+    accessLabel: getLocalIndexAccessLabel(status),
+  };
 }

@@ -281,12 +281,10 @@ import { formatSearchDate } from "@/lib/localSearchResults";
 import {
   buildLocalIndexRebuildSuccessMessage,
   buildLocalIndexStatusMessage,
+  deriveLocalIndexDetailsView,
   deriveLocalIndexTaskView,
-  formatLocalIndexSize,
-  getLocalIndexAccessLabel,
   getLocalIndexRebuildRunningMessage,
   getLocalIndexStatusBadgeClassName,
-  getLocalIndexUpdatedLabel,
 } from "@/lib/localIndexStatus";
 import { LUOGU_DIFFICULTY_OPTIONS, getDifficultyOptionClassName, getDifficultyOptionTextColor } from "@/lib/luoguDifficulty";
 import {
@@ -2103,6 +2101,7 @@ export default function App() {
     rebuildTask: localIndexRebuildTask,
     fallbackMessage: localIndexMessage,
   });
+  const localIndexDetailsView = deriveLocalIndexDetailsView(localIndexStatus);
   const isLoadingLocalIndexStatus = localIndexTaskView.isLoading;
   const isRebuildingLocalIndex = localIndexTaskView.isRebuilding;
   const localIndexActionDisabled = localIndexTaskView.actionDisabled;
@@ -7711,13 +7710,13 @@ export default function App() {
                               </span>
                             </SettingsV2Row>
                             <SettingsV2Row title="笔记数量" description="已纳入索引的 Markdown 笔记数量。">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.noteCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.noteCountLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             <SettingsV2Row title="片段数量" description="可供检索的文本片段数量。">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.chunkCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.chunkCountLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             <SettingsV2Row title="上次更新" description="索引最近一次刷新时间。">
-                              <SettingsV2ReadonlyPill>{getLocalIndexUpdatedLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.updatedLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                           </SettingsV2Card>
                         </SettingsV2Section>
@@ -7725,18 +7724,18 @@ export default function App() {
                         <SettingsV2Section title="高级信息">
                           <SettingsV2Card>
                             <SettingsV2Row title="索引版本">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? `${localIndexStatus.version ?? "尚未建立"} / 当前 ${localIndexStatus.currentVersion ?? 3}` : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.versionLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             {localIndexStatus && (
                               <>
                                 <SettingsV2Row title="存储位置">
-                                  <SettingsV2ReadonlyPill title={localIndexStatus.pathLabel}>{localIndexStatus.pathLabel}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill title={localIndexDetailsView.pathLabel ?? undefined}>{localIndexDetailsView.pathLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                                 <SettingsV2Row title="索引大小">
-                                  <SettingsV2ReadonlyPill>{formatLocalIndexSize(localIndexStatus.approxSizeBytes)}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill>{localIndexDetailsView.sizeLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                                 <SettingsV2Row title="权限">
-                                  <SettingsV2ReadonlyPill>{getLocalIndexAccessLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill>{localIndexDetailsView.accessLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                               </>
                             )}

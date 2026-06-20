@@ -4,6 +4,7 @@ import type { LocalNoteIndexStatusResult } from "@/lib/api";
 import {
   buildLocalIndexRebuildSuccessMessage,
   buildLocalIndexStatusMessage,
+  deriveLocalIndexDetailsView,
   deriveLocalIndexTaskView,
   getLocalIndexRebuildRunningMessage,
   getLocalIndexRebuildButtonLabel,
@@ -159,6 +160,32 @@ describe("localIndexStatus model helpers", () => {
     ).toMatchObject({
       statusLabel: "正在建立本地笔记索引...",
       statusBadgeTone: "info",
+    });
+  });
+
+  it("derives local index details for settings display", () => {
+    expect(deriveLocalIndexDetailsView(null)).toEqual({
+      noteCountLabel: "未获取",
+      chunkCountLabel: "未获取",
+      updatedLabel: "尚未记录",
+      versionLabel: "未获取",
+      pathLabel: null,
+      sizeLabel: null,
+      accessLabel: null,
+    });
+
+    expect(deriveLocalIndexDetailsView(baseStatus)).toEqual({
+      noteCountLabel: "12",
+      chunkCountLabel: "34",
+      updatedLabel: new Date(baseStatus.updatedAt! * 1000).toLocaleString(),
+      versionLabel: "3 / 当前 3",
+      pathLabel: "index.json",
+      sizeLabel: "2.0 KB",
+      accessLabel: "可读写",
+    });
+
+    expect(deriveLocalIndexDetailsView({ ...baseStatus, version: undefined })).toMatchObject({
+      versionLabel: "尚未建立 / 当前 3",
     });
   });
 });
