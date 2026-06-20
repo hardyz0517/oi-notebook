@@ -1,4 +1,4 @@
-import { createIdleTaskState, createTaskProgress, isTaskActive, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, createTaskProgress, deriveTaskView, isTaskActive, updateTaskProgressValue, type TaskProgress, type TaskState, type TaskView } from "@/lib/taskStatus";
 import type { PreviewLuoguSubmission } from "@/lib/api";
 
 import type { LuoguScanResultStats } from "./useLuoguImportController";
@@ -11,6 +11,7 @@ import type { LuoguImportRules } from "@/components/settings/pages/luoguImportRu
 
 export type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
 export type LuoguImportStep = "scan" | "preview";
+export type LuoguTaskViewKind = "scan" | "prepare" | "write";
 
 export interface LuoguScanProgressDisplay {
   currentPage?: number;
@@ -473,6 +474,38 @@ export function deriveLuoguWriteTaskState(input: LuoguWriteTaskStateInput): Task
     return { status: "running", progress: input.progress, error: null };
   }
   return createIdleTaskState();
+}
+
+export function deriveLuoguTaskView(state: TaskState, kind: LuoguTaskViewKind): TaskView {
+  if (kind === "scan") {
+    return deriveTaskView(state, {
+      idleLabel: "开始扫描",
+      runningLabel: "扫描中",
+      pausedLabel: "继续扫描",
+      succeededLabel: "扫描完成",
+      failedLabel: "重新扫描",
+      cancelledLabel: "扫描已取消",
+    });
+  }
+
+  if (kind === "prepare") {
+    return deriveTaskView(state, {
+      idleLabel: "生成预览",
+      runningLabel: "生成中",
+      stoppingLabel: "停止中",
+      succeededLabel: "生成完成",
+      failedLabel: "重新生成",
+      cancelledLabel: "生成已取消",
+    });
+  }
+
+  return deriveTaskView(state, {
+    idleLabel: "写入选中",
+    runningLabel: "写入中",
+    succeededLabel: "写入完成",
+    failedLabel: "重新写入",
+    cancelledLabel: "写入已取消",
+  });
 }
 
 export function formatLuoguScanResultSummary(input: LuoguScanResultSummaryInput): string {

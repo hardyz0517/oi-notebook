@@ -10,6 +10,7 @@ import {
   createEmptyLuoguPreparationWorkspace,
   deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
+  deriveLuoguTaskView,
   deriveLuoguWriteTaskState,
   failLuoguScanSourceState,
   finishLuoguScanSourceState,
@@ -256,6 +257,44 @@ describe("luoguImportDisplay", () => {
       isWriting: false,
       progress: null,
     })).toEqual({ status: "idle", progress: null, error: null });
+  });
+
+  it("derives task views for Luogu scan, prepare, and write controls", () => {
+    expect(deriveLuoguTaskView({ status: "idle", progress: null, error: null }, "scan")).toMatchObject({
+      status: "idle",
+      label: "开始扫描",
+      canStart: true,
+      canCancel: false,
+    });
+
+    expect(deriveLuoguTaskView({ status: "paused", progress: null, error: null }, "scan")).toMatchObject({
+      status: "paused",
+      label: "继续扫描",
+      isBusy: false,
+      canCancel: true,
+    });
+
+    expect(deriveLuoguTaskView({
+      status: "stopping",
+      progress: { current: 2, total: 5, succeeded: 1, failed: 0, skipped: 0 },
+      error: null,
+    }, "prepare")).toMatchObject({
+      status: "stopping",
+      label: "停止中",
+      isBusy: true,
+      canCancel: false,
+    });
+
+    expect(deriveLuoguTaskView({
+      status: "running",
+      progress: { current: 1, total: 3, succeeded: 0, failed: 0, skipped: 0 },
+      error: null,
+    }, "write")).toMatchObject({
+      status: "running",
+      label: "写入中",
+      message: "1/3",
+      canStart: false,
+    });
   });
 
   it("models prepare and write source state transitions", () => {

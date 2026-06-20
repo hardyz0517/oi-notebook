@@ -77,6 +77,7 @@ import {
   createQueuedLuoguPrepareStatuses,
   deriveLuoguPrepareTaskState,
   deriveLuoguScanTaskState,
+  deriveLuoguTaskView,
   deriveLuoguWriteTaskState,
   failLuoguScanSourceState,
   finishLuoguScanSourceState,
@@ -316,7 +317,7 @@ import {
   normalizeUserTagTaxonomyConfig,
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
-import { createIdleTaskState, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import { createIdleTaskState, failTaskState, finishTaskState, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import {
   buildNewNoteMarkdown,
   getCreateFolderPlan,
@@ -1914,9 +1915,6 @@ export default function App() {
     summary: luoguScanSummary,
     error: luoguScanError,
   });
-  const isLuoguScanTaskRunning = isTaskRunning(luoguScanTaskState);
-  const isLuoguScanTaskPaused = isTaskPaused(luoguScanTaskState);
-  const isLuoguScanTaskFailed = isTaskFailed(luoguScanTaskState);
   const luoguPrepareTaskState = deriveLuoguPrepareTaskState({
     isPreparing: isPreparingSelectedLuogu,
     isStopping: isStoppingLuoguPrepare,
@@ -1926,6 +1924,12 @@ export default function App() {
     isWriting: isWritingPreparedLuogu,
     progress: luoguWriteProgress,
   });
+  const luoguScanTaskView = deriveLuoguTaskView(luoguScanTaskState, "scan");
+  const luoguPrepareTaskView = deriveLuoguTaskView(luoguPrepareTaskState, "prepare");
+  const luoguWriteTaskView = deriveLuoguTaskView(luoguWriteTaskState, "write");
+  const isLuoguScanTaskRunning = luoguScanTaskView.status === "running";
+  const isLuoguScanTaskPaused = luoguScanTaskView.status === "paused";
+  const isLuoguScanTaskFailed = luoguScanTaskView.status === "failed";
   const luoguPrepareButtonLabel = formatLuoguPrepareButtonLabel({
     isPreparing: isPreparingSelectedLuogu,
     progress: luoguPrepareProgress,
@@ -6942,9 +6946,9 @@ export default function App() {
                                   size="sm"
                                   className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                                   onClick={handleStopPreparingLuoguPreviews}
-                                  disabled={isStoppingLuoguPrepare}
+                                  disabled={!luoguPrepareTaskView.canCancel || luoguPrepareTaskView.status === "stopping"}
                                 >
-                                  {isStoppingLuoguPrepare ? "停止中..." : "停止生成"}
+                                  {luoguPrepareTaskView.status === "stopping" ? `${luoguPrepareTaskView.label}...` : "停止生成"}
                                 </Button>
                               )}
                               </>
@@ -7156,7 +7160,7 @@ export default function App() {
                             }
                             title="写入时仅新建文件，不覆盖已有文件"
                           >
-                            {isWritingPreparedLuogu ? "写入中..." : `写入选中 ${writableLuoguPreparedNotes.length}`}
+                            {luoguWriteTaskView.status === "running" ? `${luoguWriteTaskView.label}...` : `写入选中 ${writableLuoguPreparedNotes.length}`}
                           </Button>
                         </div>
                       </section>
