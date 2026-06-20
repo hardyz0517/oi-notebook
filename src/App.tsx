@@ -148,6 +148,7 @@ import {
   getLuoguStatusLabel,
   getSaveStatusLabel,
 } from "@/lib/appStatusLabels";
+import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yieldToUi } from "@/lib/appAsync";
 import { DEFAULT_BLOG_CONFIG, normalizeBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
@@ -751,26 +752,6 @@ function createAiModelDraft(modelId: string, source: "manual" | "synced" = "manu
   };
 }
 
-function getErrorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timeoutId);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timeoutId);
-        reject(error);
-      },
-    );
-  });
-}
-
 function formatWebSearchTestError(error: unknown): string {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
@@ -796,42 +777,6 @@ function formatWebSearchTestError(error: unknown): string {
     return "搜索服务暂时不可用。测试失败不影响 AI 模型和设置保存。";
   }
   return message || "搜索测试失败。测试失败不影响设置保存，也不影响普通聊天。";
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function yieldToUi(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(() => resolve());
-      return;
-    }
-    window.setTimeout(resolve, 0);
-  });
-}
-
-async function runLimitedConcurrencyQueue<T>(
-  items: T[],
-  concurrency: number,
-  shouldContinue: () => boolean,
-  worker: (item: T, index: number) => Promise<void>,
-): Promise<void> {
-  const workerCount = Math.max(1, Math.min(concurrency, items.length));
-  let nextIndex = 0;
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (shouldContinue()) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= items.length) return;
-        await worker(items[index], index);
-        await yieldToUi();
-      }
-    }),
-  );
 }
 
 function getAiSidebarWidthMax(): number {
