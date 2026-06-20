@@ -1063,6 +1063,15 @@ git diff --cached --name-only
 git commit -m "docs: record rust service boundary audit"
 ```
 
+**Service-boundary audit note, 2026-06-20:**
+
+- Keep all `#[tauri::command]` functions as stable command adapters unless a later task explicitly changes the frontend contract. The non-AI command surface currently includes app/window commands in `lib.rs`, notes commands in `notes.rs`, git commands in `git.rs`, Luogu commands in `luogu.rs`, and blog config commands in `blog_server.rs`.
+- Keep `paths.rs` as the root/path provider. It owns app data, repo root, notes root, `.oinb`, site, local-blog dist, and data directory creation. Service modules should call it instead of duplicating root discovery.
+- Treat `notes.rs` path safety as high-risk. `safe_note_path` and its two-layer guard must not be simplified or replaced by a generic helper. If notes helpers are ever extracted, move the validation, canonicalization, callers, and tests as one intact unit.
+- Safe future extraction candidates: git command internals such as command execution/output helpers, staging guards, commit helpers, and pathspec validation; Luogu parsing/fetching/markdown-building/import helpers that already take explicit inputs; blog note scanning, frontmatter parsing, note/asset/static path resolution, JSON serialization, and typed blog response models.
+- Blog extraction order should be conservative: first pure string/path/frontmatter helpers, then note scanning/detail assembly, then asset/static resolution while preserving canonical containment checks, then JSON helpers. Keep HTTP response writing, `ProductionBlogServer`, route dispatch, redirects, Tauri commands, and `State<BlogServerState>` glue in `blog_server.rs` until the service boundary is stable.
+- Do not mix behavior cleanup into service extraction. In particular, `lib.rs::start_blog_server` currently routes both debug and release to `ProductionBlogServer::ensure_running`; record that observation, but leave the behavior unchanged during extraction tasks.
+
 ### Task 7.2: Add Rust Task Status Model
 
 **Files:**
