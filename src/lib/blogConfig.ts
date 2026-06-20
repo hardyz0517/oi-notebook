@@ -30,3 +30,33 @@ export function buildBlogConfigSaveDraft(config: BlogConfig): BlogConfigSaveDraf
   }
   return { ok: true, config: normalizedConfig };
 }
+
+export interface BlogSettingsViewInput {
+  isLoadingBlogConfig: boolean;
+  isSavingBlogConfig: boolean;
+  isRestartingBlog: boolean;
+}
+
+export interface BlogSettingsView {
+  isConfigBusy: boolean;
+  areFieldsDisabled: boolean;
+  isSaveDisabled: boolean;
+  saveButtonLabel: string;
+  isRestartDisabled: boolean;
+  restartButtonLabel: string;
+  openButtonLabel: string;
+}
+
+export function deriveBlogSettingsView(input: BlogSettingsViewInput): BlogSettingsView {
+  const isConfigBusy = input.isLoadingBlogConfig || input.isSavingBlogConfig;
+
+  return {
+    isConfigBusy,
+    areFieldsDisabled: isConfigBusy,
+    isSaveDisabled: isConfigBusy,
+    saveButtonLabel: input.isSavingBlogConfig ? "保存中..." : "保存博客信息",
+    isRestartDisabled: input.isRestartingBlog,
+    restartButtonLabel: input.isRestartingBlog ? "重启中..." : "重启博客",
+    openButtonLabel: "打开博客",
+  };
+}

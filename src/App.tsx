@@ -186,7 +186,7 @@ import {
   shouldRefreshAiConfigForSettingsDiagnostics,
   type ActivityBarItem,
 } from "@/lib/appShell";
-import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft } from "@/lib/blogConfig";
+import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
   createEmptyTagNormalizationScanStats,
@@ -2028,6 +2028,11 @@ export default function App() {
     hasActiveEditorDocument,
     isSavingNote,
     isDirty: activeEditorDirty,
+  });
+  const blogSettingsView = deriveBlogSettingsView({
+    isLoadingBlogConfig,
+    isSavingBlogConfig,
+    isRestartingBlog,
   });
   const blogStatusLabel = getBlogStatusLabel(isRestartingBlog);
   const aiStatusLabel =
@@ -7995,12 +8000,10 @@ export default function App() {
                       blogTitle={blogInfoDraft.title}
                       blogSubtitle={blogInfoDraft.subtitle}
                       blogConfigError={blogConfigError}
-                      isLoadingBlogConfig={isLoadingBlogConfig}
-                      isSavingBlogConfig={isSavingBlogConfig}
+                      blogSettingsView={blogSettingsView}
                       onBlogTitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, title: value }))}
                       onBlogSubtitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, subtitle: value }))}
                       onSaveBlogInfo={() => void handleSaveBlogInfo()}
-                      isRestartingBlog={isRestartingBlog}
                       onOpenBlog={handleOpenBlog}
                       onRestartBlog={handleRestartBlog}
                     />
