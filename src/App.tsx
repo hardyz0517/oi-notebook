@@ -170,7 +170,6 @@ import {
   getDisplayTags,
   getEffectiveCollections,
   normalizeCollectionValues,
-  normalizeTagValue,
 } from "@/lib/collectionTags";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
@@ -257,7 +256,7 @@ import {
   getNoteDisplayName,
   getNextOpenTabPathAfterClose,
 } from "@/lib/openTabs";
-import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { analyzeTagListNormalization, applyTagNormalizationPlan, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import {
   buildTagTaxonomyStatItems,
   buildTagTaxonomyStats,
@@ -269,13 +268,13 @@ import {
   getTagTaxonomyUserEntries,
 } from "@/lib/tagTaxonomySettingsModel";
 import {
+  addTagTaxonomyAlias,
+  addTagTaxonomyEntry,
   buildTagTaxonomyConfigExport,
-  createUserTagEntryId,
+  deleteTagTaxonomyAlias,
+  deleteTagTaxonomyEntry,
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
-  parseAliasListInput,
-  parseTagPathInput,
-  resolveTagTaxonomyAliasTarget,
 } from "@/lib/tagTaxonomyUserConfig";
 import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, startTaskState, updateTaskProgressValue, type TaskProgress, type TaskState } from "@/lib/taskStatus";
 import { joinNotePath, normalizeNoteFileName, validateNoteDirectoryPathInput, validateNoteNamePart } from "@/lib/notePathHelpers";
@@ -2174,76 +2173,36 @@ export default function App() {
     setTagTaxonomyImportMessage("已导入标签配置");
   }, [previewTagTaxonomyImport, requestConfirm, saveUserTagTaxonomyConfig, tagTaxonomyImportJsonInput]);
   const handleAddTagTaxonomyEntry = useCallback(async () => {
-    const path = parseTagPathInput(tagTaxonomyEntryPathInput);
-    if (path.length === 0) {
-      setTagTaxonomySaveError("标签路径不能为空。");
+    const result = addTagTaxonomyEntry(tagTaxonomyConfig, tagTaxonomyEntryPathInput, tagTaxonomyEntryAliasesInput);
+    if (!result.ok) {
+      setTagTaxonomySaveError(result.error);
       return;
     }
 
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const pathText = path.join("/");
-    const existingSuggestion = getTagSuggestionList(currentConfig).find((suggestion) => suggestion.pathText === pathText);
-    if (existingSuggestion) {
-      setTagTaxonomySaveError("这个标签路径已经存在。");
-      return;
-    }
-
-    const nextEntry: TagTaxonomyEntry = {
-      id: createUserTagEntryId(path, currentConfig.entries ?? []),
-      path,
-      aliases: parseAliasListInput(tagTaxonomyEntryAliasesInput),
-      source: "user",
-    };
-    const saved = await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      entries: [...(currentConfig.entries ?? []), nextEntry],
-    });
+    const saved = await saveUserTagTaxonomyConfig(result.config);
     if (!saved) return;
 
     setTagTaxonomyEntryPathInput("");
     setTagTaxonomyEntryAliasesInput("");
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyEntryAliasesInput, tagTaxonomyEntryPathInput]);
   const handleDeleteTagTaxonomyEntry = useCallback(async (entryId: string) => {
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      entries: (currentConfig.entries ?? []).filter((entry) => entry.id !== entryId),
-    });
+    await saveUserTagTaxonomyConfig(deleteTagTaxonomyEntry(tagTaxonomyConfig, entryId));
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const handleAddTagTaxonomyAlias = useCallback(async () => {
-    const aliasName = normalizeTagValue(tagTaxonomyAliasNameInput);
-    if (!aliasName) {
-      setTagTaxonomySaveError("别名不能为空。");
+    const result = addTagTaxonomyAlias(tagTaxonomyConfig, tagTaxonomyAliasNameInput, tagTaxonomyAliasTargetInput);
+    if (!result.ok) {
+      setTagTaxonomySaveError(result.error);
       return;
     }
 
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const target = resolveTagTaxonomyAliasTarget(tagTaxonomyAliasTargetInput, currentConfig);
-    if (!target) {
-      setTagTaxonomySaveError("目标标签不能为空；请填写 canonical id，或填写已存在的标签路径。");
-      return;
-    }
-
-    const saved = await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      aliases: {
-        ...(currentConfig.aliases ?? {}),
-        [aliasName]: target,
-      },
-    });
+    const saved = await saveUserTagTaxonomyConfig(result.config);
     if (!saved) return;
 
     setTagTaxonomyAliasNameInput("");
     setTagTaxonomyAliasTargetInput("");
   }, [saveUserTagTaxonomyConfig, tagTaxonomyAliasNameInput, tagTaxonomyAliasTargetInput, tagTaxonomyConfig]);
   const handleDeleteTagTaxonomyAlias = useCallback(async (aliasName: string) => {
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const nextAliases = { ...(currentConfig.aliases ?? {}) };
-    delete nextAliases[aliasName];
-    await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      aliases: nextAliases,
-    });
+    await saveUserTagTaxonomyConfig(deleteTagTaxonomyAlias(tagTaxonomyConfig, aliasName));
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const luoguStatusInput = {
     hasLoadedLuoguConfigStatus,

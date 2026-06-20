@@ -35,6 +35,101 @@ export function buildTagTaxonomyConfigExport(
   };
 }
 
+export type TagTaxonomyConfigUpdateResult =
+  | {
+    ok: true;
+    config: UserTagTaxonomyConfig;
+  }
+  | {
+    ok: false;
+    error: string;
+  };
+
+export function addTagTaxonomyEntry(
+  config: UserTagTaxonomyConfig | null | undefined,
+  pathInput: string,
+  aliasesInput: string,
+): TagTaxonomyConfigUpdateResult {
+  const path = parseTagPathInput(pathInput);
+  if (path.length === 0) {
+    return { ok: false, error: "标签路径不能为空。" };
+  }
+
+  const currentConfig = normalizeUserTagTaxonomyConfig(config);
+  const pathText = path.join("/");
+  const existingSuggestion = getTagSuggestionList(currentConfig).find((suggestion) => suggestion.pathText === pathText);
+  if (existingSuggestion) {
+    return { ok: false, error: "这个标签路径已经存在。" };
+  }
+
+  const nextEntry: TagTaxonomyEntry = {
+    id: createUserTagEntryId(path, currentConfig.entries ?? []),
+    path,
+    aliases: parseAliasListInput(aliasesInput),
+    source: "user",
+  };
+
+  return {
+    ok: true,
+    config: normalizeUserTagTaxonomyConfig({
+      ...currentConfig,
+      entries: [...(currentConfig.entries ?? []), nextEntry],
+    }),
+  };
+}
+
+export function deleteTagTaxonomyEntry(
+  config: UserTagTaxonomyConfig | null | undefined,
+  entryId: string,
+): UserTagTaxonomyConfig {
+  const currentConfig = normalizeUserTagTaxonomyConfig(config);
+  return normalizeUserTagTaxonomyConfig({
+    ...currentConfig,
+    entries: (currentConfig.entries ?? []).filter((entry) => entry.id !== entryId),
+  });
+}
+
+export function addTagTaxonomyAlias(
+  config: UserTagTaxonomyConfig | null | undefined,
+  aliasInput: string,
+  targetInput: string,
+): TagTaxonomyConfigUpdateResult {
+  const aliasName = normalizeTagValue(aliasInput);
+  if (!aliasName) {
+    return { ok: false, error: "别名不能为空。" };
+  }
+
+  const currentConfig = normalizeUserTagTaxonomyConfig(config);
+  const target = resolveTagTaxonomyAliasTarget(targetInput, currentConfig);
+  if (!target) {
+    return { ok: false, error: "目标标签不能为空；请填写 canonical id，或填写已存在的标签路径。" };
+  }
+
+  return {
+    ok: true,
+    config: normalizeUserTagTaxonomyConfig({
+      ...currentConfig,
+      aliases: {
+        ...(currentConfig.aliases ?? {}),
+        [aliasName]: target,
+      },
+    }),
+  };
+}
+
+export function deleteTagTaxonomyAlias(
+  config: UserTagTaxonomyConfig | null | undefined,
+  aliasName: string,
+): UserTagTaxonomyConfig {
+  const currentConfig = normalizeUserTagTaxonomyConfig(config);
+  const nextAliases = { ...(currentConfig.aliases ?? {}) };
+  delete nextAliases[aliasName];
+  return normalizeUserTagTaxonomyConfig({
+    ...currentConfig,
+    aliases: nextAliases,
+  });
+}
+
 export function parseTagPathInput(value: string): string[] {
   return value
     .split("/")

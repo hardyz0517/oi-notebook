@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TagTaxonomyEntry, UserTagTaxonomyConfig } from "./tagTaxonomy";
 import {
+  addTagTaxonomyAlias,
+  addTagTaxonomyEntry,
   buildTagTaxonomyConfigExport,
   createUserTagEntryId,
+  deleteTagTaxonomyAlias,
+  deleteTagTaxonomyEntry,
   formatTagSuggestionPath,
   mergeTagsStable,
   normalizeUserTagTaxonomyConfig,
@@ -12,6 +16,75 @@ import {
 } from "./tagTaxonomyUserConfig";
 
 describe("tagTaxonomyUserConfig", () => {
+  it("adds user taxonomy entries from form input", () => {
+    const result = addTagTaxonomyEntry(null, " 算法 / 动态规划 / 背包 ", "knapsack, 背包");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.entries).toEqual([{
+      id: "user.tag.kwfmsv",
+      path: ["算法", "动态规划", "背包"],
+      aliases: ["knapsack", "背包"],
+      source: "user",
+    }]);
+  });
+
+  it("rejects empty and duplicate user taxonomy entry paths", () => {
+    expect(addTagTaxonomyEntry(null, " / / ", "").ok).toBe(false);
+
+    const existing: UserTagTaxonomyConfig = {
+      entries: [{ id: "user.dp", path: ["算法", "动态规划"], source: "user" }],
+      aliases: {},
+      hiddenIds: [],
+      orderOverrides: {},
+      merges: {},
+      customCollections: [],
+    };
+    expect(addTagTaxonomyEntry(existing, "算法/动态规划", "").ok).toBe(false);
+  });
+
+  it("deletes user taxonomy entries without mutating the source config", () => {
+    const source: UserTagTaxonomyConfig = {
+      entries: [
+        { id: "user.keep", path: ["算法", "图论"], source: "user" },
+        { id: "user.remove", path: ["算法", "动态规划"], source: "user" },
+      ],
+      aliases: {},
+      hiddenIds: [],
+      orderOverrides: {},
+      merges: {},
+      customCollections: [],
+    };
+
+    const result = deleteTagTaxonomyEntry(source, "user.remove");
+
+    expect((result.entries ?? []).map((entry) => entry.id)).toEqual(["user.keep"]);
+    expect(source.entries?.map((entry) => entry.id)).toEqual(["user.keep", "user.remove"]);
+  });
+
+  it("adds and deletes user taxonomy aliases", () => {
+    const config: UserTagTaxonomyConfig = {
+      entries: [{ id: "user.dp", path: ["算法", "动态规划"], source: "user" }],
+      aliases: {},
+      hiddenIds: [],
+      orderOverrides: {},
+      merges: {},
+      customCollections: [],
+    };
+
+    const added = addTagTaxonomyAlias(config, " DP ", "算法 / 动态规划");
+
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.config.aliases).toEqual({ DP: "user.dp" });
+    expect(deleteTagTaxonomyAlias(added.config, "DP").aliases).toEqual({});
+  });
+
+  it("rejects empty alias names and unresolved alias targets", () => {
+    expect(addTagTaxonomyAlias(null, " ", "user.dp").ok).toBe(false);
+    expect(addTagTaxonomyAlias(null, "dp", "未知 标签").ok).toBe(false);
+  });
+
   it("builds deterministic export payloads", () => {
     const config: UserTagTaxonomyConfig = {
       version: 2,
