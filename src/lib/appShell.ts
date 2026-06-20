@@ -1,3 +1,5 @@
+import type { SettingsCategory, SettingsSection } from "@/components/settings/settingsTypes";
+
 export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 
 export interface ActiveActivityItemInput {
@@ -29,4 +31,25 @@ export function isAiActivitySelected(input: AiActivitySelectedInput): boolean {
 
 export function getActivityButtonClassName(): string {
   return "app-activity-button relative h-12 w-12 rounded-md";
+}
+
+export type SettingsOpenTarget =
+  | { type: "category"; category: SettingsCategory }
+  | { type: "page"; page: SettingsSection };
+
+export function getSettingsOpenTarget(
+  target: SettingsSection | SettingsCategory,
+  sectionFallback: Record<SettingsCategory, SettingsSection>,
+): SettingsOpenTarget {
+  return target in sectionFallback
+    ? { type: "category", category: target as SettingsCategory }
+    : { type: "page", page: target as SettingsSection };
+}
+
+export function shouldEnsureAiConfigForSettingsPage(page: SettingsSection): boolean {
+  return page.startsWith("ai-");
+}
+
+export function shouldRefreshAiConfigForSettingsDiagnostics(page: SettingsSection): boolean {
+  return page === "diagnostics-search";
 }

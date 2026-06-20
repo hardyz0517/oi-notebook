@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getActiveActivityItem, getActivityButtonClassName, isAiActivitySelected } from "./appShell";
+import {
+  getActiveActivityItem,
+  getActivityButtonClassName,
+  getSettingsOpenTarget,
+  isAiActivitySelected,
+  shouldEnsureAiConfigForSettingsPage,
+  shouldRefreshAiConfigForSettingsDiagnostics,
+} from "./appShell";
 
 describe("appShell", () => {
   it("prioritizes modal and transient activity state over the notes sidebar", () => {
@@ -59,5 +66,43 @@ describe("appShell", () => {
 
   it("keeps the stable activity button class", () => {
     expect(getActivityButtonClassName()).toBe("app-activity-button relative h-12 w-12 rounded-md");
+  });
+
+  it("derives settings open targets from categories and pages", () => {
+    expect(getSettingsOpenTarget("ai", {
+      general: "general-basics",
+      appearance: "appearance-theme",
+      ai: "ai-api",
+      luogu: "luogu-account",
+      blog: "blog-info",
+      data: "data-storage",
+      keyboard: "keyboard-shortcuts",
+      advanced: "advanced-developer",
+      about: "about-version",
+      diagnostics: "diagnostics-search",
+      editor: "about-version",
+    })).toEqual({ type: "category", category: "ai" });
+    expect(getSettingsOpenTarget("ai-web-search", {
+      general: "general-basics",
+      appearance: "appearance-theme",
+      ai: "ai-api",
+      luogu: "luogu-account",
+      blog: "blog-info",
+      data: "data-storage",
+      keyboard: "keyboard-shortcuts",
+      advanced: "advanced-developer",
+      about: "about-version",
+      diagnostics: "diagnostics-search",
+      editor: "about-version",
+    })).toEqual({ type: "page", page: "ai-web-search" });
+  });
+
+  it("detects settings pages that need AI config side effects", () => {
+    expect(shouldEnsureAiConfigForSettingsPage("ai-api")).toBe(true);
+    expect(shouldEnsureAiConfigForSettingsPage("ai-web-search")).toBe(true);
+    expect(shouldEnsureAiConfigForSettingsPage("diagnostics-search")).toBe(false);
+    expect(shouldEnsureAiConfigForSettingsPage("blog-info")).toBe(false);
+    expect(shouldRefreshAiConfigForSettingsDiagnostics("diagnostics-search")).toBe(true);
+    expect(shouldRefreshAiConfigForSettingsDiagnostics("ai-api")).toBe(false);
   });
 });

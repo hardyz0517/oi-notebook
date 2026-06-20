@@ -165,7 +165,10 @@ import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yiel
 import {
   getActiveActivityItem,
   getActivityButtonClassName,
+  getSettingsOpenTarget,
   isAiActivitySelected,
+  shouldEnsureAiConfigForSettingsPage,
+  shouldRefreshAiConfigForSettingsDiagnostics,
   type ActivityBarItem,
 } from "@/lib/appShell";
 import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, resolveBlogConfigDraft } from "@/lib/blogConfig";
@@ -5643,14 +5646,14 @@ export default function App() {
 
   const openSettingsSection = (target: SettingsSection | SettingsCategory) => {
     cancelPendingSettingsCenterCloseCleanup();
-    const nextPage =
-      target in SETTINGS_SECTION_FALLBACK
-        ? settingsCenterHostRef.current?.openSection(target as SettingsCategory)
-        : settingsCenterHostRef.current?.openPage(target as SettingsSection);
+    const openTarget = getSettingsOpenTarget(target, SETTINGS_SECTION_FALLBACK);
+    const nextPage = openTarget.type === "category"
+      ? settingsCenterHostRef.current?.openSection(openTarget.category)
+      : settingsCenterHostRef.current?.openPage(openTarget.page);
     if (!nextPage) return;
-    if (nextPage.startsWith("ai-") && !aiConfigDraft && !isLoadingAiConfig) {
+    if (shouldEnsureAiConfigForSettingsPage(nextPage) && !aiConfigDraft && !isLoadingAiConfig) {
       void ensureAiConfigLoadedForSettings();
-    } else if (nextPage === "diagnostics-search" && !aiConfigDraft && !isLoadingAiConfig) {
+    } else if (shouldRefreshAiConfigForSettingsDiagnostics(nextPage) && !aiConfigDraft && !isLoadingAiConfig) {
       setIsLoadingAiConfig(true);
       void refreshAiConfig()
         .catch((e) => toast.error(`AI 配置读取失败：${e}`))
