@@ -296,10 +296,8 @@ import {
   previewTagTaxonomyConfigImportJson,
 } from "@/lib/tagTaxonomyUserConfig";
 import { createIdleTaskState, createTaskProgress, failTaskState, finishTaskState, isTaskFailed, isTaskPaused, isTaskRunning, startTaskState, type TaskProgress, type TaskState } from "@/lib/taskStatus";
-import { validateNoteNamePart } from "@/lib/notePathHelpers";
 import {
   buildNewNoteMarkdown,
-  buildRenameNotePath,
   getCreateFolderPlan,
   getCreateNotePlan,
   findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
@@ -309,6 +307,7 @@ import {
   getFolderDialogState,
   getNoteDirectories,
   getRenameDialogInitialState,
+  getRenameNotePlan,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
   getTreeSelectionAfterClear,
   getTreeSelectionAfterDirectorySelect,
@@ -2814,26 +2813,18 @@ export default function App() {
 
   const handleRename = async () => {
     if (!renameTarget) return;
-    const nameErr = validateNoteNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
-    if (nameErr) { toast.error(nameErr); return; }
-
-    const newPath = buildRenameNotePath(renameTarget, dialogValue, renameTargetIsDirectory);
-    if (newPath === renameTarget) { closeDialog(); return; }
-
-    const existing = findEntryCaseInsensitive(newPath, renameTargetIsDirectory);
-    if (existing && existing.path.toLowerCase() !== renameTarget.toLowerCase()) {
-      toast.error(renameTargetIsDirectory ? "同目录已存在同名文件夹" : "同目录已存在同名笔记");
-      return;
-    }
+    const renamePlan = getRenameNotePlan(files, renameTarget, dialogValue, renameTargetIsDirectory);
+    if (renamePlan.error) { toast.error(renamePlan.error); return; }
+    if (renamePlan.shouldClose) { closeDialog(); return; }
 
     try {
       if (renameTargetIsDirectory) {
-        await renameNoteFolder(renameTarget, newPath);
+        await renameNoteFolder(renameTarget, renamePlan.path);
       } else {
-        await renameNote(renameTarget, newPath);
+        await renameNote(renameTarget, renamePlan.path);
       }
       const updated = await listNotes();
-      updatePathReferences(renameTarget, newPath, renameTargetIsDirectory);
+      updatePathReferences(renameTarget, renamePlan.path, renameTargetIsDirectory);
       setFiles(updated);
       closeDialog();
       toast.success(renameTargetIsDirectory ? "已重命名文件夹" : "已重命名笔记");

@@ -36,6 +36,12 @@ export interface NoteWorkspaceCreateFolderPlan {
   error: string | null;
 }
 
+export interface NoteWorkspaceRenamePlan {
+  path: string;
+  shouldClose: boolean;
+  error: string | null;
+}
+
 const FOLDER_DIALOG_DEFAULT_HELP_TEXT = "名称不能包含路径穿越或 Windows 非法字符";
 
 export function getNoteDirectories(files: NoteFileInfo[]): string[] {
@@ -169,6 +175,30 @@ export function getCreateFolderPlan(
   }
 
   return { path, error: null };
+}
+
+export function getRenameNotePlan(
+  files: NoteFileInfo[],
+  targetPath: string,
+  nextName: string,
+  isDirectory: boolean,
+): NoteWorkspaceRenamePlan {
+  const nameError = validateNoteNamePart(nextName, isDirectory ? "folder" : "file");
+  if (nameError) return { path: "", shouldClose: false, error: nameError };
+
+  const path = buildRenameNotePath(targetPath, nextName, isDirectory);
+  if (path === targetPath) return { path, shouldClose: true, error: null };
+
+  const existing = findEntryCaseInsensitive(files, path, isDirectory);
+  if (existing && existing.path.toLowerCase() !== targetPath.toLowerCase()) {
+    return {
+      path,
+      shouldClose: false,
+      error: isDirectory ? "同目录已存在同名文件夹" : "同目录已存在同名笔记",
+    };
+  }
+
+  return { path, shouldClose: false, error: null };
 }
 
 export function quoteYamlString(value: string): string {

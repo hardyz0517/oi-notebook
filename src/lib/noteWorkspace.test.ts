@@ -10,6 +10,7 @@ import {
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent,
   getNoteDirectories,
+  getRenameNotePlan,
   getRenameDialogInitialState,
   getSelectedTreeCreateParent,
   getTreeSelectionAfterClear,
@@ -161,6 +162,24 @@ describe("noteWorkspace", () => {
     expect(getCreateFolderPlan(files, "A", "note")).toEqual({
       path: "A/note",
       error: "同目录已存在同名笔记",
+    });
+  });
+
+  it("builds rename plans with no-op and sibling conflicts", () => {
+    expect(getRenameNotePlan(files, "A/note.md", "renamed", false)).toEqual({
+      path: "A/renamed.md",
+      shouldClose: false,
+      error: null,
+    });
+    expect(getRenameNotePlan(files, "A/note.md", "note", false)).toEqual({
+      path: "A/note.md",
+      shouldClose: true,
+      error: null,
+    });
+    expect(getRenameNotePlan(files, "b", "A", true)).toEqual({
+      path: "A",
+      shouldClose: false,
+      error: "同目录已存在同名文件夹",
     });
   });
 
