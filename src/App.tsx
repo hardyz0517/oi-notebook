@@ -130,7 +130,7 @@ import {
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
 import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
-import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
+import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
 import {
   COMMON_COLLECTIONS,
@@ -142,6 +142,7 @@ import {
 } from "@/lib/collectionTags";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
+import { combineMarkdown, isSnapshotDirty, splitLoadedMarkdown, type SavedNoteSnapshot } from "@/lib/markdownDocument";
 import {
   ACCENT_COLOR_STORAGE_KEY,
   APP_ZOOM_DEFAULT,
@@ -1372,62 +1373,6 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
     variables: [],
     editable: true,
   };
-}
-
-interface LoadedMarkdownParts {
-  frontmatterPrefix: string;
-  body: string;
-  warning: string | null;
-}
-
-interface SavedNoteSnapshot {
-  path: string | null;
-  frontmatterPrefix: string;
-  markdown: string;
-}
-
-function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
-  const split = splitFrontmatter(markdown);
-
-  if (split.kind === "found") {
-    return {
-      frontmatterPrefix: markdown.slice(0, markdown.length - split.body.length),
-      body: split.body,
-      warning: null,
-    };
-  }
-
-  if (split.kind === "unclosed") {
-    return {
-      frontmatterPrefix: "",
-      body: markdown,
-      warning: "frontmatter 缺少闭合 ---，已作为正文载入以避免丢数据",
-    };
-  }
-
-  return {
-    frontmatterPrefix: "",
-    body: split.body,
-    warning: null,
-  };
-}
-
-function combineMarkdown(frontmatterPrefix: string, body: string): string {
-  return `${frontmatterPrefix}${body}`;
-}
-
-function isSnapshotDirty(
-  snapshot: SavedNoteSnapshot,
-  path: string | null,
-  nextFrontmatterPrefix: string,
-  nextMarkdown: string,
-): boolean {
-  if (path === null) return false;
-  return (
-    snapshot.path !== path ||
-    snapshot.frontmatterPrefix !== nextFrontmatterPrefix ||
-    snapshot.markdown !== nextMarkdown
-  );
 }
 
 function getCommittedMarkdownSyncDelayMs(docLength: number): number {
