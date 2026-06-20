@@ -7,6 +7,7 @@ import {
   getCurrentNoteDirectory,
   getDefaultNewNoteCreateParent,
   getNoteDirectories,
+  getRenameDialogInitialState,
   getSelectedTreeCreateParent,
   getTreeSelectionAfterClear,
   getTreeSelectionAfterFileSelect,
@@ -57,6 +58,21 @@ describe("noteWorkspace", () => {
     expect(buildRenameNotePath("A/old.md", "new", false)).toBe("A/new.md");
     expect(buildRenameNotePath("old.md", "new.md", false)).toBe("new.md");
     expect(buildRenameNotePath("A/old-folder", "new-folder", true)).toBe("A/new-folder");
+  });
+
+  it("derives rename dialog initial state", () => {
+    expect(getRenameDialogInitialState("A/old.md")).toEqual({
+      dialogMode: "rename",
+      dialogValue: "old",
+      renameTarget: "A/old.md",
+      renameTargetIsDirectory: false,
+    });
+    expect(getRenameDialogInitialState("A/old-folder", true)).toEqual({
+      dialogMode: "rename",
+      dialogValue: "old-folder",
+      renameTarget: "A/old-folder",
+      renameTargetIsDirectory: true,
+    });
   });
 
   it("derives create-folder dialog validation state", () => {

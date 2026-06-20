@@ -11,6 +11,13 @@ export interface FolderDialogState {
   canConfirm: boolean;
 }
 
+export interface RenameDialogInitialState {
+  dialogMode: "rename";
+  dialogValue: string;
+  renameTarget: string;
+  renameTargetIsDirectory: boolean;
+}
+
 const FOLDER_DIALOG_DEFAULT_HELP_TEXT = "名称不能包含路径穿越或 Windows 非法字符";
 
 export function getNoteDirectories(files: NoteFileInfo[]): string[] {
@@ -46,6 +53,16 @@ export function buildRenameNotePath(targetPath: string, nextName: string, isDire
   const directoryPrefix = lastSlashIndex === -1 ? "" : targetPath.slice(0, lastSlashIndex + 1);
   const normalizedName = isDirectory ? nextName.trim() : normalizeNoteFileName(nextName);
   return `${directoryPrefix}${normalizedName}`;
+}
+
+export function getRenameDialogInitialState(path: string, isDirectory = false): RenameDialogInitialState {
+  const filename = path.split("/").pop() ?? path;
+  return {
+    dialogMode: "rename",
+    dialogValue: isDirectory ? filename : filename.replace(/\.md$/i, ""),
+    renameTarget: path,
+    renameTargetIsDirectory: isDirectory,
+  };
 }
 
 export function getFolderDialogState(

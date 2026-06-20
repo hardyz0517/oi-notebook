@@ -305,6 +305,7 @@ import {
   getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
   getFolderDialogState,
   getNoteDirectories,
+  getRenameDialogInitialState,
   getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
   getTreeSelectionAfterClear,
   getTreeSelectionAfterDirectorySelect,
@@ -2698,12 +2699,11 @@ export default function App() {
   }, []);
 
   const openRenameDialog = (path: string, isDirectory = false) => {
-    const filename = path.split("/").pop() ?? path;
-    const baseName = isDirectory ? filename : filename.replace(/\.md$/i, "");
-    setDialogMode("rename");
-    setDialogValue(baseName);
-    setRenameTarget(path);
-    setRenameTargetIsDirectory(isDirectory);
+    const renameState = getRenameDialogInitialState(path, isDirectory);
+    setDialogMode(renameState.dialogMode);
+    setDialogValue(renameState.dialogValue);
+    setRenameTarget(renameState.renameTarget);
+    setRenameTargetIsDirectory(renameState.renameTargetIsDirectory);
   };
 
   const closeDialog = () => {
