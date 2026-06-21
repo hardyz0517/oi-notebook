@@ -11,7 +11,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -387,10 +387,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
   const setSuggestionHidden = useCallback((suggestion: TagSuggestion, hidden: boolean) => {
     const currentConfig = normalizeConfig(workingConfig);
-    const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
-    if (hidden) hiddenIds.add(suggestion.id);
-    else hiddenIds.delete(suggestion.id);
-    const nextConfig = normalizeConfig({ ...currentConfig, hiddenIds: Array.from(hiddenIds) });
+    const nextConfig = setTagSuggestionHiddenInConfig(currentConfig, suggestion, hidden);
     void saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原状态", "visibility");
   }, [saveWorkingConfig, workingConfig]);
 

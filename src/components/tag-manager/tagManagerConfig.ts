@@ -641,6 +641,25 @@ export function deleteUserAliasFromConfig(
   };
 }
 
+export function setTagSuggestionHiddenInConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion,
+  hidden: boolean,
+): UserTagTaxonomyConfig {
+  const currentConfig = normalizeConfig(config);
+  const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
+  if (hidden) {
+    hiddenIds.add(suggestion.id);
+  } else {
+    hiddenIds.delete(suggestion.id);
+  }
+
+  return normalizeConfig({
+    ...currentConfig,
+    hiddenIds: Array.from(hiddenIds),
+  });
+}
+
 export function getCustomTagCreateDraft(
   suggestion: TagSuggestion | null,
   selectedGroupOrderKey: string | null,
