@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildArticleResultListView,
+  buildArchiveIndexView,
   buildArchiveListView,
   buildCollectionDetailHeaderView,
   buildCollectionEntryListView,
@@ -646,6 +647,47 @@ describe("blogViewModel", () => {
         ],
       },
     ]);
+  });
+
+  it("builds archive year index data", () => {
+    const note = (title: string, date: string | null): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: "杂谈",
+      collections: ["杂谈"],
+      created: null,
+      updated: null,
+      date,
+      sortKey: null,
+      draft: false,
+    });
+    const notes = [
+      note("a", "2026-06-21T00:00:00Z"),
+      note("b", "2026-06-20T00:00:00Z"),
+      note("c", "2025-05-01T00:00:00Z"),
+      note("d", null),
+    ];
+
+    expect(buildArchiveIndexView({
+      notes,
+      pageSize: 2,
+      getYearHref: (page, year) => "#/articles?page=" + page + "&year=" + year,
+    })).toEqual({
+      years: [
+        { year: "2026", href: "#/articles?page=1&year=2026" },
+        { year: "2025", href: "#/articles?page=2&year=2025" },
+        { year: "未知年份", href: "#/articles?page=2&year=未知年份" },
+      ],
+      yearCounts: new Map([
+        ["2026", 2],
+        ["2025", 1],
+        ["未知年份", 1],
+      ]),
+    });
   });
 
   it("derives tag diagnostic enablement from dev and debug flags", () => {

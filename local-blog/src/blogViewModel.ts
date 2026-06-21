@@ -7,6 +7,7 @@ import {
   getDisplayTags,
   getHomeExcerpt,
   getLeafTagName,
+  getNoteYear,
   getNoteDateValue,
   getNoteExcerpt,
   getRawNoteTagReason,
@@ -223,6 +224,22 @@ export type ArchiveListSection = {
   year: string;
   count: number;
   rows: ArchiveListRow[];
+};
+
+export type ArchiveIndexYearLink = {
+  year: string;
+  href: string;
+};
+
+export type ArchiveIndexView = {
+  years: ArchiveIndexYearLink[];
+  yearCounts: Map<string, number>;
+};
+
+export type ArchiveIndexViewInput = {
+  notes: NoteSummary[];
+  pageSize: number;
+  getYearHref: (page: number, year: string) => string;
 };
 
 export type ArchiveListViewInput = {
@@ -523,6 +540,27 @@ export function buildArchiveListView(input: ArchiveListViewInput): ArchiveListSe
       dateTime: getNoteDateValue(note),
     })),
   }));
+}
+
+export function buildArchiveIndexView(input: ArchiveIndexViewInput): ArchiveIndexView {
+  const yearCounts = new Map<string, number>();
+  const yearPageLookup = new Map<string, number>();
+
+  input.notes.forEach((note, index) => {
+    const year = getNoteYear(note);
+    yearCounts.set(year, (yearCounts.get(year) ?? 0) + 1);
+    if (!yearPageLookup.has(year)) {
+      yearPageLookup.set(year, Math.floor(index / input.pageSize) + 1);
+    }
+  });
+
+  return {
+    years: Array.from(yearCounts.keys()).map((year) => ({
+      year,
+      href: input.getYearHref(yearPageLookup.get(year) ?? 1, year),
+    })),
+    yearCounts,
+  };
 }
 
 export function buildRecentUpdateView(input: RecentUpdateViewInput): RecentUpdateView | null {

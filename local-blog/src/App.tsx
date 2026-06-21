@@ -19,7 +19,6 @@ import {
   defaultBlogConfig as blogDefaultConfig,
   getCategoryCounts as getBlogCategoryCounts,
   getCategoryLabel,
-  getNoteYear,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
   groupNotesByYear as groupBlogNotesByYear,
@@ -39,6 +38,7 @@ import {
 } from "./blogContent";
 import {
   buildArticleResultListView,
+  buildArchiveIndexView,
   buildArchiveListView,
   buildCollectionDetailHeaderView,
   buildCollectionEntryListView,
@@ -724,16 +724,10 @@ function ArticleArchiveView({
 }) {
   const paged = paginateBlogNotes(notes, page, archivePageSize);
   const yearGroups = groupBlogNotesByYear(paged.items);
-  const allYearGroups = groupBlogNotesByYear(notes);
-  const years = allYearGroups.map((group) => group.year);
-  const yearCounts = new Map(allYearGroups.map((group) => [group.year, group.notes.length]));
-  const yearPageLookup = new Map<string, number>();
-
-  notes.forEach((note, index) => {
-    const year = getNoteYear(note);
-    if (!yearPageLookup.has(year)) {
-      yearPageLookup.set(year, Math.floor(index / archivePageSize) + 1);
-    }
+  const archiveIndex = buildArchiveIndexView({
+    notes,
+    pageSize: archivePageSize,
+    getYearHref: getArticlesHref,
   });
 
   useEffect(() => {
@@ -748,11 +742,11 @@ function ArticleArchiveView({
 
   return (
     <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u7ae0\u5217\u8868"}>
-      {years.length > 0 ? (
+      {archiveIndex.years.length > 0 ? (
         <nav className="year-index" aria-label={"\u5e74\u4efd\u7d22\u5f15"}>
-          {years.map((year) => (
-            <a href={getArticlesHref(yearPageLookup.get(year) ?? 1, year)} key={year}>
-              {year}
+          {archiveIndex.years.map((year) => (
+            <a href={year.href} key={year.year}>
+              {year.year}
             </a>
           ))}
         </nav>
@@ -764,7 +758,7 @@ function ArticleArchiveView({
       ) : notes.length === 0 ? (
         <EmptyState title="\u6682\u65e0\u6587\u7ae0" description="\u4fdd\u5b58\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5e74\u4efd\u5f52\u6863\u3002" />
       ) : (
-        <ArchiveList groups={yearGroups} yearCounts={yearCounts} sourceHref={sourceHref} />
+        <ArchiveList groups={yearGroups} yearCounts={archiveIndex.yearCounts} sourceHref={sourceHref} />
       )}
       <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={getArticlesHref} />
     </ListingPage>
