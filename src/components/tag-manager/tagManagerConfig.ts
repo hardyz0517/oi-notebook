@@ -188,6 +188,11 @@ export type CollectionSaveResolution = {
   editState: CollectionEditState;
 };
 
+export type CollectionSaveState = {
+  panelState: CollectionPanelState;
+  editState: CollectionEditState;
+};
+
 export function getOpenedMergeEditorState(): MergeEditorState {
   return {
     isOpen: true,
@@ -741,49 +746,46 @@ export function getFailedCollectionDeleteSaveState(
 }
 
 export function getCollectionCreateSaveResolution(
-  panelState: CollectionPanelState,
-  editState: CollectionEditState,
+  state: CollectionSaveState,
   saved: boolean,
   failureMessage: string,
 ): CollectionSaveResolution {
   return {
     panelState: saved
-      ? getAppliedCollectionCreateSaveState(panelState)
-      : getFailedCollectionCreateSaveState(panelState, failureMessage),
-    editState,
+      ? getAppliedCollectionCreateSaveState(state.panelState)
+      : getFailedCollectionCreateSaveState(state.panelState, failureMessage),
+    editState: state.editState,
   };
 }
 
 export function getCollectionEditSaveResolution(
-  panelState: CollectionPanelState,
-  editState: CollectionEditState,
+  state: CollectionSaveState,
   saved: boolean,
   failureMessage: string,
 ): CollectionSaveResolution {
   return {
     panelState: saved
-      ? panelState
-      : getFailedCollectionEditSaveState(panelState, failureMessage),
+      ? state.panelState
+      : getFailedCollectionEditSaveState(state.panelState, failureMessage),
     editState: saved
-      ? getAppliedCollectionEditSaveState(editState)
-      : editState,
+      ? getAppliedCollectionEditSaveState(state.editState)
+      : state.editState,
   };
 }
 
 export function getCollectionDeleteSaveResolution(
-  panelState: CollectionPanelState,
-  editState: CollectionEditState,
+  state: CollectionSaveState,
   deletedName: string,
   saved: boolean,
   failureMessage: string,
 ): CollectionSaveResolution {
   return {
     panelState: saved
-      ? panelState
-      : getFailedCollectionDeleteSaveState(panelState, failureMessage),
+      ? state.panelState
+      : getFailedCollectionDeleteSaveState(state.panelState, failureMessage),
     editState: saved
-      ? getAppliedCollectionDeleteSaveState(editState, deletedName)
-      : editState,
+      ? getAppliedCollectionDeleteSaveState(state.editState, deletedName)
+      : state.editState,
   };
 }
 
