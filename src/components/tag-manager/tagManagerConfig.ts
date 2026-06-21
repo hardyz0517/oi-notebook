@@ -113,6 +113,12 @@ export type CustomTagCreateSelectionState = {
   customTagCreateError: string | null;
 };
 
+export type CustomTagEditSelectionState = {
+  selectedSuggestionId: string | null;
+  customTagEditDraft: CustomTagEditDraft | null;
+  customTagEditError: string | null;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -903,6 +909,18 @@ export function getAppliedCustomTagCreateSelectionState(
     selectedSuggestionId: plan.selectedSuggestionId,
     customTagCreateDraft: null,
     customTagCreateError: null,
+  };
+}
+
+export function getAppliedCustomTagEditSelectionState(
+  state: CustomTagEditSelectionState,
+  selectedSuggestionId: string | null,
+): CustomTagEditSelectionState {
+  return {
+    ...state,
+    selectedSuggestionId,
+    customTagEditDraft: null,
+    customTagEditError: null,
   };
 }
 

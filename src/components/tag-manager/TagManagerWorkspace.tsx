@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -101,6 +101,11 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setSelectedSuggestionId(state.selectedSuggestionId);
     setCustomTagCreateDraft(state.customTagCreateDraft);
     setCustomTagCreateError(state.customTagCreateError);
+  }, []);
+  const applyCustomTagEditSelectionState = useCallback((state: CustomTagEditSelectionState) => {
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagEditDraft(state.customTagEditDraft);
+    setCustomTagEditError(state.customTagEditError);
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -604,13 +609,23 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
     if (saved) {
-      setSelectedSuggestionId(selectedSuggestion.id);
-      setCustomTagEditDraft(null);
-      setCustomTagEditError(null);
+      applyCustomTagEditSelectionState(getAppliedCustomTagEditSelectionState({
+        selectedSuggestionId,
+        customTagEditDraft,
+        customTagEditError,
+      }, selectedSuggestion.id));
     } else {
       setCustomTagEditError("保存失败，已恢复原自定义标签");
     }
-  }, [customTagEditDraft, saveWorkingConfig, selectedSuggestion, workingConfig]);
+  }, [
+    applyCustomTagEditSelectionState,
+    customTagEditDraft,
+    customTagEditError,
+    saveWorkingConfig,
+    selectedSuggestion,
+    selectedSuggestionId,
+    workingConfig,
+  ]);
 
   const deleteCustomTag = useCallback(async () => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;
@@ -631,13 +646,24 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
     if (saved) {
-      setSelectedSuggestionId(null);
-      setCustomTagEditDraft(null);
-      setCustomTagEditError(null);
+      applyCustomTagEditSelectionState(getAppliedCustomTagEditSelectionState({
+        selectedSuggestionId,
+        customTagEditDraft,
+        customTagEditError,
+      }, null));
     } else {
       setCustomTagEditError("保存失败，已恢复原自定义标签");
     }
-  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
+  }, [
+    applyCustomTagEditSelectionState,
+    customTagEditDraft,
+    customTagEditError,
+    requestConfirm,
+    saveWorkingConfig,
+    selectedSuggestion,
+    selectedSuggestionId,
+    workingConfig,
+  ]);
 
   const startMergeEdit = useCallback(() => {
     if (!canEditMergeRule) {

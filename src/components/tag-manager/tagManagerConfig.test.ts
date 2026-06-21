@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -193,6 +193,33 @@ describe("tagManagerConfig custom tag create selection state", () => {
       selectedSuggestionId: "user.dp.knapsack",
       customTagCreateDraft: null,
       customTagCreateError: null,
+    });
+  });
+});
+
+describe("tagManagerConfig custom tag edit selection state", () => {
+  const state: CustomTagEditSelectionState = {
+    selectedSuggestionId: "user.string.old-tag",
+    customTagEditDraft: {
+      name: "旧标签",
+      aliasesText: "旧别名",
+    },
+    customTagEditError: "old edit error",
+  };
+
+  it("applies the saved selection and clears edit draft state", () => {
+    expect(getAppliedCustomTagEditSelectionState(state, "user.dp.knapsack")).toEqual({
+      selectedSuggestionId: "user.dp.knapsack",
+      customTagEditDraft: null,
+      customTagEditError: null,
+    });
+  });
+
+  it("clears the selection after deleting the custom tag", () => {
+    expect(getAppliedCustomTagEditSelectionState(state, null)).toEqual({
+      selectedSuggestionId: null,
+      customTagEditDraft: null,
+      customTagEditError: null,
     });
   });
 });
