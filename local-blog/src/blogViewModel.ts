@@ -1,7 +1,10 @@
 import {
   countTagTreeNodes,
+  formatCompactDate,
+  getCollectionDescription,
   getRawNoteTagReason,
   getUnknownTags,
+  type CollectionGroup,
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
@@ -69,6 +72,26 @@ export type TagMapGroupView = {
   group: TagTreeNode;
   directChips: TagChipItem[];
   branches: TagMapBranchView[];
+};
+
+export type CollectionOverviewState = "loading" | "error" | "empty" | "ready";
+
+export type CollectionOverviewCard = {
+  name: string;
+  countLabel: string;
+  description: string;
+  updatedLabel: string;
+};
+
+export type CollectionOverviewView = {
+  state: CollectionOverviewState;
+  cards: CollectionOverviewCard[];
+};
+
+export type CollectionOverviewViewInput = {
+  collections: CollectionGroup[];
+  isLoading: boolean;
+  error: string | null;
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -189,6 +212,30 @@ export function getPaginationItems(currentPage: number, totalPages: number): Pag
   }
 
   return items;
+}
+
+export function buildCollectionOverviewView(input: CollectionOverviewViewInput): CollectionOverviewView {
+  if (input.isLoading) {
+    return { state: "loading", cards: [] };
+  }
+
+  if (input.error) {
+    return { state: "error", cards: [] };
+  }
+
+  if (input.collections.length === 0) {
+    return { state: "empty", cards: [] };
+  }
+
+  return {
+    state: "ready",
+    cards: input.collections.map((collection) => ({
+      name: collection.name,
+      countLabel: `${collection.count} 篇文章`,
+      description: getCollectionDescription(collection.name),
+      updatedLabel: `最近更新：${formatCompactDate(collection.latestUpdatedAt) ?? "暂无记录"}`,
+    })),
+  };
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTagDiagnostics,
+  buildCollectionOverviewView,
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
   collectTagChips,
@@ -156,6 +157,45 @@ describe("blogViewModel", () => {
     expect(getPaginationItems(6, 12)).toEqual([1, "ellipsis", 5, 6, 7, "ellipsis", 12]);
     expect(getPaginationItems(1, 12)).toEqual([1, 2, "ellipsis", 12]);
     expect(getPaginationItems(12, 12)).toEqual([1, "ellipsis", 11, 12]);
+  });
+
+  it("builds collection overview state and card rows", () => {
+    expect(buildCollectionOverviewView({ collections: [], isLoading: true, error: null })).toEqual({
+      state: "loading",
+      cards: [],
+    });
+    expect(buildCollectionOverviewView({ collections: [], isLoading: false, error: "failed" })).toEqual({
+      state: "error",
+      cards: [],
+    });
+    expect(buildCollectionOverviewView({ collections: [], isLoading: false, error: null })).toEqual({
+      state: "empty",
+      cards: [],
+    });
+    expect(buildCollectionOverviewView({
+      collections: [
+        { name: "题解", count: 2, posts: [], latestUpdatedAt: "2026-06-21T10:20:30Z" },
+        { name: "未知合集", count: 1, posts: [] },
+      ],
+      isLoading: false,
+      error: null,
+    })).toEqual({
+      state: "ready",
+      cards: [
+        {
+          name: "题解",
+          countLabel: "2 篇文章",
+          description: "做题思路、实现坑点与代码复盘。",
+          updatedLabel: "最近更新：2026/6/21",
+        },
+        {
+          name: "未知合集",
+          countLabel: "1 篇文章",
+          description: "收录这一主题下的相关文章。",
+          updatedLabel: "最近更新：暂无记录",
+        },
+      ],
+    });
   });
 
   it("derives tag diagnostic enablement from dev and debug flags", () => {

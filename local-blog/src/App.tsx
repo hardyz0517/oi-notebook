@@ -49,6 +49,7 @@ import {
 } from "./blogContent";
 import {
   buildTagDiagnostics,
+  buildCollectionOverviewView,
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
   collectTagChips,
@@ -657,41 +658,40 @@ function CollectionList({
   error: string | null;
   onRetry: () => void;
 }) {
+  const view = buildCollectionOverviewView({ collections, isLoading, error });
   const content = (() => {
-  if (isLoading) {
-    return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6587\u96c6"} description={"\u6b63\u5728\u6309\u680f\u76ee\u3001\u7cfb\u5217\u548c\u9636\u6bb5\u6574\u7406\u672c\u5730\u6587\u7ae0\u3002"} />;
-  }
+    if (view.state === "loading") {
+      return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6587\u96c6"} description={"\u6b63\u5728\u6309\u680f\u76ee\u3001\u7cfb\u5217\u548c\u9636\u6bb5\u6574\u7406\u672c\u5730\u6587\u7ae0\u3002"} />;
+    }
 
-  if (error) {
-    return <ErrorState title={"\u65e0\u6cd5\u8bfb\u53d6\u6587\u96c6"} description={"\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u6c47\u603b\u6587\u96c6\u3002"} onRetry={onRetry} />;
-  }
+    if (view.state === "error") {
+      return <ErrorState title={"\u65e0\u6cd5\u8bfb\u53d6\u6587\u96c6"} description={"\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u6c47\u603b\u6587\u96c6\u3002"} onRetry={onRetry} />;
+    }
 
-  if (collections.length === 0) {
+    if (view.state === "empty") {
+      return (
+        <EmptyState
+          title={"\u8fd8\u6ca1\u6709\u6587\u96c6"}
+          description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6c47\u603b\u6587\u96c6\u3002"}
+        />
+      );
+    }
+
     return (
-      <EmptyState
-        title={"\u8fd8\u6ca1\u6709\u6587\u96c6"}
-        description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u81ea\u52a8\u6c47\u603b\u6587\u96c6\u3002"}
-      />
-    );
-  }
-
-  return (
-    <div className="collection-card-grid" aria-label={"\u6587\u96c6\u5217\u8868"}>
-      {collections.map((collection) => (
-        <a className="collection-card" href={getCollectionHref(collection.name)} key={collection.name}>
-          <span className="collection-card-spine" aria-hidden="true" />
-          <span className="collection-card-body">
-            <span className="collection-card-kicker">{collection.count + " \u7bc7\u6587\u7ae0"}</span>
-            <span className="collection-card-title">{collection.name}</span>
-            <span className="collection-card-description">{getBlogCollectionDescription(collection.name)}</span>
-            <span className="collection-card-updated">
-              {"\u6700\u8fd1\u66f4\u65b0\uff1a" + (formatBlogCompactDate(collection.latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}
+      <div className="collection-card-grid" aria-label={"\u6587\u96c6\u5217\u8868"}>
+        {view.cards.map((collection) => (
+          <a className="collection-card" href={getCollectionHref(collection.name)} key={collection.name}>
+            <span className="collection-card-spine" aria-hidden="true" />
+            <span className="collection-card-body">
+              <span className="collection-card-kicker">{collection.countLabel}</span>
+              <span className="collection-card-title">{collection.name}</span>
+              <span className="collection-card-description">{collection.description}</span>
+              <span className="collection-card-updated">{collection.updatedLabel}</span>
             </span>
-          </span>
-        </a>
-      ))}
-    </div>
-  );
+          </a>
+        ))}
+      </div>
+    );
   })();
 
   return (
