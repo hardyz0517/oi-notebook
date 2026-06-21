@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCollectionEntryListView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -196,6 +197,69 @@ describe("blogViewModel", () => {
         },
       ],
     });
+  });
+
+  it("builds collection entry rows", () => {
+    expect(buildCollectionEntryListView({
+      notes: [
+        {
+          title: "线段树复盘",
+          relativePath: "problems/segment-tree.md",
+          summary: "复盘线段树的实现细节。",
+          excerpt: null,
+          tags: ["算法/数据结构/线段树", "阶段/复盘", "语言/C++"],
+          category: "problems",
+          collection: "题解",
+          collections: ["题解"],
+          created: null,
+          updated: "2026-06-20T00:00:00Z",
+          date: null,
+          sortKey: null,
+          draft: true,
+        },
+        {
+          title: "无日期笔记",
+          relativePath: "inbox/no-date.md",
+          summary: null,
+          excerpt: null,
+          tags: [],
+          category: "inbox",
+          collection: "题解",
+          collections: ["题解"],
+          created: null,
+          updated: null,
+          date: null,
+          sortKey: null,
+          draft: false,
+        },
+      ],
+      collection: "题解",
+      sourceHref: "#/collections/%E9%A2%98%E8%A7%A3?page=2",
+      startIndex: 12,
+    })).toEqual([
+      {
+        key: "problems/segment-tree.md",
+        href: "#/note/problems%2Fsegment-tree.md?from=%2Fcollections%2F%25E9%25A2%2598%25E8%25A7%25A3%3Fpage%3D2",
+        number: "13",
+        title: "线段树复盘",
+        isDraft: true,
+        excerpt: "复盘线段树的实现细节。",
+        dateLabel: "2026 年 6 月 20 日",
+        dateTime: "2026-06-20T00:00:00Z",
+        tags: ["题解", "线段树", "复盘"],
+      },
+      {
+        key: "inbox/no-date.md",
+        href: "#/note/inbox%2Fno-date.md?from=%2Fcollections%2F%25E9%25A2%2598%25E8%25A7%25A3%3Fpage%3D2",
+        number: "14",
+        title: "无日期笔记",
+        isDraft: false,
+        excerpt: "这篇笔记还没有摘要，打开文章页可以继续阅读全文。",
+        dateLabel: "日期未知",
+        dateTime: null,
+        tags: ["题解"],
+      },
+    ]);
   });
 
   it("derives tag diagnostic enablement from dev and debug flags", () => {

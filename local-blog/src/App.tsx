@@ -48,6 +48,7 @@ import {
   type RawNoteSummary,
 } from "./blogContent";
 import {
+  buildCollectionEntryListView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -1013,38 +1014,33 @@ function CollectionEntryList({
   sourceHref?: string;
   startIndex: number;
 }) {
+  const entries = buildCollectionEntryListView({ notes, collection, sourceHref, startIndex });
+
   return (
     <ol className="collection-entry-list">
-      {notes.map((note, index) => {
-        const displayDate = formatBlogOptionalDate(note.date, note.updated, note.created);
-        const displayTags = getBlogDisplayTags(note).slice(0, 2);
-        const entryNumber = String(startIndex + index + 1).padStart(2, "0");
-
-        return (
-          <li className="collection-entry-item" key={note.relativePath}>
-            <a className="collection-entry-link" href={getNoteHref(note.relativePath, sourceHref)}>
-              <span className="collection-entry-number">{entryNumber}</span>
-              <span className="collection-entry-main">
-                <span className="collection-entry-title-row">
-                  <span className="collection-entry-title">{note.title}</span>
-                  {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
-                </span>
-                <span className="collection-entry-excerpt">{getBlogNoteExcerpt(note)}</span>
+      {entries.map((entry) => (
+        <li className="collection-entry-item" key={entry.key}>
+          <a className="collection-entry-link" href={entry.href}>
+            <span className="collection-entry-number">{entry.number}</span>
+            <span className="collection-entry-main">
+              <span className="collection-entry-title-row">
+                <span className="collection-entry-title">{entry.title}</span>
+                {entry.isDraft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
               </span>
-              <span className="collection-entry-meta">
-                {displayDate ? <time dateTime={getBlogNoteDateValue(note) ?? undefined}>{displayDate}</time> : <span>{"\u65e5\u671f\u672a\u77e5"}</span>}
-                <span className="collection-entry-tags">
-                  <span>{collection}</span>
-                  {displayTags.map((tag) => (
-                    <span key={tag}>{getBlogLeafTagName(tag)}</span>
-                  ))}
-                </span>
+              <span className="collection-entry-excerpt">{entry.excerpt}</span>
+            </span>
+            <span className="collection-entry-meta">
+              {entry.dateTime ? <time dateTime={entry.dateTime}>{entry.dateLabel}</time> : <span>{entry.dateLabel}</span>}
+              <span className="collection-entry-tags">
+                {entry.tags.map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
               </span>
-              <span className="collection-entry-arrow" aria-hidden="true">{"\u203a"}</span>
-            </a>
-          </li>
-        );
-      })}
+            </span>
+            <span className="collection-entry-arrow" aria-hidden="true">{"\u203a"}</span>
+          </a>
+        </li>
+      ))}
     </ol>
   );
 }

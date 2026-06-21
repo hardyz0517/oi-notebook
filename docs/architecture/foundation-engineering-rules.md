@@ -150,10 +150,11 @@ Use domain modules as the home for stable rules:
   these content rules directly.
 - `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
   chip expansion, tag chip search matching, tag-map group/branch view data,
-  collection overview state/card rows, compact pagination items, and tag
-  diagnostics payloads/debug-enable rules. The local-blog App shell should
-  render tag-map, collection overview, and pagination view data, read browser
-  debug flags, and perform console side effects instead of owning these
+  collection overview state/card rows, collection detail entry rows, compact
+  pagination items, and tag diagnostics payloads/debug-enable rules. The
+  local-blog App shell should render tag-map, collection overview/detail rows,
+  and pagination view data, read browser debug flags, and perform console side
+  effects instead of owning these
   reusable rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,

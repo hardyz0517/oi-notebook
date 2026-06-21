@@ -1,13 +1,19 @@
 import {
   countTagTreeNodes,
   formatCompactDate,
+  formatOptionalDate,
   getCollectionDescription,
+  getDisplayTags,
+  getLeafTagName,
+  getNoteDateValue,
+  getNoteExcerpt,
   getRawNoteTagReason,
   getUnknownTags,
   type CollectionGroup,
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
+import { getNoteHref } from "./blogRoutes";
 import {
   getTagPathSegments,
   getTagSuggestionList,
@@ -92,6 +98,25 @@ export type CollectionOverviewViewInput = {
   collections: CollectionGroup[];
   isLoading: boolean;
   error: string | null;
+};
+
+export type CollectionEntryListItem = {
+  key: string;
+  href: string;
+  number: string;
+  title: string;
+  isDraft: boolean;
+  excerpt: string;
+  dateLabel: string;
+  dateTime: string | null;
+  tags: string[];
+};
+
+export type CollectionEntryListViewInput = {
+  notes: NoteSummary[];
+  collection: string;
+  sourceHref?: string;
+  startIndex: number;
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -236,6 +261,27 @@ export function buildCollectionOverviewView(input: CollectionOverviewViewInput):
       updatedLabel: `最近更新：${formatCompactDate(collection.latestUpdatedAt) ?? "暂无记录"}`,
     })),
   };
+}
+
+export function buildCollectionEntryListView(input: CollectionEntryListViewInput): CollectionEntryListItem[] {
+  return input.notes.map((note, index) => {
+    const dateLabel = formatOptionalDate(note.date, note.updated, note.created);
+
+    return {
+      key: note.relativePath,
+      href: getNoteHref(note.relativePath, input.sourceHref),
+      number: String(input.startIndex + index + 1).padStart(2, "0"),
+      title: note.title,
+      isDraft: note.draft,
+      excerpt: getNoteExcerpt(note),
+      dateLabel: dateLabel ?? "日期未知",
+      dateTime: getNoteDateValue(note),
+      tags: [
+        input.collection,
+        ...getDisplayTags(note).slice(0, 2).map(getLeafTagName),
+      ],
+    };
+  });
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {
