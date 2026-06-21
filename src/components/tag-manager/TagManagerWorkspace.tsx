@@ -5,13 +5,13 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { saveTagTaxonomyConfig } from "@/lib/api";
-import { getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagSuggestionRootGroups, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { TagManagerCollectionsPanel } from "./TagManagerCollectionsPanel";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -412,24 +412,15 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [aliasInput, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
 
   const deleteUserAlias = useCallback(async (alias: string) => {
-    if (!selectedSuggestion) return;
-
     const currentConfig = normalizeConfig(workingConfig);
-    const nextAliases = { ...(currentConfig.aliases ?? {}) };
-    const targetId = nextAliases[alias];
-
-    if (targetId !== selectedSuggestion.id && normalizeTagPath(alias, currentConfig)?.entryId !== selectedSuggestion.id) {
-      setAliasError("只能删除当前标签的自定义别名");
+    const result = deleteUserAliasFromConfig(currentConfig, selectedSuggestion, alias);
+    if (!result.ok) {
+      setAliasError(result.error);
       return;
     }
 
-    delete nextAliases[alias];
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      aliases: nextAliases,
-    });
     setAliasError(null);
-    const saved = await saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原别名", "alias");
+    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原别名", "alias");
     if (!saved) {
       setAliasError("保存失败，已恢复原别名");
     }

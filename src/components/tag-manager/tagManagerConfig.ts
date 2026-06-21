@@ -613,6 +613,34 @@ export function addUserAliasToConfig(
   };
 }
 
+export function deleteUserAliasFromConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+  alias: string,
+): UserAliasUpdateResult {
+  if (!suggestion) {
+    return { ok: false, error: "请先选择标签" };
+  }
+
+  const currentConfig = normalizeConfig(config);
+  const nextAliases = { ...(currentConfig.aliases ?? {}) };
+  const targetId = nextAliases[alias];
+
+  if (targetId !== suggestion.id && normalizeTagPath(alias, currentConfig)?.entryId !== suggestion.id) {
+    return { ok: false, error: "只能删除当前标签的自定义别名" };
+  }
+
+  delete nextAliases[alias];
+  return {
+    ok: true,
+    alias,
+    config: normalizeConfig({
+      ...currentConfig,
+      aliases: nextAliases,
+    }),
+  };
+}
+
 export function getCustomTagCreateDraft(
   suggestion: TagSuggestion | null,
   selectedGroupOrderKey: string | null,

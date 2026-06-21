@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, getUserAliasesForSuggestion } from "./tagManagerConfig";
+import { addUserAliasToConfig, deleteUserAliasFromConfig, getUserAliasesForSuggestion } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -52,5 +52,42 @@ describe("tagManagerConfig alias rules", () => {
 
     expect(userAliasResult).toEqual({ ok: false, error: "别名已存在" });
     expect(builtinAliasResult).toEqual({ ok: false, error: "别名已存在" });
+  });
+
+  it("deletes a user alias from the selected tag", () => {
+    const suggestion = getTagSuggestionList(config, { includeHidden: true, includeDeprecated: true })
+      .find((item) => item.id === "user.dp.knapsack") ?? null;
+
+    const result = deleteUserAliasFromConfig(config, suggestion, "旧背包入口");
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+
+    expect(result.alias).toBe("旧背包入口");
+    expect(getUserAliasesForSuggestion(result.config, suggestion)).not.toContain("旧背包入口");
+  });
+
+  it("rejects deleting an alias that belongs to another tag", () => {
+    const suggestion = getTagSuggestionList(config, { includeHidden: true, includeDeprecated: true })
+      .find((item) => item.id === "user.dp.knapsack") ?? null;
+    const otherConfig: UserTagTaxonomyConfig = {
+      ...config,
+      entries: [
+        ...(config.entries ?? []),
+        {
+          id: "user.graph.shortest-path",
+          path: ["算法", "图论", "最短路复盘"],
+          source: "user",
+        },
+      ],
+      aliases: {
+        ...(config.aliases ?? {}),
+        "图论入口": "user.graph.shortest-path",
+      },
+    };
+
+    const result = deleteUserAliasFromConfig(otherConfig, suggestion, "图论入口");
+
+    expect(result).toEqual({ ok: false, error: "只能删除当前标签的自定义别名" });
   });
 });
