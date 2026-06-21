@@ -95,6 +95,14 @@ export type CustomTagEditorState = {
   editError: string | null;
 };
 
+export type TagManagerNodeSelectionState = {
+  activeRoot: string | null;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string | null;
+  customTagCreateDraft: CustomTagCreateDraft | null;
+  customTagCreateError: string | null;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -816,6 +824,58 @@ export function getSuggestionCustomTagCreateDraftSelection(
       parentLocked: true,
     }
     : draft;
+}
+
+export function getSelectedRootState(
+  state: TagManagerNodeSelectionState,
+  root: string,
+): TagManagerNodeSelectionState {
+  return {
+    ...getClearedNodeSelectionState(state),
+    activeRoot: root,
+  };
+}
+
+export function getClearedNodeSelectionState(
+  state: TagManagerNodeSelectionState,
+): TagManagerNodeSelectionState {
+  return {
+    ...state,
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: null,
+    customTagCreateDraft: getClearedCustomTagCreateDraftSelection(state.customTagCreateDraft),
+    customTagCreateError: null,
+  };
+}
+
+export function getSelectedGroupState(
+  state: TagManagerNodeSelectionState,
+  groupKey: string,
+  activeRootGroups: GroupNode[],
+): TagManagerNodeSelectionState {
+  const group = activeRootGroups.find((item) => item.orderKey === groupKey) ?? null;
+  return {
+    ...state,
+    selectedGroupOrderKey: groupKey,
+    selectedSuggestionId: null,
+    customTagCreateDraft: getGroupedCustomTagCreateDraftSelection(state.customTagCreateDraft, group),
+    customTagCreateError: null,
+  };
+}
+
+export function getSelectedSuggestionState(
+  state: TagManagerNodeSelectionState,
+  suggestionId: string,
+  suggestions: TagSuggestion[],
+): TagManagerNodeSelectionState {
+  const suggestion = suggestions.find((item) => item.id === suggestionId) ?? null;
+  return {
+    ...state,
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: suggestionId,
+    customTagCreateDraft: getSuggestionCustomTagCreateDraftSelection(state.customTagCreateDraft, suggestion),
+    customTagCreateError: null,
+  };
 }
 
 export function createCustomTagEntry(config: UserTagTaxonomyConfig, draft: CustomTagCreateDraft): CustomTagCreateResult {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagEditorState, type MergeEditorState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -338,6 +338,100 @@ describe("tagManagerConfig custom tag editor state rules", () => {
         aliasesText: "01 背包",
       },
       editError: null,
+    });
+  });
+});
+
+describe("tagManagerConfig node selection state rules", () => {
+  const state: TagManagerNodeSelectionState = {
+    activeRoot: "字符串",
+    selectedGroupOrderKey: "algorithm.group.string",
+    selectedSuggestionId: "algorithm.string.kmp",
+    customTagCreateDraft: {
+      parentPathText: "算法 / 字符串",
+      parentLocked: true,
+      name: "待建标签",
+      aliasesText: "别名",
+    },
+    customTagCreateError: "old create error",
+  };
+
+  it("clears node selection while preserving the current root", () => {
+    expect(getClearedNodeSelectionState({
+      ...state,
+      activeRoot: "算法",
+    })).toEqual({
+      activeRoot: "算法",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: null,
+      customTagCreateDraft: {
+        parentPathText: "",
+        parentLocked: false,
+        name: "待建标签",
+        aliasesText: "别名",
+      },
+      customTagCreateError: null,
+    });
+  });
+
+  it("selects a root and clears node selection state", () => {
+    expect(getSelectedRootState(state, "算法")).toEqual({
+      activeRoot: "算法",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: null,
+      customTagCreateDraft: {
+        parentPathText: "",
+        parentLocked: false,
+        name: "待建标签",
+        aliasesText: "别名",
+      },
+      customTagCreateError: null,
+    });
+  });
+
+  it("selects a group and retargets the create draft to that group", () => {
+    expect(getSelectedGroupState(state, "algorithm.group.dp", [{
+      orderKey: "algorithm.group.dp",
+      name: "动态规划",
+      path: ["算法", "动态规划"],
+      pathText: "算法/动态规划",
+      candidates: [],
+    }])).toEqual({
+      activeRoot: "字符串",
+      selectedGroupOrderKey: "algorithm.group.dp",
+      selectedSuggestionId: null,
+      customTagCreateDraft: {
+        parentPathText: "算法 / 动态规划",
+        parentLocked: true,
+        name: "待建标签",
+        aliasesText: "别名",
+      },
+      customTagCreateError: null,
+    });
+  });
+
+  it("selects a concrete suggestion and retargets the create draft to its parent path", () => {
+    expect(getSelectedSuggestionState(state, "user.dp.knapsack", [{
+      id: "user.dp.knapsack",
+      path: ["算法", "动态规划", "背包"],
+      pathText: "算法/动态规划/背包",
+      name: "背包",
+      aliases: [],
+      searchText: "背包",
+      source: "user",
+      deprecated: false,
+      hidden: false,
+    }])).toEqual({
+      activeRoot: "字符串",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: "user.dp.knapsack",
+      customTagCreateDraft: {
+        parentPathText: "算法 / 动态规划",
+        parentLocked: true,
+        name: "待建标签",
+        aliasesText: "别名",
+      },
+      customTagCreateError: null,
     });
   });
 });

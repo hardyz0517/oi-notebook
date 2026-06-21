@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -85,6 +85,13 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setCustomTagCreateError(state.createError);
     setCustomTagEditDraft(state.editDraft);
     setCustomTagEditError(state.editError);
+  }, []);
+  const applyNodeSelectionState = useCallback((state: TagManagerNodeSelectionState) => {
+    setActiveRoot(state.activeRoot);
+    setSelectedGroupOrderKey(state.selectedGroupOrderKey);
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagCreateDraft(state.customTagCreateDraft);
+    setCustomTagCreateError(state.customTagCreateError);
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -407,32 +414,74 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const clearSelectedNode = useCallback(() => {
-    setSelectedGroupOrderKey(null);
-    setSelectedSuggestionId(null);
-    setCustomTagCreateDraft(getClearedCustomTagCreateDraftSelection);
-    setCustomTagCreateError(null);
-  }, []);
+    applyNodeSelectionState(getClearedNodeSelectionState({
+      activeRoot,
+      selectedGroupOrderKey,
+      selectedSuggestionId,
+      customTagCreateDraft,
+      customTagCreateError,
+    }));
+  }, [
+    activeRoot,
+    applyNodeSelectionState,
+    customTagCreateDraft,
+    customTagCreateError,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+  ]);
 
   const selectRoot = useCallback((root: string) => {
-    setActiveRoot(root);
-    clearSelectedNode();
-  }, [clearSelectedNode]);
+    applyNodeSelectionState(getSelectedRootState({
+      activeRoot,
+      selectedGroupOrderKey,
+      selectedSuggestionId,
+      customTagCreateDraft,
+      customTagCreateError,
+    }, root));
+  }, [
+    activeRoot,
+    applyNodeSelectionState,
+    customTagCreateDraft,
+    customTagCreateError,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+  ]);
 
   const selectGroup = useCallback((groupKey: string) => {
-    const group = activeRootSortedGroups.find((item) => item.orderKey === groupKey) ?? null;
-    setSelectedGroupOrderKey(groupKey);
-    setSelectedSuggestionId(null);
-    setCustomTagCreateDraft((current) => getGroupedCustomTagCreateDraftSelection(current, group));
-    setCustomTagCreateError(null);
-  }, [activeRootSortedGroups]);
+    applyNodeSelectionState(getSelectedGroupState({
+      activeRoot,
+      selectedGroupOrderKey,
+      selectedSuggestionId,
+      customTagCreateDraft,
+      customTagCreateError,
+    }, groupKey, activeRootSortedGroups));
+  }, [
+    activeRoot,
+    activeRootSortedGroups,
+    applyNodeSelectionState,
+    customTagCreateDraft,
+    customTagCreateError,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+  ]);
 
   const selectSuggestion = useCallback((suggestionId: string) => {
-    const suggestion = suggestions.find((item) => item.id === suggestionId) ?? null;
-    setSelectedGroupOrderKey(null);
-    setSelectedSuggestionId(suggestionId);
-    setCustomTagCreateDraft((current) => getSuggestionCustomTagCreateDraftSelection(current, suggestion));
-    setCustomTagCreateError(null);
-  }, [suggestions]);
+    applyNodeSelectionState(getSelectedSuggestionState({
+      activeRoot,
+      selectedGroupOrderKey,
+      selectedSuggestionId,
+      customTagCreateDraft,
+      customTagCreateError,
+    }, suggestionId, suggestions));
+  }, [
+    activeRoot,
+    applyNodeSelectionState,
+    customTagCreateDraft,
+    customTagCreateError,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+    suggestions,
+  ]);
 
   const handleAliasInputChange = useCallback((value: string) => {
     setAliasInput(value);
