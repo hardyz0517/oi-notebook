@@ -5,13 +5,13 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { saveTagTaxonomyConfig } from "@/lib/api";
-import { getTagSuggestionRootGroups, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { TagManagerCollectionsPanel } from "./TagManagerCollectionsPanel";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -503,18 +503,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
     if (saved) {
-      const nextRootGroups = getTagSuggestionRootGroups(result.config, { includeHidden: true, includeDeprecated: true });
-      const nextRootGroup = nextRootGroups.find((rootGroup) => rootGroup.groups.some((group) => group.candidates.some((candidate) => candidate.id === result.entryId)));
-      const nextGroup = nextRootGroup?.groups.find((group) => group.candidates.some((candidate) => candidate.id === result.entryId));
-      if (nextRootGroup) {
-        setActiveRoot(nextRootGroup.root);
+      const selectionPlan = createCustomTagCreateSelectionPlan(result.config, result.entryId);
+      if (selectionPlan.activeRoot) {
+        setActiveRoot(selectionPlan.activeRoot);
       }
-      if (nextGroup) {
-        setExpandedGroups((current) => ({ ...current, [nextGroup.orderKey]: true }));
+      if (selectionPlan.expandedGroupOrderKey) {
+        const expandedGroupOrderKey = selectionPlan.expandedGroupOrderKey;
+        setExpandedGroups((current) => ({ ...current, [expandedGroupOrderKey]: true }));
       }
-      setFilterMode("all");
-      setSelectedGroupOrderKey(null);
-      setSelectedSuggestionId(result.entryId);
+      setFilterMode(selectionPlan.filterMode);
+      setSelectedGroupOrderKey(selectionPlan.selectedGroupOrderKey);
+      setSelectedSuggestionId(selectionPlan.selectedSuggestionId);
       setCustomTagCreateDraft(null);
       setCustomTagCreateError(null);
     } else {

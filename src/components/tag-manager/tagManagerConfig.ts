@@ -1,4 +1,4 @@
-import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, normalizeTagPath, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode } from "./types";
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
@@ -28,6 +28,14 @@ export type CustomTagCreateDraft = {
   parentLocked: boolean;
   name: string;
   aliasesText: string;
+};
+
+export type CustomTagCreateSelectionPlan = {
+  activeRoot: string | null;
+  expandedGroupOrderKey: string | null;
+  filterMode: TagManagerFilterMode;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string;
 };
 
 export type CustomTagEditResult =
@@ -726,6 +734,27 @@ export function createCustomTagEntry(config: UserTagTaxonomyConfig, draft: Custo
     }),
     entryId,
     pathText: nextPathText,
+  };
+}
+
+export function createCustomTagCreateSelectionPlan(
+  config: UserTagTaxonomyConfig,
+  entryId: string,
+): CustomTagCreateSelectionPlan {
+  const rootGroups = getTagSuggestionRootGroups(config, { includeHidden: true, includeDeprecated: true });
+  const rootGroup = rootGroups.find((candidateRootGroup) => (
+    candidateRootGroup.groups.some((group) => group.candidates.some((candidate) => candidate.id === entryId))
+  )) ?? null;
+  const group = rootGroup?.groups.find((candidateGroup) => (
+    candidateGroup.candidates.some((candidate) => candidate.id === entryId)
+  )) ?? null;
+
+  return {
+    activeRoot: rootGroup?.root ?? null,
+    expandedGroupOrderKey: group?.orderKey ?? null,
+    filterMode: "all",
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: entryId,
   };
 }
 

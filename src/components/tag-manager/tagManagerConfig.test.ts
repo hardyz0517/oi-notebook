@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, deleteUserAliasFromConfig, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -131,5 +131,28 @@ describe("tagManagerConfig visibility rules", () => {
     const result = setTagSuggestionHiddenInConfig(config, suggestion, false);
 
     expect(result.hiddenIds).toEqual([]);
+  });
+});
+
+describe("tagManagerConfig custom tag create selection plan", () => {
+  it("selects and expands the newly created custom tag location", () => {
+    const created = createCustomTagEntry({}, {
+      parentPathText: "算法 / 动态规划 DP",
+      parentLocked: true,
+      name: "背包复盘",
+      aliasesText: "",
+    });
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok) return;
+
+    const plan = createCustomTagCreateSelectionPlan(created.config, created.entryId);
+
+    expect(plan).toEqual({
+      activeRoot: "算法",
+      expandedGroupOrderKey: "algorithm.group.dp",
+      filterMode: "all",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: created.entryId,
+    });
   });
 });
