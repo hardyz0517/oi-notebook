@@ -637,6 +637,17 @@ export function getCancelledCollectionEditState(
   };
 }
 
+export function getChangedCollectionEditInputState(
+  state: CollectionEditState,
+  editInput: string,
+): CollectionEditState {
+  return {
+    ...state,
+    editInput,
+    editError: null,
+  };
+}
+
 export function getAppliedCollectionViewState(
   state: CollectionPanelState,
   activeView: TagManagerWorkspaceView,
@@ -656,6 +667,37 @@ export function getAppliedCollectionCreateState(
     ...state,
     createInput: "",
     createError: null,
+  };
+}
+
+export function getChangedCollectionCreateInputState(
+  state: CollectionPanelState,
+  createInput: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    createInput,
+    createError: null,
+  };
+}
+
+export function getFailedCollectionCreateState(
+  state: CollectionPanelState,
+  createError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    createError,
+  };
+}
+
+export function getFailedCollectionEditState(
+  state: CollectionPanelState,
+  editError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    editError,
   };
 }
 

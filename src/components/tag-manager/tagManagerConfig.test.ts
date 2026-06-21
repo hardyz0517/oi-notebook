@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getFailedCollectionCreateState, getFailedCollectionEditState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -329,16 +329,16 @@ describe("tagManagerConfig collection edit save plan", () => {
 
 describe("tagManagerConfig collection edit state", () => {
   const state: CollectionEditState = {
-    editingName: "旧文集",
-    editInput: "旧文集（草稿）",
+    editingName: "old collection",
+    editInput: "old collection draft",
     editError: "old edit error",
     createError: "old create error",
   };
 
   it("starts collection edit mode with the selected name and clears stale errors", () => {
-    expect(getOpenedCollectionEditState(state, "训练记录")).toEqual({
-      editingName: "训练记录",
-      editInput: "训练记录",
+    expect(getOpenedCollectionEditState(state, "training notes")).toEqual({
+      editingName: "training notes",
+      editInput: "training notes",
       editError: null,
       createError: null,
     });
@@ -352,12 +352,21 @@ describe("tagManagerConfig collection edit state", () => {
       createError: "old create error",
     });
   });
+
+  it("updates edit input while clearing stale edit errors", () => {
+    expect(getChangedCollectionEditInputState(state, "updated edit value")).toEqual({
+      editingName: "old collection",
+      editInput: "updated edit value",
+      editError: null,
+      createError: "old create error",
+    });
+  });
 });
 
 describe("tagManagerConfig collection panel state", () => {
   const state: CollectionPanelState = {
     activeView: "tags",
-    createInput: "待创建文集",
+    createInput: "draft collection",
     createError: "old create error",
     editError: "old edit error",
   };
@@ -365,7 +374,7 @@ describe("tagManagerConfig collection panel state", () => {
   it("switches active view while clearing collection errors", () => {
     expect(getAppliedCollectionViewState(state, "collections")).toEqual({
       activeView: "collections",
-      createInput: "待创建文集",
+      createInput: "draft collection",
       createError: null,
       editError: null,
     });
@@ -377,6 +386,33 @@ describe("tagManagerConfig collection panel state", () => {
       createInput: "",
       createError: null,
       editError: "old edit error",
+    });
+  });
+
+  it("updates create input while clearing stale create errors", () => {
+    expect(getChangedCollectionCreateInputState(state, "updated create value")).toEqual({
+      activeView: "tags",
+      createInput: "updated create value",
+      createError: null,
+      editError: "old edit error",
+    });
+  });
+
+  it("stores create save failures in collection panel state", () => {
+    expect(getFailedCollectionCreateState(state, "save failed")).toEqual({
+      activeView: "tags",
+      createInput: "draft collection",
+      createError: "save failed",
+      editError: "old edit error",
+    });
+  });
+
+  it("stores edit failures in collection panel state", () => {
+    expect(getFailedCollectionEditState(state, "rename failed")).toEqual({
+      activeView: "tags",
+      createInput: "draft collection",
+      createError: "old create error",
+      editError: "rename failed",
     });
   });
 });

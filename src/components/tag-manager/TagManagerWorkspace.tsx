@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getFailedCollectionCreateState, getFailedCollectionEditState, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -808,7 +808,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
     if (!result.ok) {
-      setCollectionCreateError(result.error);
+      applyCollectionPanelState(getFailedCollectionCreateState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, result.error));
       return;
     }
 
@@ -821,7 +826,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
         editError: collectionEditError,
       }));
     } else {
-      setCollectionCreateError("保存失败，已恢复原文集候选");
+      applyCollectionPanelState(getFailedCollectionCreateState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, "保存失败，已恢复原文集候选"));
     }
   }, [activeView, applyCollectionPanelState, collectionCreateError, collectionCreateInput, collectionEditError, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
 
@@ -855,7 +865,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, savePlan.nextName, collectionExistingCandidates);
     if (!result.ok) {
-      setCollectionEditError(result.error);
+      applyCollectionPanelState(getFailedCollectionEditState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, result.error));
       return;
     }
 
@@ -863,9 +878,14 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     if (saved) {
       cancelCollectionEdit();
     } else {
-      setCollectionEditError("保存失败，已恢复原文集候选");
+      applyCollectionPanelState(getFailedCollectionEditState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, "保存失败，已恢复原文集候选"));
     }
-  }, [cancelCollectionEdit, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
+  }, [activeView, applyCollectionPanelState, cancelCollectionEdit, collectionCreateError, collectionCreateInput, collectionEditError, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
 
   const deleteCollection = useCallback(async (name: string) => {
     const confirmed = await requestConfirm({
@@ -879,7 +899,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = deleteCustomCollectionCandidate(currentConfig, name);
     if (!result.ok) {
-      setCollectionEditError(result.error);
+      applyCollectionPanelState(getFailedCollectionEditState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, result.error));
       return;
     }
 
@@ -887,9 +912,14 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     if (saved && editingCollectionName === name) {
       cancelCollectionEdit();
     } else if (!saved) {
-      setCollectionEditError("保存失败，已恢复原文集候选");
+      applyCollectionPanelState(getFailedCollectionEditState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }, "保存失败，已恢复原文集候选"));
     }
-  }, [cancelCollectionEdit, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
+  }, [activeView, applyCollectionPanelState, cancelCollectionEdit, collectionCreateError, collectionCreateInput, collectionEditError, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {
@@ -1005,14 +1035,22 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
           editError={collectionEditError}
           isSaving={isSaving}
           onCreateInputChange={(value) => {
-            setCollectionCreateInput(value);
-            setCollectionCreateError(null);
+            applyCollectionPanelState(getChangedCollectionCreateInputState({
+              activeView,
+              createInput: collectionCreateInput,
+              createError: collectionCreateError,
+              editError: collectionEditError,
+            }, value));
           }}
           onCreate={() => void createCollection()}
           onStartEdit={startCollectionEdit}
           onEditInputChange={(value) => {
-            setCollectionEditInput(value);
-            setCollectionEditError(null);
+            applyCollectionEditState(getChangedCollectionEditInputState({
+              editingName: editingCollectionName,
+              editInput: collectionEditInput,
+              editError: collectionEditError,
+              createError: collectionCreateError,
+            }, value));
           }}
           onCancelEdit={cancelCollectionEdit}
           onSaveEdit={() => void saveCollectionEdit()}
