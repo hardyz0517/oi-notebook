@@ -683,7 +683,7 @@ export function getAppliedCollectionViewState(
   };
 }
 
-export function getAppliedCollectionCreateState(
+export function getAppliedCollectionCreateSaveState(
   state: CollectionPanelState,
 ): CollectionPanelState {
   return {

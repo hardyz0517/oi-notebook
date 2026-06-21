@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionDeleteState, getAppliedCollectionEditState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getDeletedCollectionEditState, getFailedCollectionCreateState, getFailedCollectionEditState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteState, getAppliedCollectionEditState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getDeletedCollectionEditState, getFailedCollectionCreateState, getFailedCollectionEditState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -416,7 +416,7 @@ describe("tagManagerConfig collection panel state", () => {
   });
 
   it("clears create input and error after saving a collection candidate", () => {
-    expect(getAppliedCollectionCreateState(state)).toEqual({
+    expect(getAppliedCollectionCreateSaveState(state)).toEqual({
       activeView: "tags",
       createInput: "",
       createError: null,
