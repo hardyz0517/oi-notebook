@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -591,6 +591,60 @@ describe("tagManagerConfig merge editor state rules", () => {
       searchQuery: "z function",
       selectedTargetId: "algorithm.string.kmp",
       error: null,
+    });
+  });
+
+  it("stores merge save failures while preserving editor progress", () => {
+    expect(getFailedMergeSaveState(openState, MERGE_SAVE_FAILURE_MESSAGE)).toEqual({
+      isOpen: true,
+      searchQuery: "z function",
+      selectedTargetId: "algorithm.string.z-function",
+      error: MERGE_SAVE_FAILURE_MESSAGE,
+    });
+  });
+});
+
+describe("tagManagerConfig merge save resolutions", () => {
+  const state: MergeEditorState = {
+    isOpen: true,
+    searchQuery: "kmp",
+    selectedTargetId: "algorithm.string.z-function",
+    error: "old merge error",
+  };
+
+  it("resolves merge save success by closing the editor", () => {
+    expect(getMergeSaveResolution(state, true, MERGE_SAVE_FAILURE_MESSAGE)).toEqual({
+      isOpen: false,
+      searchQuery: "",
+      selectedTargetId: null,
+      error: null,
+    });
+  });
+
+  it("resolves merge save failure by keeping editor state and updating the error", () => {
+    expect(getMergeSaveResolution(state, false, MERGE_SAVE_FAILURE_MESSAGE)).toEqual({
+      isOpen: true,
+      searchQuery: "kmp",
+      selectedTargetId: "algorithm.string.z-function",
+      error: MERGE_SAVE_FAILURE_MESSAGE,
+    });
+  });
+
+  it("resolves merge delete success by closing the editor", () => {
+    expect(getMergeDeleteResolution(state, true, MERGE_SAVE_FAILURE_MESSAGE)).toEqual({
+      isOpen: false,
+      searchQuery: "",
+      selectedTargetId: null,
+      error: null,
+    });
+  });
+
+  it("resolves merge delete failure by keeping editor state and updating the error", () => {
+    expect(getMergeDeleteResolution(state, false, MERGE_SAVE_FAILURE_MESSAGE)).toEqual({
+      isOpen: true,
+      searchQuery: "kmp",
+      selectedTargetId: "algorithm.string.z-function",
+      error: MERGE_SAVE_FAILURE_MESSAGE,
     });
   });
 });

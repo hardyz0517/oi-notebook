@@ -3,6 +3,7 @@ import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerF
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
+export const MERGE_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原合并规则";
 export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
 
 export type TagTaxonomyConfigImportPreview = {
@@ -226,6 +227,36 @@ export function getSelectedMergeTargetState(state: MergeEditorState, selectedTar
     selectedTargetId,
     error: null,
   };
+}
+
+export function getFailedMergeSaveState(
+  state: MergeEditorState,
+  error: string,
+): MergeEditorState {
+  return {
+    ...state,
+    error,
+  };
+}
+
+export function getMergeSaveResolution(
+  state: MergeEditorState,
+  saved: boolean,
+  failureMessage: string,
+): MergeEditorState {
+  return saved
+    ? getClosedMergeEditorState(state)
+    : getFailedMergeSaveState(state, failureMessage);
+}
+
+export function getMergeDeleteResolution(
+  state: MergeEditorState,
+  saved: boolean,
+  failureMessage: string,
+): MergeEditorState {
+  return saved
+    ? getClosedMergeEditorState(state)
+    : getFailedMergeSaveState(state, failureMessage);
 }
 
 export function getOpenedCustomTagCreateState(

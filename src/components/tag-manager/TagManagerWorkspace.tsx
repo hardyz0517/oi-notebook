@@ -1,4 +1,4 @@
-import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+﻿import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { COLLECTION_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { COLLECTION_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -149,6 +149,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     applyCollectionPanelState(panelState);
     applyCollectionEditState(editState);
   }, [applyCollectionEditState, applyCollectionPanelState]);
+  const getCurrentMergeEditorState = useCallback((): MergeEditorState => ({
+    isOpen: isMergeEditorOpen,
+    searchQuery: mergeSearchQuery,
+    selectedTargetId: selectedMergeTargetId,
+    error: mergeError,
+  }), [isMergeEditorOpen, mergeError, mergeSearchQuery, selectedMergeTargetId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
@@ -772,18 +778,13 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
-    if (saved) {
-      applyMergeEditorState(getClosedMergeEditorState({
-        isOpen: isMergeEditorOpen,
-        searchQuery: mergeSearchQuery,
-        selectedTargetId: selectedMergeTargetId,
-        error: mergeError,
-      }));
-    } else {
-      setMergeError("保存失败，已恢复原合并规则");
-    }
-  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedMergeTargetId, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, MERGE_SAVE_FAILURE_MESSAGE, "merge");
+    applyMergeEditorState(getMergeSaveResolution(
+      getCurrentMergeEditorState(),
+      saved,
+      MERGE_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [applyMergeEditorState, getCurrentMergeEditorState, requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
 
   const removeMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -803,18 +804,13 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
-    if (saved) {
-      applyMergeEditorState(getClosedMergeEditorState({
-        isOpen: isMergeEditorOpen,
-        searchQuery: mergeSearchQuery,
-        selectedTargetId: selectedMergeTargetId,
-        error: mergeError,
-      }));
-    } else {
-      setMergeError("保存失败，已恢复原合并规则");
-    }
-  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTargetId, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, MERGE_SAVE_FAILURE_MESSAGE, "merge");
+    applyMergeEditorState(getMergeDeleteResolution(
+      getCurrentMergeEditorState(),
+      saved,
+      MERGE_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [applyMergeEditorState, getCurrentMergeEditorState, requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
 
   const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
     applyCollectionPanelState(getAppliedCollectionViewState(getCurrentCollectionPanelState(), nextView));
