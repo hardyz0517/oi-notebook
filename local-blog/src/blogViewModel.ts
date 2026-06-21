@@ -290,6 +290,7 @@ export type ArticleArchiveRouteView = {
   yearGroups: ArchiveNoteGroup[];
   archiveIndex: ArchiveIndexView;
   isEmpty: boolean;
+  entriesState: "loading" | "error" | "empty" | "ready";
 };
 
 export type ArticleArchiveRouteViewInput = {
@@ -297,6 +298,8 @@ export type ArticleArchiveRouteViewInput = {
   page: number;
   pageSize: number;
   getYearHref: (page: number, year: string) => string;
+  isLoading?: boolean;
+  error?: string | null;
 };
 
 export type HomeRouteView = {
@@ -737,6 +740,14 @@ export function buildSearchRouteView(input: SearchRouteViewInput): SearchRouteVi
 
 export function buildArticleArchiveRouteView(input: ArticleArchiveRouteViewInput): ArticleArchiveRouteView {
   const paged = paginateNotes(input.notes, input.page, input.pageSize);
+  const isEmpty = input.notes.length === 0;
+  const entriesState = input.isLoading
+    ? "loading"
+    : input.error
+      ? "error"
+      : isEmpty
+        ? "empty"
+        : "ready";
 
   return {
     paged,
@@ -746,7 +757,8 @@ export function buildArticleArchiveRouteView(input: ArticleArchiveRouteViewInput
       pageSize: input.pageSize,
       getYearHref: input.getYearHref,
     }),
-    isEmpty: input.notes.length === 0,
+    isEmpty,
+    entriesState,
   };
 }
 

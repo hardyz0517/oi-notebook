@@ -1074,7 +1074,35 @@ describe("blogViewModel", () => {
         ]),
       },
       isEmpty: false,
+      entriesState: "ready",
     });
+
+    expect(buildArticleArchiveRouteView({
+      notes,
+      page: 1,
+      pageSize: 10,
+      getYearHref: (page, year) => "#/articles?page=" + page + "&year=" + year,
+      isLoading: true,
+      error: null,
+    }).entriesState).toBe("loading");
+
+    expect(buildArticleArchiveRouteView({
+      notes,
+      page: 1,
+      pageSize: 10,
+      getYearHref: (page, year) => "#/articles?page=" + page + "&year=" + year,
+      isLoading: false,
+      error: "failed",
+    }).entriesState).toBe("error");
+
+    expect(buildArticleArchiveRouteView({
+      notes: [],
+      page: 1,
+      pageSize: 10,
+      getYearHref: (page, year) => "#/articles?page=" + page + "&year=" + year,
+      isLoading: false,
+      error: null,
+    }).entriesState).toBe("empty");
   });
 
   it("builds home route data", () => {

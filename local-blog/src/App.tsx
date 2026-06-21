@@ -728,6 +728,8 @@ function ArticleArchiveView({
     page,
     pageSize: archivePageSize,
     getYearHref: getArticlesHref,
+    isLoading,
+    error,
   });
 
   useEffect(() => {
@@ -751,11 +753,11 @@ function ArticleArchiveView({
           ))}
         </nav>
       ) : null}
-      {isLoading ? (
+      {archiveView.entriesState === "loading" ? (
         <LoadingState />
-      ) : error ? (
+      ) : archiveView.entriesState === "error" ? (
         <ErrorState onRetry={onRetry} />
-      ) : archiveView.isEmpty ? (
+      ) : archiveView.entriesState === "empty" ? (
         <EmptyState title="\u6682\u65e0\u6587\u7ae0" description="\u4fdd\u5b58\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5e74\u4efd\u5f52\u6863\u3002" />
       ) : (
         <ArchiveList groups={archiveView.yearGroups} yearCounts={archiveView.archiveIndex.yearCounts} sourceHref={sourceHref} />
