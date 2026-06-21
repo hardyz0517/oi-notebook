@@ -43,7 +43,6 @@ import {
   buildHomeRouteView,
   buildNoteDetailRouteView,
   buildNoteNavigationCardView,
-  buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
   buildSearchRouteView,
@@ -1348,7 +1347,7 @@ function NoteNavigationItem({
   align?: "previous" | "next";
 }) {
   const cardView = buildNoteNavigationCardView({ label, note, emptyLabel, sourceHref, align });
-  const item = buildNoteNavigationItemView({ note, sourceHref });
+  const item = cardView.item;
 
   if (!item) {
     return (
