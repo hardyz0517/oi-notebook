@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildArticleResultListView,
+  buildArchiveListView,
   buildCollectionEntryListView,
   buildPostCardListView,
   buildTagDiagnostics,
@@ -340,6 +341,76 @@ describe("blogViewModel", () => {
         excerpt: "来自正文的摘录。",
         dateLabel: null,
         dateTime: null,
+      },
+    ]);
+  });
+
+  it("builds archive year sections and rows", () => {
+    const groups = [
+      {
+        year: "2026",
+        notes: [
+          {
+            title: "归档文章",
+            relativePath: "archive/item.md",
+            summary: null,
+            excerpt: null,
+            tags: [],
+            category: "inbox",
+            collection: "杂谈",
+            collections: ["杂谈"],
+            created: null,
+            updated: "2026-06-18T00:00:00Z",
+            date: null,
+            sortKey: null,
+            draft: false,
+          },
+          {
+            title: "未知日期",
+            relativePath: "archive/no-date.md",
+            summary: null,
+            excerpt: null,
+            tags: [],
+            category: "inbox",
+            collection: "技巧",
+            collections: ["技巧"],
+            created: null,
+            updated: null,
+            date: null,
+            sortKey: null,
+            draft: false,
+          },
+        ],
+      },
+    ];
+
+    expect(buildArchiveListView({
+      groups,
+      yearCounts: new Map([["2026", 4]]),
+      sourceHref: "#/articles?page=2",
+    })).toEqual([
+      {
+        id: "year-2026",
+        year: "2026",
+        count: 4,
+        rows: [
+          {
+            key: "archive/item.md",
+            href: "#/note/archive%2Fitem.md?from=%2Farticles%3Fpage%3D2",
+            title: "归档文章",
+            collection: "杂谈",
+            dateLabel: "06 月 18 日",
+            dateTime: "2026-06-18T00:00:00Z",
+          },
+          {
+            key: "archive/no-date.md",
+            href: "#/note/archive%2Fno-date.md?from=%2Farticles%3Fpage%3D2",
+            title: "未知日期",
+            collection: "技巧",
+            dateLabel: "日期未知",
+            dateTime: null,
+          },
+        ],
       },
     ]);
   });

@@ -1,5 +1,6 @@
 import {
   countTagTreeNodes,
+  formatArchiveDay,
   formatCompactDate,
   formatOptionalDate,
   getCollectionDescription,
@@ -144,6 +145,33 @@ export type ArticleResultListItem = {
 export type NoteListViewInput = {
   notes: NoteSummary[];
   sourceHref?: string;
+};
+
+export type ArchiveNoteGroup = {
+  year: string;
+  notes: NoteSummary[];
+};
+
+export type ArchiveListRow = {
+  key: string;
+  href: string;
+  title: string;
+  collection: string;
+  dateLabel: string;
+  dateTime: string | null;
+};
+
+export type ArchiveListSection = {
+  id: string;
+  year: string;
+  count: number;
+  rows: ArchiveListRow[];
+};
+
+export type ArchiveListViewInput = {
+  groups: ArchiveNoteGroup[];
+  yearCounts: Map<string, number>;
+  sourceHref: string;
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -333,6 +361,22 @@ export function buildArticleResultListView(input: NoteListViewInput): ArticleRes
     excerpt: getNoteExcerpt(note),
     dateLabel: formatOptionalDate(note.date, note.updated, note.created),
     dateTime: getNoteDateValue(note),
+  }));
+}
+
+export function buildArchiveListView(input: ArchiveListViewInput): ArchiveListSection[] {
+  return input.groups.map((group) => ({
+    id: "year-" + group.year,
+    year: group.year,
+    count: input.yearCounts.get(group.year) ?? group.notes.length,
+    rows: group.notes.map((note) => ({
+      key: note.relativePath,
+      href: getNoteHref(note.relativePath, input.sourceHref),
+      title: note.title,
+      collection: note.collection,
+      dateLabel: formatArchiveDay(note),
+      dateTime: getNoteDateValue(note),
+    })),
   }));
 }
 

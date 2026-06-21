@@ -18,7 +18,6 @@ import {
 import {
   buildCollections as buildBlogCollections,
   defaultBlogConfig as blogDefaultConfig,
-  formatArchiveDay as formatBlogArchiveDay,
   formatCompactDate as formatBlogCompactDate,
   formatOptionalDate as formatBlogOptionalDate,
   getCategoryCounts as getBlogCategoryCounts,
@@ -46,6 +45,7 @@ import {
 } from "./blogContent";
 import {
   buildArticleResultListView,
+  buildArchiveListView,
   buildCollectionEntryListView,
   buildPostCardListView,
   buildTagDiagnostics,
@@ -780,19 +780,21 @@ function ArchiveList({
   yearCounts: Map<string, number>;
   sourceHref: string;
 }) {
+  const sections = buildArchiveListView({ groups, yearCounts, sourceHref });
+
   return (
     <div className="archive-list">
-      {groups.map((group) => (
-        <section className="archive-year" id={"year-" + group.year} key={group.year}>
+      {sections.map((section) => (
+        <section className="archive-year" id={section.id} key={section.year}>
           <h2>
-            {group.year} <span>({yearCounts.get(group.year) ?? group.notes.length})</span>
+            {section.year} <span>({section.count})</span>
           </h2>
           <ol>
-            {group.notes.map((note) => (
-              <li key={note.relativePath}>
-                <time dateTime={getBlogNoteDateValue(note) ?? undefined}>{formatBlogArchiveDay(note)}</time>
-                <a href={getNoteHref(note.relativePath, sourceHref)}>{note.title}</a>
-                <span>{note.collection}</span>
+            {section.rows.map((row) => (
+              <li key={row.key}>
+                <time dateTime={row.dateTime ?? undefined}>{row.dateLabel}</time>
+                <a href={row.href}>{row.title}</a>
+                <span>{row.collection}</span>
               </li>
             ))}
           </ol>
