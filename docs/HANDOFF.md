@@ -121,9 +121,9 @@ domain modules with tests.
   data, collection detail entry rows, article archive route data, article
   archive entries state, home route data, note detail route data, archive list
   sections/rows, archive year index data, search route result data, recent
-  update cards, note detail header/navigation context, note navigation items,
-  compact post card/result rows, compact pagination items/links, and tag
-  diagnostics payloads/debug-enable rules.
+  update cards, post results state, note detail header/navigation context, note
+  navigation items, compact post card/result rows, compact pagination
+  items/links, and tag diagnostics payloads/debug-enable rules.
   The local-blog App shell should render these
   ready-to-render items, read browser debug flags, and perform console side
   effects instead of owning tag-map, tag detail filtering/pagination, collection overview/detail rows, archive
@@ -133,8 +133,8 @@ domain modules with tests.
   navigation card state, collection detail entries state, search result
   pagination/count labels, article archive entries state, recent update cards,
   note detail header/navigation context, note navigation items,
-  post card/result rows, pagination items/links, tag-map route/search state, or
-  diagnostics data-shaping rules directly.
+  post results state, post card/result rows, pagination items/links, tag-map
+  route/search state, or diagnostics data-shaping rules directly.
 
 ## Long-Task Model
 

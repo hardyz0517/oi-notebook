@@ -264,6 +264,19 @@ export type ArticleResultListItem = {
   dateTime: string | null;
 };
 
+export type PostResultsState = "loading" | "error" | "empty" | "ready";
+
+export type PostResultsView = {
+  state: PostResultsState;
+  notes: NoteSummary[];
+};
+
+export type PostResultsViewInput = {
+  notes: NoteSummary[];
+  isLoading: boolean;
+  error: string | null;
+};
+
 export type NoteListViewInput = {
   notes: NoteSummary[];
   sourceHref?: string;
@@ -755,6 +768,25 @@ export function buildArticleResultListView(input: NoteListViewInput): ArticleRes
     dateLabel: formatOptionalDate(note.date, note.updated, note.created),
     dateTime: getNoteDateValue(note),
   }));
+}
+
+export function buildPostResultsView(input: PostResultsViewInput): PostResultsView {
+  if (input.isLoading) {
+    return { state: "loading", notes: [] };
+  }
+
+  if (input.error) {
+    return { state: "error", notes: [] };
+  }
+
+  if (input.notes.length === 0) {
+    return { state: "empty", notes: [] };
+  }
+
+  return {
+    state: "ready",
+    notes: input.notes,
+  };
 }
 
 export function buildSearchRouteView(input: SearchRouteViewInput): SearchRouteView {

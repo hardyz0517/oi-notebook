@@ -16,6 +16,7 @@ import {
   buildArticleTocView,
   buildNoteNavigationCardView,
   buildPaginationView,
+  buildPostResultsView,
   buildPostCardListView,
   buildRecentUpdateView,
   buildSearchRouteView,
@@ -632,6 +633,42 @@ describe("blogViewModel", () => {
         dateTime: null,
       },
     ]);
+  });
+
+  it("builds post results state from loading error and note list state", () => {
+    const note = (title: string): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: "essay",
+      collections: ["essay"],
+      created: null,
+      updated: null,
+      date: null,
+      sortKey: null,
+      draft: false,
+    });
+    const notes = [note("one")];
+
+    expect(buildPostResultsView({ notes, isLoading: true, error: null })).toEqual({
+      state: "loading",
+      notes: [],
+    });
+    expect(buildPostResultsView({ notes, isLoading: false, error: "failed" })).toEqual({
+      state: "error",
+      notes: [],
+    });
+    expect(buildPostResultsView({ notes: [], isLoading: false, error: null })).toEqual({
+      state: "empty",
+      notes: [],
+    });
+    expect(buildPostResultsView({ notes, isLoading: false, error: null })).toEqual({
+      state: "ready",
+      notes,
+    });
   });
 
   it("builds search route result data", () => {

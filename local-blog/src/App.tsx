@@ -44,6 +44,7 @@ import {
   buildNoteDetailRouteView,
   buildNoteNavigationCardView,
   buildPaginationView,
+  buildPostResultsView,
   buildPostCardListView,
   buildSearchRouteView,
   buildSiteNavView,
@@ -902,22 +903,24 @@ function PostResults({
   emptyDescription?: string;
   variant?: "grid" | "list";
 }) {
-  if (isLoading) {
+  const view = buildPostResultsView({ notes, isLoading, error });
+
+  if (view.state === "loading") {
     return <LoadingState />;
   }
 
-  if (error) {
+  if (view.state === "error") {
     return <ErrorState onRetry={onRetry} />;
   }
 
-  if (notes.length === 0) {
+  if (view.state === "empty") {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
 
   return variant === "list" ? (
-    <ArticleResultList notes={notes} sourceHref={sourceHref} />
+    <ArticleResultList notes={view.notes} sourceHref={sourceHref} />
   ) : (
-    <PostGrid notes={notes} sourceHref={sourceHref} />
+    <PostGrid notes={view.notes} sourceHref={sourceHref} />
   );
 }
 
