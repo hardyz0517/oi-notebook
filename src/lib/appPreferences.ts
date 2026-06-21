@@ -2,6 +2,46 @@ import type { DiffMarkerMode, ReducedMotionMode } from "@/components/settings/v2
 
 export type ReadingDensity = "compact" | "standard" | "comfortable";
 
+export type ReadingDensityOption = {
+  id: ReadingDensity;
+  label: string;
+  description: string;
+  lineHeight: number;
+  blockSpacing: string;
+  listItemSpacing: string;
+  calloutSpacing: string;
+};
+
+export const READING_DENSITY_OPTIONS: ReadingDensityOption[] = [
+  {
+    id: "compact",
+    label: "紧凑",
+    description: "减少段落和列表间距，适合高信息密度浏览。",
+    lineHeight: 1.55,
+    blockSpacing: "0.55rem",
+    listItemSpacing: "0.15rem",
+    calloutSpacing: "0.75rem",
+  },
+  {
+    id: "standard",
+    label: "标准",
+    description: "保持当前阅读节奏，适合日常编辑和预览。",
+    lineHeight: 1.7,
+    blockSpacing: "0.75rem",
+    listItemSpacing: "0.25rem",
+    calloutSpacing: "1rem",
+  },
+  {
+    id: "comfortable",
+    label: "宽松",
+    description: "增加正文呼吸感，适合长文审阅。",
+    lineHeight: 1.85,
+    blockSpacing: "1rem",
+    listItemSpacing: "0.4rem",
+    calloutSpacing: "1.25rem",
+  },
+];
+
 export const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
 export const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
 export const APP_ZOOM_MIN = 0.8;

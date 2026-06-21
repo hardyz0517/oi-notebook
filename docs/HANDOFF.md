@@ -50,8 +50,8 @@ domain modules with tests.
   selection, inline create state, and deleted/renamed workspace reference
   updates.
 - App status and shell:
-  `src/lib/appStatusLabels.ts` and `src/lib/appShell.ts` own pure status labels
-  and shell navigation helpers.
+  `src/lib/appStatusLabels.ts` and `src/lib/appShell.ts` own pure status
+  labels, shell navigation helpers, and stable shell/about-page static models.
 - Blog:
   `src/lib/blogConfig.ts` owns blog defaults, draft normalization, save
   validation, and Blog settings view state. App-level Blog API calls remain in
@@ -77,6 +77,14 @@ domain modules with tests.
 - Tag taxonomy settings:
   `src/lib/tagTaxonomySettingsModel.ts` owns taxonomy stats, visible entry and
   alias lists, status tone, and settings action state.
+- Collection/tag presets:
+  `src/lib/collectionTags.ts` owns common collection presets, common new-note
+  tag presets, collection-tag parsing, display tags, and collection candidate
+  derivation.
+- App preferences:
+  `src/lib/appPreferences.ts` owns persisted preference keys, preference
+  clamping/defaults, and stable preference option models such as reading
+  density choices.
 - Tag normalization:
   `src/components/tag-manager/tagNormalizationScan.ts` owns scan/apply task
   state, stats, selection summaries, and panel state.
@@ -170,6 +178,9 @@ Recent focused coverage includes:
   `src/lib/apiBoundary.test.ts`.
 - Settings render guards:
   `src/components/settings/settingsRenderGuards.test.tsx`.
+- App preferences and collection/tag presets:
+  `src/lib/appPreferences.test.ts`,
+  `src/lib/collectionTags.test.ts`.
 
 ## Remaining Foundation Work
 

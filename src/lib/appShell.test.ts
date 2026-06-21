@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MARKDOWN_CAPABILITIES,
   getActiveActivityItem,
   getActivityButtonClassName,
   getSettingsOpenTarget,
@@ -66,6 +67,15 @@ describe("appShell", () => {
 
   it("keeps the stable activity button class", () => {
     expect(getActivityButtonClassName()).toBe("app-activity-button relative h-12 w-12 rounded-md");
+  });
+
+  it("keeps about-page markdown capabilities stable", () => {
+    expect(MARKDOWN_CAPABILITIES).toEqual([
+      "数学公式",
+      "代码高亮与行号",
+      "表格与合并单元格",
+      "引用块与常用排版组件",
+    ]);
   });
 
   it("derives settings open targets from categories and pages", () => {

@@ -1,6 +1,7 @@
 import type { FrontmatterFields } from "@/lib/frontmatter";
 
 export const COMMON_COLLECTIONS = ["题解", "技巧", "复盘", "杂谈", "集训日志"];
+export const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
 
 export function normalizeTagValue(tag: string): string {
   return tag.trim().replace(/\s+/g, " ");

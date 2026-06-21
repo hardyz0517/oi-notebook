@@ -2,6 +2,13 @@ import type { SettingsCategory, SettingsSection } from "@/components/settings/se
 
 export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 
+export const MARKDOWN_CAPABILITIES = [
+  "数学公式",
+  "代码高亮与行号",
+  "表格与合并单元格",
+  "引用块与常用排版组件",
+];
+
 export interface ActiveActivityItemInput {
   isSettingsCenterOpen: boolean;
   isLuoguDialogOpen: boolean;

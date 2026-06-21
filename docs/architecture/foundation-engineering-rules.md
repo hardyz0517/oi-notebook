@@ -125,6 +125,14 @@ Use domain modules as the home for stable rules:
 - `src/lib/tagTaxonomySettingsModel.ts`: tag taxonomy statistics, visible
   entry/alias lists, status tone, and settings action disabled/spinner state.
 - `src/lib/appStatusLabels.ts`: status bar and settings status labels.
+- `src/lib/appShell.ts`: shell navigation helpers, activity item state, and
+  stable shell/about-page static models.
+- `src/lib/appPreferences.ts`: persisted preference keys, preference
+  clamping/defaults, and stable preference option models such as reading
+  density choices.
+- `src/lib/collectionTags.ts`: common collection presets, common new-note tag
+  presets, collection-tag parsing, display tags, and collection candidate
+  derivation.
 - `src/lib/api.ts`: the only frontend boundary for Rust command invocation.
 - `src/lib/apiContract.ts`: the frontend Rust command wrapper contract. Keep
   it aligned with wrapper names, command names, and argument keys in

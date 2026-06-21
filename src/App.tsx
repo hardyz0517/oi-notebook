@@ -181,6 +181,7 @@ import {
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
+  MARKDOWN_CAPABILITIES,
   type ActivityBarItem,
 } from "@/lib/appShell";
 import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
@@ -200,6 +201,7 @@ import {
   type TagNormalizationScanStats,
 } from "@/components/tag-manager/tagNormalizationScan";
 import {
+  COMMON_NOTE_TAGS,
   COMMON_COLLECTIONS,
   buildCollectionCandidates,
   getDisplayTags,
@@ -230,6 +232,7 @@ import {
   PROMPT_EDITOR_FONT_SIZE_MAX,
   PROMPT_EDITOR_FONT_SIZE_MIN,
   PROMPT_EDITOR_FONT_SIZE_STEP,
+  READING_DENSITY_OPTIONS,
   READING_DENSITY_STORAGE_KEY,
   REDUCED_MOTION_STORAGE_KEY,
   SETTINGS_FONT_SIZE_DEFAULT,
@@ -671,52 +674,9 @@ const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
 const LUOGU_PREPARE_CONCURRENCY = 2;
-const READING_DENSITY_OPTIONS: Array<{
-  id: ReadingDensity;
-  label: string;
-  description: string;
-  lineHeight: number;
-  blockSpacing: string;
-  listItemSpacing: string;
-  calloutSpacing: string;
-}> = [
-  {
-    id: "compact",
-    label: "紧凑",
-    description: "减少段落和列表间距，适合高信息密度浏览。",
-    lineHeight: 1.55,
-    blockSpacing: "0.55rem",
-    listItemSpacing: "0.15rem",
-    calloutSpacing: "0.75rem",
-  },
-  {
-    id: "standard",
-    label: "标准",
-    description: "保持当前阅读节奏，适合日常编辑和预览。",
-    lineHeight: 1.7,
-    blockSpacing: "0.75rem",
-    listItemSpacing: "0.25rem",
-    calloutSpacing: "1rem",
-  },
-  {
-    id: "comfortable",
-    label: "宽松",
-    description: "增加正文呼吸感，适合长文审阅。",
-    lineHeight: 1.85,
-    blockSpacing: "1rem",
-    listItemSpacing: "0.4rem",
-    calloutSpacing: "1.25rem",
-  },
-];
 const SettingsSectionAnchor = ({ id, children }: { id: SettingsSection; children: ReactNode }) => (
   <div data-settings-section={id}>{children}</div>
 );
-const MARKDOWN_CAPABILITIES = [
-  "数学公式",
-  "代码高亮与行号",
-  "表格与合并单元格",
-  "引用块与常用排版组件",
-];
 
 interface LuoguScanProgress {
   currentPage: number;
@@ -732,8 +692,6 @@ interface LuoguScanSummary {
   skippedCount: number;
   rangeLabel: string;
 }
-
-const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
 
 function cloneAiConfig(config: AiConfig): AiConfig {
   return {
