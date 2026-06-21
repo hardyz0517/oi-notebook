@@ -186,6 +186,14 @@ export function getSearchedMergeEditorState(state: MergeEditorState, searchQuery
   };
 }
 
+export function getSelectedMergeTargetState(state: MergeEditorState, selectedTargetId: string): MergeEditorState {
+  return {
+    ...state,
+    selectedTargetId,
+    error: null,
+  };
+}
+
 export function getOpenedCustomTagCreateState(
   state: CustomTagEditorState,
   suggestion: TagSuggestion | null,
