@@ -48,18 +48,16 @@ import {
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
+  buildTagDetailRouteView,
   buildTagDetailHeaderView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
-  collectRelatedTagChips,
   collectTagChips,
   isTagDiagnosticsEnabled,
   type TagChipItem,
 } from "./blogViewModel";
 import {
   buildTagTree,
-  findTagTreeNode,
-  matchArticleByTagPath,
   tagPathSeparator,
   type TagTreeNode,
 } from "./tagTaxonomy";
@@ -290,11 +288,13 @@ function IndexView({
   }
 
   if (route.name === "tag") {
-    const tagNode = findTagTreeNode(tagTree, route.tag);
-    const includeDescendants = Boolean(tagNode?.children.length);
-    const filteredNotes = notes.filter((note) => matchArticleByTagPath(note, route.tag, includeDescendants));
-    const paged = paginateBlogNotes(filteredNotes, route.page, resultPageSize);
-    const relatedTags = tagNode ? collectRelatedTagChips(tagNode) : [];
+    const tagDetail = buildTagDetailRouteView({
+      notes,
+      tagTree,
+      tag: route.tag,
+      page: route.page,
+      pageSize: resultPageSize,
+    });
 
     return (
       <ListingPage
@@ -306,11 +306,11 @@ function IndexView({
           </>
         }
       >
-        <TagDetailHeader tag={route.tag} count={filteredNotes.length} />
-        <RelatedTagList tags={relatedTags} />
+        <TagDetailHeader tag={route.tag} count={tagDetail.count} />
+        <RelatedTagList tags={tagDetail.relatedTags} />
         <section className="tag-detail-results">
           <PostResults
-            notes={paged.items}
+            notes={tagDetail.paged.items}
             isLoading={isLoading}
             error={error}
             onRetry={onRetry}
@@ -319,7 +319,7 @@ function IndexView({
             emptyTitle={"\u8fd9\u4e2a\u6807\u7b7e\u4e0b\u8fd8\u6ca1\u6709\u6587\u7ae0"}
             emptyDescription={"\u540e\u7eed\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u8fd9\u4e2a\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
           />
-          <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getTagHref(route.tag, page)} />
+          <Pagination currentPage={tagDetail.paged.currentPage} totalPages={tagDetail.paged.totalPages} getPageHref={(page) => getTagHref(route.tag, page)} />
         </section>
       </ListingPage>
     );

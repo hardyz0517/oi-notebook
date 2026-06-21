@@ -12,6 +12,7 @@ import {
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
+  buildTagDetailRouteView,
   buildTagDetailHeaderView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -63,6 +64,74 @@ describe("blogViewModel", () => {
           showSeparator: true,
         },
       ],
+    });
+  });
+
+  it("builds tag detail route data with descendant matches", () => {
+    const tree = [
+      tagNode({
+        name: "算法",
+        fullPath: "算法",
+        depth: 1,
+        count: 3,
+        children: [
+          tagNode({
+            name: "图论",
+            fullPath: "算法/图论",
+            depth: 2,
+            count: 3,
+            children: [
+              tagNode({
+                name: "最短路",
+                fullPath: "算法/图论/最短路",
+                depth: 3,
+                count: 1,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ];
+    const note = (title: string, tags: string[]): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags,
+      category: "inbox",
+      collection: "杂谈",
+      collections: ["杂谈"],
+      created: null,
+      updated: null,
+      date: null,
+      sortKey: null,
+      draft: false,
+    });
+
+    expect(buildTagDetailRouteView({
+      notes: [
+        note("a", ["算法/图论"]),
+        note("b", ["算法/图论/最短路"]),
+        note("c", ["算法/字符串"]),
+      ],
+      tagTree: tree,
+      tag: "算法/图论",
+      page: 2,
+      pageSize: 1,
+    })).toEqual({
+      filteredNotes: [
+        note("a", ["算法/图论"]),
+        note("b", ["算法/图论/最短路"]),
+      ],
+      paged: {
+        items: [note("b", ["算法/图论/最短路"])],
+        currentPage: 2,
+        totalPages: 2,
+      },
+      relatedTags: [
+        { label: "最短路", fullPath: "算法/图论/最短路", count: 1 },
+      ],
+      count: 2,
     });
   });
 

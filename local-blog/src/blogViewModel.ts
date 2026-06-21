@@ -12,6 +12,7 @@ import {
   getNoteExcerpt,
   getRawNoteTagReason,
   getUnknownTags,
+  paginateNotes,
   type CollectionGroup,
   type NoteDetail,
   type NoteSummary,
@@ -19,8 +20,10 @@ import {
 } from "./blogContent";
 import { getNoteHref, getTagHref } from "./blogRoutes";
 import {
+  findTagTreeNode,
   getTagPathSegments,
   getTagSuggestionList,
+  matchArticleByTagPath,
   tagPathSeparator,
   type TagTreeNode,
 } from "./tagTaxonomy";
@@ -125,6 +128,25 @@ export type TagDetailHeaderView = {
 export type TagDetailHeaderViewInput = {
   tag: string;
   count: number;
+};
+
+export type TagDetailRouteView = {
+  filteredNotes: NoteSummary[];
+  paged: {
+    items: NoteSummary[];
+    currentPage: number;
+    totalPages: number;
+  };
+  relatedTags: TagChipItem[];
+  count: number;
+};
+
+export type TagDetailRouteViewInput = {
+  notes: NoteSummary[];
+  tagTree: TagTreeNode[];
+  tag: string;
+  page: number;
+  pageSize: number;
 };
 
 export type CollectionOverviewState = "loading" | "error" | "empty" | "ready";
@@ -401,6 +423,19 @@ export function buildTagDetailHeaderView(input: TagDetailHeaderViewInput): TagDe
       };
     }),
     countLabel: "共 " + input.count + " 篇文章",
+  };
+}
+
+export function buildTagDetailRouteView(input: TagDetailRouteViewInput): TagDetailRouteView {
+  const tagNode = findTagTreeNode(input.tagTree, input.tag);
+  const includeDescendants = Boolean(tagNode?.children.length);
+  const filteredNotes = input.notes.filter((note) => matchArticleByTagPath(note, input.tag, includeDescendants));
+
+  return {
+    filteredNotes,
+    paged: paginateNotes(filteredNotes, input.page, input.pageSize),
+    relatedTags: tagNode ? collectRelatedTagChips(tagNode) : [],
+    count: filteredNotes.length,
   };
 }
 

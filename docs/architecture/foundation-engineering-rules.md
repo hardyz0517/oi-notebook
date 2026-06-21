@@ -150,12 +150,12 @@ Use domain modules as the home for stable rules:
   these content rules directly.
 - `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
   chip expansion, tag chip search matching, tag-map group/branch view data,
-  tag detail header data, collection overview state/card rows, collection
+  tag detail route data, tag detail header data, collection overview state/card rows, collection
   detail header data, collection detail entry rows, archive list sections/rows,
   archive year index data, recent update cards, note detail header/navigation
   context, note navigation items, compact post card/result rows, compact
   pagination items/links, and tag diagnostics payloads/debug-enable rules. The
-  local-blog App shell should render tag-map, tag detail header data,
+  local-blog App shell should render tag-map, tag detail route/header data,
   collection overview/detail rows, archive index/list rows, recent update
   cards, note detail header/navigation context, note navigation items, post
   card/result rows, and pagination item/link view data, read browser debug
