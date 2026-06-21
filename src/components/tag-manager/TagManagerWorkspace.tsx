@@ -11,7 +11,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getSaveEventBase, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCollectionEditSavePlan, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getSaveEventBase, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -695,14 +695,14 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   const saveCollectionEdit = useCallback(async () => {
     if (!editingCollectionName) return;
 
-    const nextName = collectionEditInput.trim().replace(/\s+/g, " ");
-    if (nextName === editingCollectionName) {
+    const savePlan = getCollectionEditSavePlan(editingCollectionName, collectionEditInput);
+    if (savePlan.action === "cancel") {
       cancelCollectionEdit();
       return;
     }
 
     const currentConfig = normalizeConfig(workingConfig);
-    const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, nextName, collectionExistingCandidates);
+    const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, savePlan.nextName, collectionExistingCandidates);
     if (!result.ok) {
       setCollectionEditError(result.error);
       return;

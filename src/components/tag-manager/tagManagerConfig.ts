@@ -112,6 +112,15 @@ export type CustomCollectionUpdateResult =
     error: string;
   };
 
+export type CollectionEditSavePlan =
+  | {
+    action: "cancel";
+  }
+  | {
+    action: "rename";
+    nextName: string;
+  };
+
 export function normalizeConfig(config: UserTagTaxonomyConfig | null | undefined): UserTagTaxonomyConfig {
   return {
     version: config?.version ?? 1,
@@ -462,6 +471,20 @@ export function renameCustomCollectionCandidate(
       ...currentConfig,
       customCollections: nextCollections,
     }),
+  };
+}
+
+export function getCollectionEditSavePlan(
+  editingCollectionName: string,
+  collectionEditInput: string,
+): CollectionEditSavePlan {
+  const nextName = normalizeCollectionCandidateValue(collectionEditInput);
+  if (nextName === editingCollectionName) {
+    return { action: "cancel" };
+  }
+  return {
+    action: "rename",
+    nextName,
   };
 }
 

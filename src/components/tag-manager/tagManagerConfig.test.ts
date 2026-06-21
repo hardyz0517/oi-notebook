@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getGroupedCustomTagCreateDraftSelection, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -206,6 +206,21 @@ describe("tagManagerConfig custom tag create draft selection rules", () => {
       ...draft,
       parentPathText: "算法 / 动态规划",
       parentLocked: true,
+    });
+  });
+});
+
+describe("tagManagerConfig collection edit save plan", () => {
+  it("cancels editing when the normalized collection name is unchanged", () => {
+    expect(getCollectionEditSavePlan("训练 记录", "  训练   记录  ")).toEqual({
+      action: "cancel",
+    });
+  });
+
+  it("returns the normalized collection name when editing changes the value", () => {
+    expect(getCollectionEditSavePlan("训练记录", "  周赛   复盘  ")).toEqual({
+      action: "rename",
+      nextName: "周赛 复盘",
     });
   });
 });
