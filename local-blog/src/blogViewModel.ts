@@ -191,6 +191,7 @@ export type CollectionDetailRouteView = {
   };
   count: number;
   latestUpdatedAt?: string;
+  entriesState: "loading" | "error" | "empty" | "ready";
 };
 
 export type CollectionDetailRouteViewInput = {
@@ -199,6 +200,8 @@ export type CollectionDetailRouteViewInput = {
   collection: string;
   page: number;
   pageSize: number;
+  isLoading?: boolean;
+  error?: string | null;
 };
 
 export type CollectionOverviewViewInput = {
@@ -651,6 +654,13 @@ export function buildCollectionDetailRouteView(input: CollectionDetailRouteViewI
   const collectionGroup = input.collections.find((item) => item.name === collection);
   const filteredNotes = sortNotesByRecent(input.notes.filter((note) => note.collections.includes(collection)));
   const paged = paginateNotes(filteredNotes, input.page, input.pageSize);
+  const entriesState = input.isLoading
+    ? "loading"
+    : input.error
+      ? "error"
+      : paged.items.length === 0
+        ? "empty"
+        : "ready";
 
   return {
     collection,
@@ -659,6 +669,7 @@ export function buildCollectionDetailRouteView(input: CollectionDetailRouteViewI
     paged,
     count: filteredNotes.length,
     latestUpdatedAt: collectionGroup?.latestUpdatedAt,
+    entriesState,
   };
 }
 

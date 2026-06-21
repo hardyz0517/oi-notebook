@@ -464,7 +464,38 @@ describe("blogViewModel", () => {
       },
       count: 2,
       latestUpdatedAt: "2026-06-20T00:00:00Z",
+      entriesState: "ready",
     });
+
+    expect(buildCollectionDetailRouteView({
+      notes,
+      collections,
+      collection: "algorithm",
+      page: 1,
+      pageSize: 10,
+      isLoading: true,
+      error: null,
+    }).entriesState).toBe("loading");
+
+    expect(buildCollectionDetailRouteView({
+      notes,
+      collections,
+      collection: "algorithm",
+      page: 1,
+      pageSize: 10,
+      isLoading: false,
+      error: "failed",
+    }).entriesState).toBe("error");
+
+    expect(buildCollectionDetailRouteView({
+      notes,
+      collections,
+      collection: "missing",
+      page: 1,
+      pageSize: 10,
+      isLoading: false,
+      error: null,
+    }).entriesState).toBe("empty");
   });
 
   it("builds post card and result rows", () => {

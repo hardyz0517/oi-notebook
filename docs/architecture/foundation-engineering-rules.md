@@ -151,21 +151,23 @@ Use domain modules as the home for stable rules:
 - `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
   chip expansion, tag chip search matching, tag-map group/branch view data,
   tag detail route data, tag detail header data, collection overview state/card rows, collection
-  detail route data, collection detail header data, collection detail entry rows,
-  article archive route data, home route data, note detail route data, archive
-  list sections/rows, archive year index data, search route result data, recent
-  update cards, note detail header/navigation context, note navigation items,
-  compact post card/result rows, compact pagination items/links, and tag
+  detail route data, collection detail entries state, collection detail header
+  data, collection detail entry rows, article archive route data, home route
+  data, note detail route data, archive list sections/rows, archive year index
+  data, search route result data, recent update cards, note detail
+  header/navigation context, note navigation items, compact post card/result
+  rows, compact pagination items/links, and tag
   diagnostics payloads/debug-enable rules. The
   local-blog App shell should render tag-map, tag detail route/header data,
   collection overview/detail rows, collection detail filtering/pagination,
   article archive pagination/year grouping/index data, archive index/list rows,
   home pagination/latest-note data, note detail route data, site nav active
-  state, article toc active state, note navigation card state, search result
-  pagination/count labels, recent update cards, note detail
-  header/navigation context, note navigation items, post card/result rows, and
-  pagination item/link view data, read browser debug flags, and perform
-  console side effects instead of owning these reusable rules directly.
+  state, article toc active state, note navigation card state, collection
+  detail entries state, search result pagination/count labels, recent update
+  cards, note detail header/navigation context, note navigation items, post
+  card/result rows, and pagination item/link view data, read browser debug
+  flags, and perform console side effects instead of owning these reusable
+  rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
 Luogu import edge cases, local-blog page-section rules, and other non-AI areas

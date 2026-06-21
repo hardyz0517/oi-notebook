@@ -345,6 +345,8 @@ function IndexView({
       collection: route.collection,
       page: route.page,
       pageSize: resultPageSize,
+      isLoading,
+      error,
     });
 
     return (
@@ -360,11 +362,11 @@ function IndexView({
             <header className="collection-entries-header">
               <h2 id="collection-entries-title">{"\u6587\u7ae0\u76ee\u5f55"}</h2>
             </header>
-            {isLoading ? (
+            {collectionDetail.entriesState === "loading" ? (
               <LoadingState />
-            ) : error ? (
+            ) : collectionDetail.entriesState === "error" ? (
               <ErrorState onRetry={onRetry} />
-            ) : collectionDetail.paged.items.length === 0 ? (
+            ) : collectionDetail.entriesState === "empty" ? (
               <EmptyState
                 title={"\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6587\u96c6"}
                 description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
