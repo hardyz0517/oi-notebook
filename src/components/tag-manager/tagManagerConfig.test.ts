@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -220,6 +220,41 @@ describe("tagManagerConfig custom tag edit selection state", () => {
       selectedSuggestionId: null,
       customTagEditDraft: null,
       customTagEditError: null,
+    });
+  });
+});
+
+describe("tagManagerConfig selection change transient state", () => {
+  const state: TagManagerSelectionChangeTransientState = {
+    aliasInput: "old alias",
+    aliasError: "old alias error",
+    customTagCreateError: "old create error",
+    customTagEditDraft: {
+      name: "old tag",
+      aliasesText: "old alias text",
+    },
+    customTagEditError: "old edit error",
+    mergeEditor: {
+      isOpen: true,
+      searchQuery: "kmp",
+      selectedTargetId: "algorithm.string.kmp",
+      error: "old merge error",
+    },
+  };
+
+  it("clears transient selection state when switching suggestions", () => {
+    expect(getSelectionChangeTransientState(state)).toEqual({
+      aliasInput: "",
+      aliasError: null,
+      customTagCreateError: null,
+      customTagEditDraft: null,
+      customTagEditError: null,
+      mergeEditor: {
+        isOpen: false,
+        searchQuery: "",
+        selectedTargetId: null,
+        error: null,
+      },
     });
   });
 });

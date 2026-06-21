@@ -119,6 +119,15 @@ export type CustomTagEditSelectionState = {
   customTagEditError: string | null;
 };
 
+export type TagManagerSelectionChangeTransientState = {
+  aliasInput: string;
+  aliasError: string | null;
+  customTagCreateError: string | null;
+  customTagEditDraft: CustomTagEditDraft | null;
+  customTagEditError: string | null;
+  mergeEditor: MergeEditorState;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -929,6 +938,20 @@ export function getAppliedCustomTagEditSelectionState(
     selectedSuggestionId,
     customTagEditDraft: null,
     customTagEditError: null,
+  };
+}
+
+export function getSelectionChangeTransientState(
+  state: TagManagerSelectionChangeTransientState,
+): TagManagerSelectionChangeTransientState {
+  return {
+    ...state,
+    aliasInput: "",
+    aliasError: null,
+    customTagCreateError: null,
+    customTagEditDraft: null,
+    customTagEditError: null,
+    mergeEditor: getClosedMergeEditorState(state.mergeEditor),
   };
 }
 
