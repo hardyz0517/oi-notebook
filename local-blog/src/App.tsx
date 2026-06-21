@@ -42,6 +42,7 @@ import {
   buildArticleTocView,
   buildHomeRouteView,
   buildNoteDetailRouteView,
+  buildNoteNavigationCardView,
   buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
@@ -1346,21 +1347,21 @@ function NoteNavigationItem({
   sourceHref: string;
   align?: "previous" | "next";
 }) {
-  const className = "note-nav-card note-nav-" + align + (note ? "" : " note-nav-card-disabled");
+  const cardView = buildNoteNavigationCardView({ label, note, emptyLabel, sourceHref, align });
   const item = buildNoteNavigationItemView({ note, sourceHref });
 
   if (!item) {
     return (
-      <div className={className} aria-disabled="true">
-        <span className="note-nav-label">{label}</span>
-        <p>{emptyLabel}</p>
+      <div className={cardView.className} aria-disabled="true">
+        <span className="note-nav-label">{cardView.label}</span>
+        <p>{cardView.emptyLabel}</p>
       </div>
     );
   }
 
   return (
-    <a className={className} href={item.href}>
-      <span className="note-nav-label">{label}</span>
+    <a className={cardView.className} href={item.href}>
+      <span className="note-nav-label">{cardView.label}</span>
       <h2>{item.title}</h2>
       <div className="note-nav-meta">
         <span>{item.collection}</span>

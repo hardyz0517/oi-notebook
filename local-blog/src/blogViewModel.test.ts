@@ -14,6 +14,7 @@ import {
   buildNoteNavigationItemView,
   buildSiteNavView,
   buildArticleTocView,
+  buildNoteNavigationCardView,
   buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
@@ -1096,6 +1097,54 @@ describe("blogViewModel", () => {
       searchDebugTag: null,
       localStorageDebugTag: null,
     })).toBe(false);
+  });
+
+  it("builds note navigation card state", () => {
+    expect(buildNoteNavigationCardView({
+      label: "上一页",
+      note: null,
+      emptyLabel: "已经是最新文章",
+      sourceHref: "#/note/current.md",
+      align: "previous",
+    })).toEqual({
+      className: "note-nav-card note-nav-previous note-nav-card-disabled",
+      isDisabled: true,
+      label: "上一页",
+      emptyLabel: "已经是最新文章",
+      item: null,
+    });
+
+    expect(buildNoteNavigationCardView({
+      label: "下一页",
+      note: {
+        title: "下一篇",
+        relativePath: "posts/next.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技术",
+        collections: ["技术"],
+        created: null,
+        updated: null,
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+      emptyLabel: "没有更早文章",
+      sourceHref: "#/note/current.md",
+      align: "next",
+    })).toMatchObject({
+      className: "note-nav-card note-nav-next",
+      isDisabled: false,
+      label: "下一页",
+      emptyLabel: "没有更早文章",
+      item: {
+        href: "#/note/posts%2Fnext.md?from=%2Fnote%2Fcurrent.md",
+        title: "下一篇",
+        collection: "技术",
+      },
+    });
   });
 
   it("builds ready-to-log tag diagnostics from raw notes, normalized notes, and the tag tree", () => {

@@ -377,6 +377,22 @@ export type NoteNavigationItemViewInput = {
   sourceHref: string;
 };
 
+export type NoteNavigationCardView = {
+  className: string;
+  isDisabled: boolean;
+  label: string;
+  emptyLabel: string;
+  item: NoteNavigationItemView | null;
+};
+
+export type NoteNavigationCardViewInput = {
+  label: string;
+  note: NoteSummary | null;
+  emptyLabel: string;
+  sourceHref: string;
+  align?: "previous" | "next";
+};
+
 export type NoteDetailHeaderView = {
   displayDate: string | null;
   summary: string | null;
@@ -799,6 +815,17 @@ export function buildNoteNavigationItemView(input: NoteNavigationItemViewInput):
     collection: input.note.collection,
     dateLabel: formatOptionalDate(input.note.date, input.note.updated, input.note.created),
     dateTime: getNoteDateValue(input.note),
+  };
+}
+
+export function buildNoteNavigationCardView(input: NoteNavigationCardViewInput): NoteNavigationCardView {
+  const className = "note-nav-card note-nav-" + (input.align ?? "previous") + (input.note ? "" : " note-nav-card-disabled");
+  return {
+    className,
+    isDisabled: !input.note,
+    label: input.label,
+    emptyLabel: input.emptyLabel,
+    item: buildNoteNavigationItemView({ note: input.note, sourceHref: input.sourceHref }),
   };
 }
 
