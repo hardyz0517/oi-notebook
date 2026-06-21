@@ -123,6 +123,19 @@ export type CollectionOverviewView = {
   cards: CollectionOverviewCard[];
 };
 
+export type CollectionDetailHeaderView = {
+  collection: string;
+  countLabel: string;
+  updatedLabel: string;
+  description: string;
+};
+
+export type CollectionDetailHeaderViewInput = {
+  collection: string;
+  count: number;
+  latestUpdatedAt?: string;
+};
+
 export type CollectionOverviewViewInput = {
   collections: CollectionGroup[];
   isLoading: boolean;
@@ -403,6 +416,15 @@ export function buildCollectionOverviewView(input: CollectionOverviewViewInput):
       description: getCollectionDescription(collection.name),
       updatedLabel: `最近更新：${formatCompactDate(collection.latestUpdatedAt) ?? "暂无记录"}`,
     })),
+  };
+}
+
+export function buildCollectionDetailHeaderView(input: CollectionDetailHeaderViewInput): CollectionDetailHeaderView {
+  return {
+    collection: input.collection,
+    countLabel: input.count + " 篇文章",
+    updatedLabel: "最近更新 " + (formatCompactDate(input.latestUpdatedAt) ?? "暂无记录"),
+    description: getCollectionDescription(input.collection),
   };
 }
 

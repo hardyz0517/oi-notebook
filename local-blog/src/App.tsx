@@ -17,10 +17,8 @@ import {
 import {
   buildCollections as buildBlogCollections,
   defaultBlogConfig as blogDefaultConfig,
-  formatCompactDate as formatBlogCompactDate,
   getCategoryCounts as getBlogCategoryCounts,
   getCategoryLabel,
-  getCollectionDescription as getBlogCollectionDescription,
   getNoteYear,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
@@ -42,6 +40,7 @@ import {
 import {
   buildArticleResultListView,
   buildArchiveListView,
+  buildCollectionDetailHeaderView,
   buildCollectionEntryListView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
@@ -631,16 +630,18 @@ function CollectionDetailHeader({
   count: number;
   latestUpdatedAt?: string;
 }) {
+  const header = buildCollectionDetailHeaderView({ collection, count, latestUpdatedAt });
+
   return (
     <header className="collection-detail-hero">
       <div className="collection-detail-hero-main">
         <p className="collection-detail-kicker">{"\u6587\u96c6"}</p>
-        <h1>{collection}</h1>
+        <h1>{header.collection}</h1>
         <p className="collection-detail-meta">
-          <span>{count + " \u7bc7\u6587\u7ae0"}</span>
-          <span>{"\u6700\u8fd1\u66f4\u65b0 " + (formatBlogCompactDate(latestUpdatedAt) ?? "\u6682\u65e0\u8bb0\u5f55")}</span>
+          <span>{header.countLabel}</span>
+          <span>{header.updatedLabel}</span>
         </p>
-        <p className="collection-detail-description">{getBlogCollectionDescription(collection)}</p>
+        <p className="collection-detail-description">{header.description}</p>
       </div>
     </header>
   );

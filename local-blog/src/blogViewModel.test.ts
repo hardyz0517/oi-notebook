@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildArticleResultListView,
   buildArchiveListView,
+  buildCollectionDetailHeaderView,
   buildCollectionEntryListView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
@@ -293,6 +294,29 @@ describe("blogViewModel", () => {
         tags: ["题解"],
       },
     ]);
+  });
+
+  it("builds collection detail header data", () => {
+    expect(buildCollectionDetailHeaderView({
+      collection: "题解",
+      count: 12,
+      latestUpdatedAt: "2026-06-21T10:20:30Z",
+    })).toEqual({
+      collection: "题解",
+      countLabel: "12 篇文章",
+      updatedLabel: "最近更新 2026/6/21",
+      description: "做题思路、实现坑点与代码复盘。",
+    });
+
+    expect(buildCollectionDetailHeaderView({
+      collection: "未知合集",
+      count: 0,
+    })).toEqual({
+      collection: "未知合集",
+      countLabel: "0 篇文章",
+      updatedLabel: "最近更新 暂无记录",
+      description: "收录这一主题下的相关文章。",
+    });
   });
 
   it("builds post card and result rows", () => {
