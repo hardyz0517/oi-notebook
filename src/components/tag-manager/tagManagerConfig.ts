@@ -724,6 +724,16 @@ export function getFailedCollectionEditSaveState(
   };
 }
 
+export function getFailedCollectionDeleteSaveState(
+  state: CollectionPanelState,
+  deleteError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    editError: deleteError,
+  };
+}
+
 export function deleteCustomCollectionCandidate(
   config: UserTagTaxonomyConfig,
   name: string,

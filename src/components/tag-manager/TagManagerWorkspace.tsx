@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getFailedCollectionCreateSaveState, getFailedCollectionEditSaveState, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -146,6 +146,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
   const applyFailedCollectionEditState = useCallback((editError: string) => {
     applyCollectionPanelState(getFailedCollectionEditSaveState(getCurrentCollectionPanelState(), editError));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
+  const applyFailedCollectionDeleteState = useCallback((deleteError: string) => {
+    applyCollectionPanelState(getFailedCollectionDeleteSaveState(getCurrentCollectionPanelState(), deleteError));
   }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
   const applySavedCollectionEditState = useCallback(() => {
     applyCollectionEditState(getAppliedCollectionEditSaveState(getCurrentCollectionEditState()));
@@ -884,7 +887,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = deleteCustomCollectionCandidate(currentConfig, name);
     if (!result.ok) {
-      applyFailedCollectionEditState(result.error);
+      applyFailedCollectionDeleteState(result.error);
       return;
     }
 
@@ -892,9 +895,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     if (saved) {
       applyDeletedCollectionEditState(name);
     } else if (!saved) {
-      applyFailedCollectionEditState("保存失败，已恢复原文集候选");
+      applyFailedCollectionDeleteState("保存失败，已恢复原文集候选");
     }
-  }, [applyDeletedCollectionEditState, applyFailedCollectionEditState, requestConfirm, saveWorkingConfig, workingConfig]);
+  }, [applyDeletedCollectionEditState, applyFailedCollectionDeleteState, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {
