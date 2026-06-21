@@ -100,10 +100,21 @@ Use domain modules as the home for stable rules:
 - `src/components/luogu/luoguImportDisplay.ts`: Luogu import task states,
   import center view state, scan summaries, prepare/write progress, selection
   plans, and display-only import rules.
+- `src/components/luogu/useLuoguImportWorkflow.ts`: Luogu import workspace
+  source state, including selected/skipped ids, prepared notes, prepare/write
+  state, active preview, edited markdown ids, review selection, and reset
+  helpers.
+- `src/components/luogu/useLuoguImportController.ts`: Luogu import derived
+  controller state, including displayed submissions, selected counts,
+  candidate state, reusable preview grouping, and active prepared preview.
 - `src/components/settings/pages/luoguImportRules.ts`: Luogu import rule
   schema, storage normalization, rule rows, and safe save-directory rules.
 - `src/components/tag-manager/tagNormalizationScan.ts`: tag normalization
   scan/apply task state, stats, panel state, and selection summaries.
+- `src/components/tag-manager/tagManagerViewModel.ts`: Tag Manager workspace
+  view state, including filtered suggestions/root groups, active root
+  fallback, selected suggestion alias state, merge preview/candidates,
+  collection rows, sort disabled state, and search results.
 - `src/lib/localIndexStatus.ts`: local index status labels, task view state,
   rebuild messages, details view state, and size/date/access formatting.
 - `src/lib/blogConfig.ts`: blog identity defaults, loaded config fallback,
@@ -115,6 +126,9 @@ Use domain modules as the home for stable rules:
   entry/alias lists, status tone, and settings action disabled/spinner state.
 - `src/lib/appStatusLabels.ts`: status bar and settings status labels.
 - `src/lib/api.ts`: the only frontend boundary for Rust command invocation.
+- `src/lib/apiContract.ts`: the frontend Rust command wrapper contract. Keep
+  it aligned with wrapper names, command names, and argument keys in
+  `src/lib/api.ts`.
 - `src/components/settings/settingsRenderGuards.ts`: settings group/page render
   guards used by the Settings shell.
 
@@ -173,6 +187,13 @@ should import typed wrapper functions from that file instead of importing
 The test intentionally allows existing frozen AI boundary files and test files,
 but ordinary app, settings, notes, Luogu, blog, local index, and tag taxonomy
 code should not bypass `src/lib/api.ts`.
+
+`src/lib/apiContract.ts` records the current command wrapper contract. When a
+wrapper in `src/lib/api.ts` is added, renamed, or changes its argument object,
+update the contract in the same change and run
+`pnpm.cmd vitest run src/lib/apiBoundary.test.ts`. The contract is intentionally
+small and reviewable: wrapper function name, Rust command name, argument keys,
+and command-name uniqueness.
 
 Tauri event/window utilities are not Rust command calls and may remain in shell
 or quick-note code when they are part of local window/event orchestration.

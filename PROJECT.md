@@ -59,9 +59,9 @@ oi-notebook/
 
 **IPC pattern:** Frontend calls Rust commands through wrappers in `src/lib/api.ts`. Commands are defined with `#[tauri::command]` in Rust and registered in the builder's `invoke_handler`.
 
-**Foundation upgrade status:** The current engineering pass is foundation-first with AI behavior frozen. Theme Engine lives under `src/theme/**`; Settings V2 visual styling is protected; App shell helpers, note workspace rules, long-task state helpers, Blog/Local Index/Tag Taxonomy/Luogu view models, and API boundary guards are being extracted into focused modules with Vitest coverage.
+**Foundation upgrade status:** The current engineering pass is foundation-first with AI behavior frozen. Theme Engine lives under `src/theme/**`; Settings V2 visual styling is protected; App shell helpers, note workspace rules, long-task state helpers, Blog/Local Index/Tag Taxonomy/Luogu view models, Luogu import workflow state, Tag Manager workspace view state, and API boundary/contract guards are being extracted into focused modules with Vitest coverage.
 
-**Foundation engineering rules:** See `docs/architecture/foundation-engineering-rules.md` before continuing non-AI architecture cleanup. It defines the App shell boundary, TaskState/TaskView pattern, domain-module ownership, side-effect placement, and verification checklist.
+**Foundation engineering rules:** See `docs/architecture/foundation-engineering-rules.md` before continuing non-AI architecture cleanup, and `docs/HANDOFF.md` for the current phase handoff. They define the App shell boundary, TaskState/TaskView pattern, domain-module ownership, side-effect placement, API contract rules, and verification checklist.
 
 **Long-task model:** Non-AI long-running work should expose `TaskState` from `src/lib/taskStatus.ts` and, when UI labels/progress are needed, a small domain task-view helper. Local index rebuild/load state, Luogu scan/prepare/write state, and tag normalization scan/apply state are already aligned with this rule. Settings-facing disabled/spinner/label state should prefer domain view models when the rule is shared or non-trivial. New task surfaces should not invent ad hoc `isLoading`/`isBusy`/`error` boolean clusters when the shared model can represent the workflow.
 
