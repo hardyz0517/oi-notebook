@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCollectionEditSavePlan, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getSaveEventBase, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type MergeEditorState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -73,6 +73,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       current?.resolve(true);
       return null;
     });
+  }, []);
+  const applyMergeEditorState = useCallback((state: MergeEditorState) => {
+    setIsMergeEditorOpen(state.isOpen);
+    setMergeSearchQuery(state.searchQuery);
+    setSelectedMergeTargetId(state.selectedTargetId);
+    setMergeError(state.error);
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -546,24 +552,26 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       setMergeError("只有具体标签可以设置合并规则。");
       return;
     }
-    setIsMergeEditorOpen(true);
-    setMergeSearchQuery("");
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, [canEditMergeRule]);
+    applyMergeEditorState(getOpenedMergeEditorState());
+  }, [applyMergeEditorState, canEditMergeRule]);
 
   const cancelMergeEdit = useCallback(() => {
-    setIsMergeEditorOpen(false);
-    setMergeSearchQuery("");
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, []);
+    applyMergeEditorState(getClosedMergeEditorState({
+      isOpen: isMergeEditorOpen,
+      searchQuery: mergeSearchQuery,
+      selectedTargetId: selectedMergeTargetId,
+      error: mergeError,
+    }));
+  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, selectedMergeTargetId]);
 
   const handleMergeSearchQueryChange = useCallback((value: string) => {
-    setMergeSearchQuery(value);
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, []);
+    applyMergeEditorState(getSearchedMergeEditorState({
+      isOpen: isMergeEditorOpen,
+      searchQuery: mergeSearchQuery,
+      selectedTargetId: selectedMergeTargetId,
+      error: mergeError,
+    }, value));
+  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, selectedMergeTargetId]);
 
   const saveMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -585,14 +593,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
     if (saved) {
-      setIsMergeEditorOpen(false);
-      setMergeSearchQuery("");
-      setSelectedMergeTargetId(null);
-      setMergeError(null);
+      applyMergeEditorState(getClosedMergeEditorState({
+        isOpen: isMergeEditorOpen,
+        searchQuery: mergeSearchQuery,
+        selectedTargetId: selectedMergeTargetId,
+        error: mergeError,
+      }));
     } else {
       setMergeError("保存失败，已恢复原合并规则");
     }
-  }, [requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
+  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedMergeTargetId, selectedSuggestion, workingConfig]);
 
   const removeMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -614,14 +624,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
     if (saved) {
-      setIsMergeEditorOpen(false);
-      setMergeSearchQuery("");
-      setSelectedMergeTargetId(null);
-      setMergeError(null);
+      applyMergeEditorState(getClosedMergeEditorState({
+        isOpen: isMergeEditorOpen,
+        searchQuery: mergeSearchQuery,
+        selectedTargetId: selectedMergeTargetId,
+        error: mergeError,
+      }));
     } else {
       setMergeError("保存失败，已恢复原合并规则");
     }
-  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
+  }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTargetId, selectedSuggestion, workingConfig]);
 
   const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
     setActiveView(nextView);

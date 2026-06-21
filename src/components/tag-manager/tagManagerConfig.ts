@@ -81,6 +81,13 @@ export type MergeRuleUpdateResult =
     error: string;
   };
 
+export type MergeEditorState = {
+  isOpen: boolean;
+  searchQuery: string;
+  selectedTargetId: string | null;
+  error: string | null;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -120,6 +127,33 @@ export type CollectionEditSavePlan =
     action: "rename";
     nextName: string;
   };
+
+export function getOpenedMergeEditorState(): MergeEditorState {
+  return {
+    isOpen: true,
+    searchQuery: "",
+    selectedTargetId: null,
+    error: null,
+  };
+}
+
+export function getClosedMergeEditorState(_state: MergeEditorState): MergeEditorState {
+  return {
+    isOpen: false,
+    searchQuery: "",
+    selectedTargetId: null,
+    error: null,
+  };
+}
+
+export function getSearchedMergeEditorState(state: MergeEditorState, searchQuery: string): MergeEditorState {
+  return {
+    ...state,
+    searchQuery,
+    selectedTargetId: null,
+    error: null,
+  };
+}
 
 export function normalizeConfig(config: UserTagTaxonomyConfig | null | undefined): UserTagTaxonomyConfig {
   return {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedMergeEditorState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type MergeEditorState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -221,6 +221,42 @@ describe("tagManagerConfig collection edit save plan", () => {
     expect(getCollectionEditSavePlan("训练记录", "  周赛   复盘  ")).toEqual({
       action: "rename",
       nextName: "周赛 复盘",
+    });
+  });
+});
+
+describe("tagManagerConfig merge editor state rules", () => {
+  const openState: MergeEditorState = {
+    isOpen: true,
+    searchQuery: "z function",
+    selectedTargetId: "algorithm.string.z-function",
+    error: "previous error",
+  };
+
+  it("opens the editor with empty search, target, and error state", () => {
+    expect(getOpenedMergeEditorState()).toEqual({
+      isOpen: true,
+      searchQuery: "",
+      selectedTargetId: null,
+      error: null,
+    });
+  });
+
+  it("closes the editor and clears transient merge state", () => {
+    expect(getClosedMergeEditorState(openState)).toEqual({
+      isOpen: false,
+      searchQuery: "",
+      selectedTargetId: null,
+      error: null,
+    });
+  });
+
+  it("updates search text while clearing target and error state", () => {
+    expect(getSearchedMergeEditorState(openState, "kmp")).toEqual({
+      isOpen: true,
+      searchQuery: "kmp",
+      selectedTargetId: null,
+      error: null,
     });
   });
 });
