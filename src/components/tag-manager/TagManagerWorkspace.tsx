@@ -129,6 +129,25 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setCollectionEditError(state.editError);
   }, []);
 
+  const getCurrentCollectionEditState = useCallback((): CollectionEditState => ({
+    editingName: editingCollectionName,
+    editInput: collectionEditInput,
+    editError: collectionEditError,
+    createError: collectionCreateError,
+  }), [collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
+  const getCurrentCollectionPanelState = useCallback((): CollectionPanelState => ({
+    activeView,
+    createInput: collectionCreateInput,
+    createError: collectionCreateError,
+    editError: collectionEditError,
+  }), [activeView, collectionCreateError, collectionCreateInput, collectionEditError]);
+  const applyFailedCollectionCreateState = useCallback((createError: string) => {
+    applyCollectionPanelState(getFailedCollectionCreateState(getCurrentCollectionPanelState(), createError));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
+  const applyFailedCollectionEditState = useCallback((editError: string) => {
+    applyCollectionPanelState(getFailedCollectionEditState(getCurrentCollectionPanelState(), editError));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
     config: workingConfig,
@@ -796,62 +815,32 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTargetId, selectedSuggestion, workingConfig]);
 
   const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
-    applyCollectionPanelState(getAppliedCollectionViewState({
-      activeView,
-      createInput: collectionCreateInput,
-      createError: collectionCreateError,
-      editError: collectionEditError,
-    }, nextView));
-  }, [activeView, applyCollectionPanelState, collectionCreateError, collectionCreateInput, collectionEditError]);
+    applyCollectionPanelState(getAppliedCollectionViewState(getCurrentCollectionPanelState(), nextView));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
 
   const createCollection = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
     const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
     if (!result.ok) {
-      applyCollectionPanelState(getFailedCollectionCreateState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, result.error));
+      applyFailedCollectionCreateState(result.error);
       return;
     }
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
     if (saved) {
-      applyCollectionPanelState(getAppliedCollectionCreateState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }));
+      applyCollectionPanelState(getAppliedCollectionCreateState(getCurrentCollectionPanelState()));
     } else {
-      applyCollectionPanelState(getFailedCollectionCreateState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, "保存失败，已恢复原文集候选"));
+      applyFailedCollectionCreateState("保存失败，已恢复原文集候选");
     }
-  }, [activeView, applyCollectionPanelState, collectionCreateError, collectionCreateInput, collectionEditError, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
+  }, [applyCollectionPanelState, applyFailedCollectionCreateState, collectionCreateInput, collectionExistingCandidates, getCurrentCollectionPanelState, saveWorkingConfig, workingConfig]);
 
   const startCollectionEdit = useCallback((name: string) => {
-    applyCollectionEditState(getOpenedCollectionEditState({
-      editingName: editingCollectionName,
-      editInput: collectionEditInput,
-      editError: collectionEditError,
-      createError: collectionCreateError,
-    }, name));
-  }, [applyCollectionEditState, collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
+    applyCollectionEditState(getOpenedCollectionEditState(getCurrentCollectionEditState(), name));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
 
   const cancelCollectionEdit = useCallback(() => {
-    applyCollectionEditState(getCancelledCollectionEditState({
-      editingName: editingCollectionName,
-      editInput: collectionEditInput,
-      editError: collectionEditError,
-      createError: collectionCreateError,
-    }));
-  }, [applyCollectionEditState, collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
+    applyCollectionEditState(getCancelledCollectionEditState(getCurrentCollectionEditState()));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
 
   const saveCollectionEdit = useCallback(async () => {
     if (!editingCollectionName) return;
@@ -865,12 +854,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, savePlan.nextName, collectionExistingCandidates);
     if (!result.ok) {
-      applyCollectionPanelState(getFailedCollectionEditState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, result.error));
+      applyFailedCollectionEditState(result.error);
       return;
     }
 
@@ -878,14 +862,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     if (saved) {
       cancelCollectionEdit();
     } else {
-      applyCollectionPanelState(getFailedCollectionEditState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, "保存失败，已恢复原文集候选"));
+      applyFailedCollectionEditState("保存失败，已恢复原文集候选");
     }
-  }, [activeView, applyCollectionPanelState, cancelCollectionEdit, collectionCreateError, collectionCreateInput, collectionEditError, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
+  }, [applyFailedCollectionEditState, cancelCollectionEdit, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
 
   const deleteCollection = useCallback(async (name: string) => {
     const confirmed = await requestConfirm({
@@ -899,12 +878,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = deleteCustomCollectionCandidate(currentConfig, name);
     if (!result.ok) {
-      applyCollectionPanelState(getFailedCollectionEditState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, result.error));
+      applyFailedCollectionEditState(result.error);
       return;
     }
 
@@ -912,14 +886,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     if (saved && editingCollectionName === name) {
       cancelCollectionEdit();
     } else if (!saved) {
-      applyCollectionPanelState(getFailedCollectionEditState({
-        activeView,
-        createInput: collectionCreateInput,
-        createError: collectionCreateError,
-        editError: collectionEditError,
-      }, "保存失败，已恢复原文集候选"));
+      applyFailedCollectionEditState("保存失败，已恢复原文集候选");
     }
-  }, [activeView, applyCollectionPanelState, cancelCollectionEdit, collectionCreateError, collectionCreateInput, collectionEditError, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
+  }, [applyFailedCollectionEditState, cancelCollectionEdit, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {
@@ -1035,22 +1004,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
           editError={collectionEditError}
           isSaving={isSaving}
           onCreateInputChange={(value) => {
-            applyCollectionPanelState(getChangedCollectionCreateInputState({
-              activeView,
-              createInput: collectionCreateInput,
-              createError: collectionCreateError,
-              editError: collectionEditError,
-            }, value));
+            applyCollectionPanelState(getChangedCollectionCreateInputState(getCurrentCollectionPanelState(), value));
           }}
           onCreate={() => void createCollection()}
           onStartEdit={startCollectionEdit}
           onEditInputChange={(value) => {
-            applyCollectionEditState(getChangedCollectionEditInputState({
-              editingName: editingCollectionName,
-              editInput: collectionEditInput,
-              editError: collectionEditError,
-              createError: collectionCreateError,
-            }, value));
+            applyCollectionEditState(getChangedCollectionEditInputState(getCurrentCollectionEditState(), value));
           }}
           onCancelEdit={cancelCollectionEdit}
           onSaveEdit={() => void saveCollectionEdit()}
