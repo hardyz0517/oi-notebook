@@ -98,6 +98,12 @@ domain modules with tests.
   href builders, note return-target validation, and return labels. The
   local-blog App shell should pass `window.location.hash` into this helper
   instead of owning route rules directly.
+- Local blog content model:
+  `local-blog/src/blogContent.ts` owns local-blog frontmatter parsing, note
+  summary/detail normalization, summary cleanup, display tags, collection
+  grouping, search, pagination, date formatting, and Blog config defaults.
+  The local-blog App shell should load data and render views instead of owning
+  these content rules directly.
 
 ## Long-Task Model
 
@@ -146,6 +152,8 @@ Recent focused coverage includes:
 
 - Local blog route helpers:
   `local-blog/src/blogRoutes.test.ts`.
+- Local blog content helpers:
+  `local-blog/src/blogContent.test.ts`.
 - Luogu display/task/workflow helpers:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
@@ -163,9 +171,9 @@ be selective:
 
 - Continue shrinking `App.tsx` only where a rule has a clear owner and focused
   test value.
-- Continue shrinking `local-blog/src/App.tsx` by moving stable route, config,
-  normalization, collection, search, and diagnostics rules into focused
-  local-blog domain modules with tests.
+- Continue shrinking `local-blog/src/App.tsx` by moving remaining stable
+  diagnostics and view-model rules into focused local-blog domain modules with
+  tests.
 - Consider a future Luogu effect controller only if it can own an end-to-end
   side-effect boundary without hiding important API/toast/confirm ordering.
 - Extend API contract metadata only when it improves review value, such as

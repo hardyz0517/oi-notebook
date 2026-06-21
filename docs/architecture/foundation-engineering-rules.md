@@ -135,11 +135,16 @@ Use domain modules as the home for stable rules:
   builders, note return-target validation, and return labels. The local-blog
   App shell should read browser state and consume this helper instead of
   owning route rules directly.
+- `local-blog/src/blogContent.ts`: local-blog frontmatter parsing, note
+  summary/detail normalization, summary cleanup, display tags, collection
+  grouping, search, pagination, date formatting, and Blog config defaults.
+  The local-blog App shell should load data and render views instead of owning
+  these content rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
-Luogu import edge cases, local-blog config/normalization/search rules, and
-other non-AI areas only when the extracted rule has a stable owner and focused
-test value.
+Luogu import edge cases, local-blog diagnostics/view-model rules, and other
+non-AI areas only when the extracted rule has a stable owner and focused test
+value.
 
 ## Blog Domain Boundary
 
