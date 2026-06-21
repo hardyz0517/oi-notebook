@@ -3,6 +3,7 @@ import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerF
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
+export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
 
 export type TagTaxonomyConfigImportPreview = {
   entriesCount: number;
