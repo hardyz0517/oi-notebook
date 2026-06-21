@@ -114,11 +114,11 @@ domain modules with tests.
   these content rules directly.
 - Local blog view model:
   `local-blog/src/blogViewModel.ts` owns local-blog tag chip labels, related
-  tag chip expansion, tag chip search matching, compact pagination items, and
-  tag diagnostics payloads/debug-enable rules. The local-blog App shell should
-  render these ready-to-render items, read browser debug flags, and perform
-  console side effects instead of owning tag-map, pagination, or diagnostics
-  data-shaping rules directly.
+  tag chip expansion, tag chip search matching, tag-map group/branch view data,
+  compact pagination items, and tag diagnostics payloads/debug-enable rules.
+  The local-blog App shell should render these ready-to-render items, read
+  browser debug flags, and perform console side effects instead of owning
+  tag-map, pagination, or diagnostics data-shaping rules directly.
 
 ## Long-Task Model
 

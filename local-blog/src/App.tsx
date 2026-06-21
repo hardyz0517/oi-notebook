@@ -49,11 +49,11 @@ import {
 } from "./blogContent";
 import {
   buildTagDiagnostics,
+  buildVisibleTagMapGroups,
   collectRelatedTagChips,
   collectTagChips,
   getPaginationItems,
   isTagDiagnosticsEnabled,
-  matchesTagChipSearch,
   type TagChipItem,
 } from "./blogViewModel";
 import {
@@ -533,30 +533,7 @@ function TagMap({
     );
   }
 
-  const trimmedTagQuery = tagQuery.trim();
-  const visibleGroups = tagTree
-    .map((group) => {
-      const directChips = group.children
-        .filter((child) => child.children.length === 0)
-        .map((child) => ({
-          label: child.name,
-          fullPath: child.fullPath,
-          count: child.count,
-        }))
-        .filter((item) => matchesTagChipSearch(item, trimmedTagQuery));
-      const branches = group.children
-        .filter((child) => child.children.length > 0)
-        .map((child) => ({
-          node: child,
-          chips: child.children
-            .flatMap(collectTagChips)
-            .filter((item) => matchesTagChipSearch(item, trimmedTagQuery)),
-        }))
-        .filter((branch) => branch.chips.length > 0);
-
-      return { group, directChips, branches };
-    })
-    .filter((group) => group.directChips.length > 0 || group.branches.length > 0);
+  const visibleGroups = buildVisibleTagMapGroups(tagTree, tagQuery);
 
   return (
     <section className="tag-map" aria-label={"\u6807\u7b7e\u4f53\u7cfb"}>

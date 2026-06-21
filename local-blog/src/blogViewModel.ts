@@ -60,6 +60,17 @@ export type TagDiagnostics = {
   rawTagFailureRows: TagDiagnosticFailureRow[];
 };
 
+export type TagMapBranchView = {
+  node: TagTreeNode;
+  chips: TagChipItem[];
+};
+
+export type TagMapGroupView = {
+  group: TagTreeNode;
+  directChips: TagChipItem[];
+  branches: TagMapBranchView[];
+};
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -128,6 +139,34 @@ export function matchesTagChipSearch(item: TagChipItem, query: string) {
     normalizeTagSearchText(searchText).includes(normalizedQuery) ||
     normalizeCompactTagSearchText(searchText).includes(normalizeCompactTagSearchText(query))
   );
+}
+
+export function buildVisibleTagMapGroups(tagTree: TagTreeNode[], query: string): TagMapGroupView[] {
+  const trimmedQuery = query.trim();
+
+  return tagTree
+    .map((group) => {
+      const directChips = group.children
+        .filter((child) => child.children.length === 0)
+        .map((child) => ({
+          label: child.name,
+          fullPath: child.fullPath,
+          count: child.count,
+        }))
+        .filter((item) => matchesTagChipSearch(item, trimmedQuery));
+      const branches = group.children
+        .filter((child) => child.children.length > 0)
+        .map((child) => ({
+          node: child,
+          chips: child.children
+            .flatMap(collectTagChips)
+            .filter((item) => matchesTagChipSearch(item, trimmedQuery)),
+        }))
+        .filter((branch) => branch.chips.length > 0);
+
+      return { group, directChips, branches };
+    })
+    .filter((group) => group.directChips.length > 0 || group.branches.length > 0);
 }
 
 export function getPaginationItems(currentPage: number, totalPages: number): PaginationItem[] {

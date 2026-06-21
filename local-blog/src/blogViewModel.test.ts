@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTagDiagnostics,
+  buildVisibleTagMapGroups,
   collectRelatedTagChips,
   collectTagChips,
   getPaginationItems,
@@ -84,6 +85,70 @@ describe("blogViewModel", () => {
     expect(matchesTagChipSearch(item, "\u6700\u77ed\u8def")).toBe(true);
     expect(matchesTagChipSearch(item, "\u6700 \u77ed \u8def")).toBe(true);
     expect(matchesTagChipSearch(item, "network flow")).toBe(false);
+  });
+
+  it("builds visible tag map groups with direct chips and branch chips", () => {
+    const tree = [
+      tagNode({
+        name: "算法",
+        fullPath: "算法",
+        depth: 1,
+        count: 5,
+        children: [
+          tagNode({
+            name: "数学",
+            fullPath: "算法/数学",
+            depth: 2,
+            count: 1,
+          }),
+          tagNode({
+            name: "图论",
+            fullPath: "算法/图论",
+            depth: 2,
+            count: 4,
+            children: [
+              tagNode({
+                name: "最短路",
+                fullPath: "算法/图论/最短路",
+                depth: 3,
+                count: 3,
+              }),
+              tagNode({
+                name: "网络流",
+                fullPath: "算法/图论/网络流",
+                depth: 3,
+                count: 1,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ];
+
+    expect(buildVisibleTagMapGroups(tree, "")).toEqual([
+      {
+        group: tree[0],
+        directChips: [{ label: "数学", fullPath: "算法/数学", count: 1 }],
+        branches: [{
+          node: tree[0].children[1],
+          chips: [
+            { label: "最短路", fullPath: "算法/图论/最短路", count: 3 },
+            { label: "网络流", fullPath: "算法/图论/网络流", count: 1 },
+          ],
+        }],
+      },
+    ]);
+    expect(buildVisibleTagMapGroups(tree, "网络")).toEqual([
+      {
+        group: tree[0],
+        directChips: [],
+        branches: [{
+          node: tree[0].children[1],
+          chips: [{ label: "网络流", fullPath: "算法/图论/网络流", count: 1 }],
+        }],
+      },
+    ]);
+    expect(buildVisibleTagMapGroups(tree, "不存在")).toEqual([]);
   });
 
   it("creates compact pagination items with ellipses", () => {
