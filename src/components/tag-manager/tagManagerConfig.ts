@@ -687,6 +687,44 @@ export function getCustomTagCreateDraft(
   };
 }
 
+export function getClearedCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+): CustomTagCreateDraft | null {
+  return draft
+    ? {
+      ...draft,
+      parentPathText: "",
+      parentLocked: false,
+    }
+    : draft;
+}
+
+export function getGroupedCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+  group: GroupNode | null,
+): CustomTagCreateDraft | null {
+  return draft && group
+    ? {
+      ...draft,
+      parentPathText: group.path.join(" / "),
+      parentLocked: true,
+    }
+    : draft;
+}
+
+export function getSuggestionCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+  suggestion: TagSuggestion | null,
+): CustomTagCreateDraft | null {
+  return draft && suggestion && suggestion.path.length >= 3
+    ? {
+      ...draft,
+      parentPathText: suggestion.path.slice(0, -1).join(" / "),
+      parentLocked: true,
+    }
+    : draft;
+}
+
 export function createCustomTagEntry(config: UserTagTaxonomyConfig, draft: CustomTagCreateDraft): CustomTagCreateResult {
   const currentConfig = normalizeConfig(config);
   const parentPath = parseTagManagerParentPath(draft.parentPathText);

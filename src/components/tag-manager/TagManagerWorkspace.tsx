@@ -11,7 +11,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getSaveEventBase, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -430,11 +430,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   const clearSelectedNode = useCallback(() => {
     setSelectedGroupOrderKey(null);
     setSelectedSuggestionId(null);
-    setCustomTagCreateDraft((current) => current ? {
-      ...current,
-      parentPathText: "",
-      parentLocked: false,
-    } : current);
+    setCustomTagCreateDraft(getClearedCustomTagCreateDraftSelection);
     setCustomTagCreateError(null);
   }, []);
 
@@ -447,11 +443,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const group = activeRootSortedGroups.find((item) => item.orderKey === groupKey) ?? null;
     setSelectedGroupOrderKey(groupKey);
     setSelectedSuggestionId(null);
-    setCustomTagCreateDraft((current) => current && group ? {
-      ...current,
-      parentPathText: group.path.join(" / "),
-      parentLocked: true,
-    } : current);
+    setCustomTagCreateDraft((current) => getGroupedCustomTagCreateDraftSelection(current, group));
     setCustomTagCreateError(null);
   }, [activeRootSortedGroups]);
 
@@ -459,11 +451,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const suggestion = suggestions.find((item) => item.id === suggestionId) ?? null;
     setSelectedGroupOrderKey(null);
     setSelectedSuggestionId(suggestionId);
-    setCustomTagCreateDraft((current) => current && suggestion && suggestion.path.length >= 3 ? {
-      ...current,
-      parentPathText: suggestion.path.slice(0, -1).join(" / "),
-      parentLocked: true,
-    } : current);
+    setCustomTagCreateDraft((current) => getSuggestionCustomTagCreateDraftSelection(current, suggestion));
     setCustomTagCreateError(null);
   }, [suggestions]);
 

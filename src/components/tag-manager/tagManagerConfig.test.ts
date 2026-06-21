@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getGroupedCustomTagCreateDraftSelection, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -153,6 +153,59 @@ describe("tagManagerConfig custom tag create selection plan", () => {
       filterMode: "all",
       selectedGroupOrderKey: null,
       selectedSuggestionId: created.entryId,
+    });
+  });
+});
+
+describe("tagManagerConfig custom tag create draft selection rules", () => {
+  const draft: CustomTagCreateDraft = {
+    parentPathText: "算法 / 动态规划",
+    parentLocked: true,
+    name: "背包复盘",
+    aliasesText: "背包入口",
+  };
+
+  it("clears parent path when the selected node is cleared", () => {
+    expect(getClearedCustomTagCreateDraftSelection(draft)).toEqual({
+      ...draft,
+      parentPathText: "",
+      parentLocked: false,
+    });
+    expect(getClearedCustomTagCreateDraftSelection(null)).toBeNull();
+  });
+
+  it("locks parent path to the selected group when a group is selected", () => {
+    const result = getGroupedCustomTagCreateDraftSelection(draft, {
+      orderKey: "algorithm.group.graph",
+      name: "图论",
+      path: ["算法", "图论"],
+      pathText: "算法/图论",
+      candidates: [],
+    });
+
+    expect(result).toEqual({
+      ...draft,
+      parentPathText: "算法 / 图论",
+      parentLocked: true,
+    });
+  });
+
+  it("locks parent path to the selected concrete suggestion parent", () => {
+    const suggestion = getTagSuggestionList({
+      entries: [{
+        id: "user.dp.knapsack",
+        path: ["算法", "动态规划", "背包复盘"],
+        source: "user",
+      }],
+    }, { includeHidden: true, includeDeprecated: true })
+      .find((item) => item.id === "user.dp.knapsack") ?? null;
+
+    const result = getSuggestionCustomTagCreateDraftSelection(draft, suggestion);
+
+    expect(result).toEqual({
+      ...draft,
+      parentPathText: "算法 / 动态规划",
+      parentLocked: true,
     });
   });
 });
