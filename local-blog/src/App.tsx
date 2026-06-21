@@ -18,7 +18,6 @@ import {
   buildCollections as buildBlogCollections,
   defaultBlogConfig as blogDefaultConfig,
   formatCompactDate as formatBlogCompactDate,
-  formatOptionalDate as formatBlogOptionalDate,
   getCategoryCounts as getBlogCategoryCounts,
   getCategoryLabel,
   getCollectionDescription as getBlogCollectionDescription,
@@ -44,6 +43,7 @@ import {
   buildArticleResultListView,
   buildArchiveListView,
   buildCollectionEntryListView,
+  buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
@@ -1229,11 +1229,7 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
     );
   }
 
-  const displayDate = formatBlogOptionalDate(note.updated, note.created, note.date);
-  const summary = note.summary?.trim() || note.metadata.summary?.trim();
-  const currentIndex = notes.findIndex((summaryNote) => summaryNote.relativePath === note.relativePath);
-  const previousNote = currentIndex > 0 ? notes[currentIndex - 1] : null;
-  const nextNote = currentIndex !== -1 && currentIndex < notes.length - 1 ? notes[currentIndex + 1] : null;
+  const noteHeader = buildNoteDetailHeaderView({ note, notes });
 
   return (
     <div className="note-reader-shell">
@@ -1246,11 +1242,11 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
           <header className="note-header">
             <div className="post-meta">
               <a href={getCollectionHref(note.collection)}>{note.collection}</a>
-              {displayDate ? <time>{displayDate}</time> : null}
+              {noteHeader.displayDate ? <time>{noteHeader.displayDate}</time> : null}
               {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
             </div>
             <h1>{note.title}</h1>
-            {summary ? <p className="note-summary">{summary}</p> : null}
+            {noteHeader.summary ? <p className="note-summary">{noteHeader.summary}</p> : null}
             {note.tags.length > 0 ? (
               <div className="tag-row" aria-label={note.title + " \u6807\u7b7e"}>
                 {note.tags.map((tag) => (
@@ -1264,8 +1260,8 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
 
           <MarkdownRenderer markdown={note.body} />
 
-          {currentIndex !== -1 ? (
-            <NoteNavigation previousNote={previousNote} nextNote={nextNote} sourceHref={returnTarget.href} />
+          {noteHeader.hasNavigation ? (
+            <NoteNavigation previousNote={noteHeader.previousNote} nextNote={noteHeader.nextNote} sourceHref={returnTarget.href} />
           ) : null}
         </article>
       </main>

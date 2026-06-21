@@ -12,6 +12,7 @@ import {
   getRawNoteTagReason,
   getUnknownTags,
   type CollectionGroup,
+  type NoteDetail,
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
@@ -225,6 +226,19 @@ export type NoteNavigationItemView = {
 export type NoteNavigationItemViewInput = {
   note: NoteSummary | null;
   sourceHref: string;
+};
+
+export type NoteDetailHeaderView = {
+  displayDate: string | null;
+  summary: string | null;
+  previousNote: NoteSummary | null;
+  nextNote: NoteSummary | null;
+  hasNavigation: boolean;
+};
+
+export type NoteDetailHeaderViewInput = {
+  note: NoteDetail;
+  notes: NoteSummary[];
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -480,6 +494,18 @@ export function buildNoteNavigationItemView(input: NoteNavigationItemViewInput):
     collection: input.note.collection,
     dateLabel: formatOptionalDate(input.note.date, input.note.updated, input.note.created),
     dateTime: getNoteDateValue(input.note),
+  };
+}
+
+export function buildNoteDetailHeaderView(input: NoteDetailHeaderViewInput): NoteDetailHeaderView {
+  const currentIndex = input.notes.findIndex((summaryNote) => summaryNote.relativePath === input.note.relativePath);
+
+  return {
+    displayDate: formatOptionalDate(input.note.updated, input.note.created, input.note.date),
+    summary: input.note.summary?.trim() || input.note.metadata.summary?.trim() || null,
+    previousNote: currentIndex > 0 ? input.notes[currentIndex - 1] : null,
+    nextNote: currentIndex !== -1 && currentIndex < input.notes.length - 1 ? input.notes[currentIndex + 1] : null,
+    hasNavigation: currentIndex !== -1,
   };
 }
 

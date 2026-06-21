@@ -4,6 +4,7 @@ import {
   buildArticleResultListView,
   buildArchiveListView,
   buildCollectionEntryListView,
+  buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
@@ -430,6 +431,106 @@ describe("blogViewModel", () => {
       collection: "技巧",
       dateLabel: "2026 年 6 月 19 日",
       dateTime: "2026-06-19T00:00:00Z",
+    });
+  });
+
+  it("builds note detail header and navigation context", () => {
+    const notes: NoteSummary[] = [
+      {
+        title: "上一篇",
+        relativePath: "posts/previous.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        created: null,
+        updated: "2026-06-21T00:00:00Z",
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+      {
+        title: "当前",
+        relativePath: "posts/current.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        created: null,
+        updated: null,
+        date: "2026-06-20T00:00:00Z",
+        sortKey: null,
+        draft: false,
+      },
+      {
+        title: "下一篇",
+        relativePath: "posts/next.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        created: null,
+        updated: "2026-06-19T00:00:00Z",
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+    ];
+
+    expect(buildNoteDetailHeaderView({
+      note: {
+        relativePath: "posts/current.md",
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        title: "当前",
+        tags: ["算法/图论"],
+        created: "2026-06-18T00:00:00Z",
+        updated: null,
+        date: "2026-06-20T00:00:00Z",
+        draft: true,
+        summary: " ",
+        metadata: { summary: "来自元数据的摘要" },
+        body: "# 当前",
+      },
+      notes,
+    })).toEqual({
+      displayDate: "2026 年 6 月 18 日",
+      summary: "来自元数据的摘要",
+      previousNote: notes[0],
+      nextNote: notes[2],
+      hasNavigation: true,
+    });
+
+    expect(buildNoteDetailHeaderView({
+      note: {
+        relativePath: "posts/missing.md",
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        title: "未收录",
+        tags: [],
+        created: null,
+        updated: null,
+        date: null,
+        draft: false,
+        summary: null,
+        metadata: {},
+        body: "# 未收录",
+      },
+      notes,
+    })).toMatchObject({
+      displayDate: null,
+      summary: null,
+      previousNote: null,
+      nextNote: null,
+      hasNavigation: false,
     });
   });
 
