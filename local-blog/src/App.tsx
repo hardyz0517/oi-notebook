@@ -39,6 +39,7 @@ import {
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
+  buildArticleTocView,
   buildHomeRouteView,
   buildNoteDetailRouteView,
   buildNoteNavigationItemView,
@@ -1305,16 +1306,18 @@ function ArticleToc({
   activeId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const viewItems = buildArticleTocView({ items, activeId });
+
   return (
     <aside className="article-toc" aria-label={"\u6587\u7ae0\u76ee\u5f55"}>
       <div className="article-toc-inner">
         <p className="article-toc-title">{"\u76ee\u5f55"}</p>
         {items.length > 0 ? (
           <nav>
-            {items.map((item) => (
+            {viewItems.map((item) => (
               <button
                 type="button"
-                className={"article-toc-link article-toc-level-" + item.level + (activeId === item.id ? " article-toc-link-active" : "")}
+                className={item.levelClassName}
                 key={item.id}
                 onClick={() => onSelect(item.id)}
               >

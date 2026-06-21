@@ -413,6 +413,18 @@ export type SiteNavView = {
 
 export type SiteNavViewInput = Route;
 
+export type ArticleTocViewItem = {
+  id: string;
+  text: string;
+  levelClassName: string;
+  isActive: boolean;
+};
+
+export type ArticleTocViewInput = {
+  items: MarkdownHeading[];
+  activeId: string | null;
+};
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -835,6 +847,16 @@ export function buildSiteNavView(route: SiteNavViewInput): SiteNavView {
           : route.name;
 
   return { activeName };
+}
+
+export function buildArticleTocView(input: ArticleTocViewInput): ArticleTocViewItem[] {
+  return input.items.map((item) => ({
+    id: item.id,
+    text: item.text,
+    levelClassName:
+      "article-toc-link article-toc-level-" + item.level + (input.activeId === item.id ? " article-toc-link-active" : ""),
+    isActive: input.activeId === item.id,
+  }));
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {

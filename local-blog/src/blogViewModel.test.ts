@@ -13,6 +13,7 @@ import {
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
   buildSiteNavView,
+  buildArticleTocView,
   buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
@@ -855,6 +856,29 @@ describe("blogViewModel", () => {
     expect(buildSiteNavView({ name: "tag", tag: "算法", page: 1 })).toEqual({ activeName: "tags" });
     expect(buildSiteNavView({ name: "collection", collection: "技术", page: 1 })).toEqual({ activeName: "collections" });
     expect(buildSiteNavView({ name: "search", query: "图论", page: 1 })).toEqual({ activeName: "search" });
+  });
+
+  it("builds article toc item classes", () => {
+    expect(buildArticleTocView({
+      items: [
+        { id: "h1", level: 1, text: "Heading 1" },
+        { id: "h2", level: 2, text: "Heading 2" },
+      ],
+      activeId: "h2",
+    })).toEqual([
+      {
+        id: "h1",
+        levelClassName: "article-toc-link article-toc-level-1",
+        isActive: false,
+        text: "Heading 1",
+      },
+      {
+        id: "h2",
+        levelClassName: "article-toc-link article-toc-level-2 article-toc-link-active",
+        isActive: true,
+        text: "Heading 2",
+      },
+    ]);
   });
 
   it("builds archive year sections and rows", () => {

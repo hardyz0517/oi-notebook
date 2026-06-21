@@ -127,10 +127,10 @@ domain modules with tests.
   effects instead of owning tag-map, tag detail filtering/pagination, collection overview/detail rows, archive
   list rows, collection detail filtering/pagination, article archive
   pagination/year grouping/index data, home pagination/latest-note data, note
-  detail route data, site nav active state, search result pagination/count
-  labels, recent update cards, note detail header/navigation context, note
-  navigation items, post card/result rows, pagination items/links, or
-  diagnostics data-shaping rules directly.
+  detail route data, site nav active state, article toc active state, search
+  result pagination/count labels, recent update cards, note detail
+  header/navigation context, note navigation items, post card/result rows,
+  pagination items/links, or diagnostics data-shaping rules directly.
 
 ## Long-Task Model
 

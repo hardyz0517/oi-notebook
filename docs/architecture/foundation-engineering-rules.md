@@ -161,10 +161,11 @@ Use domain modules as the home for stable rules:
   collection overview/detail rows, collection detail filtering/pagination,
   article archive pagination/year grouping/index data, archive index/list rows,
   home pagination/latest-note data, note detail route data, site nav active
-  state, search result pagination/count labels, recent update cards, note
-  detail header/navigation context, note navigation items, post card/result
-  rows, and pagination item/link view data, read browser debug flags, and
-  perform console side effects instead of owning these reusable rules directly.
+  state, article toc active state, search result pagination/count labels,
+  recent update cards, note detail header/navigation context, note navigation
+  items, post card/result rows, and pagination item/link view data, read
+  browser debug flags, and perform console side effects instead of owning
+  these reusable rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
 Luogu import edge cases, local-blog page-section rules, and other non-AI areas
