@@ -23,8 +23,6 @@ import {
   getCategoryCounts as getBlogCategoryCounts,
   getCategoryLabel,
   getCollectionDescription as getBlogCollectionDescription,
-  getHomeExcerpt as getBlogHomeExcerpt,
-  getNoteDateValue as getBlogNoteDateValue,
   getNoteYear,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
@@ -48,6 +46,7 @@ import {
   buildArchiveListView,
   buildCollectionEntryListView,
   buildPostCardListView,
+  buildRecentUpdateView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -919,7 +918,9 @@ function PostResults({
 }
 
 function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceHref?: string }) {
-  if (!note) {
+  const recentUpdate = buildRecentUpdateView({ note, sourceHref });
+
+  if (!recentUpdate) {
     return (
       <section className="recent-updates" aria-label={"\u6700\u65b0\u6587\u7ae0"}>
         <section className="status-panel compact-status">
@@ -930,21 +931,19 @@ function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceH
     );
   }
 
-  const displayDate = formatBlogOptionalDate(note.date, note.updated, note.created);
-
   return (
     <section className="recent-updates" aria-label={"\u6700\u65b0\u6587\u7ae0"}>
       <article className="recent-card">
-        <a href={getNoteHref(note.relativePath, sourceHref)}>
+        <a href={recentUpdate.href}>
           <div className="post-meta">
-            <span>{note.collection}</span>
-            {displayDate ? (
-              <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time>
+            <span>{recentUpdate.collection}</span>
+            {recentUpdate.dateLabel ? (
+              <time dateTime={recentUpdate.dateTime ?? undefined}>{recentUpdate.dateLabel}</time>
             ) : null}
           </div>
           <div className="recent-card-main">
-            <h3>{note.title}</h3>
-            <p>{getBlogHomeExcerpt(note, 132)}</p>
+            <h3>{recentUpdate.title}</h3>
+            <p>{recentUpdate.excerpt}</p>
           </div>
           <div className="recent-card-action">
             <span>{"\u9605\u8bfb\u66f4\u591a"}</span>

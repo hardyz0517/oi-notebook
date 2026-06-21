@@ -5,6 +5,7 @@ import {
   buildArchiveListView,
   buildCollectionEntryListView,
   buildPostCardListView,
+  buildRecentUpdateView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -343,6 +344,36 @@ describe("blogViewModel", () => {
         dateTime: null,
       },
     ]);
+  });
+
+  it("builds the recent update card view", () => {
+    expect(buildRecentUpdateView({ note: null, sourceHref: "#/" })).toBeNull();
+
+    expect(buildRecentUpdateView({
+      note: {
+        title: "最新文章",
+        relativePath: "posts/latest.md",
+        summary: "这是一篇会显示在首页最近更新区域的文章摘要。",
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "杂谈",
+        collections: ["杂谈"],
+        created: null,
+        updated: "2026-06-21T00:00:00Z",
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+      sourceHref: "#/?page=1",
+    })).toEqual({
+      href: "#/note/posts%2Flatest.md?from=%2F%3Fpage%3D1",
+      collection: "杂谈",
+      title: "最新文章",
+      excerpt: "这是一篇会显示在首页最近更新区域的文章摘要。",
+      dateLabel: "2026 年 6 月 21 日",
+      dateTime: "2026-06-21T00:00:00Z",
+    });
   });
 
   it("builds archive year sections and rows", () => {

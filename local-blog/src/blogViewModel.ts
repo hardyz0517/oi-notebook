@@ -174,6 +174,20 @@ export type ArchiveListViewInput = {
   sourceHref: string;
 };
 
+export type RecentUpdateView = {
+  href: string;
+  collection: string;
+  title: string;
+  excerpt: string;
+  dateLabel: string | null;
+  dateTime: string | null;
+};
+
+export type RecentUpdateViewInput = {
+  note: NoteSummary | null;
+  sourceHref?: string;
+};
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -378,6 +392,21 @@ export function buildArchiveListView(input: ArchiveListViewInput): ArchiveListSe
       dateTime: getNoteDateValue(note),
     })),
   }));
+}
+
+export function buildRecentUpdateView(input: RecentUpdateViewInput): RecentUpdateView | null {
+  if (!input.note) {
+    return null;
+  }
+
+  return {
+    href: getNoteHref(input.note.relativePath, input.sourceHref),
+    collection: input.note.collection,
+    title: input.note.title,
+    excerpt: getHomeExcerpt(input.note, 132),
+    dateLabel: formatOptionalDate(input.note.date, input.note.updated, input.note.created),
+    dateTime: getNoteDateValue(input.note),
+  };
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {
