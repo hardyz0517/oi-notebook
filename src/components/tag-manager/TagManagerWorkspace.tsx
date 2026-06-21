@@ -1,5 +1,4 @@
 import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
-import { arrayMove } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -13,7 +12,7 @@ import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
 import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getCollectionEditSavePlan, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getSaveEventBase, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
-import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
+import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
 import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
@@ -315,71 +314,39 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   ) => {
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
+    const sortEndPlan = getSortEndPlan(currentIds, activeId, overId);
     if (scope === "group") {
       setActiveDraggingGroupId(null);
     }
-    if (!overId || activeId === overId) {
-      if (scope === "group") {
-        debugEvent("manager.groupOrder.dragEnd", {
-          scope,
-          parentKey,
-          activeRootName: parentKey,
-          activeId,
-          overId,
-          currentIds,
-          nextIds: currentIds,
-          changed: false,
-          currentIdsSource,
-          currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
-        });
-      }
-      debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed: false });
-      return;
-    }
-    const oldIndex = currentIds.indexOf(activeId);
-    const newIndex = currentIds.indexOf(overId);
-    if (oldIndex < 0 || newIndex < 0) {
-      if (scope === "group") {
-        debugEvent("manager.groupOrder.dragEnd", {
-          scope,
-          parentKey,
-          activeRootName: parentKey,
-          activeId,
-          overId,
-          currentIds,
-          nextIds: currentIds,
-          changed: false,
-          currentIdsSource,
-          reason: "invalid-index",
-          currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
-        });
-      }
-      debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed: false, reason: "invalid-index" });
-      return;
-    }
-    const nextIds = arrayMove(currentIds, oldIndex, newIndex);
-    const changed = !areStringArraysEqual(nextIds, currentIds);
     if (scope === "group") {
       debugEvent("manager.groupOrder.dragEnd", {
         scope,
         parentKey,
         activeRootName: parentKey,
-        activeId,
-        overId,
+        activeId: sortEndPlan.activeId,
+        overId: sortEndPlan.overId,
         currentIds,
-        nextIds,
-        changed,
+        nextIds: sortEndPlan.nextIds,
+        changed: sortEndPlan.changed,
         currentIdsSource,
+        ...(sortEndPlan.reason ? { reason: sortEndPlan.reason } : {}),
         currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
       });
     }
-    debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed });
-    if (!changed) return;
-    saveOrder(nextIds, {
+    debugEvent("manager.drag.end", {
+      scope,
+      parentKey,
+      activeId: sortEndPlan.activeId,
+      overId: sortEndPlan.overId,
+      changed: sortEndPlan.changed,
+      ...(sortEndPlan.reason ? { reason: sortEndPlan.reason } : {}),
+    });
+    if (!sortEndPlan.changed) return;
+    saveOrder(sortEndPlan.nextIds, {
       scope,
       parentKey,
       previousIds: currentIds,
-      nextIds,
+      nextIds: sortEndPlan.nextIds,
       currentIdsSource,
       currentGroups,
     });
