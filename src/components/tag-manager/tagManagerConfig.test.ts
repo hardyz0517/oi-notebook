@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteState, getAppliedCollectionEditState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getDeletedCollectionEditState, getFailedCollectionCreateState, getFailedCollectionEditState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getDeletedCollectionEditState, getFailedCollectionCreateState, getFailedCollectionEditState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -385,7 +385,7 @@ describe("tagManagerConfig collection edit state", () => {
   });
 
   it("applies collection delete success cleanup when the deleted collection is being edited", () => {
-    expect(getAppliedCollectionDeleteState(state, "old collection")).toEqual({
+    expect(getAppliedCollectionDeleteSaveState(state, "old collection")).toEqual({
       editingName: null,
       editInput: "",
       editError: null,
@@ -394,7 +394,7 @@ describe("tagManagerConfig collection edit state", () => {
   });
 
   it("keeps collection edit state unchanged when delete success targets another collection", () => {
-    expect(getAppliedCollectionDeleteState(state, "another collection")).toEqual(state);
+    expect(getAppliedCollectionDeleteSaveState(state, "another collection")).toEqual(state);
   });
 });
 
