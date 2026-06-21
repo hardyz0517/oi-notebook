@@ -4,6 +4,7 @@ import {
   buildArticleResultListView,
   buildArchiveIndexView,
   buildArchiveListView,
+  buildArticleArchiveRouteView,
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
@@ -869,6 +870,59 @@ describe("blogViewModel", () => {
         ["2025", 1],
         ["未知年份", 1],
       ]),
+    });
+  });
+
+  it("builds article archive route data", () => {
+    const note = (title: string, date: string | null): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: "essay",
+      collections: ["essay"],
+      created: null,
+      updated: null,
+      date,
+      sortKey: null,
+      draft: false,
+    });
+    const notes = [
+      note("a", "2026-06-21T00:00:00Z"),
+      note("b", "2026-06-20T00:00:00Z"),
+      note("c", "2025-05-01T00:00:00Z"),
+    ];
+
+    expect(buildArticleArchiveRouteView({
+      notes,
+      page: 2,
+      pageSize: 1,
+      getYearHref: (page, year) => "#/articles?page=" + page + "&year=" + year,
+    })).toEqual({
+      paged: {
+        items: [notes[1]],
+        currentPage: 2,
+        totalPages: 3,
+      },
+      yearGroups: [
+        {
+          year: "2026",
+          notes: [notes[1]],
+        },
+      ],
+      archiveIndex: {
+        years: [
+          { year: "2026", href: "#/articles?page=1&year=2026" },
+          { year: "2025", href: "#/articles?page=3&year=2025" },
+        ],
+        yearCounts: new Map([
+          ["2026", 2],
+          ["2025", 1],
+        ]),
+      },
+      isEmpty: false,
     });
   });
 

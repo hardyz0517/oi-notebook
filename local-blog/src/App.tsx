@@ -20,7 +20,6 @@ import {
   getCategoryCounts as getBlogCategoryCounts,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
-  groupNotesByYear as groupBlogNotesByYear,
   normalizeBlogConfig as normalizeBlogConfigDraft,
   normalizeNoteDetail as normalizeBlogNoteDetail,
   normalizeNoteSummary as normalizeBlogNoteSummary,
@@ -34,8 +33,8 @@ import {
   type RawNoteSummary,
 } from "./blogContent";
 import {
+  buildArticleArchiveRouteView,
   buildArticleResultListView,
-  buildArchiveIndexView,
   buildArchiveListView,
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
@@ -724,10 +723,9 @@ function ArticleArchiveView({
   targetYear: string | null;
   sourceHref: string;
 }) {
-  const paged = paginateBlogNotes(notes, page, archivePageSize);
-  const yearGroups = groupBlogNotesByYear(paged.items);
-  const archiveIndex = buildArchiveIndexView({
+  const archiveView = buildArticleArchiveRouteView({
     notes,
+    page,
     pageSize: archivePageSize,
     getYearHref: getArticlesHref,
   });
@@ -740,13 +738,13 @@ function ArticleArchiveView({
     window.requestAnimationFrame(() => {
       document.getElementById("year-" + targetYear)?.scrollIntoView({ block: "start" });
     });
-  }, [error, isLoading, targetYear, paged.currentPage]);
+  }, [archiveView.paged.currentPage, error, isLoading, targetYear]);
 
   return (
     <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u7ae0\u5217\u8868"}>
-      {archiveIndex.years.length > 0 ? (
+      {archiveView.archiveIndex.years.length > 0 ? (
         <nav className="year-index" aria-label={"\u5e74\u4efd\u7d22\u5f15"}>
-          {archiveIndex.years.map((year) => (
+          {archiveView.archiveIndex.years.map((year) => (
             <a href={year.href} key={year.year}>
               {year.year}
             </a>
@@ -757,12 +755,12 @@ function ArticleArchiveView({
         <LoadingState />
       ) : error ? (
         <ErrorState onRetry={onRetry} />
-      ) : notes.length === 0 ? (
+      ) : archiveView.isEmpty ? (
         <EmptyState title="\u6682\u65e0\u6587\u7ae0" description="\u4fdd\u5b58\u7b2c\u4e00\u7bc7 Markdown \u7b14\u8bb0\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5e74\u4efd\u5f52\u6863\u3002" />
       ) : (
-        <ArchiveList groups={yearGroups} yearCounts={archiveIndex.yearCounts} sourceHref={sourceHref} />
+        <ArchiveList groups={archiveView.yearGroups} yearCounts={archiveView.archiveIndex.yearCounts} sourceHref={sourceHref} />
       )}
-      <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={getArticlesHref} />
+      <Pagination currentPage={archiveView.paged.currentPage} totalPages={archiveView.paged.totalPages} getPageHref={getArticlesHref} />
     </ListingPage>
   );
 }

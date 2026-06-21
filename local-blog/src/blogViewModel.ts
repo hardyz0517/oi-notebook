@@ -13,6 +13,7 @@ import {
   getNoteExcerpt,
   getRawNoteTagReason,
   getUnknownTags,
+  groupNotesByYear,
   paginateNotes,
   searchNotes,
   sortNotesByRecent,
@@ -275,6 +276,24 @@ export type SearchRouteViewInput = {
 export type ArchiveNoteGroup = {
   year: string;
   notes: NoteSummary[];
+};
+
+export type ArticleArchiveRouteView = {
+  paged: {
+    items: NoteSummary[];
+    currentPage: number;
+    totalPages: number;
+  };
+  yearGroups: ArchiveNoteGroup[];
+  archiveIndex: ArchiveIndexView;
+  isEmpty: boolean;
+};
+
+export type ArticleArchiveRouteViewInput = {
+  notes: NoteSummary[];
+  page: number;
+  pageSize: number;
+  getYearHref: (page: number, year: string) => string;
 };
 
 export type ArchiveListRow = {
@@ -635,6 +654,21 @@ export function buildSearchRouteView(input: SearchRouteViewInput): SearchRouteVi
     emptyDescription: input.query
       ? "换一个标题、标签、文集或摘要里的关键词再试试。"
       : "可以搜索中文标题、标签、摘要、文集名或相对路径。",
+  };
+}
+
+export function buildArticleArchiveRouteView(input: ArticleArchiveRouteViewInput): ArticleArchiveRouteView {
+  const paged = paginateNotes(input.notes, input.page, input.pageSize);
+
+  return {
+    paged,
+    yearGroups: groupNotesByYear(paged.items),
+    archiveIndex: buildArchiveIndexView({
+      notes: input.notes,
+      pageSize: input.pageSize,
+      getYearHref: input.getYearHref,
+    }),
+    isEmpty: input.notes.length === 0,
   };
 }
 
