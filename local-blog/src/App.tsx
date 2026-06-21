@@ -26,7 +26,6 @@ import {
   normalizeNoteDetail as normalizeBlogNoteDetail,
   normalizeNoteSummary as normalizeBlogNoteSummary,
   paginateNotes as paginateBlogNotes,
-  searchNotes as searchBlogNotes,
   sortNotesByRecent as sortBlogNotesByRecent,
   type BlogConfig,
   type CollectionGroup,
@@ -47,6 +46,7 @@ import {
   buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
+  buildSearchRouteView,
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
@@ -814,9 +814,16 @@ function SearchView({
   page: number;
 }) {
   const [draftQuery, setDraftQuery] = useState(query);
-  const results = useMemo(() => searchBlogNotes(notes, query), [notes, query]);
-  const paged = paginateBlogNotes(query ? results : [], page, resultPageSize);
-  const sourceHref = getSearchHref(query, paged.currentPage);
+  const searchView = useMemo(
+    () => buildSearchRouteView({
+      notes,
+      query,
+      page,
+      pageSize: resultPageSize,
+      getSearchHref,
+    }),
+    [notes, page, query],
+  );
 
   useEffect(() => {
     setDraftQuery(query);
@@ -852,24 +859,20 @@ function SearchView({
       </form>
 
       <p className="result-count">
-        {query ? "\u627e\u5230 " + results.length + " \u7bc7\u76f8\u5173\u6587\u7ae0" : "\u8f93\u5165\u5173\u952e\u8bcd\u5f00\u59cb\u641c\u7d22"}
+        {searchView.resultCountLabel}
       </p>
 
       <PostResults
-        notes={paged.items}
+        notes={searchView.paged.items}
         isLoading={isLoading}
         error={error}
         onRetry={onRetry}
-        sourceHref={sourceHref}
+        sourceHref={searchView.sourceHref}
         variant="list"
-        emptyTitle={query ? "\u6ca1\u6709\u627e\u5230\u76f8\u5173\u6587\u7ae0" : "\u8fd8\u6ca1\u6709\u8f93\u5165\u641c\u7d22\u8bcd"}
-        emptyDescription={
-          query
-            ? "\u6362\u4e00\u4e2a\u6807\u9898\u3001\u6807\u7b7e\u3001\u6587\u96c6\u6216\u6458\u8981\u91cc\u7684\u5173\u952e\u8bcd\u518d\u8bd5\u8bd5\u3002"
-            : "\u53ef\u4ee5\u641c\u7d22\u4e2d\u6587\u6807\u9898\u3001\u6807\u7b7e\u3001\u6458\u8981\u3001\u6587\u96c6\u540d\u6216\u76f8\u5bf9\u8def\u5f84\u3002"
-        }
+        emptyTitle={searchView.emptyTitle}
+        emptyDescription={searchView.emptyDescription}
       />
-      <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(nextPage) => getSearchHref(query, nextPage)} />
+      <Pagination currentPage={searchView.paged.currentPage} totalPages={searchView.paged.totalPages} getPageHref={(nextPage) => getSearchHref(query, nextPage)} />
     </ListingPage>
   );
 }

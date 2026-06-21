@@ -11,6 +11,7 @@ import {
   buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
+  buildSearchRouteView,
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
@@ -487,6 +488,67 @@ describe("blogViewModel", () => {
         dateTime: null,
       },
     ]);
+  });
+
+  it("builds search route result data", () => {
+    const note = (title: string, summary: string | null): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: "杂谈",
+      collections: ["杂谈"],
+      created: null,
+      updated: null,
+      date: null,
+      sortKey: null,
+      draft: false,
+    });
+    const notes = [
+      note("graph shortest path", "Dijkstra"),
+      note("graph matching", "Hungarian"),
+      note("number theory", "sieve"),
+    ];
+
+    expect(buildSearchRouteView({
+      notes,
+      query: "graph",
+      page: 2,
+      pageSize: 1,
+      getSearchHref: (query, page) => "#/search?q=" + query + "&page=" + page,
+    })).toEqual({
+      results: [notes[0], notes[1]],
+      paged: {
+        items: [notes[1]],
+        currentPage: 2,
+        totalPages: 2,
+      },
+      sourceHref: "#/search?q=graph&page=2",
+      resultCountLabel: "找到 2 篇相关文章",
+      emptyTitle: "没有找到相关文章",
+      emptyDescription: "换一个标题、标签、文集或摘要里的关键词再试试。",
+    });
+
+    expect(buildSearchRouteView({
+      notes,
+      query: "",
+      page: 1,
+      pageSize: 1,
+      getSearchHref: (query, page) => "#/search?q=" + query + "&page=" + page,
+    })).toMatchObject({
+      results: [],
+      paged: {
+        items: [],
+        currentPage: 1,
+        totalPages: 1,
+      },
+      sourceHref: "#/search?q=&page=1",
+      resultCountLabel: "输入关键词开始搜索",
+      emptyTitle: "还没有输入搜索词",
+      emptyDescription: "可以搜索中文标题、标签、摘要、文集名或相对路径。",
+    });
   });
 
   it("builds the recent update card view", () => {

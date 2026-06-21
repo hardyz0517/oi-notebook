@@ -13,6 +13,7 @@ import {
   getRawNoteTagReason,
   getUnknownTags,
   paginateNotes,
+  searchNotes,
   type CollectionGroup,
   type NoteDetail,
   type NoteSummary,
@@ -225,6 +226,27 @@ export type ArticleResultListItem = {
 export type NoteListViewInput = {
   notes: NoteSummary[];
   sourceHref?: string;
+};
+
+export type SearchRouteView = {
+  results: NoteSummary[];
+  paged: {
+    items: NoteSummary[];
+    currentPage: number;
+    totalPages: number;
+  };
+  sourceHref: string;
+  resultCountLabel: string;
+  emptyTitle: string;
+  emptyDescription: string;
+};
+
+export type SearchRouteViewInput = {
+  notes: NoteSummary[];
+  query: string;
+  page: number;
+  pageSize: number;
+  getSearchHref: (query: string, page: number) => string;
 };
 
 export type ArchiveNoteGroup = {
@@ -559,6 +581,22 @@ export function buildArticleResultListView(input: NoteListViewInput): ArticleRes
     dateLabel: formatOptionalDate(note.date, note.updated, note.created),
     dateTime: getNoteDateValue(note),
   }));
+}
+
+export function buildSearchRouteView(input: SearchRouteViewInput): SearchRouteView {
+  const results = input.query ? searchNotes(input.notes, input.query) : [];
+  const paged = paginateNotes(results, input.page, input.pageSize);
+
+  return {
+    results,
+    paged,
+    sourceHref: input.getSearchHref(input.query, paged.currentPage),
+    resultCountLabel: input.query ? "找到 " + results.length + " 篇相关文章" : "输入关键词开始搜索",
+    emptyTitle: input.query ? "没有找到相关文章" : "还没有输入搜索词",
+    emptyDescription: input.query
+      ? "换一个标题、标签、文集或摘要里的关键词再试试。"
+      : "可以搜索中文标题、标签、摘要、文集名或相对路径。",
+  };
 }
 
 export function buildArchiveListView(input: ArchiveListViewInput): ArchiveListSection[] {
