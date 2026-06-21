@@ -16,7 +16,7 @@ import {
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
-import { getNoteHref } from "./blogRoutes";
+import { getNoteHref, getTagHref } from "./blogRoutes";
 import {
   getTagPathSegments,
   getTagSuggestionList,
@@ -107,6 +107,23 @@ export type TagMapGroupView = {
   group: TagTreeNode;
   directChips: TagChipItem[];
   branches: TagMapBranchView[];
+};
+
+export type TagDetailHeaderSegmentView = {
+  key: string;
+  label: string;
+  href: string;
+  showSeparator: boolean;
+};
+
+export type TagDetailHeaderView = {
+  segments: TagDetailHeaderSegmentView[];
+  countLabel: string;
+};
+
+export type TagDetailHeaderViewInput = {
+  tag: string;
+  count: number;
 };
 
 export type CollectionOverviewState = "loading" | "error" | "empty" | "ready";
@@ -350,6 +367,24 @@ export function buildVisibleTagMapGroups(tagTree: TagTreeNode[], query: string):
       return { group, directChips, branches };
     })
     .filter((group) => group.directChips.length > 0 || group.branches.length > 0);
+}
+
+export function buildTagDetailHeaderView(input: TagDetailHeaderViewInput): TagDetailHeaderView {
+  const segments = getTagPathSegments(input.tag);
+
+  return {
+    segments: segments.map((segment, index) => {
+      const key = segments.slice(0, index + 1).join(tagPathSeparator);
+
+      return {
+        key,
+        label: segment,
+        href: getTagHref(key),
+        showSeparator: index > 0,
+      };
+    }),
+    countLabel: "共 " + input.count + " 篇文章",
+  };
 }
 
 export function getPaginationItems(currentPage: number, totalPages: number): PaginationItem[] {

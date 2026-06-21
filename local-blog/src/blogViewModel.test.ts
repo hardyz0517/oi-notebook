@@ -11,6 +11,7 @@ import {
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
+  buildTagDetailHeaderView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
@@ -43,6 +44,25 @@ describe("blogViewModel", () => {
       fullPath: "\u7b97\u6cd5/\u56fe\u8bba/\u6700\u77ed\u8def/\u5355\u6e90\u6700\u77ed\u8def",
       depth: 4,
     }))).toBe("\u6700\u77ed\u8def / \u5355\u6e90\u6700\u77ed\u8def");
+  });
+
+  it("builds tag detail header segments and count label", () => {
+    expect(buildTagDetailHeaderView({
+      tag: "算法/图论/最短路",
+      count: 3,
+    })).toEqual({
+      countLabel: "共 3 篇文章",
+      segments: [
+        { key: "算法", label: "算法", href: "#/tags/%E7%AE%97%E6%B3%95", showSeparator: false },
+        { key: "算法/图论", label: "图论", href: "#/tags/%E7%AE%97%E6%B3%95%2F%E5%9B%BE%E8%AE%BA", showSeparator: true },
+        {
+          key: "算法/图论/最短路",
+          label: "最短路",
+          href: "#/tags/%E7%AE%97%E6%B3%95%2F%E5%9B%BE%E8%AE%BA%2F%E6%9C%80%E7%9F%AD%E8%B7%AF",
+          showSeparator: true,
+        },
+      ],
+    });
   });
 
   it("collects all tag chips and related leaf chips", () => {

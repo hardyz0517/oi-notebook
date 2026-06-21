@@ -48,6 +48,7 @@ import {
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
+  buildTagDetailHeaderView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
@@ -58,7 +59,6 @@ import {
 import {
   buildTagTree,
   findTagTreeNode,
-  getTagPathSegments,
   matchArticleByTagPath,
   tagPathSeparator,
   type TagTreeNode,
@@ -459,19 +459,19 @@ function ListingPage({ breadcrumb, children }: { breadcrumb: ReactNode; children
 }
 
 function TagDetailHeader({ tag, count }: { tag: string; count: number }) {
-  const segments = getTagPathSegments(tag);
+  const header = buildTagDetailHeaderView({ tag, count });
 
   return (
     <header className="tag-detail-header">
       <h1>
-        {segments.map((segment, index) => (
-          <span key={segments.slice(0, index + 1).join(tagPathSeparator)}>
-            {index > 0 ? <em>{tagPathSeparator}</em> : null}
-            <a href={getTagHref(segments.slice(0, index + 1).join(tagPathSeparator))}>{segment}</a>
+        {header.segments.map((segment) => (
+          <span key={segment.key}>
+            {segment.showSeparator ? <em>{tagPathSeparator}</em> : null}
+            <a href={segment.href}>{segment.label}</a>
           </span>
         ))}
       </h1>
-      <p className="tag-detail-count">{"\u5171 " + count + " \u7bc7\u6587\u7ae0"}</p>
+      <p className="tag-detail-count">{header.countLabel}</p>
     </header>
   );
 }
