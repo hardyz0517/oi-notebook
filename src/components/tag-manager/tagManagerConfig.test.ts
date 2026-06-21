@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedMergeEditorState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type MergeEditorState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagEditorState, type MergeEditorState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -257,6 +257,87 @@ describe("tagManagerConfig merge editor state rules", () => {
       searchQuery: "kmp",
       selectedTargetId: null,
       error: null,
+    });
+  });
+});
+
+describe("tagManagerConfig custom tag editor state rules", () => {
+  const state: CustomTagEditorState = {
+    createDraft: null,
+    createError: "old create error",
+    editDraft: { name: "old name", aliasesText: "old alias" },
+    editError: "old edit error",
+  };
+
+  it("starts custom tag create mode from the current selection and clears edit state", () => {
+    expect(getOpenedCustomTagCreateState(
+      state,
+      {
+        id: "user.dp.knapsack",
+        path: ["算法", "动态规划", "背包"],
+        pathText: "算法/动态规划/背包",
+        name: "背包",
+        aliases: [],
+        searchText: "背包",
+        source: "user",
+        deprecated: false,
+        hidden: false,
+      },
+      null,
+      [{
+        orderKey: "algorithm.group.dp",
+        name: "动态规划",
+        path: ["算法", "动态规划"],
+        pathText: "算法/动态规划",
+        candidates: [],
+      }],
+    )).toEqual({
+      createDraft: {
+        parentPathText: "算法 / 动态规划",
+        parentLocked: true,
+        name: "",
+        aliasesText: "",
+      },
+      createError: null,
+      editDraft: null,
+      editError: null,
+    });
+  });
+
+  it("starts custom tag edit mode and clears create state", () => {
+    const config: UserTagTaxonomyConfig = {
+      entries: [{
+        id: "user.dp.knapsack",
+        path: ["算法", "动态规划", "背包"],
+        aliases: ["01 背包"],
+        source: "user",
+      }],
+    };
+    const suggestion = getTagSuggestionList(config, { includeHidden: true, includeDeprecated: true })
+      .find((item) => item.id === "user.dp.knapsack") ?? null;
+
+    expect(getOpenedCustomTagEditState(
+      {
+        createDraft: {
+          parentPathText: "算法 / 动态规划",
+          parentLocked: true,
+          name: "新标签",
+          aliasesText: "新别名",
+        },
+        createError: "create error",
+        editDraft: null,
+        editError: "edit error",
+      },
+      config,
+      suggestion,
+    )).toEqual({
+      createDraft: null,
+      createError: null,
+      editDraft: {
+        name: "背包",
+        aliasesText: "01 背包",
+      },
+      editError: null,
     });
   });
 });

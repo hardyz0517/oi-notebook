@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getCustomTagCreateDraft, getCustomTagEditDraft, getGroupedCustomTagCreateDraftSelection, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type MergeEditorState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -79,6 +79,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setMergeSearchQuery(state.searchQuery);
     setSelectedMergeTargetId(state.selectedTargetId);
     setMergeError(state.error);
+  }, []);
+  const applyCustomTagEditorState = useCallback((state: CustomTagEditorState) => {
+    setCustomTagCreateDraft(state.createDraft);
+    setCustomTagCreateError(state.createError);
+    setCustomTagEditDraft(state.editDraft);
+    setCustomTagEditError(state.editError);
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -434,13 +440,24 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const startCustomTagCreate = useCallback(() => {
-    setCustomTagCreateDraft(getCustomTagCreateDraft(selectedSuggestion, selectedGroupOrderKey, activeRootSortedGroups));
-    setCustomTagCreateError(null);
-    setCustomTagEditDraft(null);
-    setCustomTagEditError(null);
+    applyCustomTagEditorState(getOpenedCustomTagCreateState({
+      createDraft: customTagCreateDraft,
+      createError: customTagCreateError,
+      editDraft: customTagEditDraft,
+      editError: customTagEditError,
+    }, selectedSuggestion, selectedGroupOrderKey, activeRootSortedGroups));
     setIsMergeEditorOpen(false);
     setMergeError(null);
-  }, [activeRootSortedGroups, selectedGroupOrderKey, selectedSuggestion]);
+  }, [
+    activeRootSortedGroups,
+    applyCustomTagEditorState,
+    customTagCreateDraft,
+    customTagCreateError,
+    customTagEditDraft,
+    customTagEditError,
+    selectedGroupOrderKey,
+    selectedSuggestion,
+  ]);
 
   const cancelCustomTagCreate = useCallback(() => {
     setCustomTagCreateDraft(null);
@@ -484,11 +501,21 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
   const startCustomTagEdit = useCallback(() => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;
-    setCustomTagEditDraft(getCustomTagEditDraft(workingConfig, selectedSuggestion));
-    setCustomTagEditError(null);
-    setCustomTagCreateDraft(null);
-    setCustomTagCreateError(null);
-  }, [selectedSuggestion, workingConfig]);
+    applyCustomTagEditorState(getOpenedCustomTagEditState({
+      createDraft: customTagCreateDraft,
+      createError: customTagCreateError,
+      editDraft: customTagEditDraft,
+      editError: customTagEditError,
+    }, workingConfig, selectedSuggestion));
+  }, [
+    applyCustomTagEditorState,
+    customTagCreateDraft,
+    customTagCreateError,
+    customTagEditDraft,
+    customTagEditError,
+    selectedSuggestion,
+    workingConfig,
+  ]);
 
   const cancelCustomTagEdit = useCallback(() => {
     setCustomTagEditDraft(null);

@@ -88,6 +88,13 @@ export type MergeEditorState = {
   error: string | null;
 };
 
+export type CustomTagEditorState = {
+  createDraft: CustomTagCreateDraft | null;
+  createError: string | null;
+  editDraft: CustomTagEditDraft | null;
+  editError: string | null;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -152,6 +159,35 @@ export function getSearchedMergeEditorState(state: MergeEditorState, searchQuery
     searchQuery,
     selectedTargetId: null,
     error: null,
+  };
+}
+
+export function getOpenedCustomTagCreateState(
+  state: CustomTagEditorState,
+  suggestion: TagSuggestion | null,
+  selectedGroupOrderKey: string | null,
+  activeRootGroups: GroupNode[],
+): CustomTagEditorState {
+  return {
+    ...state,
+    createDraft: getCustomTagCreateDraft(suggestion, selectedGroupOrderKey, activeRootGroups),
+    createError: null,
+    editDraft: null,
+    editError: null,
+  };
+}
+
+export function getOpenedCustomTagEditState(
+  state: CustomTagEditorState,
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+): CustomTagEditorState {
+  return {
+    ...state,
+    createDraft: null,
+    createError: null,
+    editDraft: suggestion?.source === "user" ? getCustomTagEditDraft(config, suggestion) : state.editDraft,
+    editError: null,
   };
 }
 
