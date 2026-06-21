@@ -1,4 +1,11 @@
 import {
+  countTagTreeNodes,
+  getRawNoteTagReason,
+  getUnknownTags,
+  type NoteSummary,
+  type RawNoteSummary,
+} from "./blogContent";
+import {
   getTagPathSegments,
   getTagSuggestionList,
   tagPathSeparator,
@@ -12,6 +19,46 @@ export type TagChipItem = {
 };
 
 export type PaginationItem = number | "ellipsis";
+
+export type TagDiagnosticsEnvironment = {
+  isDev?: boolean;
+  routeDebugTag?: string | null;
+  searchDebugTag?: string | null;
+  localStorageDebugTag?: string | null;
+};
+
+export type TagDiagnosticRawRow = {
+  title: string;
+  path: string;
+  tags: unknown;
+  metadataTags: unknown;
+  frontmatterTags: unknown;
+  draft: boolean;
+};
+
+export type TagDiagnosticNormalizedRow = {
+  title: string;
+  path: string;
+  tags: string[];
+  draft: boolean;
+};
+
+export type TagDiagnosticFailureRow = {
+  title: string;
+  path: string;
+  reason: string;
+};
+
+export type TagDiagnostics = {
+  returnedNotesCount: number;
+  rawFirstNoteKeys: string[];
+  rawRows: TagDiagnosticRawRow[];
+  normalizedRows: TagDiagnosticNormalizedRow[];
+  normalizedTagTotal: number;
+  tagTreeRootCount: number;
+  tagTreeNodeCount: number;
+  rawTagFailureRows: TagDiagnosticFailureRow[];
+};
 
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
@@ -103,4 +150,51 @@ export function getPaginationItems(currentPage: number, totalPages: number): Pag
   }
 
   return items;
+}
+
+export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {
+  return (
+    environment.isDev === true ||
+    environment.routeDebugTag === "1" ||
+    environment.searchDebugTag === "1" ||
+    environment.localStorageDebugTag === "1"
+  );
+}
+
+export function buildTagDiagnostics(
+  rawNotes: RawNoteSummary[],
+  normalizedNotes: NoteSummary[],
+  tagTree: TagTreeNode[],
+): TagDiagnostics {
+  const normalizedTagTotal = normalizedNotes.reduce((count, note) => count + note.tags.length, 0);
+  const shouldIncludeFailureRows = rawNotes.length > 0 && normalizedTagTotal === 0 && tagTree.length === 0;
+
+  return {
+    returnedNotesCount: rawNotes.length,
+    rawFirstNoteKeys: rawNotes[0] ? Object.keys(rawNotes[0]) : [],
+    rawRows: rawNotes.slice(0, 5).map((note) => ({
+      title: note.title,
+      path: note.relativePath,
+      tags: getUnknownTags(note.tags),
+      metadataTags: getUnknownTags(note.metadata?.tags),
+      frontmatterTags: getUnknownTags((note as { frontmatter?: { tags?: unknown } }).frontmatter?.tags),
+      draft: note.draft,
+    })),
+    normalizedRows: normalizedNotes.slice(0, 5).map((note) => ({
+      title: note.title,
+      path: note.relativePath,
+      tags: note.tags,
+      draft: note.draft,
+    })),
+    normalizedTagTotal,
+    tagTreeRootCount: tagTree.length,
+    tagTreeNodeCount: countTagTreeNodes(tagTree),
+    rawTagFailureRows: shouldIncludeFailureRows
+      ? rawNotes.slice(0, 5).map((note) => ({
+          title: note.title,
+          path: note.relativePath,
+          reason: getRawNoteTagReason(note),
+        }))
+      : [],
+  };
 }

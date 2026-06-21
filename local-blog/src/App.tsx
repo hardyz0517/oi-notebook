@@ -17,7 +17,6 @@ import {
 } from "./blogRoutes";
 import {
   buildCollections as buildBlogCollections,
-  countTagTreeNodes as countBlogTagTreeNodes,
   defaultBlogConfig as blogDefaultConfig,
   formatArchiveDay as formatBlogArchiveDay,
   formatCompactDate as formatBlogCompactDate,
@@ -31,10 +30,8 @@ import {
   getNoteDateValue as getBlogNoteDateValue,
   getNoteYear,
   getNoteExcerpt as getBlogNoteExcerpt,
-  getRawNoteTagReason as getBlogRawNoteTagReason,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
-  getUnknownTags as getBlogUnknownTags,
   groupNotesByYear as groupBlogNotesByYear,
   normalizeBlogConfig as normalizeBlogConfigDraft,
   normalizeNoteDetail as normalizeBlogNoteDetail,
@@ -51,9 +48,11 @@ import {
   type RawNoteSummary,
 } from "./blogContent";
 import {
+  buildTagDiagnostics,
   collectRelatedTagChips,
   collectTagChips,
   getPaginationItems,
+  isTagDiagnosticsEnabled,
   matchesTagChipSearch,
   type TagChipItem,
 } from "./blogViewModel";
@@ -81,12 +80,12 @@ function isDebugTagsEnabled() {
   const params = getHashParams(window.location.hash);
   const searchParams = new URLSearchParams(window.location.search);
   const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
-  return (
-    viteEnv?.DEV === true ||
-    params.get("debugTags") === "1" ||
-    searchParams.get("debugTags") === "1" ||
-    window.localStorage.getItem("local-blog.debugTags") === "1"
-  );
+  return isTagDiagnosticsEnabled({
+    isDev: viteEnv?.DEV === true,
+    routeDebugTag: params.get("debugTags"),
+    searchDebugTag: searchParams.get("debugTags"),
+    localStorageDebugTag: window.localStorage.getItem("local-blog.debugTags"),
+  });
 }
 
 function logTagDiagnostics(rawNotes: RawNoteSummary[], normalizedNotes: NoteSummary[], tagTree: TagTreeNode[]) {
@@ -94,40 +93,18 @@ function logTagDiagnostics(rawNotes: RawNoteSummary[], normalizedNotes: NoteSumm
     return;
   }
 
-  const normalizedTagTotal = normalizedNotes.reduce((count, note) => count + note.tags.length, 0);
+  const diagnostics = buildTagDiagnostics(rawNotes, normalizedNotes, tagTree);
   console.groupCollapsed("[local-blog] tag diagnostics");
   console.info("fetch /api/notes succeeded", true);
-  console.info("returned notes count", rawNotes.length);
-  console.info("raw first note keys", rawNotes[0] ? Object.keys(rawNotes[0]) : []);
-  console.table(
-    rawNotes.slice(0, 5).map((note) => ({
-      title: note.title,
-      path: note.relativePath,
-      tags: getBlogUnknownTags(note.tags),
-      metadataTags: getBlogUnknownTags(note.metadata?.tags),
-      frontmatterTags: getBlogUnknownTags((note as { frontmatter?: { tags?: unknown } }).frontmatter?.tags),
-      draft: note.draft,
-    })),
-  );
-  console.table(
-    normalizedNotes.slice(0, 5).map((note) => ({
-      title: note.title,
-      path: note.relativePath,
-      tags: note.tags,
-      draft: note.draft,
-    })),
-  );
-  console.info("buildTagTree input tag total", normalizedTagTotal);
-  console.info("buildTagTree root count", tagTree.length);
-  console.info("buildTagTree node count", countBlogTagTreeNodes(tagTree));
-  if (rawNotes.length > 0 && normalizedTagTotal === 0 && tagTree.length === 0) {
-    console.table(
-      rawNotes.slice(0, 5).map((note) => ({
-        title: note.title,
-        path: note.relativePath,
-        reason: getBlogRawNoteTagReason(note),
-      })),
-    );
+  console.info("returned notes count", diagnostics.returnedNotesCount);
+  console.info("raw first note keys", diagnostics.rawFirstNoteKeys);
+  console.table(diagnostics.rawRows);
+  console.table(diagnostics.normalizedRows);
+  console.info("buildTagTree input tag total", diagnostics.normalizedTagTotal);
+  console.info("buildTagTree root count", diagnostics.tagTreeRootCount);
+  console.info("buildTagTree node count", diagnostics.tagTreeNodeCount);
+  if (diagnostics.rawTagFailureRows.length > 0) {
+    console.table(diagnostics.rawTagFailureRows);
   }
   console.groupEnd();
 }
