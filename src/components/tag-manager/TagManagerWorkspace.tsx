@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { COLLECTION_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { COLLECTION_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -141,21 +141,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     createError: collectionCreateError,
     editError: collectionEditError,
   }), [activeView, collectionCreateError, collectionCreateInput, collectionEditError]);
-  const applyFailedCollectionCreateState = useCallback((createError: string) => {
-    applyCollectionPanelState(getFailedCollectionCreateSaveState(getCurrentCollectionPanelState(), createError));
-  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
-  const applyFailedCollectionEditState = useCallback((editError: string) => {
-    applyCollectionPanelState(getFailedCollectionEditSaveState(getCurrentCollectionPanelState(), editError));
-  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
-  const applyFailedCollectionDeleteState = useCallback((deleteError: string) => {
-    applyCollectionPanelState(getFailedCollectionDeleteSaveState(getCurrentCollectionPanelState(), deleteError));
-  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
-  const applySavedCollectionEditState = useCallback(() => {
-    applyCollectionEditState(getAppliedCollectionEditSaveState(getCurrentCollectionEditState()));
-  }, [applyCollectionEditState, getCurrentCollectionEditState]);
-  const applyDeletedCollectionEditState = useCallback((deletedName: string) => {
-    applyCollectionEditState(getAppliedCollectionDeleteSaveState(getCurrentCollectionEditState(), deletedName));
-  }, [applyCollectionEditState, getCurrentCollectionEditState]);
+  const applyCollectionSaveResolution = useCallback((panelState: CollectionPanelState, editState: CollectionEditState) => {
+    applyCollectionPanelState(panelState);
+    applyCollectionEditState(editState);
+  }, [applyCollectionEditState, applyCollectionPanelState]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
@@ -831,17 +820,25 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
     if (!result.ok) {
-      applyFailedCollectionCreateState(result.error);
+      const resolution = getCollectionCreateSaveResolution(
+        getCurrentCollectionPanelState(),
+        getCurrentCollectionEditState(),
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
     const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
-    if (saved) {
-      applyCollectionPanelState(getAppliedCollectionCreateSaveState(getCurrentCollectionPanelState()));
-    } else {
-      applyFailedCollectionCreateState(COLLECTION_SAVE_FAILURE_MESSAGE);
-    }
-  }, [applyCollectionPanelState, applyFailedCollectionCreateState, collectionCreateInput, collectionExistingCandidates, getCurrentCollectionPanelState, saveWorkingConfig, workingConfig]);
+    const resolution = getCollectionCreateSaveResolution(
+      getCurrentCollectionPanelState(),
+      getCurrentCollectionEditState(),
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, collectionCreateInput, collectionExistingCandidates, getCurrentCollectionEditState, getCurrentCollectionPanelState, saveWorkingConfig, workingConfig]);
 
   const startCollectionEdit = useCallback((name: string) => {
     applyCollectionEditState(getOpenedCollectionEditState(getCurrentCollectionEditState(), name));
@@ -863,17 +860,25 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, savePlan.nextName, collectionExistingCandidates);
     if (!result.ok) {
-      applyFailedCollectionEditState(result.error);
+      const resolution = getCollectionEditSaveResolution(
+        getCurrentCollectionPanelState(),
+        getCurrentCollectionEditState(),
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
     const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
-    if (saved) {
-      applySavedCollectionEditState();
-    } else {
-      applyFailedCollectionEditState(COLLECTION_SAVE_FAILURE_MESSAGE);
-    }
-  }, [applyFailedCollectionEditState, applySavedCollectionEditState, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
+    const resolution = getCollectionEditSaveResolution(
+      getCurrentCollectionPanelState(),
+      getCurrentCollectionEditState(),
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, collectionEditInput, collectionExistingCandidates, editingCollectionName, getCurrentCollectionEditState, getCurrentCollectionPanelState, saveWorkingConfig, workingConfig]);
 
   const deleteCollection = useCallback(async (name: string) => {
     const confirmed = await requestConfirm({
@@ -887,17 +892,27 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     const currentConfig = normalizeConfig(workingConfig);
     const result = deleteCustomCollectionCandidate(currentConfig, name);
     if (!result.ok) {
-      applyFailedCollectionDeleteState(result.error);
+      const resolution = getCollectionDeleteSaveResolution(
+        getCurrentCollectionPanelState(),
+        getCurrentCollectionEditState(),
+        name,
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
     const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
-    if (saved) {
-      applyDeletedCollectionEditState(name);
-    } else if (!saved) {
-      applyFailedCollectionDeleteState(COLLECTION_SAVE_FAILURE_MESSAGE);
-    }
-  }, [applyDeletedCollectionEditState, applyFailedCollectionDeleteState, requestConfirm, saveWorkingConfig, workingConfig]);
+    const resolution = getCollectionDeleteSaveResolution(
+      getCurrentCollectionPanelState(),
+      getCurrentCollectionEditState(),
+      name,
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, getCurrentCollectionEditState, getCurrentCollectionPanelState, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {

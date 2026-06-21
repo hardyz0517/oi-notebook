@@ -183,6 +183,11 @@ export type CollectionPanelState = {
   editError: string | null;
 };
 
+export type CollectionSaveResolution = {
+  panelState: CollectionPanelState;
+  editState: CollectionEditState;
+};
+
 export function getOpenedMergeEditorState(): MergeEditorState {
   return {
     isOpen: true,
@@ -732,6 +737,53 @@ export function getFailedCollectionDeleteSaveState(
   return {
     ...state,
     editError: deleteError,
+  };
+}
+
+export function getCollectionCreateSaveResolution(
+  panelState: CollectionPanelState,
+  editState: CollectionEditState,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? getAppliedCollectionCreateSaveState(panelState)
+      : getFailedCollectionCreateSaveState(panelState, failureMessage),
+    editState,
+  };
+}
+
+export function getCollectionEditSaveResolution(
+  panelState: CollectionPanelState,
+  editState: CollectionEditState,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? panelState
+      : getFailedCollectionEditSaveState(panelState, failureMessage),
+    editState: saved
+      ? getAppliedCollectionEditSaveState(editState)
+      : editState,
+  };
+}
+
+export function getCollectionDeleteSaveResolution(
+  panelState: CollectionPanelState,
+  editState: CollectionEditState,
+  deletedName: string,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? panelState
+      : getFailedCollectionDeleteSaveState(panelState, failureMessage),
+    editState: saved
+      ? getAppliedCollectionDeleteSaveState(editState, deletedName)
+      : editState,
   };
 }
 

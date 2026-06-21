@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getDeletedCollectionEditState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -457,6 +457,93 @@ describe("tagManagerConfig collection panel state", () => {
       createInput: "draft collection",
       createError: "old create error",
       editError: "delete failed",
+    });
+  });
+});
+
+describe("tagManagerConfig collection save resolutions", () => {
+  const panelState: CollectionPanelState = {
+    activeView: "collections",
+    createInput: "draft collection",
+    createError: "old create error",
+    editError: "old edit error",
+  };
+  const editState: CollectionEditState = {
+    editingName: "old collection",
+    editInput: "edited collection",
+    editError: "old edit error",
+    createError: "old create error",
+  };
+
+  it("resolves create save success by clearing create input while preserving edit state", () => {
+    expect(getCollectionCreateSaveResolution(panelState, editState, true, "save failed")).toEqual({
+      panelState: {
+        activeView: "collections",
+        createInput: "",
+        createError: null,
+        editError: "old edit error",
+      },
+      editState,
+    });
+  });
+
+  it("resolves create save failure by storing the failure on panel state", () => {
+    expect(getCollectionCreateSaveResolution(panelState, editState, false, "save failed")).toEqual({
+      panelState: {
+        activeView: "collections",
+        createInput: "draft collection",
+        createError: "save failed",
+        editError: "old edit error",
+      },
+      editState,
+    });
+  });
+
+  it("resolves edit save success by clearing edit mode while preserving panel state", () => {
+    expect(getCollectionEditSaveResolution(panelState, editState, true, "save failed")).toEqual({
+      panelState,
+      editState: {
+        editingName: null,
+        editInput: "",
+        editError: null,
+        createError: "old create error",
+      },
+    });
+  });
+
+  it("resolves edit save failure by storing the failure on panel state", () => {
+    expect(getCollectionEditSaveResolution(panelState, editState, false, "save failed")).toEqual({
+      panelState: {
+        activeView: "collections",
+        createInput: "draft collection",
+        createError: "old create error",
+        editError: "save failed",
+      },
+      editState,
+    });
+  });
+
+  it("resolves delete save success by clearing edit mode when deleting the active collection", () => {
+    expect(getCollectionDeleteSaveResolution(panelState, editState, "old collection", true, "save failed")).toEqual({
+      panelState,
+      editState: {
+        editingName: null,
+        editInput: "",
+        editError: null,
+        createError: "old create error",
+      },
+    });
+  });
+
+  it("resolves delete save failure by storing the failure on panel state", () => {
+    expect(getCollectionDeleteSaveResolution(panelState, editState, "old collection", false, "save failed")).toEqual({
+      panelState: {
+        activeView: "collections",
+        createInput: "draft collection",
+        createError: "old create error",
+        editError: "save failed",
+      },
+      editState,
     });
   });
 });
