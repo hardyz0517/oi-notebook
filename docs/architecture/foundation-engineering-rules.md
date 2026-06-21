@@ -151,17 +151,18 @@ Use domain modules as the home for stable rules:
 - `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
   chip expansion, tag chip search matching, tag-map group/branch view data,
   tag detail route data, tag detail header data, collection overview state/card rows, collection
-  detail header data, collection detail entry rows, archive list sections/rows,
-  archive year index data, search route result data, recent update cards, note
-  detail header/navigation context, note navigation items, compact post
-  card/result rows, compact pagination items/links, and tag diagnostics
-  payloads/debug-enable rules. The
+  detail route data, collection detail header data, collection detail entry rows,
+  archive list sections/rows, archive year index data, search route result data,
+  recent update cards, note detail header/navigation context, note navigation
+  items, compact post card/result rows, compact pagination items/links, and tag
+  diagnostics payloads/debug-enable rules. The
   local-blog App shell should render tag-map, tag detail route/header data,
-  collection overview/detail rows, archive index/list rows, search result
-  pagination/count labels, recent update cards, note detail header/navigation
-  context, note navigation items, post card/result rows, and pagination
-  item/link view data, read browser debug flags, and perform console side
-  effects instead of owning these reusable rules directly.
+  collection overview/detail rows, collection detail filtering/pagination,
+  archive index/list rows, search result pagination/count labels, recent update
+  cards, note detail header/navigation context, note navigation items, post
+  card/result rows, and pagination item/link view data, read browser debug
+  flags, and perform console side effects instead of owning these reusable rules
+  directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
 Luogu import edge cases, local-blog page-section rules, and other non-AI areas

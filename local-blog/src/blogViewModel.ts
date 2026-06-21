@@ -3,6 +3,7 @@ import {
   formatArchiveDay,
   formatCompactDate,
   formatOptionalDate,
+  getCategoryLabel,
   getCollectionDescription,
   getDisplayTags,
   getHomeExcerpt,
@@ -14,6 +15,7 @@ import {
   getUnknownTags,
   paginateNotes,
   searchNotes,
+  sortNotesByRecent,
   type CollectionGroup,
   type NoteDetail,
   type NoteSummary,
@@ -175,6 +177,27 @@ export type CollectionDetailHeaderViewInput = {
   collection: string;
   count: number;
   latestUpdatedAt?: string;
+};
+
+export type CollectionDetailRouteView = {
+  collection: string;
+  collectionGroup: CollectionGroup | undefined;
+  filteredNotes: NoteSummary[];
+  paged: {
+    items: NoteSummary[];
+    currentPage: number;
+    totalPages: number;
+  };
+  count: number;
+  latestUpdatedAt?: string;
+};
+
+export type CollectionDetailRouteViewInput = {
+  notes: NoteSummary[];
+  collections: CollectionGroup[];
+  collection: string;
+  page: number;
+  pageSize: number;
 };
 
 export type CollectionOverviewViewInput = {
@@ -534,6 +557,22 @@ export function buildCollectionDetailHeaderView(input: CollectionDetailHeaderVie
     countLabel: input.count + " 篇文章",
     updatedLabel: "最近更新 " + (formatCompactDate(input.latestUpdatedAt) ?? "暂无记录"),
     description: getCollectionDescription(input.collection),
+  };
+}
+
+export function buildCollectionDetailRouteView(input: CollectionDetailRouteViewInput): CollectionDetailRouteView {
+  const collection = getCategoryLabel(input.collection);
+  const collectionGroup = input.collections.find((item) => item.name === collection);
+  const filteredNotes = sortNotesByRecent(input.notes.filter((note) => note.collections.includes(collection)));
+  const paged = paginateNotes(filteredNotes, input.page, input.pageSize);
+
+  return {
+    collection,
+    collectionGroup,
+    filteredNotes,
+    paged,
+    count: filteredNotes.length,
+    latestUpdatedAt: collectionGroup?.latestUpdatedAt,
   };
 }
 

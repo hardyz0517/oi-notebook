@@ -18,7 +18,6 @@ import {
   buildCollections as buildBlogCollections,
   defaultBlogConfig as blogDefaultConfig,
   getCategoryCounts as getBlogCategoryCounts,
-  getCategoryLabel,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
   groupNotesByYear as groupBlogNotesByYear,
@@ -26,7 +25,6 @@ import {
   normalizeNoteDetail as normalizeBlogNoteDetail,
   normalizeNoteSummary as normalizeBlogNoteSummary,
   paginateNotes as paginateBlogNotes,
-  sortNotesByRecent as sortBlogNotesByRecent,
   type BlogConfig,
   type CollectionGroup,
   type CountItem,
@@ -40,6 +38,7 @@ import {
   buildArchiveIndexView,
   buildArchiveListView,
   buildCollectionDetailHeaderView,
+  buildCollectionDetailRouteView,
   buildCollectionEntryListView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
@@ -339,19 +338,22 @@ function IndexView({
   }
 
   if (route.name === "collection") {
-    const collection = getCategoryLabel(route.collection);
-    const collectionGroup = collections.find((item) => item.name === collection);
-    const filteredNotes = sortBlogNotesByRecent(notes.filter((note) => note.collections.includes(collection)));
-    const paged = paginateBlogNotes(filteredNotes, route.page, resultPageSize);
+    const collectionDetail = buildCollectionDetailRouteView({
+      notes,
+      collections,
+      collection: route.collection,
+      page: route.page,
+      pageSize: resultPageSize,
+    });
 
     return (
-      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u96c6 \u2192 " + collection}>
+      <ListingPage breadcrumb={"\u9996\u9875 \u2192 \u6587\u96c6 \u2192 " + collectionDetail.collection}>
         <section className="collection-detail">
           <a className="collection-detail-back" href="#/collections">{"\u2190 \u8fd4\u56de\u6587\u96c6"}</a>
           <CollectionDetailHeader
-            collection={collection}
-            count={filteredNotes.length}
-            latestUpdatedAt={collectionGroup?.latestUpdatedAt}
+            collection={collectionDetail.collection}
+            count={collectionDetail.count}
+            latestUpdatedAt={collectionDetail.latestUpdatedAt}
           />
           <section className="collection-detail-entries" aria-labelledby="collection-entries-title">
             <header className="collection-entries-header">
@@ -361,20 +363,20 @@ function IndexView({
               <LoadingState />
             ) : error ? (
               <ErrorState onRetry={onRetry} />
-            ) : paged.items.length === 0 ? (
+            ) : collectionDetail.paged.items.length === 0 ? (
               <EmptyState
                 title={"\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6587\u96c6"}
                 description={"\u7ed9\u7b14\u8bb0\u6dfb\u52a0\u5bf9\u5e94 collection\u3001category \u6216\u6587\u96c6\u6807\u7b7e\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u5bf9\u5e94\u6587\u7ae0\u3002"}
               />
             ) : (
               <CollectionEntryList
-                notes={paged.items}
-                collection={collection}
+                notes={collectionDetail.paged.items}
+                collection={collectionDetail.collection}
                 sourceHref={getRouteReturnHref(route)}
-                startIndex={(paged.currentPage - 1) * resultPageSize}
+                startIndex={(collectionDetail.paged.currentPage - 1) * resultPageSize}
               />
             )}
-            <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={(page) => getCollectionHref(collection, page)} />
+            <Pagination currentPage={collectionDetail.paged.currentPage} totalPages={collectionDetail.paged.totalPages} getPageHref={(page) => getCollectionHref(collectionDetail.collection, page)} />
           </section>
         </section>
       </ListingPage>

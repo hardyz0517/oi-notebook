@@ -5,6 +5,7 @@ import {
   buildArchiveIndexView,
   buildArchiveListView,
   buildCollectionDetailHeaderView,
+  buildCollectionDetailRouteView,
   buildCollectionEntryListView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
@@ -407,6 +408,56 @@ describe("blogViewModel", () => {
       countLabel: "0 篇文章",
       updatedLabel: "最近更新 暂无记录",
       description: "收录这一主题下的相关文章。",
+    });
+  });
+
+  it("builds collection detail route data", () => {
+    const note = (title: string, collections: string[], updated: string | null): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: collections[0] ?? "unknown",
+      collections,
+      created: null,
+      updated,
+      date: null,
+      sortKey: updated,
+      draft: false,
+    });
+    const notes = [
+      note("older graph", ["algorithm"], "2026-06-18T00:00:00Z"),
+      note("newer graph", ["algorithm"], "2026-06-20T00:00:00Z"),
+      note("essay", ["essay"], "2026-06-19T00:00:00Z"),
+    ];
+    const collections = [
+      {
+        name: "algorithm",
+        count: 2,
+        posts: [],
+        latestUpdatedAt: "2026-06-20T00:00:00Z",
+      },
+    ];
+
+    expect(buildCollectionDetailRouteView({
+      notes,
+      collections,
+      collection: "algorithm",
+      page: 2,
+      pageSize: 1,
+    })).toEqual({
+      collection: "algorithm",
+      collectionGroup: collections[0],
+      filteredNotes: [notes[1], notes[0]],
+      paged: {
+        items: [notes[0]],
+        currentPage: 2,
+        totalPages: 2,
+      },
+      count: 2,
+      latestUpdatedAt: "2026-06-20T00:00:00Z",
     });
   });
 
