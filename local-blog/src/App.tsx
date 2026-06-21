@@ -40,7 +40,7 @@ import {
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
   buildHomeRouteView,
-  buildNoteDetailHeaderView,
+  buildNoteDetailRouteView,
   buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
@@ -1228,7 +1228,11 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
     );
   }
 
-  const noteHeader = buildNoteDetailHeaderView({ note, notes });
+  const noteView = buildNoteDetailRouteView({
+    note,
+    notes,
+    sourceHref: returnTarget.href,
+  });
 
   return (
     <div className="note-reader-shell">
@@ -1240,17 +1244,17 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
         <article className="note-page">
           <header className="note-header">
             <div className="post-meta">
-              <a href={getCollectionHref(note.collection)}>{note.collection}</a>
-              {noteHeader.displayDate ? <time>{noteHeader.displayDate}</time> : null}
-              {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
+              <a href={noteView.collectionHref}>{note.collection}</a>
+              {noteView.displayDate ? <time>{noteView.displayDate}</time> : null}
+              {noteView.isDraft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
             </div>
             <h1>{note.title}</h1>
-            {noteHeader.summary ? <p className="note-summary">{noteHeader.summary}</p> : null}
-            {note.tags.length > 0 ? (
+            {noteView.summary ? <p className="note-summary">{noteView.summary}</p> : null}
+            {noteView.tags.length > 0 ? (
               <div className="tag-row" aria-label={note.title + " \u6807\u7b7e"}>
-                {note.tags.map((tag) => (
-                  <a href={getTagHref(tag)} key={tag}>
-                    {tag}
+                {noteView.tags.map((tag) => (
+                  <a href={getTagHref(tag.label)} key={tag.label}>
+                    {tag.label}
                   </a>
                 ))}
               </div>
@@ -1259,8 +1263,8 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
 
           <MarkdownRenderer markdown={note.body} />
 
-          {noteHeader.hasNavigation ? (
-            <NoteNavigation previousNote={noteHeader.previousNote} nextNote={noteHeader.nextNote} sourceHref={returnTarget.href} />
+          {noteView.hasNavigation ? (
+            <NoteNavigation previousNote={noteView.previousNote} nextNote={noteView.nextNote} sourceHref={returnTarget.href} />
           ) : null}
         </article>
       </main>

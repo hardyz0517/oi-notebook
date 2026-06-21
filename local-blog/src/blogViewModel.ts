@@ -22,7 +22,7 @@ import {
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
-import { getNoteHref, getTagHref } from "./blogRoutes";
+import { getCollectionHref, getNoteHref, getTagHref } from "./blogRoutes";
 import {
   findTagTreeNode,
   getTagPathSegments,
@@ -388,6 +388,23 @@ export type NoteDetailHeaderView = {
 export type NoteDetailHeaderViewInput = {
   note: NoteDetail;
   notes: NoteSummary[];
+};
+
+export type NoteDetailRouteView = {
+  collectionHref: string;
+  displayDate: string | null;
+  summary: string | null;
+  tags: TagChipItem[];
+  isDraft: boolean;
+  previousNote: NoteSummary | null;
+  nextNote: NoteSummary | null;
+  hasNavigation: boolean;
+};
+
+export type NoteDetailRouteViewInput = {
+  note: NoteDetail;
+  notes: NoteSummary[];
+  sourceHref: string;
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -776,6 +793,28 @@ export function buildNoteDetailHeaderView(input: NoteDetailHeaderViewInput): Not
     previousNote: currentIndex > 0 ? input.notes[currentIndex - 1] : null,
     nextNote: currentIndex !== -1 && currentIndex < input.notes.length - 1 ? input.notes[currentIndex + 1] : null,
     hasNavigation: currentIndex !== -1,
+  };
+}
+
+export function buildNoteDetailRouteView(input: NoteDetailRouteViewInput): NoteDetailRouteView {
+  const header = buildNoteDetailHeaderView({
+    note: input.note,
+    notes: input.notes,
+  });
+
+  return {
+    collectionHref: getCollectionHref(input.note.collection),
+    displayDate: header.displayDate,
+    summary: header.summary,
+    tags: input.note.tags.map((tag) => ({
+      label: tag,
+      fullPath: tag,
+      count: 0,
+    })),
+    isDraft: input.note.draft,
+    previousNote: header.previousNote,
+    nextNote: header.nextNote,
+    hasNavigation: header.hasNavigation,
   };
 }
 

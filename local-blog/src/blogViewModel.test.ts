@@ -9,6 +9,7 @@ import {
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
+  buildNoteDetailRouteView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
   buildPaginationView,
@@ -760,6 +761,88 @@ describe("blogViewModel", () => {
       previousNote: null,
       nextNote: null,
       hasNavigation: false,
+    });
+  });
+
+  it("builds note detail route data", () => {
+    const notes: NoteSummary[] = [
+      {
+        title: "上一篇",
+        relativePath: "posts/previous.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技术",
+        collections: ["技术"],
+        created: null,
+        updated: "2026-06-21T00:00:00Z",
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+      {
+        title: "当前",
+        relativePath: "posts/current.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技术",
+        collections: ["技术"],
+        created: null,
+        updated: null,
+        date: "2026-06-20T00:00:00Z",
+        sortKey: null,
+        draft: false,
+      },
+      {
+        title: "下一篇",
+        relativePath: "posts/next.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技术",
+        collections: ["技术"],
+        created: null,
+        updated: "2026-06-19T00:00:00Z",
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+    ];
+
+    expect(buildNoteDetailRouteView({
+      note: {
+        relativePath: "posts/current.md",
+        category: "inbox",
+        collection: "技术",
+        collections: ["技术"],
+        title: "当前",
+        tags: ["算法/图论", "数据结构"],
+        created: "2026-06-18T00:00:00Z",
+        updated: null,
+        date: "2026-06-20T00:00:00Z",
+        draft: true,
+        summary: " ",
+        metadata: { summary: "来自元数据的摘要" },
+        body: "# 当前",
+      },
+      notes,
+      sourceHref: "#/note/posts%2Fcurrent.md",
+    })).toEqual({
+      collectionHref: "#/collections/%E6%8A%80%E6%9C%AF",
+      displayDate: "2026 年 6 月 18 日",
+      summary: "来自元数据的摘要",
+      tags: [
+        { label: "算法/图论", fullPath: "算法/图论", count: 0 },
+        { label: "数据结构", fullPath: "数据结构", count: 0 },
+      ],
+      isDraft: true,
+      previousNote: notes[0],
+      nextNote: notes[2],
+      hasNavigation: true,
     });
   });
 
