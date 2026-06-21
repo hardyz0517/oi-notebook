@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -116,6 +116,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setCustomTagEditError(state.customTagEditError);
     applyMergeEditorState(state.mergeEditor);
   }, [applyMergeEditorState]);
+  const applyCollectionEditState = useCallback((state: CollectionEditState) => {
+    setEditingCollectionName(state.editingName);
+    setCollectionEditInput(state.editInput);
+    setCollectionEditError(state.editError);
+    setCollectionCreateError(state.createError);
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
@@ -807,17 +813,22 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [collectionCreateInput, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
 
   const startCollectionEdit = useCallback((name: string) => {
-    setEditingCollectionName(name);
-    setCollectionEditInput(name);
-    setCollectionEditError(null);
-    setCollectionCreateError(null);
-  }, []);
+    applyCollectionEditState(getOpenedCollectionEditState({
+      editingName: editingCollectionName,
+      editInput: collectionEditInput,
+      editError: collectionEditError,
+      createError: collectionCreateError,
+    }, name));
+  }, [applyCollectionEditState, collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
 
   const cancelCollectionEdit = useCallback(() => {
-    setEditingCollectionName(null);
-    setCollectionEditInput("");
-    setCollectionEditError(null);
-  }, []);
+    applyCollectionEditState(getCancelledCollectionEditState({
+      editingName: editingCollectionName,
+      editInput: collectionEditInput,
+      editError: collectionEditError,
+      createError: collectionCreateError,
+    }));
+  }, [applyCollectionEditState, collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
 
   const saveCollectionEdit = useCallback(async () => {
     if (!editingCollectionName) return;

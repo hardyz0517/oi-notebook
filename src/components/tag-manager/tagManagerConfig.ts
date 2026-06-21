@@ -168,6 +168,13 @@ export type CollectionEditSavePlan =
     nextName: string;
   };
 
+export type CollectionEditState = {
+  editingName: string | null;
+  editInput: string;
+  editError: string | null;
+  createError: string | null;
+};
+
 export function getOpenedMergeEditorState(): MergeEditorState {
   return {
     isOpen: true,
@@ -596,6 +603,30 @@ export function getCollectionEditSavePlan(
   return {
     action: "rename",
     nextName,
+  };
+}
+
+export function getOpenedCollectionEditState(
+  state: CollectionEditState,
+  name: string,
+): CollectionEditState {
+  return {
+    ...state,
+    editingName: name,
+    editInput: name,
+    editError: null,
+    createError: null,
+  };
+}
+
+export function getCancelledCollectionEditState(
+  state: CollectionEditState,
+): CollectionEditState {
+  return {
+    ...state,
+    editingName: null,
+    editInput: "",
+    editError: null,
   };
 }
 

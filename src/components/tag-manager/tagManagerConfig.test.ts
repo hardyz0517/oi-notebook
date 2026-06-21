@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -323,6 +323,33 @@ describe("tagManagerConfig collection edit save plan", () => {
     expect(getCollectionEditSavePlan("训练记录", "  周赛   复盘  ")).toEqual({
       action: "rename",
       nextName: "周赛 复盘",
+    });
+  });
+});
+
+describe("tagManagerConfig collection edit state", () => {
+  const state: CollectionEditState = {
+    editingName: "旧文集",
+    editInput: "旧文集（草稿）",
+    editError: "old edit error",
+    createError: "old create error",
+  };
+
+  it("starts collection edit mode with the selected name and clears stale errors", () => {
+    expect(getOpenedCollectionEditState(state, "训练记录")).toEqual({
+      editingName: "训练记录",
+      editInput: "训练记录",
+      editError: null,
+      createError: null,
+    });
+  });
+
+  it("cancels collection edit mode and clears transient edit state", () => {
+    expect(getCancelledCollectionEditState(state)).toEqual({
+      editingName: null,
+      editInput: "",
+      editError: null,
+      createError: "old create error",
     });
   });
 });
