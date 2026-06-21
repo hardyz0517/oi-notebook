@@ -111,9 +111,13 @@ Use domain modules as the home for stable rules:
   schema, storage normalization, rule rows, and safe save-directory rules.
 - `src/components/tag-manager/tagNormalizationScan.ts`: tag normalization
   scan/apply task state, stats, panel state, and selection summaries.
+- `src/components/tag-manager/tagManagerConfig.ts`: Tag Manager config
+  normalization, custom tag create/edit/delete rules, alias update validation,
+  merge rule updates, collection candidate updates, filtered root/suggestion
+  helpers, and save debug event labels.
 - `src/components/tag-manager/tagManagerViewModel.ts`: Tag Manager workspace
   view state, including filtered suggestions/root groups, active root
-  fallback, selected suggestion alias state, merge preview/candidates,
+  fallback, selected suggestion alias display state, merge preview/candidates,
   collection rows, sort disabled state, and search results.
 - `src/lib/localIndexStatus.ts`: local index status labels, task view state,
   rebuild messages, details view state, and size/date/access formatting.

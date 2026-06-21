@@ -73,6 +73,17 @@ export type MergeRuleUpdateResult =
     error: string;
   };
 
+export type UserAliasUpdateResult =
+  | {
+    ok: true;
+    config: UserTagTaxonomyConfig;
+    alias: string;
+  }
+  | {
+    ok: false;
+    error: string;
+  };
+
 export type CollectionCandidateSource = "builtin" | "custom" | "article";
 
 export type CollectionCandidateRow = {
@@ -556,6 +567,50 @@ export function getBuiltinAliasesForSuggestion(suggestion: TagSuggestion | null,
   if (!suggestion) return [];
   const userAliasKeys = new Set(userAliases.map(getAliasCompareKey));
   return suggestion.aliases.filter((alias) => !userAliasKeys.has(getAliasCompareKey(alias)));
+}
+
+export function addUserAliasToConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+  aliasInput: string,
+  selectedBuiltinAliases: string[],
+): UserAliasUpdateResult {
+  if (!suggestion || suggestion.path.length < 3) {
+    return { ok: false, error: "只有具体标签支持别名管理" };
+  }
+
+  const alias = aliasInput.trim();
+  const aliasKey = getAliasCompareKey(alias);
+  if (!alias) {
+    return { ok: false, error: "请输入别名" };
+  }
+  if (aliasKey === getAliasCompareKey(suggestion.name) || aliasKey === getAliasCompareKey(suggestion.pathText)) {
+    return { ok: false, error: "该名称已是当前标签，无需添加" };
+  }
+  const builtinAliasOwnerId = normalizeTagPath(alias)?.entryId;
+  if (builtinAliasOwnerId && builtinAliasOwnerId !== suggestion.id) {
+    return { ok: false, error: "该别名已被内置标签使用" };
+  }
+
+  const currentConfig = normalizeConfig(config);
+  const existingUserAlias = Object.keys(currentConfig.aliases ?? {}).some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
+  const existingBuiltinAlias = selectedBuiltinAliases.some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
+
+  if (existingUserAlias || existingBuiltinAlias) {
+    return { ok: false, error: "别名已存在" };
+  }
+
+  return {
+    ok: true,
+    alias,
+    config: normalizeConfig({
+      ...currentConfig,
+      aliases: {
+        ...(currentConfig.aliases ?? {}),
+        [alias]: suggestion.id,
+      },
+    }),
+  };
 }
 
 export function getCustomTagCreateDraft(

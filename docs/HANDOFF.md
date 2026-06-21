@@ -88,11 +88,16 @@ domain modules with tests.
 - Tag normalization:
   `src/components/tag-manager/tagNormalizationScan.ts` owns scan/apply task
   state, stats, selection summaries, and panel state.
+- Tag Manager config rules:
+  `src/components/tag-manager/tagManagerConfig.ts` owns Tag Manager config
+  normalization, custom tag create/edit/delete rules, alias update validation,
+  merge rule updates, collection candidate updates, filtered root/suggestion
+  helpers, and save debug event labels.
 - Tag Manager workspace:
   `src/components/tag-manager/tagManagerViewModel.ts` owns filtered
   suggestions/root groups, active root fallback state, selected suggestion
-  display, alias display, merge preview/candidates, collection rows, sort
-  disabled state, and search results.
+  display, alias display state, merge preview/candidates, collection rows,
+  sort disabled state, and search results.
 - API boundary:
   `src/lib/api.ts` is the only non-AI frontend Rust command boundary.
   `src/lib/apiContract.ts` records the command wrapper contract, and
@@ -190,6 +195,9 @@ Recent focused coverage includes:
 - Luogu display/task/workflow helpers:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
+- Tag Manager config rules:
+  `src/components/tag-manager/tagManagerConfig.test.ts`, including alias add
+  validation and config updates.
 - Tag Manager workspace view model:
   `src/components/tag-manager/tagManagerViewModel.test.ts`, including active
   root fallback, alias display, merge target, collection row, and search/sort

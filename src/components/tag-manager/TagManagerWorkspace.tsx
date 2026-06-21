@@ -11,7 +11,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, getAliasCompareKey, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -395,51 +395,21 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [saveWorkingConfig, workingConfig]);
 
   const addAlias = useCallback(async () => {
-    if (!selectedSuggestion || !canManageAliases) {
-      setAliasError("只有具体标签支持别名管理");
-      return;
-    }
-
-    const alias = aliasInput.trim();
-    const aliasKey = getAliasCompareKey(alias);
-    if (!alias) {
-      setAliasError("请输入别名");
-      return;
-    }
-    if (aliasKey === getAliasCompareKey(selectedSuggestion.name) || aliasKey === getAliasCompareKey(selectedSuggestion.pathText)) {
-      setAliasError("该名称已是当前标签，无需添加");
-      return;
-    }
-    const builtinAliasOwnerId = normalizeTagPath(alias)?.entryId;
-    if (builtinAliasOwnerId && builtinAliasOwnerId !== selectedSuggestion.id) {
-      setAliasError("该别名已被内置标签使用");
-      return;
-    }
-
     const currentConfig = normalizeConfig(workingConfig);
-    const existingUserAlias = Object.keys(currentConfig.aliases ?? {}).some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
-    const existingBuiltinAlias = selectedBuiltinAliases.some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
-
-    if (existingUserAlias || existingBuiltinAlias) {
-      setAliasError("别名已存在");
+    const result = addUserAliasToConfig(currentConfig, selectedSuggestion, aliasInput, selectedBuiltinAliases);
+    if (!result.ok) {
+      setAliasError(result.error);
       return;
     }
 
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      aliases: {
-        ...(currentConfig.aliases ?? {}),
-        [alias]: selectedSuggestion.id,
-      },
-    });
     setAliasError(null);
-    const saved = await saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原别名", "alias");
+    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原别名", "alias");
     if (saved) {
       setAliasInput("");
     } else {
       setAliasError("保存失败，已恢复原别名");
     }
-  }, [aliasInput, canManageAliases, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
+  }, [aliasInput, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
 
   const deleteUserAlias = useCallback(async (alias: string) => {
     if (!selectedSuggestion) return;
