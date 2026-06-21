@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -88,6 +88,15 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
   const applyNodeSelectionState = useCallback((state: TagManagerNodeSelectionState) => {
     setActiveRoot(state.activeRoot);
+    setSelectedGroupOrderKey(state.selectedGroupOrderKey);
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagCreateDraft(state.customTagCreateDraft);
+    setCustomTagCreateError(state.customTagCreateError);
+  }, []);
+  const applyCustomTagCreateSelectionState = useCallback((state: CustomTagCreateSelectionState) => {
+    setActiveRoot(state.activeRoot);
+    setExpandedGroups(state.expandedGroups);
+    setFilterMode(state.filterMode);
     setSelectedGroupOrderKey(state.selectedGroupOrderKey);
     setSelectedSuggestionId(state.selectedSuggestionId);
     setCustomTagCreateDraft(state.customTagCreateDraft);
@@ -530,23 +539,30 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
     if (saved) {
-      const selectionPlan = createCustomTagCreateSelectionPlan(result.config, result.entryId);
-      if (selectionPlan.activeRoot) {
-        setActiveRoot(selectionPlan.activeRoot);
-      }
-      if (selectionPlan.expandedGroupOrderKey) {
-        const expandedGroupOrderKey = selectionPlan.expandedGroupOrderKey;
-        setExpandedGroups((current) => ({ ...current, [expandedGroupOrderKey]: true }));
-      }
-      setFilterMode(selectionPlan.filterMode);
-      setSelectedGroupOrderKey(selectionPlan.selectedGroupOrderKey);
-      setSelectedSuggestionId(selectionPlan.selectedSuggestionId);
-      setCustomTagCreateDraft(null);
-      setCustomTagCreateError(null);
+      applyCustomTagCreateSelectionState(getAppliedCustomTagCreateSelectionState({
+        activeRoot,
+        expandedGroups,
+        filterMode,
+        selectedGroupOrderKey,
+        selectedSuggestionId,
+        customTagCreateDraft,
+        customTagCreateError,
+      }, createCustomTagCreateSelectionPlan(result.config, result.entryId)));
     } else {
       setCustomTagCreateError("保存失败，已恢复原自定义标签");
     }
-  }, [customTagCreateDraft, saveWorkingConfig, workingConfig]);
+  }, [
+    activeRoot,
+    applyCustomTagCreateSelectionState,
+    customTagCreateDraft,
+    customTagCreateError,
+    expandedGroups,
+    filterMode,
+    saveWorkingConfig,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+    workingConfig,
+  ]);
 
   const startCustomTagEdit = useCallback(() => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;

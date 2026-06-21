@@ -103,6 +103,16 @@ export type TagManagerNodeSelectionState = {
   customTagCreateError: string | null;
 };
 
+export type CustomTagCreateSelectionState = {
+  activeRoot: string | null;
+  expandedGroups: Record<string, boolean>;
+  filterMode: TagManagerFilterMode;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string | null;
+  customTagCreateDraft: CustomTagCreateDraft | null;
+  customTagCreateError: string | null;
+};
+
 export type UserAliasUpdateResult =
   | {
     ok: true;
@@ -874,6 +884,24 @@ export function getSelectedSuggestionState(
     selectedGroupOrderKey: null,
     selectedSuggestionId: suggestionId,
     customTagCreateDraft: getSuggestionCustomTagCreateDraftSelection(state.customTagCreateDraft, suggestion),
+    customTagCreateError: null,
+  };
+}
+
+export function getAppliedCustomTagCreateSelectionState(
+  state: CustomTagCreateSelectionState,
+  plan: CustomTagCreateSelectionPlan,
+): CustomTagCreateSelectionState {
+  return {
+    ...state,
+    activeRoot: plan.activeRoot,
+    expandedGroups: plan.expandedGroupOrderKey
+      ? { ...state.expandedGroups, [plan.expandedGroupOrderKey]: true }
+      : state.expandedGroups,
+    filterMode: plan.filterMode,
+    selectedGroupOrderKey: plan.selectedGroupOrderKey,
+    selectedSuggestionId: plan.selectedSuggestionId,
+    customTagCreateDraft: null,
     customTagCreateError: null,
   };
 }

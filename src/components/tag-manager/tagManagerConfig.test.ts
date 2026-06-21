@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getGroupedCustomTagCreateDraftSelection, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedRootState, getSelectedSuggestionState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -153,6 +153,46 @@ describe("tagManagerConfig custom tag create selection plan", () => {
       filterMode: "all",
       selectedGroupOrderKey: null,
       selectedSuggestionId: created.entryId,
+    });
+  });
+});
+
+describe("tagManagerConfig custom tag create selection state", () => {
+  const state: CustomTagCreateSelectionState = {
+    activeRoot: "字符串",
+    expandedGroups: {
+      "algorithm.group.string": true,
+    },
+    filterMode: "user",
+    selectedGroupOrderKey: "algorithm.group.string",
+    selectedSuggestionId: null,
+    customTagCreateDraft: {
+      parentPathText: "算法 / 字符串",
+      parentLocked: true,
+      name: "新标签",
+      aliasesText: "新别名",
+    },
+    customTagCreateError: "old create error",
+  };
+
+  it("applies the create selection plan and clears create draft state", () => {
+    expect(getAppliedCustomTagCreateSelectionState(state, {
+      activeRoot: "算法",
+      expandedGroupOrderKey: "algorithm.group.dp",
+      filterMode: "all",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: "user.dp.knapsack",
+    })).toEqual({
+      activeRoot: "算法",
+      expandedGroups: {
+        "algorithm.group.string": true,
+        "algorithm.group.dp": true,
+      },
+      filterMode: "all",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: "user.dp.knapsack",
+      customTagCreateDraft: null,
+      customTagCreateError: null,
     });
   });
 });
