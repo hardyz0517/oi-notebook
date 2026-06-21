@@ -93,6 +93,11 @@ domain modules with tests.
 - Settings render guards:
   `src/components/settings/settingsRenderGuards.ts` owns settings page/group
   render guard rules.
+- Local blog routes:
+  `local-blog/src/blogRoutes.ts` owns local-blog hash route parsing, route
+  href builders, note return-target validation, and return labels. The
+  local-blog App shell should pass `window.location.hash` into this helper
+  instead of owning route rules directly.
 
 ## Long-Task Model
 
@@ -139,6 +144,8 @@ git status --short -- . ":(exclude)notes/**"
 
 Recent focused coverage includes:
 
+- Local blog route helpers:
+  `local-blog/src/blogRoutes.test.ts`.
 - Luogu display/task/workflow helpers:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
@@ -156,6 +163,9 @@ be selective:
 
 - Continue shrinking `App.tsx` only where a rule has a clear owner and focused
   test value.
+- Continue shrinking `local-blog/src/App.tsx` by moving stable route, config,
+  normalization, collection, search, and diagnostics rules into focused
+  local-blog domain modules with tests.
 - Consider a future Luogu effect controller only if it can own an end-to-end
   side-effect boundary without hiding important API/toast/confirm ordering.
 - Extend API contract metadata only when it improves review value, such as

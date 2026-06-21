@@ -131,10 +131,15 @@ Use domain modules as the home for stable rules:
   `src/lib/api.ts`.
 - `src/components/settings/settingsRenderGuards.ts`: settings group/page render
   guards used by the Settings shell.
+- `local-blog/src/blogRoutes.ts`: local-blog hash route parsing, route href
+  builders, note return-target validation, and return labels. The local-blog
+  App shell should read browser state and consume this helper instead of
+  owning route rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
-Luogu import edge cases, and other non-AI areas only when the extracted rule
-has a stable owner and focused test value.
+Luogu import edge cases, local-blog config/normalization/search rules, and
+other non-AI areas only when the extracted rule has a stable owner and focused
+test value.
 
 ## Blog Domain Boundary
 
