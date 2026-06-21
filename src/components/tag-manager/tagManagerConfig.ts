@@ -648,7 +648,7 @@ export function getChangedCollectionEditInputState(
   };
 }
 
-export function getAppliedCollectionEditState(
+export function getAppliedCollectionEditSaveState(
   state: CollectionEditState,
 ): CollectionEditState {
   return getCancelledCollectionEditState(state);
