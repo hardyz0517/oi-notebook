@@ -39,11 +39,11 @@ import {
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
+  buildHomeRouteView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
   buildPaginationView,
   buildPostCardListView,
-  buildRecentUpdateView,
   buildSearchRouteView,
   buildTagDiagnostics,
   buildTagDetailRouteView,
@@ -395,23 +395,26 @@ function IndexView({
     );
   }
 
-  const latestNote = notes[0] ?? null;
-  const articleNotes = notes.slice(1);
-  const paged = paginateBlogNotes(articleNotes, route.page, homePageSize);
+  const homeView = buildHomeRouteView({
+    notes,
+    page: route.page,
+    pageSize: homePageSize,
+    sourceHref: getRouteReturnHref(route),
+  });
 
   return (
     <>
-      <RecentUpdates note={latestNote} sourceHref={getRouteReturnHref(route)} />
+      <RecentUpdates recentUpdate={homeView.latestNote} />
 
       <section className="home-posts" id="articles" aria-label={"\u6587\u7ae0\u6458\u8981\u6d41"}>
         <PostResults
-          notes={paged.items}
+          notes={homeView.paged.items}
           isLoading={isLoading}
           error={error}
           onRetry={onRetry}
           sourceHref={getRouteReturnHref(route)}
         />
-        <Pagination currentPage={paged.currentPage} totalPages={paged.totalPages} getPageHref={getHomeHref} />
+        <Pagination currentPage={homeView.paged.currentPage} totalPages={homeView.paged.totalPages} getPageHref={getHomeHref} />
       </section>
     </>
   );
@@ -915,9 +918,7 @@ function PostResults({
   );
 }
 
-function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceHref?: string }) {
-  const recentUpdate = buildRecentUpdateView({ note, sourceHref });
-
+function RecentUpdates({ recentUpdate }: { recentUpdate: ReturnType<typeof buildHomeRouteView>["latestNote"] }) {
   if (!recentUpdate) {
     return (
       <section className="recent-updates" aria-label={"\u6700\u65b0\u6587\u7ae0"}>

@@ -117,19 +117,19 @@ domain modules with tests.
   tag chip expansion, tag chip search matching, tag-map group/branch view data,
   tag detail route data, tag detail header data, collection overview state/card rows, collection
   detail route data, collection detail header data, collection detail entry rows,
-  article archive route data, archive list sections/rows, archive year index
-  data, search route result data, recent update cards, note detail
-  header/navigation context, note navigation items, compact post card/result
-  rows, compact pagination items/links, and tag diagnostics payloads/debug-enable
-  rules.
+  article archive route data, home route data, archive list sections/rows,
+  archive year index data, search route result data, recent update cards, note
+  detail header/navigation context, note navigation items, compact post
+  card/result rows, compact pagination items/links, and tag diagnostics
+  payloads/debug-enable rules.
   The local-blog App shell should render these
   ready-to-render items, read browser debug flags, and perform console side
   effects instead of owning tag-map, tag detail filtering/pagination, collection overview/detail rows, archive
   list rows, collection detail filtering/pagination, article archive
-  pagination/year grouping/index data, search result pagination/count labels,
-  recent update cards, note detail header/navigation context, note navigation
-  items, post card/result rows, pagination items/links, or diagnostics
-  data-shaping rules directly.
+  pagination/year grouping/index data, home pagination/latest-note data,
+  search result pagination/count labels, recent update cards, note detail
+  header/navigation context, note navigation items, post card/result rows,
+  pagination items/links, or diagnostics data-shaping rules directly.
 
 ## Long-Task Model
 

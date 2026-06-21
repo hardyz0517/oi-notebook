@@ -5,6 +5,7 @@ import {
   buildArchiveIndexView,
   buildArchiveListView,
   buildArticleArchiveRouteView,
+  buildHomeRouteView,
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
   buildCollectionEntryListView,
@@ -923,6 +924,46 @@ describe("blogViewModel", () => {
         ]),
       },
       isEmpty: false,
+    });
+  });
+
+  it("builds home route data", () => {
+    const note = (title: string): NoteSummary => ({
+      title,
+      relativePath: title + ".md",
+      summary: null,
+      excerpt: null,
+      tags: [],
+      category: "inbox",
+      collection: "essay",
+      collections: ["essay"],
+      created: null,
+      updated: null,
+      date: null,
+      sortKey: null,
+      draft: false,
+    });
+    const notes = [note("latest"), note("one"), note("two")];
+
+    expect(buildHomeRouteView({
+      notes,
+      page: 1,
+      pageSize: 2,
+      sourceHref: "#/",
+    })).toEqual({
+      latestNote: {
+        href: "#/note/latest.md?from=%2F",
+        collection: "essay",
+        title: "latest",
+        excerpt: "这篇笔记还没有摘要，打开文章页可以继续阅读全文。",
+        dateLabel: null,
+        dateTime: null,
+      },
+      paged: {
+        items: [notes[1], notes[2]],
+        currentPage: 1,
+        totalPages: 1,
+      },
     });
   });
 

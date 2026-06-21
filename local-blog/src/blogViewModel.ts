@@ -296,6 +296,22 @@ export type ArticleArchiveRouteViewInput = {
   getYearHref: (page: number, year: string) => string;
 };
 
+export type HomeRouteView = {
+  latestNote: RecentUpdateView | null;
+  paged: {
+    items: NoteSummary[];
+    currentPage: number;
+    totalPages: number;
+  };
+};
+
+export type HomeRouteViewInput = {
+  notes: NoteSummary[];
+  page: number;
+  pageSize: number;
+  sourceHref?: string;
+};
+
 export type ArchiveListRow = {
   key: string;
   href: string;
@@ -669,6 +685,19 @@ export function buildArticleArchiveRouteView(input: ArticleArchiveRouteViewInput
       getYearHref: input.getYearHref,
     }),
     isEmpty: input.notes.length === 0,
+  };
+}
+
+export function buildHomeRouteView(input: HomeRouteViewInput): HomeRouteView {
+  const latestNote = buildRecentUpdateView({
+    note: input.notes[0] ?? null,
+    sourceHref: input.sourceHref,
+  });
+  const paged = paginateNotes(input.notes.slice(1), input.page, input.pageSize);
+
+  return {
+    latestNote,
+    paged,
   };
 }
 
