@@ -188,6 +188,19 @@ export type RecentUpdateViewInput = {
   sourceHref?: string;
 };
 
+export type NoteNavigationItemView = {
+  href: string;
+  title: string;
+  collection: string;
+  dateLabel: string | null;
+  dateTime: string | null;
+};
+
+export type NoteNavigationItemViewInput = {
+  note: NoteSummary | null;
+  sourceHref: string;
+};
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -404,6 +417,20 @@ export function buildRecentUpdateView(input: RecentUpdateViewInput): RecentUpdat
     collection: input.note.collection,
     title: input.note.title,
     excerpt: getHomeExcerpt(input.note, 132),
+    dateLabel: formatOptionalDate(input.note.date, input.note.updated, input.note.created),
+    dateTime: getNoteDateValue(input.note),
+  };
+}
+
+export function buildNoteNavigationItemView(input: NoteNavigationItemViewInput): NoteNavigationItemView | null {
+  if (!input.note) {
+    return null;
+  }
+
+  return {
+    href: getNoteHref(input.note.relativePath, input.sourceHref),
+    title: input.note.title,
+    collection: input.note.collection,
     dateLabel: formatOptionalDate(input.note.date, input.note.updated, input.note.created),
     dateTime: getNoteDateValue(input.note),
   };

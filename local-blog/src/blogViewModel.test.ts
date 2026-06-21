@@ -4,6 +4,7 @@ import {
   buildArticleResultListView,
   buildArchiveListView,
   buildCollectionEntryListView,
+  buildNoteNavigationItemView,
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
@@ -373,6 +374,35 @@ describe("blogViewModel", () => {
       excerpt: "这是一篇会显示在首页最近更新区域的文章摘要。",
       dateLabel: "2026 年 6 月 21 日",
       dateTime: "2026-06-21T00:00:00Z",
+    });
+  });
+
+  it("builds note navigation item card data", () => {
+    expect(buildNoteNavigationItemView({ note: null, sourceHref: "#/note/current.md" })).toBeNull();
+
+    expect(buildNoteNavigationItemView({
+      note: {
+        title: "上一篇文章",
+        relativePath: "posts/previous.md",
+        summary: null,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        created: "2026-06-19T00:00:00Z",
+        updated: null,
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+      sourceHref: "#/note/current.md",
+    })).toEqual({
+      href: "#/note/posts%2Fprevious.md?from=%2Fnote%2Fcurrent.md",
+      title: "上一篇文章",
+      collection: "技巧",
+      dateLabel: "2026 年 6 月 19 日",
+      dateTime: "2026-06-19T00:00:00Z",
     });
   });
 

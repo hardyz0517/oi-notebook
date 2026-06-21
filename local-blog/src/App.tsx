@@ -6,7 +6,6 @@ import {
   getCollectionHref,
   getHashParams,
   getHomeHref,
-  getNoteHref,
   getNoteReturnTargetFromHash,
   getRouteFromHash,
   getRouteReturnHref,
@@ -45,6 +44,7 @@ import {
   buildArticleResultListView,
   buildArchiveListView,
   buildCollectionEntryListView,
+  buildNoteNavigationItemView,
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
@@ -1351,8 +1351,9 @@ function NoteNavigationItem({
   align?: "previous" | "next";
 }) {
   const className = "note-nav-card note-nav-" + align + (note ? "" : " note-nav-card-disabled");
+  const item = buildNoteNavigationItemView({ note, sourceHref });
 
-  if (!note) {
+  if (!item) {
     return (
       <div className={className} aria-disabled="true">
         <span className="note-nav-label">{label}</span>
@@ -1361,15 +1362,13 @@ function NoteNavigationItem({
     );
   }
 
-  const displayDate = formatBlogOptionalDate(note.date, note.updated, note.created);
-
   return (
-    <a className={className} href={getNoteHref(note.relativePath, sourceHref)}>
+    <a className={className} href={item.href}>
       <span className="note-nav-label">{label}</span>
-      <h2>{note.title}</h2>
+      <h2>{item.title}</h2>
       <div className="note-nav-meta">
-        <span>{note.collection}</span>
-        {displayDate ? <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>{displayDate}</time> : null}
+        <span>{item.collection}</span>
+        {item.dateLabel ? <time dateTime={item.dateTime ?? undefined}>{item.dateLabel}</time> : null}
       </div>
     </a>
   );
