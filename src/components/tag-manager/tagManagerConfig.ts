@@ -704,7 +704,7 @@ export function getChangedCollectionCreateInputState(
   };
 }
 
-export function getFailedCollectionCreateState(
+export function getFailedCollectionCreateSaveState(
   state: CollectionPanelState,
   createError: string,
 ): CollectionPanelState {
@@ -714,7 +714,7 @@ export function getFailedCollectionCreateState(
   };
 }
 
-export function getFailedCollectionEditState(
+export function getFailedCollectionEditSaveState(
   state: CollectionPanelState,
   editError: string,
 ): CollectionPanelState {
