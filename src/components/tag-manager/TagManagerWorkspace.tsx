@@ -5,15 +5,16 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { saveTagTaxonomyConfig } from "@/lib/api";
-import { getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { TagManagerCollectionsPanel } from "./TagManagerCollectionsPanel";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { buildCollectionCandidateRows, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, filterTagRootGroups, filterTagSuggestions, getAliasCompareKey, getBuiltinAliasesForSuggestion, getCustomTagCreateDraft, getCustomTagEditDraft, getMergePreviewInfo, getMergeTargetCandidates, getSaveEventBase, getUserAliasesForSuggestion, isLeafTagSuggestion, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, getAliasCompareKey, getCustomTagCreateDraft, getCustomTagEditDraft, getSaveEventBase, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
-import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows, sortGroupsByOrderOverrides } from "./tagManagerOrdering";
+import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows } from "./tagManagerOrdering";
+import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
 import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
 export type { TagManagerCloseReason };
@@ -76,56 +77,48 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const includeHidden = showHidden || filterMode === "hidden";
-  const baseSuggestions = useMemo(() => getTagSuggestionList(workingConfig, { includeHidden, includeDeprecated: true }), [includeHidden, workingConfig]);
-  const baseRootGroups = useMemo(() => getTagSuggestionRootGroups(workingConfig, { includeHidden, includeDeprecated: true }), [includeHidden, workingConfig]);
-  const suggestions = useMemo(() => filterTagSuggestions(baseSuggestions, filterMode), [baseSuggestions, filterMode]);
-  const rootGroups = useMemo(() => filterTagRootGroups(baseRootGroups, filterMode), [baseRootGroups, filterMode]);
-  const activeRootGroup = useMemo(() => rootGroups.find((group) => group.root === activeRoot) ?? rootGroups[0] ?? null, [activeRoot, rootGroups]);
-  const activeRootSortedGroups = useMemo(
-    () => activeRootGroup ? sortGroupsByOrderOverrides(activeRootGroup.groups, workingConfig.orderOverrides) : [],
-    [activeRootGroup, workingConfig.orderOverrides],
-  );
-  const activeRootSortableItems = useMemo(
-    () => activeRootSortedGroups.map((group) => group.orderKey),
-    [activeRootSortedGroups],
-  );
-  const selectedSuggestion = useMemo(() => suggestions.find((suggestion) => suggestion.id === selectedSuggestionId) ?? null, [selectedSuggestionId, suggestions]);
-  const selectedUserAliases = useMemo(() => getUserAliasesForSuggestion(workingConfig, selectedSuggestion), [selectedSuggestion, workingConfig]);
-  const selectedBuiltinAliases = useMemo(() => getBuiltinAliasesForSuggestion(selectedSuggestion, selectedUserAliases), [selectedSuggestion, selectedUserAliases]);
-  const mergePreview = useMemo(() => getMergePreviewInfo(workingConfig, selectedSuggestion, baseSuggestions), [baseSuggestions, selectedSuggestion, workingConfig]);
-  const canEditMergeRule = isLeafTagSuggestion(selectedSuggestion);
-  const mergeTargetCandidates = useMemo(
-    () => getMergeTargetCandidates(baseSuggestions, selectedSuggestion, workingConfig, mergeSearchQuery),
-    [baseSuggestions, mergeSearchQuery, selectedSuggestion, workingConfig],
-  );
-  const selectedMergeTarget = useMemo(
-    () => mergeTargetCandidates.find((candidate) => candidate.id === selectedMergeTargetId)
-      ?? baseSuggestions.find((candidate) => candidate.id === selectedMergeTargetId)
-      ?? null,
-    [baseSuggestions, mergeTargetCandidates, selectedMergeTargetId],
-  );
-  const collectionRows = useMemo(
-    () => buildCollectionCandidateRows(builtinCollections, workingConfig.customCollections ?? [], noteCollections),
-    [builtinCollections, noteCollections, workingConfig.customCollections],
-  );
-  const collectionExistingCandidates = useMemo(
-    () => [
-      ...builtinCollections,
-      ...noteCollections,
-      ...(workingConfig.customCollections ?? []),
-    ],
-    [builtinCollections, noteCollections, workingConfig.customCollections],
-  );
-  const canManageAliases = Boolean(selectedSuggestion && selectedSuggestion.path.length >= 3);
-  const isSortDisabled = Boolean(searchQuery.trim()) || filterMode !== "all";
-  const searchResults = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-    return suggestions
-      .filter((suggestion) => [suggestion.id, suggestion.name, suggestion.pathText, suggestion.searchText, ...suggestion.aliases].join("\n").toLowerCase().includes(query))
-      .slice(0, 100);
-  }, [searchQuery, suggestions]);
+  const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
+    config: workingConfig,
+    showHidden,
+    filterMode,
+    activeRoot,
+    selectedSuggestionId,
+    selectedMergeTargetId,
+    mergeSearchQuery,
+    searchQuery,
+    builtinCollections,
+    noteCollections,
+  }), [
+    activeRoot,
+    builtinCollections,
+    filterMode,
+    mergeSearchQuery,
+    noteCollections,
+    searchQuery,
+    selectedMergeTargetId,
+    selectedSuggestionId,
+    showHidden,
+    workingConfig,
+  ]);
+  const {
+    rootGroups,
+    activeRootGroup,
+    activeRootSortedGroups,
+    activeRootSortableItems,
+    suggestions,
+    selectedSuggestion,
+    selectedUserAliases,
+    selectedBuiltinAliases,
+    mergePreview,
+    canEditMergeRule,
+    mergeTargetCandidates,
+    selectedMergeTarget,
+    collectionRows,
+    collectionExistingCandidates,
+    canManageAliases,
+    isSortDisabled,
+    searchResults,
+  } = tagManagerView;
 
   useEffect(() => {
     debugEvent("manager.mount", {
