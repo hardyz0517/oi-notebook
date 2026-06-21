@@ -648,6 +648,12 @@ export function getChangedCollectionEditInputState(
   };
 }
 
+export function getAppliedCollectionEditState(
+  state: CollectionEditState,
+): CollectionEditState {
+  return getCancelledCollectionEditState(state);
+}
+
 export function getDeletedCollectionEditState(
   state: CollectionEditState,
   deletedName: string,
