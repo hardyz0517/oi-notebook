@@ -103,6 +103,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   const {
     rootGroups,
     activeRootGroup,
+    nextActiveRoot,
     activeRootSortedGroups,
     activeRootSortableItems,
     suggestions,
@@ -129,12 +130,8 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [initialConfig]);
 
   useEffect(() => {
-    if (rootGroups.length === 0) {
-      setActiveRoot(null);
-      return;
-    }
-    setActiveRoot((current) => (current && rootGroups.some((group) => group.root === current) ? current : rootGroups[0].root));
-  }, [rootGroups]);
+    setActiveRoot(nextActiveRoot);
+  }, [nextActiveRoot]);
 
   useEffect(() => {
     setAliasInput("");

@@ -47,6 +47,24 @@ describe("tagManagerViewModel", () => {
     expect(view.mergePreview.targetSuggestion?.id).toBe("algorithm.string.z-function");
   });
 
+  it("derives the next active root when the current root is unavailable", () => {
+    const view = deriveTagManagerWorkspaceViewModel({
+      config,
+      showHidden: false,
+      filterMode: "all",
+      activeRoot: "missing-root",
+      selectedSuggestionId: null,
+      selectedMergeTargetId: null,
+      mergeSearchQuery: "",
+      searchQuery: "",
+      builtinCollections: [],
+      noteCollections: [],
+    });
+
+    expect(view.activeRootGroup?.root).toBe(view.rootGroups[0].root);
+    expect(view.nextActiveRoot).toBe(view.rootGroups[0].root);
+  });
+
   it("assigns user aliases pointing at a merged source to the merge target", () => {
     const view = deriveTagManagerWorkspaceViewModel({
       config,

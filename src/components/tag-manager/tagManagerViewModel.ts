@@ -35,6 +35,7 @@ export interface TagManagerWorkspaceViewModel {
   suggestions: TagSuggestion[];
   rootGroups: RootGroup[];
   activeRootGroup: RootGroup | null;
+  nextActiveRoot: string | null;
   activeRootSortedGroups: GroupNode[];
   activeRootSortableItems: string[];
   selectedSuggestion: TagSuggestion | null;
@@ -61,6 +62,7 @@ export function deriveTagManagerWorkspaceViewModel(
   const suggestions = filterTagSuggestions(baseSuggestions, input.filterMode);
   const rootGroups = filterTagRootGroups(baseRootGroups, input.filterMode);
   const activeRootGroup = rootGroups.find((group) => group.root === input.activeRoot) ?? rootGroups[0] ?? null;
+  const nextActiveRoot = activeRootGroup?.root ?? null;
   const activeRootSortedGroups = activeRootGroup
     ? sortGroupsByOrderOverrides(activeRootGroup.groups, workingConfig.orderOverrides)
     : [];
@@ -113,6 +115,7 @@ export function deriveTagManagerWorkspaceViewModel(
     suggestions,
     rootGroups,
     activeRootGroup,
+    nextActiveRoot,
     activeRootSortedGroups,
     activeRootSortableItems,
     selectedSuggestion,

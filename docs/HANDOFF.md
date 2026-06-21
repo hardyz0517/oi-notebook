@@ -90,9 +90,9 @@ domain modules with tests.
   state, stats, selection summaries, and panel state.
 - Tag Manager workspace:
   `src/components/tag-manager/tagManagerViewModel.ts` owns filtered
-  suggestions/root groups, active root state, selected suggestion display,
-  alias display, merge preview/candidates, collection rows, sort disabled
-  state, and search results.
+  suggestions/root groups, active root fallback state, selected suggestion
+  display, alias display, merge preview/candidates, collection rows, sort
+  disabled state, and search results.
 - API boundary:
   `src/lib/api.ts` is the only non-AI frontend Rust command boundary.
   `src/lib/apiContract.ts` records the command wrapper contract, and
@@ -191,7 +191,9 @@ Recent focused coverage includes:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
 - Tag Manager workspace view model:
-  `src/components/tag-manager/tagManagerViewModel.test.ts`.
+  `src/components/tag-manager/tagManagerViewModel.test.ts`, including active
+  root fallback, alias display, merge target, collection row, and search/sort
+  view state.
 - API boundary and command contract:
   `src/lib/apiBoundary.test.ts`.
 - Settings render guards:
