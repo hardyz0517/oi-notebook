@@ -104,6 +104,11 @@ domain modules with tests.
   grouping, search, pagination, date formatting, and Blog config defaults.
   The local-blog App shell should load data and render views instead of owning
   these content rules directly.
+- Local blog view model:
+  `local-blog/src/blogViewModel.ts` owns local-blog tag chip labels, related
+  tag chip expansion, tag chip search matching, and compact pagination items.
+  The local-blog App shell should render these ready-to-render items instead
+  of owning tag-map and pagination rules directly.
 
 ## Long-Task Model
 
@@ -154,6 +159,8 @@ Recent focused coverage includes:
   `local-blog/src/blogRoutes.test.ts`.
 - Local blog content helpers:
   `local-blog/src/blogContent.test.ts`.
+- Local blog view-model helpers:
+  `local-blog/src/blogViewModel.test.ts`.
 - Luogu display/task/workflow helpers:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
@@ -172,8 +179,8 @@ be selective:
 - Continue shrinking `App.tsx` only where a rule has a clear owner and focused
   test value.
 - Continue shrinking `local-blog/src/App.tsx` by moving remaining stable
-  diagnostics and view-model rules into focused local-blog domain modules with
-  tests.
+  diagnostics and page-section view rules into focused local-blog modules with
+  tests when they have stable ownership.
 - Consider a future Luogu effect controller only if it can own an end-to-end
   side-effect boundary without hiding important API/toast/confirm ordering.
 - Extend API contract metadata only when it improves review value, such as

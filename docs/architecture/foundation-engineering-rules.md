@@ -140,9 +140,13 @@ Use domain modules as the home for stable rules:
   grouping, search, pagination, date formatting, and Blog config defaults.
   The local-blog App shell should load data and render views instead of owning
   these content rules directly.
+- `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
+  chip expansion, tag chip search matching, and compact pagination items. The
+  local-blog App shell should render tag-map and pagination view data instead
+  of owning these reusable rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
-Luogu import edge cases, local-blog diagnostics/view-model rules, and other
+Luogu import edge cases, local-blog diagnostics/page-section rules, and other
 non-AI areas only when the extracted rule has a stable owner and focused test
 value.
 
