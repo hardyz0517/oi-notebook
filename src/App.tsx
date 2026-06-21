@@ -68,7 +68,6 @@ import {
   type LuoguScanMode,
 } from "@/components/settings/pages/luoguImportDomain";
 import {
-  createEmptyLuoguPreparationWorkspace,
   createIdleLuoguPrepareSourceState,
   createIdleLuoguScanSourceState,
   createIdleLuoguWriteSourceState,
@@ -98,8 +97,6 @@ import {
   updateLuoguPrepareSourceProgress,
   updateLuoguScanSourceProgress,
   updateLuoguWriteSourceProgress,
-  type LuoguImportStep,
-  type LuoguPreviewDetailTab,
 } from "@/components/luogu/luoguImportDisplay";
 import {
   formatLuoguSubmissionStatus,
@@ -109,9 +106,9 @@ import {
   getLuoguPreviewStatusLabel,
   getLuoguStatusBadgeClass,
   parseLuoguSubmitTimeMs,
-  type LuoguPrepareItemStatus,
 } from "@/components/luogu/luoguDisplay";
 import { useLuoguImportController } from "@/components/luogu/useLuoguImportController";
+import { useLuoguImportWorkflow } from "@/components/luogu/useLuoguImportWorkflow";
 import {
   applyLuoguPreparedRules,
   buildLuoguImportRuleRowModels,
@@ -161,7 +158,7 @@ import {
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
 import { getCommittedMarkdownSyncDelayMs, getPreviewMarkdownSyncDelayMs } from "@/lib/previewSyncTiming";
-import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
@@ -1495,50 +1492,48 @@ export default function App() {
   const [expandedWebSearchSelectId, setExpandedWebSearchSelectId] = useState<string | null>(null);
   const luoguScanProgress = luoguScanSourceState.progress as LuoguScanProgress | null;
   const luoguScanSummary = luoguScanSourceState.summary as LuoguScanSummary | null;
-  const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [skippedLuoguSubmissionIds, setSkippedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [luoguPrepareSourceState, setLuoguPrepareSourceState] = useState(createIdleLuoguPrepareSourceState);
-  const isPreparingSelectedLuogu = luoguPrepareSourceState.isPreparing;
-  const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
-  const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
-  const [luoguPrepareStatusesById, setLuoguPrepareStatusesById] = useState<Record<string, LuoguPrepareItemStatus>>({});
-  const [currentlyPreparingLuoguId, setCurrentlyPreparingLuoguId] = useState<string | null>(null);
+  const luoguImportWorkflow = useLuoguImportWorkflow();
+  const selectedLuoguSubmissionIds = luoguImportWorkflow.selectedSubmissionIds;
+  const setSelectedLuoguSubmissionIds = luoguImportWorkflow.setSelectedSubmissionIds;
+  const skippedLuoguSubmissionIds = luoguImportWorkflow.skippedSubmissionIds;
+  const luoguPrepareSourceState = luoguImportWorkflow.prepareSourceState;
+  const setLuoguPrepareSourceState = luoguImportWorkflow.setPrepareSourceState;
+  const isPreparingSelectedLuogu = luoguImportWorkflow.isPreparingSelected;
+  const luoguPreparedNotesById = luoguImportWorkflow.preparedNotesById;
+  const setLuoguPreparedNotesById = luoguImportWorkflow.setPreparedNotesById;
+  const luoguPrepareErrorsById = luoguImportWorkflow.prepareErrorsById;
+  const setLuoguPrepareErrorsById = luoguImportWorkflow.setPrepareErrorsById;
+  const luoguPrepareStatusesById = luoguImportWorkflow.prepareStatusesById;
+  const setLuoguPrepareStatusesById = luoguImportWorkflow.setPrepareStatusesById;
+  const currentlyPreparingLuoguId = luoguImportWorkflow.currentlyPreparingId;
+  const setCurrentlyPreparingLuoguId = luoguImportWorkflow.setCurrentlyPreparingId;
   const luoguPrepareProgress = luoguPrepareSourceState.progress as LuoguPrepareProgress | null;
-  const isStoppingLuoguPrepare = luoguPrepareSourceState.isStopping;
-  const [luoguWriteSourceState, setLuoguWriteSourceState] = useState(createIdleLuoguWriteSourceState);
-  const isWritingPreparedLuogu = luoguWriteSourceState.isWriting;
-  const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
-  const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
+  const isStoppingLuoguPrepare = luoguImportWorkflow.isStoppingPrepare;
+  const luoguWriteSourceState = luoguImportWorkflow.writeSourceState;
+  const setLuoguWriteSourceState = luoguImportWorkflow.setWriteSourceState;
+  const isWritingPreparedLuogu = luoguImportWorkflow.isWritingPrepared;
+  const luoguWriteResultsById = luoguImportWorkflow.writeResultsById;
+  const setLuoguWriteResultsById = luoguImportWorkflow.setWriteResultsById;
+  const currentlyWritingLuoguId = luoguImportWorkflow.currentlyWritingId;
+  const setCurrentlyWritingLuoguId = luoguImportWorkflow.setCurrentlyWritingId;
   const luoguWriteProgress = luoguWriteSourceState.progress as LuoguWriteProgress | null;
-  const [activeLuoguPreparedPreviewId, setActiveLuoguPreparedPreviewId] = useState<string | null>(null);
-  const [activeLuoguPreviewDetailTab, setActiveLuoguPreviewDetailTab] = useState<LuoguPreviewDetailTab>("rendered");
-  const [editedLuoguPreparedMarkdownIds, setEditedLuoguPreparedMarkdownIds] = useState<Set<string>>(() => new Set());
-  const [reviewSelectedLuoguSubmissionIds, setReviewSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
+  const activeLuoguPreparedPreviewId = luoguImportWorkflow.activePreparedPreviewId;
+  const setActiveLuoguPreparedPreviewId = luoguImportWorkflow.setActivePreparedPreviewId;
+  const activeLuoguPreviewDetailTab = luoguImportWorkflow.activePreviewDetailTab;
+  const setActiveLuoguPreviewDetailTab = luoguImportWorkflow.setActivePreviewDetailTab;
+  const editedLuoguPreparedMarkdownIds = luoguImportWorkflow.editedPreparedMarkdownIds;
+  const reviewSelectedLuoguSubmissionIds = luoguImportWorkflow.reviewSelectedSubmissionIds;
+  const setReviewSelectedLuoguSubmissionIds = luoguImportWorkflow.setReviewSelectedSubmissionIds;
   const [luoguImportCenterTab, setLuoguImportCenterTab] = useState<LuoguImportCenterTab>("scan");
-  const [luoguImportStep, setLuoguImportStep] = useState<LuoguImportStep>("scan");
+  const luoguImportStep = luoguImportWorkflow.importStep;
+  const setLuoguImportStep = luoguImportWorkflow.setImportStep;
   const isSyncingLuogu = false;
   const [luoguSyncResult] = useState<SyncLuoguInsightsResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
-  const resetLuoguPreparationWorkspace = useCallback(() => {
-    const workspace = createEmptyLuoguPreparationWorkspace<PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult>();
-    setSkippedLuoguSubmissionIds(workspace.skippedSubmissionIds);
-    setLuoguPreparedNotesById(workspace.preparedNotesById);
-    setLuoguPrepareErrorsById(workspace.prepareErrorsById);
-    setLuoguPrepareStatusesById(workspace.prepareStatusesById);
-    setEditedLuoguPreparedMarkdownIds(workspace.editedPreparedMarkdownIds);
-    setReviewSelectedLuoguSubmissionIds(workspace.reviewSelectedSubmissionIds);
-    setCurrentlyPreparingLuoguId(workspace.currentlyPreparingId);
-    setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
-    setLuoguWriteResultsById(workspace.writeResultsById);
-    setCurrentlyWritingLuoguId(workspace.currentlyWritingId);
-    setLuoguWriteSourceState(createIdleLuoguWriteSourceState());
-    setActiveLuoguPreparedPreviewId(workspace.activePreparedPreviewId);
-    setActiveLuoguPreviewDetailTab(workspace.activePreviewDetailTab);
-    setLuoguImportStep(workspace.importStep);
-  }, []);
+  const resetLuoguPreparationWorkspace = luoguImportWorkflow.resetPreparationWorkspace;
   const applyLuoguConfigFormState = useCallback((config: LuoguConfig) => {
     const formState = buildLuoguConfigFormState(config);
     setLuoguConfigUid(formState.uid);
@@ -3979,15 +3974,7 @@ export default function App() {
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {
     const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
     if (!candidateState?.canSelect || luoguImportCenterView.isSubmissionSelectionDisabled) return;
-    setSelectedLuoguSubmissionIds((current) => {
-      const next = new Set(current);
-      if (next.has(submission.submissionId)) {
-        next.delete(submission.submissionId);
-      } else {
-        next.add(submission.submissionId);
-      }
-      return next;
-    });
+    luoguImportWorkflow.toggleSubmissionSelection(submission.submissionId);
   };
 
   const handleToggleAllLuoguSelectableSubmissions = () => {
@@ -4451,21 +4438,7 @@ export default function App() {
     const submissionId = activeLuoguPreparedPreview?.submissionId;
     if (!submissionId) return;
 
-    setLuoguPreparedNotesById((current) => {
-      const prepared = current[submissionId];
-      if (!prepared || prepared.markdown === markdown) return current;
-      return {
-        ...current,
-        [submissionId]: {
-          ...prepared,
-          markdown,
-        },
-      };
-    });
-    setEditedLuoguPreparedMarkdownIds((current) => {
-      if (current.has(submissionId)) return current;
-      return new Set([...current, submissionId]);
-    });
+    luoguImportWorkflow.updatePreparedMarkdown(submissionId, markdown);
   };
 
   const toggleLuoguReviewSelection = (submissionId: string) => {
@@ -4473,15 +4446,7 @@ export default function App() {
     const prepared = luoguPreparedNotesById[submissionId];
     if (!prepared || prepared.skipped || prepared.aiStatus === "failed" || !prepared.markdown.trim() || luoguWriteResultsById[submissionId]) return;
 
-    setReviewSelectedLuoguSubmissionIds((current) => {
-      const next = new Set(current);
-      if (next.has(submissionId)) {
-        next.delete(submissionId);
-      } else {
-        next.add(submissionId);
-      }
-      return next;
-    });
+    luoguImportWorkflow.toggleReviewSelection(submissionId);
   };
 
   const handleImportLuogu = async () => {
