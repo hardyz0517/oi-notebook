@@ -407,6 +407,12 @@ export type NoteDetailRouteViewInput = {
   sourceHref: string;
 };
 
+export type SiteNavView = {
+  activeName: "home" | "articles" | "tags" | "collections" | "search";
+};
+
+export type SiteNavViewInput = Route;
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -816,6 +822,19 @@ export function buildNoteDetailRouteView(input: NoteDetailRouteViewInput): NoteD
     nextNote: header.nextNote,
     hasNavigation: header.hasNavigation,
   };
+}
+
+export function buildSiteNavView(route: SiteNavViewInput): SiteNavView {
+  const activeName =
+    route.name === "note" || route.name === "articles"
+      ? "articles"
+      : route.name === "tag"
+        ? "tags"
+        : route.name === "collection"
+          ? "collections"
+          : route.name;
+
+  return { activeName };
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {

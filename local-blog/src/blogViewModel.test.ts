@@ -12,6 +12,7 @@ import {
   buildNoteDetailRouteView,
   buildNoteDetailHeaderView,
   buildNoteNavigationItemView,
+  buildSiteNavView,
   buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
@@ -844,6 +845,16 @@ describe("blogViewModel", () => {
       nextNote: notes[2],
       hasNavigation: true,
     });
+  });
+
+  it("builds site nav active state", () => {
+    expect(buildSiteNavView({ name: "home", page: 1 })).toEqual({ activeName: "home" });
+    expect(buildSiteNavView({ name: "note", encodedPath: "posts/current.md", relativePath: "posts/current.md" })).toEqual({
+      activeName: "articles",
+    });
+    expect(buildSiteNavView({ name: "tag", tag: "算法", page: 1 })).toEqual({ activeName: "tags" });
+    expect(buildSiteNavView({ name: "collection", collection: "技术", page: 1 })).toEqual({ activeName: "collections" });
+    expect(buildSiteNavView({ name: "search", query: "图论", page: 1 })).toEqual({ activeName: "search" });
   });
 
   it("builds archive year sections and rows", () => {

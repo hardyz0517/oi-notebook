@@ -45,6 +45,7 @@ import {
   buildPaginationView,
   buildPostCardListView,
   buildSearchRouteView,
+  buildSiteNavView,
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
@@ -421,14 +422,7 @@ function IndexView({
 }
 
 function SiteNav({ route }: { route: Route }) {
-  const activeName =
-    route.name === "note" || route.name === "articles"
-      ? "articles"
-      : route.name === "tag"
-        ? "tags"
-        : route.name === "collection"
-          ? "collections"
-          : route.name;
+  const { activeName } = buildSiteNavView(route);
 
   return (
     <div className="primary-nav-row">
