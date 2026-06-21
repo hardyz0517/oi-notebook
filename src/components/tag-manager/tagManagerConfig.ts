@@ -648,6 +648,16 @@ export function getChangedCollectionEditInputState(
   };
 }
 
+export function getDeletedCollectionEditState(
+  state: CollectionEditState,
+  deletedName: string,
+): CollectionEditState {
+  if (state.editingName !== deletedName) {
+    return state;
+  }
+  return getCancelledCollectionEditState(state);
+}
+
 export function getAppliedCollectionViewState(
   state: CollectionPanelState,
   activeView: TagManagerWorkspaceView,
