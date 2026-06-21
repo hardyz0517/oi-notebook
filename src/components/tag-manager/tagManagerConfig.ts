@@ -654,6 +654,13 @@ export function getAppliedCollectionEditState(
   return getCancelledCollectionEditState(state);
 }
 
+export function getAppliedCollectionDeleteState(
+  state: CollectionEditState,
+  deletedName: string,
+): CollectionEditState {
+  return getDeletedCollectionEditState(state, deletedName);
+}
+
 export function getDeletedCollectionEditState(
   state: CollectionEditState,
   deletedName: string,
