@@ -24,12 +24,9 @@ import {
   getCategoryCounts as getBlogCategoryCounts,
   getCategoryLabel,
   getCollectionDescription as getBlogCollectionDescription,
-  getDisplayTags as getBlogDisplayTags,
   getHomeExcerpt as getBlogHomeExcerpt,
-  getLeafTagName as getBlogLeafTagName,
   getNoteDateValue as getBlogNoteDateValue,
   getNoteYear,
-  getNoteExcerpt as getBlogNoteExcerpt,
   getShortNoteExcerpt as getBlogShortNoteExcerpt,
   getTagCounts as getBlogTagCounts,
   groupNotesByYear as groupBlogNotesByYear,
@@ -48,7 +45,9 @@ import {
   type RawNoteSummary,
 } from "./blogContent";
 import {
+  buildArticleResultListView,
   buildCollectionEntryListView,
+  buildPostCardListView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -955,22 +954,22 @@ function RecentUpdates({ note, sourceHref }: { note: NoteSummary | null; sourceH
 }
 
 function PostGrid({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: string }) {
+  const cards = buildPostCardListView({ notes, sourceHref });
+
   return (
     <div className="post-grid">
-      {notes.map((note) => (
-        <article className="post-card" key={note.relativePath}>
-          <a className="post-card-link" href={getNoteHref(note.relativePath, sourceHref)}>
+      {cards.map((card) => (
+        <article className="post-card" key={card.key}>
+          <a className="post-card-link" href={card.href}>
             <div className="post-meta">
-              <span>{note.collection}</span>
-              {formatBlogOptionalDate(note.date, note.updated, note.created) ? (
-                <time dateTime={note.date ?? note.updated ?? note.created ?? undefined}>
-                  {formatBlogOptionalDate(note.date, note.updated, note.created)}
-                </time>
+              <span>{card.collection}</span>
+              {card.dateLabel ? (
+                <time dateTime={card.dateTime ?? undefined}>{card.dateLabel}</time>
               ) : null}
-              {note.draft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
+              {card.isDraft ? <span className="draft-badge">{"\u8349\u7a3f"}</span> : null}
             </div>
-            <h2>{note.title}</h2>
-            <p>{getBlogHomeExcerpt(note, 78)}</p>
+            <h2>{card.title}</h2>
+            <p>{card.excerpt}</p>
             <span className="read-more">{"\u9605\u8bfb\u66f4\u591a"}</span>
           </a>
         </article>
@@ -980,25 +979,23 @@ function PostGrid({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: st
 }
 
 function ArticleResultList({ notes, sourceHref }: { notes: NoteSummary[]; sourceHref?: string }) {
+  const results = buildArticleResultListView({ notes, sourceHref });
+
   return (
     <div className="result-list">
-      {notes.map((note) => {
-        const displayDate = formatBlogOptionalDate(note.date, note.updated, note.created);
-
-        return (
-          <article className="result-item" key={note.relativePath}>
-            <a href={getNoteHref(note.relativePath, sourceHref)}>
-              <div className="post-meta">
-                <span>{note.collection}</span>
-                {displayDate ? <time dateTime={getBlogNoteDateValue(note) ?? undefined}>{displayDate}</time> : null}
-              </div>
-              <h2>{note.title}</h2>
-              <p>{getBlogNoteExcerpt(note)}</p>
-              <span className="result-read-more">{"\u9605\u8bfb\u66f4\u591a"}</span>
-            </a>
-          </article>
-        );
-      })}
+      {results.map((result) => (
+        <article className="result-item" key={result.key}>
+          <a href={result.href}>
+            <div className="post-meta">
+              <span>{result.collection}</span>
+              {result.dateLabel ? <time dateTime={result.dateTime ?? undefined}>{result.dateLabel}</time> : null}
+            </div>
+            <h2>{result.title}</h2>
+            <p>{result.excerpt}</p>
+            <span className="result-read-more">{"\u9605\u8bfb\u66f4\u591a"}</span>
+          </a>
+        </article>
+      ))}
     </div>
   );
 }

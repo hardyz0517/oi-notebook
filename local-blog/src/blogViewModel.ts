@@ -4,6 +4,7 @@ import {
   formatOptionalDate,
   getCollectionDescription,
   getDisplayTags,
+  getHomeExcerpt,
   getLeafTagName,
   getNoteDateValue,
   getNoteExcerpt,
@@ -117,6 +118,32 @@ export type CollectionEntryListViewInput = {
   collection: string;
   sourceHref?: string;
   startIndex: number;
+};
+
+export type PostCardListItem = {
+  key: string;
+  href: string;
+  collection: string;
+  title: string;
+  excerpt: string;
+  dateLabel: string | null;
+  dateTime: string | null;
+  isDraft: boolean;
+};
+
+export type ArticleResultListItem = {
+  key: string;
+  href: string;
+  collection: string;
+  title: string;
+  excerpt: string;
+  dateLabel: string | null;
+  dateTime: string | null;
+};
+
+export type NoteListViewInput = {
+  notes: NoteSummary[];
+  sourceHref?: string;
 };
 
 const tagSuggestionSearchByPath = new Map(
@@ -282,6 +309,31 @@ export function buildCollectionEntryListView(input: CollectionEntryListViewInput
       ],
     };
   });
+}
+
+export function buildPostCardListView(input: NoteListViewInput): PostCardListItem[] {
+  return input.notes.map((note) => ({
+    key: note.relativePath,
+    href: getNoteHref(note.relativePath, input.sourceHref),
+    collection: note.collection,
+    title: note.title,
+    excerpt: getHomeExcerpt(note, 78),
+    dateLabel: formatOptionalDate(note.date, note.updated, note.created),
+    dateTime: getNoteDateValue(note),
+    isDraft: note.draft,
+  }));
+}
+
+export function buildArticleResultListView(input: NoteListViewInput): ArticleResultListItem[] {
+  return input.notes.map((note) => ({
+    key: note.relativePath,
+    href: getNoteHref(note.relativePath, input.sourceHref),
+    collection: note.collection,
+    title: note.title,
+    excerpt: getNoteExcerpt(note),
+    dateLabel: formatOptionalDate(note.date, note.updated, note.created),
+    dateTime: getNoteDateValue(note),
+  }));
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {

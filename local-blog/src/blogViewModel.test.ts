@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildArticleResultListView,
   buildCollectionEntryListView,
+  buildPostCardListView,
   buildTagDiagnostics,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -258,6 +260,86 @@ describe("blogViewModel", () => {
         dateLabel: "日期未知",
         dateTime: null,
         tags: ["题解"],
+      },
+    ]);
+  });
+
+  it("builds post card and result rows", () => {
+    const longSummary = "一二三四五六七八九十".repeat(10);
+    const notes: NoteSummary[] = [
+      {
+        title: "首页卡片",
+        relativePath: "posts/home-card.md",
+        summary: longSummary,
+        excerpt: null,
+        tags: [],
+        category: "inbox",
+        collection: "杂谈",
+        collections: ["杂谈"],
+        created: "2026-06-19T00:00:00Z",
+        updated: null,
+        date: null,
+        sortKey: null,
+        draft: true,
+      },
+      {
+        title: "无日期结果",
+        relativePath: "posts/no-date.md",
+        summary: null,
+        excerpt: "来自正文的摘录。",
+        tags: [],
+        category: "inbox",
+        collection: "技巧",
+        collections: ["技巧"],
+        created: null,
+        updated: null,
+        date: null,
+        sortKey: null,
+        draft: false,
+      },
+    ];
+
+    expect(buildPostCardListView({ notes, sourceHref: "#/?page=2" })).toEqual([
+      {
+        key: "posts/home-card.md",
+        href: "#/note/posts%2Fhome-card.md?from=%2F%3Fpage%3D2",
+        collection: "杂谈",
+        title: "首页卡片",
+        excerpt: longSummary.slice(0, 78) + " [...]",
+        dateLabel: "2026 年 6 月 19 日",
+        dateTime: "2026-06-19T00:00:00Z",
+        isDraft: true,
+      },
+      {
+        key: "posts/no-date.md",
+        href: "#/note/posts%2Fno-date.md?from=%2F%3Fpage%3D2",
+        collection: "技巧",
+        title: "无日期结果",
+        excerpt: "来自正文的摘录。",
+        dateLabel: null,
+        dateTime: null,
+        isDraft: false,
+      },
+    ]);
+
+    expect(buildArticleResultListView({ notes, sourceHref: "#/search?q=%E6%91%98%E8%A6%81" })).toEqual([
+      {
+        key: "posts/home-card.md",
+        href: "#/note/posts%2Fhome-card.md?from=%2Fsearch%3Fq%3D%25E6%2591%2598%25E8%25A6%2581",
+        collection: "杂谈",
+        title: "首页卡片",
+        excerpt: longSummary.length > 112 ? longSummary.slice(0, 112) + " [...]" : longSummary,
+        dateLabel: "2026 年 6 月 19 日",
+        dateTime: "2026-06-19T00:00:00Z",
+      },
+      {
+        key: "posts/no-date.md",
+        href: "#/note/posts%2Fno-date.md?from=%2Fsearch%3Fq%3D%25E6%2591%2598%25E8%25A6%2581",
+        collection: "技巧",
+        title: "无日期结果",
+        excerpt: "来自正文的摘录。",
+        dateLabel: null,
+        dateTime: null,
       },
     ]);
   });
