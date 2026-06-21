@@ -1,5 +1,5 @@
 import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
-import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode } from "./types";
+import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode, TagManagerWorkspaceView } from "./types";
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
@@ -173,6 +173,13 @@ export type CollectionEditState = {
   editInput: string;
   editError: string | null;
   createError: string | null;
+};
+
+export type CollectionPanelState = {
+  activeView: TagManagerWorkspaceView;
+  createInput: string;
+  createError: string | null;
+  editError: string | null;
 };
 
 export function getOpenedMergeEditorState(): MergeEditorState {
@@ -627,6 +634,28 @@ export function getCancelledCollectionEditState(
     editingName: null,
     editInput: "",
     editError: null,
+  };
+}
+
+export function getAppliedCollectionViewState(
+  state: CollectionPanelState,
+  activeView: TagManagerWorkspaceView,
+): CollectionPanelState {
+  return {
+    ...state,
+    activeView,
+    createError: null,
+    editError: null,
+  };
+}
+
+export function getAppliedCollectionCreateState(
+  state: CollectionPanelState,
+): CollectionPanelState {
+  return {
+    ...state,
+    createInput: "",
+    createError: null,
   };
 }
 

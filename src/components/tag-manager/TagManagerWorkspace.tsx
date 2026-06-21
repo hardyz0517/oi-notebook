@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionCreateState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionEditSavePlan, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -121,6 +121,12 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setCollectionEditInput(state.editInput);
     setCollectionEditError(state.editError);
     setCollectionCreateError(state.createError);
+  }, []);
+  const applyCollectionPanelState = useCallback((state: CollectionPanelState) => {
+    setActiveView(state.activeView);
+    setCollectionCreateInput(state.createInput);
+    setCollectionCreateError(state.createError);
+    setCollectionEditError(state.editError);
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -790,10 +796,13 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, requestConfirm, saveWorkingConfig, selectedMergeTargetId, selectedSuggestion, workingConfig]);
 
   const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
-    setActiveView(nextView);
-    setCollectionCreateError(null);
-    setCollectionEditError(null);
-  }, []);
+    applyCollectionPanelState(getAppliedCollectionViewState({
+      activeView,
+      createInput: collectionCreateInput,
+      createError: collectionCreateError,
+      editError: collectionEditError,
+    }, nextView));
+  }, [activeView, applyCollectionPanelState, collectionCreateError, collectionCreateInput, collectionEditError]);
 
   const createCollection = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -805,12 +814,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
     const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
     if (saved) {
-      setCollectionCreateInput("");
-      setCollectionCreateError(null);
+      applyCollectionPanelState(getAppliedCollectionCreateState({
+        activeView,
+        createInput: collectionCreateInput,
+        createError: collectionCreateError,
+        editError: collectionEditError,
+      }));
     } else {
       setCollectionCreateError("保存失败，已恢复原文集候选");
     }
-  }, [collectionCreateInput, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
+  }, [activeView, applyCollectionPanelState, collectionCreateError, collectionCreateInput, collectionEditError, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
 
   const startCollectionEdit = useCallback((name: string) => {
     applyCollectionEditState(getOpenedCollectionEditState({
