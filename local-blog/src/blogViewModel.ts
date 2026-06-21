@@ -31,6 +31,32 @@ export type TagChipItem = {
 
 export type PaginationItem = number | "ellipsis";
 
+export type PaginationPageLink = {
+  kind: "page";
+  page: number;
+  href: string;
+  isCurrent: boolean;
+};
+
+export type PaginationEllipsis = {
+  kind: "ellipsis";
+  key: string;
+};
+
+export type PaginationViewItem = PaginationPageLink | PaginationEllipsis;
+
+export type PaginationView = {
+  previousHref: string | null;
+  nextHref: string | null;
+  items: PaginationViewItem[];
+};
+
+export type PaginationViewInput = {
+  currentPage: number;
+  totalPages: number;
+  getPageHref: (page: number) => string;
+};
+
 export type TagDiagnosticsEnvironment = {
   isDev?: boolean;
   routeDebugTag?: string | null;
@@ -319,6 +345,27 @@ export function getPaginationItems(currentPage: number, totalPages: number): Pag
   }
 
   return items;
+}
+
+export function buildPaginationView(input: PaginationViewInput): PaginationView | null {
+  if (input.totalPages <= 1) {
+    return null;
+  }
+
+  return {
+    previousHref: input.currentPage > 1 ? input.getPageHref(input.currentPage - 1) : null,
+    nextHref: input.currentPage < input.totalPages ? input.getPageHref(input.currentPage + 1) : null,
+    items: getPaginationItems(input.currentPage, input.totalPages).map((item, index) => (
+      item === "ellipsis"
+        ? { kind: "ellipsis", key: "ellipsis-" + index }
+        : {
+            kind: "page",
+            page: item,
+            href: input.getPageHref(item),
+            isCurrent: item === input.currentPage,
+          }
+    )),
+  };
 }
 
 export function buildCollectionOverviewView(input: CollectionOverviewViewInput): CollectionOverviewView {

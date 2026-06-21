@@ -152,11 +152,11 @@ Use domain modules as the home for stable rules:
   chip expansion, tag chip search matching, tag-map group/branch view data,
   collection overview state/card rows, collection detail entry rows, archive
   list sections/rows, recent update cards, note navigation items, compact post
-  card/result rows, compact pagination items, and tag diagnostics
+  card/result rows, compact pagination items/links, and tag diagnostics
   payloads/debug-enable rules. The local-blog App shell should render tag-map,
   collection overview/detail rows, archive list rows, recent update cards,
-  note navigation items, post card/result rows, and pagination view data, read
-  browser debug flags, and perform console side effects instead of owning
+  note navigation items, post card/result rows, and pagination item/link view
+  data, read browser debug flags, and perform console side effects instead of owning
   these reusable rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,

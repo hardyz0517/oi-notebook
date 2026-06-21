@@ -45,6 +45,7 @@ import {
   buildArchiveListView,
   buildCollectionEntryListView,
   buildNoteNavigationItemView,
+  buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
@@ -52,7 +53,6 @@ import {
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
   collectTagChips,
-  getPaginationItems,
   isTagDiagnosticsEnabled,
   type TagChipItem,
 } from "./blogViewModel";
@@ -1052,37 +1052,37 @@ function Pagination({
   totalPages: number;
   getPageHref: (page: number) => string;
 }) {
-  if (totalPages <= 1) {
+  const view = buildPaginationView({ currentPage, totalPages, getPageHref });
+
+  if (!view) {
     return null;
   }
 
-  const pages = getPaginationItems(currentPage, totalPages);
-
   return (
     <nav className="pagination" aria-label={"\u5206\u9875"}>
-      {currentPage > 1 ? (
-        <a className="pagination-prev" href={getPageHref(currentPage - 1)}>
+      {view.previousHref ? (
+        <a className="pagination-prev" href={view.previousHref}>
           {"\u2190 \u4e0a\u4e00\u9875"}
         </a>
       ) : null}
-      {pages.map((item, index) =>
-        item === "ellipsis" ? (
-          <span className="pagination-ellipsis" key={"ellipsis-" + index}>
+      {view.items.map((item) =>
+        item.kind === "ellipsis" ? (
+          <span className="pagination-ellipsis" key={item.key}>
             ...
           </span>
         ) : (
           <a
-            className={item === currentPage ? "active" : undefined}
-            aria-current={item === currentPage ? "page" : undefined}
-            href={getPageHref(item)}
-            key={item}
+            className={item.isCurrent ? "active" : undefined}
+            aria-current={item.isCurrent ? "page" : undefined}
+            href={item.href}
+            key={item.page}
           >
-            {item}
+            {item.page}
           </a>
         ),
       )}
-      {currentPage < totalPages ? (
-        <a className="pagination-next" href={getPageHref(currentPage + 1)}>
+      {view.nextHref ? (
+        <a className="pagination-next" href={view.nextHref}>
           {"\u4e0b\u4e00\u9875 \u2192"}
         </a>
       ) : null}

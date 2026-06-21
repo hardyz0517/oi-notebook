@@ -5,6 +5,7 @@ import {
   buildArchiveListView,
   buildCollectionEntryListView,
   buildNoteNavigationItemView,
+  buildPaginationView,
   buildPostCardListView,
   buildRecentUpdateView,
   buildTagDiagnostics,
@@ -163,6 +164,32 @@ describe("blogViewModel", () => {
     expect(getPaginationItems(6, 12)).toEqual([1, "ellipsis", 5, 6, 7, "ellipsis", 12]);
     expect(getPaginationItems(1, 12)).toEqual([1, 2, "ellipsis", 12]);
     expect(getPaginationItems(12, 12)).toEqual([1, "ellipsis", 11, 12]);
+  });
+
+  it("builds ready-to-render pagination links", () => {
+    expect(buildPaginationView({
+      currentPage: 1,
+      totalPages: 1,
+      getPageHref: (page) => "#/?page=" + page,
+    })).toBeNull();
+
+    expect(buildPaginationView({
+      currentPage: 6,
+      totalPages: 12,
+      getPageHref: (page) => "#/?page=" + page,
+    })).toEqual({
+      previousHref: "#/?page=5",
+      nextHref: "#/?page=7",
+      items: [
+        { kind: "page", page: 1, href: "#/?page=1", isCurrent: false },
+        { kind: "ellipsis", key: "ellipsis-1" },
+        { kind: "page", page: 5, href: "#/?page=5", isCurrent: false },
+        { kind: "page", page: 6, href: "#/?page=6", isCurrent: true },
+        { kind: "page", page: 7, href: "#/?page=7", isCurrent: false },
+        { kind: "ellipsis", key: "ellipsis-5" },
+        { kind: "page", page: 12, href: "#/?page=12", isCurrent: false },
+      ],
+    });
   });
 
   it("builds collection overview state and card rows", () => {
