@@ -117,6 +117,20 @@ export type TagMapGroupView = {
   branches: TagMapBranchView[];
 };
 
+export type TagMapState = "loading" | "error" | "empty" | "no-results" | "ready";
+
+export type TagMapView = {
+  state: TagMapState;
+  groups: TagMapGroupView[];
+};
+
+export type TagMapViewInput = {
+  tagTree: TagTreeNode[];
+  query: string;
+  isLoading: boolean;
+  error: string | null;
+};
+
 export type TagDetailHeaderSegmentView = {
   key: string;
   label: string;
@@ -543,6 +557,27 @@ export function buildVisibleTagMapGroups(tagTree: TagTreeNode[], query: string):
       return { group, directChips, branches };
     })
     .filter((group) => group.directChips.length > 0 || group.branches.length > 0);
+}
+
+export function buildTagMapView(input: TagMapViewInput): TagMapView {
+  if (input.isLoading) {
+    return { state: "loading", groups: [] };
+  }
+
+  if (input.error) {
+    return { state: "error", groups: [] };
+  }
+
+  if (input.tagTree.length === 0) {
+    return { state: "empty", groups: [] };
+  }
+
+  const groups = buildVisibleTagMapGroups(input.tagTree, input.query);
+
+  return {
+    state: groups.length > 0 ? "ready" : "no-results",
+    groups,
+  };
 }
 
 export function buildTagDetailHeaderView(input: TagDetailHeaderViewInput): TagDetailHeaderView {

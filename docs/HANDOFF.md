@@ -115,7 +115,8 @@ domain modules with tests.
 - Local blog view model:
   `local-blog/src/blogViewModel.ts` owns local-blog tag chip labels, related
   tag chip expansion, tag chip search matching, tag-map group/branch view data,
-  tag detail route data, tag detail header data, collection overview state/card rows, collection
+  tag-map route/search state, tag detail route data, tag detail header data,
+  collection overview state/card rows, collection
   detail route data, collection detail entries state, collection detail header
   data, collection detail entry rows, article archive route data, article
   archive entries state, home route data, note detail route data, archive list
@@ -132,8 +133,8 @@ domain modules with tests.
   navigation card state, collection detail entries state, search result
   pagination/count labels, article archive entries state, recent update cards,
   note detail header/navigation context, note navigation items,
-  post card/result rows, pagination items/links, or diagnostics data-shaping
-  rules directly.
+  post card/result rows, pagination items/links, tag-map route/search state, or
+  diagnostics data-shaping rules directly.
 
 ## Long-Task Model
 

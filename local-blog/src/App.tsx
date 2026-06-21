@@ -50,8 +50,8 @@ import {
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
+  buildTagMapView,
   buildCollectionOverviewView,
-  buildVisibleTagMapGroups,
   collectTagChips,
   isTagDiagnosticsEnabled,
   type TagChipItem,
@@ -515,16 +515,22 @@ function TagMap({
   onRetry: () => void;
 }) {
   const [tagQuery, setTagQuery] = useState("");
+  const tagMapView = buildTagMapView({
+    tagTree,
+    query: tagQuery,
+    isLoading,
+    error,
+  });
 
-  if (isLoading) {
+  if (tagMapView.state === "loading") {
     return <LoadingState title={"\u6b63\u5728\u52a0\u8f7d\u6807\u7b7e"} description={"\u6b63\u5728\u6c47\u603b\u672c\u5730\u7b14\u8bb0\u7684\u6807\u7b7e\u4f53\u7cfb\u3002"} />;
   }
 
-  if (error) {
+  if (tagMapView.state === "error") {
     return <ErrorState title={"\u65e0\u6cd5\u8bfb\u53d6\u6807\u7b7e"} description={"\u672c\u5730\u535a\u5ba2\u670d\u52a1\u6682\u65f6\u65e0\u6cd5\u6c47\u603b\u6807\u7b7e\u4f53\u7cfb\u3002"} onRetry={onRetry} />;
   }
 
-  if (tagTree.length === 0) {
+  if (tagMapView.state === "empty") {
     return (
       <EmptyState
         title={"\u8fd8\u6ca1\u6709\u6807\u7b7e"}
@@ -532,8 +538,6 @@ function TagMap({
       />
     );
   }
-
-  const visibleGroups = buildVisibleTagMapGroups(tagTree, tagQuery);
 
   return (
     <section className="tag-map" aria-label={"\u6807\u7b7e\u4f53\u7cfb"}>
@@ -555,9 +559,9 @@ function TagMap({
           ) : null}
         </div>
       </div>
-      {visibleGroups.length > 0 ? (
+      {tagMapView.state === "ready" ? (
         <div className="tag-map-groups">
-          {visibleGroups.map(({ group, directChips, branches }) => (
+          {tagMapView.groups.map(({ group, directChips, branches }) => (
               <section className="tag-map-group" key={group.fullPath}>
                 <a className="tag-map-group-title" href={getTagHref(group.fullPath)}>
                   <span>{group.name}</span>

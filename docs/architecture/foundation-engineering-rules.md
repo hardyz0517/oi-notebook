@@ -150,7 +150,8 @@ Use domain modules as the home for stable rules:
   these content rules directly.
 - `local-blog/src/blogViewModel.ts`: local-blog tag chip labels, related tag
   chip expansion, tag chip search matching, tag-map group/branch view data,
-  tag detail route data, tag detail header data, collection overview state/card rows, collection
+  tag-map route/search state, tag detail route data, tag detail header data,
+  collection overview state/card rows, collection
   detail route data, collection detail entries state, collection detail header
   data, collection detail entry rows, article archive route data, article
   archive entries state, home route data, note detail route data, archive list
@@ -165,9 +166,9 @@ Use domain modules as the home for stable rules:
   state, article toc active state, note navigation card state, collection
   detail entries state, search result pagination/count labels, recent update
   cards, article archive entries state, note detail header/navigation context,
-  note navigation items, post card/result rows, and pagination item/link view
-  data, read browser debug flags, and perform console side effects instead of
-  owning these reusable rules directly.
+  note navigation items, post card/result rows, pagination item/link view data,
+  and tag-map route/search state, read browser debug flags, and perform console
+  side effects instead of owning these reusable rules directly.
 
 Future work should continue this pattern for remaining Tag Manager details,
 Luogu import edge cases, local-blog page-section rules, and other non-AI areas

@@ -22,6 +22,7 @@ import {
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
+  buildTagMapView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
   collectRelatedTagChips,
@@ -257,6 +258,61 @@ describe("blogViewModel", () => {
       },
     ]);
     expect(buildVisibleTagMapGroups(tree, "不存在")).toEqual([]);
+  });
+
+  it("builds tag map route state from tag tree loading and search state", () => {
+    const tree = [
+      tagNode({
+        name: "\u7b97\u6cd5",
+        fullPath: "\u7b97\u6cd5",
+        depth: 1,
+        count: 2,
+        children: [
+          tagNode({
+            name: "\u56fe\u8bba",
+            fullPath: "\u7b97\u6cd5/\u56fe\u8bba",
+            depth: 2,
+            count: 2,
+            children: [
+              tagNode({
+                name: "\u6700\u77ed\u8def",
+                fullPath: "\u7b97\u6cd5/\u56fe\u8bba/\u6700\u77ed\u8def",
+                depth: 3,
+                count: 2,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ];
+
+    expect(buildTagMapView({ tagTree: tree, query: "", isLoading: true, error: null })).toEqual({
+      state: "loading",
+      groups: [],
+    });
+    expect(buildTagMapView({ tagTree: tree, query: "", isLoading: false, error: "failed" })).toEqual({
+      state: "error",
+      groups: [],
+    });
+    expect(buildTagMapView({ tagTree: [], query: "", isLoading: false, error: null })).toEqual({
+      state: "empty",
+      groups: [],
+    });
+    expect(buildTagMapView({ tagTree: tree, query: "missing", isLoading: false, error: null })).toEqual({
+      state: "no-results",
+      groups: [],
+    });
+    expect(buildTagMapView({ tagTree: tree, query: "\u6700\u77ed", isLoading: false, error: null })).toEqual({
+      state: "ready",
+      groups: [{
+        group: tree[0],
+        directChips: [],
+        branches: [{
+          node: tree[0].children[0],
+          chips: [{ label: "\u6700\u77ed\u8def", fullPath: "\u7b97\u6cd5/\u56fe\u8bba/\u6700\u77ed\u8def", count: 2 }],
+        }],
+      }],
+    });
   });
 
   it("creates compact pagination items with ellipses", () => {
