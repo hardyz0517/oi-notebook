@@ -12,7 +12,7 @@ import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
 import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
-import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
+import { getDebugGroupOrderRows, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
 import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
@@ -367,11 +367,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const saveOrder = useCallback((nextIds: string[], debugContext?: GroupOrderSaveDebugContext) => {
-    const currentConfig = normalizeConfig(workingConfig);
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      orderOverrides: createOrderOverrides(currentConfig.orderOverrides, nextIds),
-    });
+    const savePlan = getTagSortSavePlan(workingConfig, nextIds);
 
     if (debugContext?.scope === "group") {
       debugEvent("manager.groupOrder.saveNext", {
@@ -382,22 +378,22 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
         previousIds: debugContext.previousIds,
         nextIds: debugContext.nextIds,
         currentGroups: debugContext.currentGroups
-          ? getDebugGroupOrderRows(debugContext.currentGroups, currentConfig.orderOverrides)
+          ? getDebugGroupOrderRows(debugContext.currentGroups, savePlan.previousConfig.orderOverrides)
           : [],
         previousOverridesForNextIds: debugContext.nextIds.map((key) => ({
           key,
-          value: currentConfig.orderOverrides?.[key],
+          value: savePlan.previousConfig.orderOverrides?.[key],
         })),
         savedOverridesForNextIds: debugContext.nextIds.map((key) => ({
           key,
-          value: nextConfig.orderOverrides?.[key],
+          value: savePlan.nextConfig.orderOverrides?.[key],
         })),
-        orderOverrideCountBefore: Object.keys(currentConfig.orderOverrides ?? {}).length,
-        orderOverrideCountAfter: Object.keys(nextConfig.orderOverrides ?? {}).length,
+        orderOverrideCountBefore: Object.keys(savePlan.previousConfig.orderOverrides ?? {}).length,
+        orderOverrideCountAfter: Object.keys(savePlan.nextConfig.orderOverrides ?? {}).length,
       });
     }
 
-    void saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原顺序", "sort");
+    void saveWorkingConfig(savePlan.nextConfig, savePlan.previousConfig, savePlan.failureMessage, savePlan.operation);
   }, [saveWorkingConfig, workingConfig]);
 
   const handleSortStart = useCallback((scope: SortScope, parentKey: string | undefined, event: DragStartEvent) => {

@@ -1,7 +1,11 @@
 import { arrayMove } from "@dnd-kit/sortable";
 
 import { createDenseOrderOverrides } from "@/lib/tagTaxonomy";
-import type { GroupNode, RootGroup } from "./types";
+import type { UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { normalizeConfig } from "./tagManagerConfig";
+import type { GroupNode, RootGroup, SaveOperation } from "./types";
+
+export const SORT_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原顺序";
 
 export type SortEndPlan = {
   activeId: string;
@@ -11,12 +15,32 @@ export type SortEndPlan = {
   reason?: "invalid-index";
 };
 
+export type TagSortSavePlan = {
+  previousConfig: UserTagTaxonomyConfig;
+  nextConfig: UserTagTaxonomyConfig;
+  failureMessage: string;
+  operation: SaveOperation;
+};
+
 export function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function createOrderOverrides(currentOverrides: Record<string, number> | undefined, nextIds: string[]): Record<string, number> {
   return createDenseOrderOverrides(currentOverrides, nextIds);
+}
+
+export function getTagSortSavePlan(config: UserTagTaxonomyConfig, nextIds: string[]): TagSortSavePlan {
+  const previousConfig = normalizeConfig(config);
+  return {
+    previousConfig,
+    nextConfig: normalizeConfig({
+      ...previousConfig,
+      orderOverrides: createOrderOverrides(previousConfig.orderOverrides, nextIds),
+    }),
+    failureMessage: SORT_SAVE_FAILURE_MESSAGE,
+    operation: "sort",
+  };
 }
 
 export function getSortEndPlan(currentIds: string[], activeId: string, overId: string | null): SortEndPlan {
