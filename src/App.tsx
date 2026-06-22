@@ -177,6 +177,7 @@ import {
 import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yieldToUi } from "@/lib/appAsync";
 import {
   getActiveActivityItem,
+  getAiActivityToggleLabel,
   getActivityButtonClassName,
   getNotesActivityToggleLabel,
   getSettingsOpenTarget,
@@ -1988,6 +1989,7 @@ export default function App() {
     saveStatusLabel,
   });
   const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
+  const aiActivityToggleLabel = getAiActivityToggleLabel(isAiSidebarOpen);
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
     isSavingBlogConfig,
@@ -8179,8 +8181,8 @@ export default function App() {
               type="button"
               className={activityButtonClass("ai")}
               onClick={handleActivityAi}
-              title={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
-              aria-label={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
+              title={aiActivityToggleLabel}
+              aria-label={aiActivityToggleLabel}
               selected={isAiActivityActive}
             >
               <Bot size={24} strokeWidth={2.18} />

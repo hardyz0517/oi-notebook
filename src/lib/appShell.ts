@@ -78,6 +78,10 @@ export function getNotesActivityToggleLabel(isNotesSidebarOpen: boolean): string
   return isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏";
 }
 
+export function getAiActivityToggleLabel(isAiSidebarOpen: boolean): string {
+  return isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手";
+}
+
 export type SettingsOpenTarget =
   | { type: "category"; category: SettingsCategory }
   | { type: "page"; page: SettingsSection };

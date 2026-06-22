@@ -6,6 +6,7 @@ import {
   MARKDOWN_CAPABILITIES,
   deriveEditorViewLayout,
   getActiveActivityItem,
+  getAiActivityToggleLabel,
   getActivityButtonClassName,
   getNotesActivityToggleLabel,
   getSaveStatusActionLabel,
@@ -82,6 +83,11 @@ describe("appShell", () => {
     expect(getNotesActivityToggleLabel(false)).toBe("展开笔记侧栏");
   });
 
+  it("derives the AI activity toggle label from sidebar visibility", () => {
+    expect(getAiActivityToggleLabel(true)).toBe("关闭 AI 助手");
+    expect(getAiActivityToggleLabel(false)).toBe("打开 AI 助手");
+  });
+
   it("keeps about-page markdown capabilities stable", () => {
     expect(MARKDOWN_CAPABILITIES).toEqual([
       "数学公式",
@@ -140,6 +146,13 @@ describe("appShell", () => {
 
     expect(appSource).toContain("EDITOR_VIEW_MODE_OPTIONS");
     expect(appSource).not.toContain("editorViewModeButtons");
+  });
+
+  it("keeps App wired to centralized activity toggle labels", () => {
+    const appSource = readFileSync(appSourcePath, "utf8");
+
+    expect(appSource).toContain("getAiActivityToggleLabel");
+    expect(appSource).not.toContain('isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"');
   });
 
   it("derives settings open targets from categories and pages", () => {
