@@ -182,8 +182,10 @@ import {
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
+  EDITOR_VIEW_MODE_OPTIONS,
   MARKDOWN_CAPABILITIES,
   type ActivityBarItem,
+  type EditorViewMode,
 } from "@/lib/appShell";
 import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
 import {
@@ -509,7 +511,6 @@ type ConfirmDialogState = {
   resolve: (confirmed: boolean) => void;
 };
 type NoteLocationOptionId = NewNoteLocationOption;
-type EditorViewMode = "split" | "editor" | "preview";
 type LuoguImportCenterTab = "scan" | "manual";
 type LuoguWriteMode = "createNew" | "overwrite";
 type LuoguPrepareProgress = TaskProgress;
@@ -521,6 +522,11 @@ type WorkspaceTabId = string;
 const TAG_MANAGER_DEBUG_STORAGE_KEY = "oi-notebook.debugTagManager";
 const TAG_MANAGER_DEBUG_LOG_STORAGE_KEY = "oi-notebook.debugTagManagerLog";
 const TAG_MANAGER_DEBUG_LOG_LIMIT = 300;
+const EDITOR_VIEW_MODE_ICON_BY_ID: Record<EditorViewMode, typeof Columns2> = {
+  split: Columns2,
+  editor: SquarePen,
+  preview: Eye,
+};
 
 function isTagManagerDebugEnabled(): boolean {
   try {
@@ -1914,19 +1920,10 @@ export default function App() {
   }, [isLuoguSelectableSelectionMixed]);
   const showEditorPane = editorViewMode !== "preview";
   const showPreviewPane = editorViewMode !== "editor";
-  const editorViewModeButtons: Array<{
-    id: EditorViewMode;
-    label: string;
-    icon: typeof Columns2;
-  }> = [
-    { id: "split", label: "双栏", icon: Columns2 },
-    { id: "editor", label: "仅编辑", icon: SquarePen },
-    { id: "preview", label: "仅预览", icon: Eye },
-  ];
   const editorViewModeSwitcher = (
     <div className="editor-view-mode-switcher flex items-center gap-1" aria-label="编辑器视图模式">
-      {editorViewModeButtons.map((mode) => {
-        const Icon = mode.icon;
+      {EDITOR_VIEW_MODE_OPTIONS.map((mode) => {
+        const Icon = EDITOR_VIEW_MODE_ICON_BY_ID[mode.id];
         const isActive = editorViewMode === mode.id;
 
         return (

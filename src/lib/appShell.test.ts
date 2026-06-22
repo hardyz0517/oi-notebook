@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EDITOR_VIEW_MODE_OPTIONS,
@@ -9,6 +11,8 @@ import {
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
 } from "./appShell";
+
+const appSourcePath = path.resolve(__dirname, "..", "App.tsx");
 
 describe("appShell", () => {
   it("prioritizes modal and transient activity state over the notes sidebar", () => {
@@ -85,6 +89,13 @@ describe("appShell", () => {
       { id: "editor", label: "仅编辑" },
       { id: "preview", label: "仅预览" },
     ]);
+  });
+
+  it("keeps App wired to centralized editor view mode options", () => {
+    const appSource = readFileSync(appSourcePath, "utf8");
+
+    expect(appSource).toContain("EDITOR_VIEW_MODE_OPTIONS");
+    expect(appSource).not.toContain("editorViewModeButtons");
   });
 
   it("derives settings open targets from categories and pages", () => {
