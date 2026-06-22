@@ -7,6 +7,7 @@ export const MERGE_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原合并规�
 export const ALIAS_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原别名";
 export const CUSTOM_TAG_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原自定义标签";
 export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
+export const VISIBILITY_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原状态";
 
 export type TagTaxonomyConfigImportPreview = {
   entriesCount: number;
@@ -194,6 +195,13 @@ export type CollectionPanelState = {
 export type CollectionSaveResolution = {
   panelState: CollectionPanelState;
   editState: CollectionEditState;
+};
+
+export type TagVisibilitySavePlan = {
+  previousConfig: UserTagTaxonomyConfig;
+  nextConfig: UserTagTaxonomyConfig;
+  failureMessage: string;
+  operation: SaveOperation;
 };
 
 export type CollectionSaveState = {
@@ -1064,6 +1072,20 @@ export function setTagSuggestionHiddenInConfig(
     ...currentConfig,
     hiddenIds: Array.from(hiddenIds),
   });
+}
+
+export function getTagVisibilitySavePlan(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion,
+  hidden: boolean,
+): TagVisibilitySavePlan {
+  const previousConfig = normalizeConfig(config);
+  return {
+    previousConfig,
+    nextConfig: setTagSuggestionHiddenInConfig(previousConfig, suggestion, hidden),
+    failureMessage: VISIBILITY_SAVE_FAILURE_MESSAGE,
+    operation: "visibility",
+  };
 }
 
 export function getCustomTagCreateDraft(

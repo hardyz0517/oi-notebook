@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, VISIBILITY_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getTagVisibilitySavePlan, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -131,6 +131,48 @@ describe("tagManagerConfig visibility rules", () => {
     const result = setTagSuggestionHiddenInConfig(config, suggestion, false);
 
     expect(result.hiddenIds).toEqual([]);
+  });
+
+  it("builds a visibility save plan with normalized configs and save metadata", () => {
+    const suggestion = {
+      id: "user.dp.knapsack",
+      path: ["algorithm", "dp", "knapsack"],
+      pathText: "algorithm/dp/knapsack",
+      name: "knapsack",
+      aliases: [],
+      searchText: "knapsack",
+      source: "user" as const,
+      deprecated: false,
+      hidden: false,
+    };
+
+    const result = getTagVisibilitySavePlan({
+      hiddenIds: ["builtin.old"],
+      aliases: undefined,
+    }, suggestion, true);
+
+    expect(result).toEqual({
+      previousConfig: {
+        version: 1,
+        hiddenIds: ["builtin.old"],
+        aliases: {},
+        merges: {},
+        orderOverrides: {},
+        entries: [],
+        customCollections: [],
+      },
+      nextConfig: {
+        version: 1,
+        hiddenIds: ["builtin.old", "user.dp.knapsack"],
+        aliases: {},
+        merges: {},
+        orderOverrides: {},
+        entries: [],
+        customCollections: [],
+      },
+      failureMessage: VISIBILITY_SAVE_FAILURE_MESSAGE,
+      operation: "visibility",
+    });
   });
 });
 
