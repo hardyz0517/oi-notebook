@@ -9,6 +9,23 @@ export const EDITOR_VIEW_MODE_OPTIONS: Array<{ id: EditorViewMode; label: string
   { id: "preview", label: "仅预览" },
 ];
 
+export interface EditorViewLayout {
+  showEditorPane: boolean;
+  showPreviewPane: boolean;
+  isEditorPreviewSplit: boolean;
+}
+
+export function deriveEditorViewLayout(viewMode: EditorViewMode): EditorViewLayout {
+  const showEditorPane = viewMode !== "preview";
+  const showPreviewPane = viewMode !== "editor";
+
+  return {
+    showEditorPane,
+    showPreviewPane,
+    isEditorPreviewSplit: showEditorPane && showPreviewPane,
+  };
+}
+
 export const MARKDOWN_CAPABILITIES = [
   "数学公式",
   "代码高亮与行号",

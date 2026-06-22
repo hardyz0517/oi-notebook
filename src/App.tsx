@@ -179,6 +179,7 @@ import {
   getActiveActivityItem,
   getActivityButtonClassName,
   getSettingsOpenTarget,
+  deriveEditorViewLayout,
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
@@ -1918,8 +1919,8 @@ export default function App() {
       luoguSelectAllCheckboxRef.current.indeterminate = isLuoguSelectableSelectionMixed;
     }
   }, [isLuoguSelectableSelectionMixed]);
-  const showEditorPane = editorViewMode !== "preview";
-  const showPreviewPane = editorViewMode !== "editor";
+  const editorViewLayout = deriveEditorViewLayout(editorViewMode);
+  const { showEditorPane, showPreviewPane, isEditorPreviewSplit } = editorViewLayout;
   const editorViewModeSwitcher = (
     <div className="editor-view-mode-switcher flex items-center gap-1" aria-label="编辑器视图模式">
       {EDITOR_VIEW_MODE_OPTIONS.map((mode) => {
@@ -2475,7 +2476,6 @@ export default function App() {
       bodyStartLine: hasOpenNote ? bodyStartLine : null,
     };
   }, [activeNoteFile, aiContextSelectionRange, bodyStartLine, currentFilePath, currentParagraphContext, committedMarkdown, editorSelectedText, editorSelectedTextLength, frontmatter.fields]);
-  const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
     flexBasis: leftSidebarWidth,

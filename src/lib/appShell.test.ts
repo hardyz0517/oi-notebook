@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   EDITOR_VIEW_MODE_OPTIONS,
   MARKDOWN_CAPABILITIES,
+  deriveEditorViewLayout,
   getActiveActivityItem,
   getActivityButtonClassName,
   getSettingsOpenTarget,
@@ -89,6 +90,24 @@ describe("appShell", () => {
       { id: "editor", label: "仅编辑" },
       { id: "preview", label: "仅预览" },
     ]);
+  });
+
+  it("derives editor and preview pane visibility from the editor view mode", () => {
+    expect(deriveEditorViewLayout("split")).toEqual({
+      showEditorPane: true,
+      showPreviewPane: true,
+      isEditorPreviewSplit: true,
+    });
+    expect(deriveEditorViewLayout("editor")).toEqual({
+      showEditorPane: true,
+      showPreviewPane: false,
+      isEditorPreviewSplit: false,
+    });
+    expect(deriveEditorViewLayout("preview")).toEqual({
+      showEditorPane: false,
+      showPreviewPane: true,
+      isEditorPreviewSplit: false,
+    });
   });
 
   it("keeps App wired to centralized editor view mode options", () => {
