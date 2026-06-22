@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { ALIAS_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -220,6 +220,110 @@ describe("tagManagerConfig custom tag edit selection state", () => {
       selectedSuggestionId: null,
       customTagEditDraft: null,
       customTagEditError: null,
+    });
+  });
+});
+
+describe("tagManagerConfig custom tag save resolutions", () => {
+  const createState: CustomTagCreateSelectionState = {
+    activeRoot: "字符串",
+    expandedGroups: {
+      "algorithm.group.string": true,
+    },
+    filterMode: "user",
+    selectedGroupOrderKey: "algorithm.group.string",
+    selectedSuggestionId: null,
+    customTagCreateDraft: {
+      parentPathText: "算法 / 字符串",
+      parentLocked: true,
+      name: "新标签",
+      aliasesText: "新别名",
+    },
+    customTagCreateError: "old create error",
+  };
+  const createPlan = {
+    activeRoot: "算法",
+    expandedGroupOrderKey: "algorithm.group.dp",
+    filterMode: "all" as const,
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: "user.dp.knapsack",
+  };
+  const editState: CustomTagEditSelectionState = {
+    selectedSuggestionId: "user.string.old-tag",
+    customTagEditDraft: {
+      name: "旧标签",
+      aliasesText: "旧别名",
+    },
+    customTagEditError: "old edit error",
+  };
+
+  it("resolves custom tag create save success by applying the create selection plan", () => {
+    expect(getCustomTagCreateSaveResolution(
+      createState,
+      true,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      createPlan,
+    )).toEqual({
+      activeRoot: "算法",
+      expandedGroups: {
+        "algorithm.group.string": true,
+        "algorithm.group.dp": true,
+      },
+      filterMode: "all",
+      selectedGroupOrderKey: null,
+      selectedSuggestionId: "user.dp.knapsack",
+      customTagCreateDraft: null,
+      customTagCreateError: null,
+    });
+  });
+
+  it("resolves custom tag create save failure by preserving the draft and updating the error", () => {
+    expect(getCustomTagCreateSaveResolution(
+      createState,
+      false,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      createPlan,
+    )).toEqual({
+      ...createState,
+      customTagCreateError: CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+    });
+  });
+
+  it("resolves custom tag edit save success by clearing edit state and selecting the saved tag", () => {
+    expect(getCustomTagEditSaveResolution(
+      editState,
+      true,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      "user.dp.knapsack",
+    )).toEqual({
+      selectedSuggestionId: "user.dp.knapsack",
+      customTagEditDraft: null,
+      customTagEditError: null,
+    });
+  });
+
+  it("resolves custom tag delete save success by clearing edit state and selection", () => {
+    expect(getCustomTagEditSaveResolution(
+      editState,
+      true,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      null,
+    )).toEqual({
+      selectedSuggestionId: null,
+      customTagEditDraft: null,
+      customTagEditError: null,
+    });
+  });
+
+  it("resolves custom tag edit/delete save failure by preserving the draft and updating the error", () => {
+    expect(getCustomTagEditSaveResolution(
+      editState,
+      false,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      "user.dp.knapsack",
+    )).toEqual({
+      ...editState,
+      customTagEditError: CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
     });
   });
 });

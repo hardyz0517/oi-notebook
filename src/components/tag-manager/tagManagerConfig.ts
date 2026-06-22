@@ -5,6 +5,7 @@ const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => e
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
 export const MERGE_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原合并规则";
 export const ALIAS_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原别名";
+export const CUSTOM_TAG_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原自定义标签";
 export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
 
 export type TagTaxonomyConfigImportPreview = {
@@ -1202,6 +1203,34 @@ export function getAppliedCustomTagEditSelectionState(
     customTagEditDraft: null,
     customTagEditError: null,
   };
+}
+
+export function getCustomTagCreateSaveResolution(
+  state: CustomTagCreateSelectionState,
+  saved: boolean,
+  failureMessage: string,
+  plan: CustomTagCreateSelectionPlan,
+): CustomTagCreateSelectionState {
+  return saved
+    ? getAppliedCustomTagCreateSelectionState(state, plan)
+    : {
+      ...state,
+      customTagCreateError: failureMessage,
+    };
+}
+
+export function getCustomTagEditSaveResolution(
+  state: CustomTagEditSelectionState,
+  saved: boolean,
+  failureMessage: string,
+  selectedSuggestionId: string | null,
+): CustomTagEditSelectionState {
+  return saved
+    ? getAppliedCustomTagEditSelectionState(state, selectedSuggestionId)
+    : {
+      ...state,
+      customTagEditError: failureMessage,
+    };
 }
 
 export function getSelectionChangeTransientState(

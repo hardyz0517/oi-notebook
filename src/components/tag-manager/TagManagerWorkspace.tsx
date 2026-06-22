@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -627,9 +627,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      applyCustomTagCreateSelectionState(getAppliedCustomTagCreateSelectionState({
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagCreateSelectionState(getCustomTagCreateSaveResolution(
+      {
         activeRoot,
         expandedGroups,
         filterMode,
@@ -637,10 +637,11 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
         selectedSuggestionId,
         customTagCreateDraft,
         customTagCreateError,
-      }, createCustomTagCreateSelectionPlan(result.config, result.entryId)));
-    } else {
-      setCustomTagCreateError("保存失败，已恢复原自定义标签");
-    }
+      },
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      createCustomTagCreateSelectionPlan(result.config, result.entryId),
+    ));
   }, [
     activeRoot,
     applyCustomTagCreateSelectionState,
@@ -692,16 +693,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      applyCustomTagEditSelectionState(getAppliedCustomTagEditSelectionState({
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagEditSelectionState(getCustomTagEditSaveResolution(
+      {
         selectedSuggestionId,
         customTagEditDraft,
         customTagEditError,
-      }, selectedSuggestion.id));
-    } else {
-      setCustomTagEditError("保存失败，已恢复原自定义标签");
-    }
+      },
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      selectedSuggestion.id,
+    ));
   }, [
     applyCustomTagEditSelectionState,
     customTagEditDraft,
@@ -729,16 +731,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      applyCustomTagEditSelectionState(getAppliedCustomTagEditSelectionState({
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagEditSelectionState(getCustomTagEditSaveResolution(
+      {
         selectedSuggestionId,
         customTagEditDraft,
         customTagEditError,
-      }, null));
-    } else {
-      setCustomTagEditError("保存失败，已恢复原自定义标签");
-    }
+      },
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      null,
+    ));
   }, [
     applyCustomTagEditSelectionState,
     customTagEditDraft,
