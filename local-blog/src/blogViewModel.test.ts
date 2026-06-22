@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import {
   buildArticleResultListView,
@@ -40,6 +42,8 @@ import {
 } from "./blogViewModel";
 import type { NoteSummary, RawNoteSummary } from "./blogContent";
 import type { TagTreeNode } from "./tagTaxonomy";
+
+const localBlogAppSourcePath = path.resolve(__dirname, "App.tsx");
 
 const tagNode = (overrides: Partial<TagTreeNode> = {}): TagTreeNode => ({
   name: "root",
@@ -1039,6 +1043,15 @@ describe("blogViewModel", () => {
         className: "search-link active",
       },
     });
+  });
+
+  it("keeps local-blog App from importing lower-level list and pagination helpers directly", () => {
+    const appSource = readFileSync(localBlogAppSourcePath, "utf8");
+
+    expect(appSource).not.toContain("getCategoryCounts as getBlogCategoryCounts");
+    expect(appSource).not.toContain("getShortNoteExcerpt as getBlogShortNoteExcerpt");
+    expect(appSource).not.toContain("getTagCounts as getBlogTagCounts");
+    expect(appSource).not.toContain("paginateNotes as paginateBlogNotes");
   });
 
   it("builds article toc item classes", () => {

@@ -17,13 +17,9 @@ import {
 import {
   buildCollections as buildBlogCollections,
   defaultBlogConfig as blogDefaultConfig,
-  getCategoryCounts as getBlogCategoryCounts,
-  getShortNoteExcerpt as getBlogShortNoteExcerpt,
-  getTagCounts as getBlogTagCounts,
   normalizeBlogConfig as normalizeBlogConfigDraft,
   normalizeNoteDetail as normalizeBlogNoteDetail,
   normalizeNoteSummary as normalizeBlogNoteSummary,
-  paginateNotes as paginateBlogNotes,
   type BlogConfig,
   type CollectionGroup,
   type CountItem,
