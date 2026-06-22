@@ -812,7 +812,9 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
             .iter()
             .chain(oi_known_algorithm_terms().iter())
         {
-            if term_matches(&combined_normalized, keyword) && is_allowed_search_token(&normalize_term(keyword), true) {
+            if term_matches(&combined_normalized, keyword)
+                && is_allowed_search_token(&normalize_term(keyword), true)
+            {
                 push_term(&mut terms, keyword);
                 push_term(&mut expanded_terms, keyword);
             }
@@ -829,7 +831,9 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
     let terms = terms
         .into_iter()
         .map(|term| normalize_term(&term))
-        .filter(|term| is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term))
+        .filter(|term| {
+            is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term)
+        })
         .filter(|term| seen.insert(term.clone()))
         .take(32)
         .collect::<Vec<_>>();
@@ -837,14 +841,17 @@ fn build_search_terms(input: &LocalNoteSearchInput) -> SearchTerms {
     let expanded_terms = expanded_terms
         .into_iter()
         .map(|term| normalize_term(&term))
-        .filter(|term| is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term))
+        .filter(|term| {
+            is_allowed_search_token(term, oi_synonyms_enabled) && !is_low_value_term(term)
+        })
         .filter(|term| expanded_seen.insert(term.clone()))
         .take(24)
         .collect::<Vec<_>>();
     let specific_terms = terms
         .iter()
         .filter(|term| {
-            looks_specific(term, oi_synonyms_enabled) || problem_ids.iter().any(|id| normalize_term(id) == **term)
+            looks_specific(term, oi_synonyms_enabled)
+                || problem_ids.iter().any(|id| normalize_term(id) == **term)
         })
         .cloned()
         .collect::<HashSet<_>>();
@@ -1035,8 +1042,7 @@ fn term_match_count(normalized_haystack: &str, needle: &str) -> usize {
 }
 
 fn needs_ascii_boundaries(term: &str) -> bool {
-    term.chars()
-        .any(|ch| ch.is_ascii_alphanumeric())
+    term.chars().any(|ch| ch.is_ascii_alphanumeric())
 }
 
 fn is_ascii_word_char(byte: u8) -> bool {
@@ -1055,7 +1061,8 @@ fn ascii_bounded_match_count(haystack: &str, needle: &str) -> usize {
         let index = start + offset;
         let before_ok = index == 0 || !is_ascii_word_char(haystack_bytes[index - 1]);
         let after_index = index + needle_bytes.len();
-        let after_ok = after_index >= haystack_bytes.len() || !is_ascii_word_char(haystack_bytes[after_index]);
+        let after_ok =
+            after_index >= haystack_bytes.len() || !is_ascii_word_char(haystack_bytes[after_index]);
         if before_ok && after_ok {
             count += 1;
         }
@@ -1081,9 +1088,15 @@ fn should_enable_oi_synonyms(
     combined_normalized: &str,
     problem_ids: &[String],
 ) -> bool {
-    if input.problem_id.as_deref().is_some_and(|value| !value.trim().is_empty())
+    if input
+        .problem_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
         || !problem_ids.is_empty()
-        || input.algorithm_keywords.iter().any(|keyword| !keyword.trim().is_empty())
+        || input
+            .algorithm_keywords
+            .iter()
+            .any(|keyword| !keyword.trim().is_empty())
     {
         return true;
     }
@@ -2013,4 +2026,103 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn search_input(query: &str) -> LocalNoteSearchInput {
+        LocalNoteSearchInput {
+            query: query.to_string(),
+            problem_id: None,
+            problem_title: None,
+            algorithm_keywords: Vec::new(),
+            current_note_path: None,
+            max_results: None,
+            max_chars_per_result: None,
+        }
+    }
+
+    #[test]
+    fn normalizes_safe_relative_note_paths() {
+        assert_eq!(
+            normalize_relative_note_path(" tricks\\graph\\lca.md "),
+            Some("tricks/graph/lca.md".to_string())
+        );
+        assert_eq!(normalize_relative_note_path(""), None);
+        assert_eq!(normalize_relative_note_path("/absolute.md"), None);
+        assert_eq!(normalize_relative_note_path("tricks/../secret.md"), None);
+        assert_eq!(normalize_relative_note_path("bad\0path.md"), None);
+    }
+
+    #[test]
+    fn splits_frontmatter_and_deduplicates_tags() {
+        let (frontmatter, body, raw) = split_frontmatter(concat!(
+            "---\r\n",
+            "title: \"LCA 模板\"\r\n",
+            "summary: '倍增写法'\r\n",
+            "tags: [图论, LCA, 图论]\r\n",
+            "- 倍增\r\n",
+            "---\r\n",
+            "# 正文\r\n",
+            "内容",
+        ));
+
+        assert_eq!(frontmatter.title, "LCA 模板");
+        assert_eq!(frontmatter.summary, "倍增写法");
+        assert_eq!(frontmatter.tags, vec!["LCA", "倍增", "图论"]);
+        assert!(body.starts_with("# 正文"));
+        assert!(raw.contains("title:"));
+    }
+
+    #[test]
+    fn extracts_common_problem_ids_from_mixed_query() {
+        assert_eq!(
+            detect_problem_ids("复盘 P3379、1705C 和 abc300_f，再看 QTREE6"),
+            vec![
+                "P3379".to_string(),
+                "1705C".to_string(),
+                "ABC300_F".to_string(),
+                "QTREE6".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn enables_oi_synonyms_for_algorithm_queries_but_not_general_news() {
+        let oi_terms = build_search_terms(&search_input("最近 LCA 倍增 有哪些坑"));
+        assert!(oi_terms.oi_synonyms_enabled);
+        assert!(!oi_terms.general_news_query);
+        assert!(oi_terms.terms.iter().any(|term| term == "lca"));
+        assert!(oi_terms
+            .expanded_terms
+            .iter()
+            .any(|term| term == "最近公共祖先"));
+
+        let news_terms = build_search_terms(&search_input("最近 AI 新闻"));
+        assert!(!news_terms.oi_synonyms_enabled);
+        assert!(news_terms.general_news_query);
+    }
+
+    #[test]
+    fn splits_markdown_chunks_with_heading_context() {
+        let chunks = split_markdown_chunks(
+            "tricks/graph/lca.md",
+            "# 图论\n\
+             LCA 倍增模板。\n\
+             \n\
+             ## 最近公共祖先\n\
+             注意初始化 depth 和 fa 数组。\n\
+             ```cpp\n\
+             int up[20][N];\n\
+             ```",
+        );
+
+        assert!(!chunks.is_empty());
+        assert_eq!(chunks[0].heading_path, vec!["图论"]);
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk.heading_path == vec!["图论", "最近公共祖先"]));
+    }
 }
