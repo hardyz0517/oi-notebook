@@ -209,6 +209,33 @@ export type CollectionSaveState = {
   editState: CollectionEditState;
 };
 
+export function createMergeEditorStateSnapshot(state: MergeEditorState): MergeEditorState {
+  return {
+    isOpen: state.isOpen,
+    searchQuery: state.searchQuery,
+    selectedTargetId: state.selectedTargetId,
+    error: state.error,
+  };
+}
+
+export function createCollectionEditStateSnapshot(state: CollectionEditState): CollectionEditState {
+  return {
+    editingName: state.editingName,
+    editInput: state.editInput,
+    editError: state.editError,
+    createError: state.createError,
+  };
+}
+
+export function createCollectionPanelStateSnapshot(state: CollectionPanelState): CollectionPanelState {
+  return {
+    activeView: state.activeView,
+    createInput: state.createInput,
+    createError: state.createError,
+    editError: state.editError,
+  };
+}
+
 export type TagManagerConfirmOptions = {
   title: string;
   description: string;

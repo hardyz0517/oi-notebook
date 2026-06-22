@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagDeleteConfirmOptions, getCustomTagEditSaveResolution, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCollectionEditStateSnapshot, createCollectionPanelStateSnapshot, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, createMergeEditorStateSnapshot, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagDeleteConfirmOptions, getCustomTagEditSaveResolution, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { getDebugGroupOrderRows, getGroupOrderAfterWorkingConfigDebugPayload, getGroupOrderRenderDebugPayload, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -129,13 +129,13 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setCollectionEditError(state.editError);
   }, []);
 
-  const getCurrentCollectionEditState = useCallback((): CollectionEditState => ({
+  const getCurrentCollectionEditState = useCallback((): CollectionEditState => createCollectionEditStateSnapshot({
     editingName: editingCollectionName,
     editInput: collectionEditInput,
     editError: collectionEditError,
     createError: collectionCreateError,
   }), [collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
-  const getCurrentCollectionPanelState = useCallback((): CollectionPanelState => ({
+  const getCurrentCollectionPanelState = useCallback((): CollectionPanelState => createCollectionPanelStateSnapshot({
     activeView,
     createInput: collectionCreateInput,
     createError: collectionCreateError,
@@ -157,7 +157,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     setAliasInput(state.input);
     setAliasError(state.error);
   }, []);
-  const getCurrentMergeEditorState = useCallback((): MergeEditorState => ({
+  const getCurrentMergeEditorState = useCallback((): MergeEditorState => createMergeEditorStateSnapshot({
     isOpen: isMergeEditorOpen,
     searchQuery: mergeSearchQuery,
     selectedTargetId: selectedMergeTargetId,
@@ -759,6 +759,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     }, value));
   }, [applyMergeEditorState, isMergeEditorOpen, mergeError, mergeSearchQuery, selectedMergeTargetId]);
 
+  const handleMergeTargetSelect = useCallback((suggestion: TagSuggestion) => {
+    applyMergeEditorState(getSelectedMergeTargetState(getCurrentMergeEditorState(), suggestion.id));
+  }, [applyMergeEditorState, getCurrentMergeEditorState]);
+
   const saveMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
     const result = setMergeRule(currentConfig, selectedSuggestion, selectedMergeTarget);
@@ -810,6 +814,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     applyCollectionPanelState(getAppliedCollectionViewState(getCurrentCollectionPanelState(), nextView));
   }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
 
+  const handleCollectionCreateInputChange = useCallback((value: string) => {
+    applyCollectionPanelState(getChangedCollectionCreateInputState(getCurrentCollectionPanelState(), value));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
+
   const createCollection = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
     const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
@@ -838,6 +846,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
 
   const cancelCollectionEdit = useCallback(() => {
     applyCollectionEditState(getCancelledCollectionEditState(getCurrentCollectionEditState()));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
+
+  const handleCollectionEditInputChange = useCallback((value: string) => {
+    applyCollectionEditState(getChangedCollectionEditInputState(getCurrentCollectionEditState(), value));
   }, [applyCollectionEditState, getCurrentCollectionEditState]);
 
   const saveCollectionEdit = useCallback(async () => {
@@ -988,14 +1000,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
             onStartMergeEdit={startMergeEdit}
             onCancelMergeEdit={cancelMergeEdit}
             onMergeSearchQueryChange={handleMergeSearchQueryChange}
-            onSelectMergeTarget={(suggestion) => {
-              applyMergeEditorState(getSelectedMergeTargetState({
-                isOpen: isMergeEditorOpen,
-                searchQuery: mergeSearchQuery,
-                selectedTargetId: selectedMergeTargetId,
-                error: mergeError,
-              }, suggestion.id));
-            }}
+            onSelectMergeTarget={handleMergeTargetSelect}
             onSaveMergeRule={() => void saveMergeRule()}
             onDeleteMergeRule={() => void removeMergeRule()}
             onSetSuggestionHidden={setSuggestionHidden}
@@ -1010,14 +1015,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
           editInput={collectionEditInput}
           editError={collectionEditError}
           isSaving={isSaving}
-          onCreateInputChange={(value) => {
-            applyCollectionPanelState(getChangedCollectionCreateInputState(getCurrentCollectionPanelState(), value));
-          }}
+          onCreateInputChange={handleCollectionCreateInputChange}
           onCreate={() => void createCollection()}
           onStartEdit={startCollectionEdit}
-          onEditInputChange={(value) => {
-            applyCollectionEditState(getChangedCollectionEditInputState(getCurrentCollectionEditState(), value));
-          }}
+          onEditInputChange={handleCollectionEditInputChange}
           onCancelEdit={cancelCollectionEdit}
           onSaveEdit={() => void saveCollectionEdit()}
           onDelete={(name) => void deleteCollection(name)}
