@@ -7,6 +7,7 @@ import {
   deriveEditorViewLayout,
   getActiveActivityItem,
   getActivityButtonClassName,
+  getSaveStatusActionLabel,
   getSettingsOpenTarget,
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
@@ -108,6 +109,24 @@ describe("appShell", () => {
       showPreviewPane: true,
       isEditorPreviewSplit: false,
     });
+  });
+
+  it("derives the save status action label from dirty and untitled state", () => {
+    expect(getSaveStatusActionLabel({
+      isDirty: true,
+      isUntitled: false,
+      saveStatusLabel: "已保存",
+    })).toBe("保存当前笔记");
+    expect(getSaveStatusActionLabel({
+      isDirty: false,
+      isUntitled: true,
+      saveStatusLabel: "未命名",
+    })).toBe("保存当前笔记");
+    expect(getSaveStatusActionLabel({
+      isDirty: false,
+      isUntitled: false,
+      saveStatusLabel: "已保存",
+    })).toBe("已保存");
   });
 
   it("keeps App wired to centralized editor view mode options", () => {

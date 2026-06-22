@@ -26,6 +26,16 @@ export function deriveEditorViewLayout(viewMode: EditorViewMode): EditorViewLayo
   };
 }
 
+export interface SaveStatusActionLabelInput {
+  isDirty: boolean;
+  isUntitled: boolean;
+  saveStatusLabel: string;
+}
+
+export function getSaveStatusActionLabel(input: SaveStatusActionLabelInput): string {
+  return input.isDirty || input.isUntitled ? "保存当前笔记" : input.saveStatusLabel;
+}
+
 export const MARKDOWN_CAPABILITIES = [
   "数学公式",
   "代码高亮与行号",

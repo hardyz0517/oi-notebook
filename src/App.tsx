@@ -180,6 +180,7 @@ import {
   getActivityButtonClassName,
   getSettingsOpenTarget,
   deriveEditorViewLayout,
+  getSaveStatusActionLabel,
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
@@ -1979,6 +1980,11 @@ export default function App() {
     hasActiveEditorDocument,
     isSavingNote,
     isDirty: activeEditorDirty,
+  });
+  const saveStatusActionLabel = getSaveStatusActionLabel({
+    isDirty: activeEditorDirty,
+    isUntitled: activeWorkingCopy?.kind === "untitled",
+    saveStatusLabel,
   });
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
@@ -8673,8 +8679,8 @@ export default function App() {
               )}
               onClick={handleSaveCurrentNote}
               disabled={!hasActiveEditorDocument || isSavingNote}
-              title={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
-              aria-label={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
+              title={saveStatusActionLabel}
+              aria-label={saveStatusActionLabel}
             >
               <Save className="h-3 w-3" aria-hidden="true" />
               保存：{saveStatusLabel}
