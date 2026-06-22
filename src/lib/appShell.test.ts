@@ -7,6 +7,7 @@ import {
   deriveEditorViewLayout,
   getActiveActivityItem,
   getActivityButtonClassName,
+  getNotesActivityToggleLabel,
   getSaveStatusActionLabel,
   getSettingsOpenTarget,
   isAiActivitySelected,
@@ -74,6 +75,11 @@ describe("appShell", () => {
 
   it("keeps the stable activity button class", () => {
     expect(getActivityButtonClassName()).toBe("app-activity-button relative h-12 w-12 rounded-md");
+  });
+
+  it("derives the notes activity toggle label from sidebar visibility", () => {
+    expect(getNotesActivityToggleLabel(true)).toBe("收起笔记侧栏");
+    expect(getNotesActivityToggleLabel(false)).toBe("展开笔记侧栏");
   });
 
   it("keeps about-page markdown capabilities stable", () => {

@@ -74,6 +74,10 @@ export function getActivityButtonClassName(): string {
   return "app-activity-button relative h-12 w-12 rounded-md";
 }
 
+export function getNotesActivityToggleLabel(isNotesSidebarOpen: boolean): string {
+  return isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏";
+}
+
 export type SettingsOpenTarget =
   | { type: "category"; category: SettingsCategory }
   | { type: "page"; page: SettingsSection };

@@ -178,6 +178,7 @@ import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yiel
 import {
   getActiveActivityItem,
   getActivityButtonClassName,
+  getNotesActivityToggleLabel,
   getSettingsOpenTarget,
   deriveEditorViewLayout,
   getSaveStatusActionLabel,
@@ -1986,6 +1987,7 @@ export default function App() {
     isUntitled: activeWorkingCopy?.kind === "untitled",
     saveStatusLabel,
   });
+  const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
     isSavingBlogConfig,
@@ -8146,8 +8148,8 @@ export default function App() {
               type="button"
               className={activityButtonClass("notes")}
               onClick={handleActivityNotes}
-              title={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
-              aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
+              title={notesActivityToggleLabel}
+              aria-label={notesActivityToggleLabel}
               selected={activeActivityItem === "notes"}
             >
               <FileText size={24} strokeWidth={2.18} />
