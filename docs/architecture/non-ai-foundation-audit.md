@@ -40,7 +40,7 @@ and remaining issues are either acceptable in place or deferred with a reason.
 
 ## App Shell
 
-Status: `should fix selectively`.
+Status: `acceptable as-is; future work only with a concrete owner and test case`.
 
 Evidence:
 - `src/App.tsx` remains the composition root and owns app-level state, API call
@@ -56,19 +56,28 @@ Evidence:
   App shell, status labels, note workspace, blog config, local index status,
   Luogu config form, app preferences, collection tags, task status, and API
   boundary.
+- Final targeted review found remaining large sections to be mostly shell
+  concerns: editor/working-copy state, Settings wiring, toast/confirm flows,
+  browser/window effects, Luogu scan/prepare/write side-effect ordering, and
+  UI composition. The stable rules used by those sections are consumed from
+  domain owners such as `noteWorkspace.ts`, `appShell.ts`,
+  `localIndexStatus.ts`, `luoguImportDisplay.ts`, `luoguConfigForm.ts`,
+  `blogConfig.ts`, `tagNormalizationScan.ts`, and settings render guards.
 
 Assessment:
-- The App shell is large, but size alone is not the failure condition. Its
-  remaining work should target only stable, pure, domain-specific rules that
-  still sit in App and have focused test value.
-- Side-effect ordering, toast/confirm behavior, cross-domain orchestration, and
-  modal/dialog wiring may remain in App unless a whole domain controller owns
-  the effect end to end.
+- The App shell is large, but size alone is not the failure condition. It now
+  uses domain owners for the stable rules that should not live permanently in
+  App.
+- Remaining Luogu scan/prepare/write handlers are intentionally left in App
+  because they coordinate API calls, pause/resume state, toast messages,
+  cancellation flags, and selection updates. Moving them without a full
+  end-to-end controller would hide important side-effect ordering.
 
 Next actions:
-- Continue only with evidence-backed extractions from App shell.
-- Do not extract one-off JSX conditions or effect ordering just to reduce line
-  count.
+- Do not continue shrinking `App.tsx` for line count.
+- Revisit only when a specific pure rule reappears in App and has a clear
+  domain owner plus focused test value, or when a complete domain controller
+  can own an effect end to end without hiding ordering.
 
 ## local-blog
 
@@ -103,7 +112,7 @@ Next actions:
 
 ## Luogu Frontend Workflow
 
-Status: `acceptable core boundary; should fix selectively`.
+Status: `acceptable as-is`.
 
 Evidence:
 - `src/components/luogu/useLuoguImportWorkflow.ts` owns import source state:
@@ -121,10 +130,13 @@ Assessment:
 - The main risk is whether long side-effect sequences in App can be reasoned
   about. A controller is useful only if it owns an end-to-end effect without
   hiding API, toast, confirm, pause, or cancellation ordering.
+- Final review kept those side-effect sequences in App deliberately, while
+  workflow state, task view state, candidate display, scan summaries, prepare
+  progress, write progress, and selection plans remain in focused modules.
 
 Next actions:
-- Audit Luogu App-side scan/prepare/write handlers before extracting anything.
-- Prefer small state/view helper improvements over a broad controller rewrite.
+- Do not build a new Luogu effect controller unless future changes can prove a
+  whole effect boundary with preserved ordering and focused tests.
 
 ## Tag Manager
 
@@ -181,7 +193,7 @@ Next actions:
 
 ## Rust Luogu
 
-Status: `partially fixed; should fix selectively`.
+Status: `partially fixed; acceptable with deferred selective follow-ups`.
 
 Evidence:
 - `src-tauri/src/luogu_reader.rs` now owns Luogu problem/solution/discussion
@@ -201,9 +213,11 @@ Assessment:
 - The remaining `luogu.rs` breadth is still real, but much of it is cohesive
   command-side orchestration around config, submissions, preparation, writing,
   and AI-adjacent note generation.
-- Further Rust Luogu work should be narrow: submission parsing/path/write
-  helpers only when a concrete owner or test gap appears. Do not refactor the
-  AI-adjacent preparation path without explicit approval.
+- The remaining `luogu.rs` breadth is an acceptable deferred follow-up rather
+  than a current must-fix item. Further Rust Luogu work should be narrow:
+  submission parsing/path/write helpers only when a concrete owner or test gap
+  appears. Do not refactor the AI-adjacent preparation path without explicit
+  approval.
 
 Next actions:
 - Treat `luogu_reader.rs` as done.
@@ -279,8 +293,9 @@ Next actions:
 1. `fixed`: local-search focused tests now protect core search rules.
 2. `fixed`: blog note content/API shaping now belongs to `blog_content.rs`.
 3. `fixed`: Luogu problem content reader now belongs to `luogu_reader.rs`.
-4. `should fix selectively`: App shell rules only where owner and focused test
-   value are clear.
+4. `acceptable/deferred with reason`: App shell remains large but now mainly
+   owns composition, side effects, and wiring; revisit only with a concrete
+   owner and focused test case.
 5. `acceptable/deferred with reason`: remaining `blog_server.rs` legacy
    rendering/static response code and remaining `luogu.rs` command-side
    orchestration are not current must-fix areas; revisit only with a concrete

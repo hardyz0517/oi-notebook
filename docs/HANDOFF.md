@@ -246,11 +246,16 @@ Recent focused coverage includes:
 The main foundation goals are now mostly in place. Good remaining work should
 be selective:
 
-- Continue shrinking `App.tsx` only where a rule has a clear owner and focused
-  test value.
-- Continue shrinking `local-blog/src/App.tsx` by moving remaining stable
-  page-section view rules into focused local-blog modules with tests when they
-  have stable ownership.
+- Treat `src/App.tsx` as acceptable as the app shell/composition root. It is
+  still large, but the remaining bulk is mostly state wiring, API ordering,
+  toast/confirm flows, Settings/Luogu orchestration, editor working-copy
+  coordination, and UI composition. Revisit only when a specific pure rule has
+  a clear owner and focused test value, or when a complete domain controller
+  can own an effect end to end without hiding ordering.
+- Treat `local-blog/src/App.tsx` as acceptable as the local-blog shell. It
+  should keep fetches, browser hash state, document title, debug logging,
+  scroll/focus effects, and page composition while consuming
+  `blogRoutes.ts`, `blogContent.ts`, and `blogViewModel.ts` for stable rules.
 - Treat `src-tauri/src/local_search.rs` as acceptable as-is unless a future
   search change reveals a concrete persistence/scoring/snippet owner gap.
 - Treat `src-tauri/src/luogu_reader.rs` as done. Continue changing
