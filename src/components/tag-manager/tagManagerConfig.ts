@@ -228,6 +228,17 @@ export function getMergeSaveConfirmOptions(
   };
 }
 
+export function getCustomTagDeleteConfirmOptions(
+  pathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: `删除自定义标签“${pathText}”？`,
+    description: "不会自动修改 notes。",
+    confirmText: "删除",
+    danger: true,
+  };
+}
+
 export function getMergeDeleteConfirmOptions(
   sourcePathText: string,
 ): TagManagerConfirmOptions {
