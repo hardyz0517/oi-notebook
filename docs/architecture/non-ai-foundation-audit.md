@@ -27,12 +27,16 @@ and remaining issues are either acceptable in place or deferred with a reason.
   - `src/App.tsx`: about 405 KB.
   - `local-blog/src/App.tsx`: about 44 KB.
   - `local-blog/src/blogViewModel.ts`: about 30 KB.
-  - `src-tauri/src/blog_server.rs`: about 88 KB.
-  - `src-tauri/src/luogu.rs`: about 107 KB.
-  - `src-tauri/src/local_search.rs`: about 66 KB.
-- Recent commits show active extraction work in local-blog and App shell:
-  local-blog note detail, archive scroll state, diagnostics debug state, and
-  App shell activity labels.
+  - `src-tauri/src/blog_server.rs`: about 1,940 lines after blog content
+    extraction.
+  - `src-tauri/src/blog_content.rs`: about 870 lines.
+  - `src-tauri/src/luogu.rs`: about 2,885 lines after Luogu reader
+    extraction.
+  - `src-tauri/src/luogu_reader.rs`: about 524 lines.
+  - `src-tauri/src/local_search.rs`: about 2,240 lines.
+- Recent commits show active foundation work in Rust non-AI code:
+  local-search core tests, blog content extraction, Luogu problem reader
+  extraction, and local-search ranking/snippet tests.
 
 ## App Shell
 
@@ -148,35 +152,44 @@ Next actions:
 
 ## Rust Blog Server
 
-Status: `should fix`.
+Status: `partially fixed; should fix only if legacy rendering remains a review blocker`.
 
 Evidence:
-- `src-tauri/src/blog_server.rs` still combines request routing, API JSON,
-  notes scanning, path resolution/safety, frontmatter parsing, markdown and
-  legacy HTML rendering, static assets, response writing, and tests in one
-  large file.
-- `src-tauri/src/blog_service.rs` exists but currently owns only effective blog
-  config JSON/error helpers.
-- `blog_server.rs` does have focused tests for many path, parsing, rendering,
-  and response-shaping helpers.
+- `src-tauri/src/blog_content.rs` now owns note scanning, API JSON shaping,
+  note detail loading, frontmatter parsing, collection/excerpt rules, and
+  focused tests for those content rules.
+- `src-tauri/src/blog_server.rs` now primarily owns HTTP routing, path/static
+  asset safety, response writing, local-blog/static asset serving, and legacy
+  HTML rendering.
+- `src-tauri/src/blog_service.rs` owns effective blog config JSON/error
+  helpers.
+- `blog_server.rs` still has focused tests for route/path/rendering and
+  response-shaping helpers.
 
 Assessment:
-- The file is not untested, but the ownership boundary is still too broad.
-- The right upgrade is not a mechanical split into many files. Prefer one or
-  two high-cohesion moves such as blog note content/API shaping or legacy
-  markdown rendering, with existing tests moved or expanded.
+- The main content/API boundary has been extracted, so this area is no longer
+  a clear must-fix.
+- The remaining large surface is legacy HTML/Markdown rendering and static
+  response handling. It is acceptable to leave this in `blog_server.rs` unless
+  a future review finds a specific render rule that is hard to test or reason
+  about.
 
 Next actions:
-- Choose the most cohesive and lowest-risk extraction from `blog_server.rs`.
-- Preserve HTTP route behavior and static asset/path safety behavior.
+- Do not mechanically split `blog_server.rs` for line count.
+- Consider a future renderer module only if it can own legacy rendering
+  cleanly with moved tests and no static/path-safety behavior changes.
 
 ## Rust Luogu
 
-Status: `should fix selectively`.
+Status: `partially fixed; should fix selectively`.
 
 Evidence:
-- `src-tauri/src/luogu.rs` combines config, Luogu HTTP/JSON reading,
-  problem/submission parsing, insight extraction, note markdown preparation,
+- `src-tauri/src/luogu_reader.rs` now owns Luogu problem/solution/discussion
+  content reading: reader input/result types, problem id and kind
+  normalization, URLs/source roles, permission result shaping, lentille JSON
+  extraction, content extraction, HTTP request logic, and focused tests.
+- `src-tauri/src/luogu.rs` still owns config, Luogu submission HTTP/JSON
+  reading, submission parsing, insight extraction, note markdown preparation,
   note writing, path formatting, command entry, and tests.
 - It has a substantial test module covering many parsing, note, config, and
   import helpers.
@@ -184,42 +197,43 @@ Evidence:
   the AI freeze boundary must be respected when changing this file.
 
 Assessment:
-- The module has test coverage and recognizable sections, but its non-AI
-  service boundary is still broad.
-- Work should favor cohesive non-AI helper extraction or clearer section
-  ownership around parsing, raw note preparation/write, or path formatting.
-- Avoid changing AI behavior or provider/prompt/search behavior while touching
-  this file.
+- The Luogu problem content reader boundary is now clear and test-covered.
+- The remaining `luogu.rs` breadth is still real, but much of it is cohesive
+  command-side orchestration around config, submissions, preparation, writing,
+  and AI-adjacent note generation.
+- Further Rust Luogu work should be narrow: submission parsing/path/write
+  helpers only when a concrete owner or test gap appears. Do not refactor the
+  AI-adjacent preparation path without explicit approval.
 
 Next actions:
-- Start with non-AI parsing/path/note-preparation helpers that already have
-  tests or can get focused tests.
-- Do not rewrite the Luogu system end to end.
+- Treat `luogu_reader.rs` as done.
+- Revisit `luogu.rs` only for specific non-AI helper gaps, especially
+  submission parsing/path/write rules with focused tests.
 
 ## Rust Local Search
 
-Status: `must fix`.
+Status: `fixed for test coverage; acceptable as-is unless a concrete owner gap appears`.
 
 Evidence:
 - `src-tauri/src/local_search.rs` owns command entry, index persistence, note
   scanning/frontmatter parsing, query expansion, OI synonym logic, scoring,
   chunking/snippets, diagnostics, ids, and metadata.
-- Targeted search found no `mod tests` or `#[test]` entries in this file.
-- The file contains high-risk search behavior and many pure helpers that are
-  suitable for focused Rust tests.
+- Focused tests now cover safe relative note paths, skipped generated/hidden
+  entries, frontmatter/tag parsing, problem id detection, OI synonym gating,
+  ASCII term word boundaries, ranking/current-note boosts, heading-aware
+  chunking, and snippet/code truncation.
 
 Assessment:
-- This is the clearest remaining foundation gap: large, high-impact local
-  search logic lacks local focused tests in the owning module.
-- Before broad structural extraction, add focused tests around stable pure
-  rules such as note path normalization, frontmatter parsing, query token
-  expansion, problem id detection, chunking, snippet behavior, or diagnostics.
+- The original must-fix gap was missing focused tests around high-risk search
+  rules. That gap is now closed.
+- The file remains large, but its responsibilities are cohesive for a local
+  indexing/search service. Splitting it now would mostly move private helpers
+  around without a stronger owner or verification benefit.
 
 Next actions:
-- First Rust implementation slice should add local-search tests without
-  changing behavior.
-- After tests exist, consider a small cohesive extraction only if it improves
-  reviewability.
+- Leave `local_search.rs` in place unless a future feature reveals a concrete
+  persistence/scoring/snippet boundary that should become a separate owner.
+- Keep adding focused tests when changing search behavior.
 
 ## API Boundary
 
@@ -252,9 +266,9 @@ Evidence:
 - This audit adds a current-state triage artifact for the long-running goal.
 
 Assessment:
-- Documentation is broadly aligned, but it should not imply all foundation work
-  is done while Rust blog server, Rust Luogu, and Rust local search remain
-  active follow-up areas.
+- Documentation is broadly aligned after the Rust foundation updates, but it
+  should continue to distinguish fixed areas from intentionally deferred
+  follow-ups.
 
 Next actions:
 - Update HANDOFF and architecture docs at each milestone boundary, not after
@@ -262,14 +276,18 @@ Next actions:
 
 ## Priority Order
 
-1. `must fix`: add focused tests to `src-tauri/src/local_search.rs`.
-2. `should fix`: extract one cohesive Rust blog server boundary with tests.
-3. `should fix`: selectively improve Rust Luogu non-AI helper boundaries.
+1. `fixed`: local-search focused tests now protect core search rules.
+2. `fixed`: blog note content/API shaping now belongs to `blog_content.rs`.
+3. `fixed`: Luogu problem content reader now belongs to `luogu_reader.rs`.
 4. `should fix selectively`: App shell rules only where owner and focused test
    value are clear.
-5. `mostly acceptable`: local-blog and Tag Manager; revisit only with specific
+5. `acceptable/deferred with reason`: remaining `blog_server.rs` legacy
+   rendering/static response code and remaining `luogu.rs` command-side
+   orchestration are not current must-fix areas; revisit only with a concrete
+   owner or test gap.
+6. `mostly acceptable`: local-blog and Tag Manager; revisit only with specific
    evidence.
-6. `acceptable`: API boundary; keep auditing.
+7. `acceptable`: API boundary; keep auditing.
 
 ## Stop Rule For This Goal
 

@@ -140,6 +140,25 @@ domain modules with tests.
   note detail header/navigation context, note navigation items,
   post results state, post card/result rows, pagination items/links, tag-map
   route/search state, or diagnostics data-shaping rules directly.
+- Rust blog content:
+  `src-tauri/src/blog_content.rs` owns production/local-blog note scanning,
+  note API JSON shaping, note detail loading, frontmatter parsing, collection
+  and excerpt rules, and their focused tests. `src-tauri/src/blog_server.rs`
+  owns HTTP routing, path/static asset safety, response writing, local-blog
+  static serving, and legacy HTML rendering.
+- Rust Luogu reader:
+  `src-tauri/src/luogu_reader.rs` owns Luogu problem/solution/discussion
+  content reader input/result types, problem id and kind normalization,
+  reader URLs, source roles, permission result shaping, lentille JSON
+  extraction, content extraction, HTTP request logic, and focused tests.
+  `src-tauri/src/luogu.rs` remains the command-side owner for config,
+  submissions, note preparation/write, and AI-adjacent Luogu import behavior.
+- Rust local search:
+  `src-tauri/src/local_search.rs` remains the local index/search service owner
+  for command entry, index persistence, scanning/frontmatter parsing, query
+  expansion, OI synonym logic, scoring, chunking/snippets, diagnostics, ids,
+  and metadata. Focused tests now cover the main pure rules; do not split the
+  file just for line count.
 
 ## Long-Task Model
 
@@ -195,6 +214,18 @@ Recent focused coverage includes:
 - Luogu display/task/workflow helpers:
   `src/components/luogu/luoguImportDisplay.test.ts`,
   `src/components/luogu/useLuoguImportWorkflow.test.ts`.
+- Rust Luogu problem reader:
+  `src-tauri/src/luogu_reader.rs` tests cover problem id/kind normalization,
+  reader URLs/source roles, JSON and lentille HTML extraction, and unreadable
+  or too-short content handling.
+- Rust local search:
+  `src-tauri/src/local_search.rs` tests cover safe relative paths, skipped
+  generated/hidden entries, frontmatter/tag parsing, problem id detection, OI
+  synonym gating, ASCII term boundaries, ranking/current-note boosts,
+  heading-aware chunking, and snippet/code truncation.
+- Rust blog content:
+  `src-tauri/src/blog_content.rs` tests cover blog content/frontmatter/API
+  shaping rules extracted from the blog server.
 - Tag Manager config rules:
   `src/components/tag-manager/tagManagerConfig.test.ts`, including alias add
   validation and config updates.
@@ -220,6 +251,14 @@ be selective:
 - Continue shrinking `local-blog/src/App.tsx` by moving remaining stable
   page-section view rules into focused local-blog modules with tests when they
   have stable ownership.
+- Treat `src-tauri/src/local_search.rs` as acceptable as-is unless a future
+  search change reveals a concrete persistence/scoring/snippet owner gap.
+- Treat `src-tauri/src/luogu_reader.rs` as done. Continue changing
+  `src-tauri/src/luogu.rs` only for specific non-AI submission/path/write
+  helper gaps, and do not touch frozen AI behavior.
+- Treat `src-tauri/src/blog_content.rs` as the blog content/API owner. Revisit
+  `src-tauri/src/blog_server.rs` only if legacy rendering/static response code
+  becomes hard to review or test; do not split it mechanically.
 - Consider a future Luogu effect controller only if it can own an end-to-end
   side-effect boundary without hiding important API/toast/confirm ordering.
 - Extend API contract metadata only when it improves review value, such as
