@@ -209,6 +209,47 @@ export type CollectionSaveState = {
   editState: CollectionEditState;
 };
 
+export type TagManagerConfirmOptions = {
+  title: string;
+  description: string;
+  confirmText: string;
+  danger: boolean;
+};
+
+export function getMergeSaveConfirmOptions(
+  sourcePathText: string,
+  targetPathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: "确认合并标签？",
+    description: `确认把“${sourcePathText}”合并到“${targetPathText}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`,
+    confirmText: "合并",
+    danger: true,
+  };
+}
+
+export function getMergeDeleteConfirmOptions(
+  sourcePathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: "取消合并规则？",
+    description: `确认取消“${sourcePathText}”的合并规则？\n\n不会自动修改 notes。`,
+    confirmText: "取消合并",
+    danger: true,
+  };
+}
+
+export function getCollectionDeleteConfirmOptions(
+  collectionName: string,
+): TagManagerConfirmOptions {
+  return {
+    title: `删除自定义文集“${collectionName}”？`,
+    description: "只会删除候选，不会修改已有文章。",
+    confirmText: "删除",
+    danger: true,
+  };
+}
+
 export function getOpenedMergeEditorState(): MergeEditorState {
   return {
     isOpen: true,

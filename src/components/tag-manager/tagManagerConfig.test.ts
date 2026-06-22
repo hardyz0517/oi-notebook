@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, VISIBILITY_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getTagVisibilitySavePlan, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, VISIBILITY_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getTagVisibilitySavePlan, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -1015,6 +1015,35 @@ describe("tagManagerConfig node selection state rules", () => {
         aliasesText: "别名",
       },
       customTagCreateError: null,
+    });
+  });
+});
+
+describe("tagManagerConfig confirm options", () => {
+  it("builds merge save confirmation copy from selected paths", () => {
+    expect(getMergeSaveConfirmOptions("算法/字符串/KMP", "算法/字符串")).toEqual({
+      title: "确认合并标签？",
+      description: "确认把“算法/字符串/KMP”合并到“算法/字符串”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。",
+      confirmText: "合并",
+      danger: true,
+    });
+  });
+
+  it("builds merge delete confirmation copy from the selected path", () => {
+    expect(getMergeDeleteConfirmOptions("算法/字符串/KMP")).toEqual({
+      title: "取消合并规则？",
+      description: "确认取消“算法/字符串/KMP”的合并规则？\n\n不会自动修改 notes。",
+      confirmText: "取消合并",
+      danger: true,
+    });
+  });
+
+  it("builds collection delete confirmation copy from the collection name", () => {
+    expect(getCollectionDeleteConfirmOptions("训练清单")).toEqual({
+      title: "删除自定义文集“训练清单”？",
+      description: "只会删除候选，不会修改已有文章。",
+      confirmText: "删除",
+      danger: true,
     });
   });
 });

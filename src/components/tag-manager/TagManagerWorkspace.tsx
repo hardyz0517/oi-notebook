@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { getDebugGroupOrderRows, getGroupOrderAfterWorkingConfigDebugPayload, getGroupOrderRenderDebugPayload, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -772,12 +772,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = await requestConfirm({
-      title: "确认合并标签？",
-      description: `确认把“${selectedSuggestion?.pathText ?? ""}”合并到“${selectedMergeTarget?.pathText ?? ""}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`,
-      confirmText: "合并",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getMergeSaveConfirmOptions(
+      selectedSuggestion?.pathText ?? "",
+      selectedMergeTarget?.pathText ?? "",
+    ));
     if (!confirmed) {
       return;
     }
@@ -798,12 +796,9 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = await requestConfirm({
-      title: "取消合并规则？",
-      description: `确认取消“${selectedSuggestion?.pathText ?? ""}”的合并规则？\n\n不会自动修改 notes。`,
-      confirmText: "取消合并",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getMergeDeleteConfirmOptions(
+      selectedSuggestion?.pathText ?? "",
+    ));
     if (!confirmed) {
       return;
     }
@@ -881,12 +876,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [applyCollectionSaveResolution, collectionEditInput, collectionExistingCandidates, editingCollectionName, getCurrentCollectionSaveState, saveWorkingConfig, workingConfig]);
 
   const deleteCollection = useCallback(async (name: string) => {
-    const confirmed = await requestConfirm({
-      title: `删除自定义文集“${name}”？`,
-      description: "只会删除候选，不会修改已有文章。",
-      confirmText: "删除",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getCollectionDeleteConfirmOptions(name));
     if (!confirmed) return;
 
     const currentConfig = normalizeConfig(workingConfig);
