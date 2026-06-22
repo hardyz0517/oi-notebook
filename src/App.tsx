@@ -101,6 +101,7 @@ import {
 import {
   formatLuoguSubmissionStatus,
   formatLuoguSubmissionTime,
+  formatLuoguCandidateSuggestionTitle,
   getLuoguCandidateDisplayState,
   getLuoguPreviewStatusBadgeClass,
   getLuoguPreviewStatusLabel,
@@ -6993,7 +6994,7 @@ export default function App() {
                                 });
                                 const submitTime = formatLuoguSubmissionTime(submission.submitTime);
                                 const canOpenPreview = Boolean(prepared && !prepared.skipped && prepared.markdown.trim());
-                                const suggestionTitle = [displayState.detail, displayState.output !== "—" ? displayState.output : ""].filter(Boolean).join(" 路 ");
+                                const suggestionTitle = formatLuoguCandidateSuggestionTitle(displayState);
                                 return (
                                   <div
                                     key={submission.submissionId}

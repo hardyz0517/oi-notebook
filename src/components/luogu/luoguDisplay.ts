@@ -175,6 +175,13 @@ export function getLuoguCandidateDisplayState({
   return { label: "可导入", detail: "符合当前规则，可选择生成预览", tone: "success", output: "生成预览后确定" };
 }
 
+export function formatLuoguCandidateSuggestionTitle(displayState: LuoguCandidateDisplayState): string {
+  return [
+    displayState.detail,
+    displayState.output !== "—" ? displayState.output : "",
+  ].filter(Boolean).join(" 路 ");
+}
+
 export function getLuoguPreviewStatusLabel({
   prepared,
   prepareError,
