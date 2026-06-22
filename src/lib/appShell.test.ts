@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EDITOR_VIEW_MODE_OPTIONS,
   MARKDOWN_CAPABILITIES,
   getActiveActivityItem,
   getActivityButtonClassName,
@@ -75,6 +76,14 @@ describe("appShell", () => {
       "代码高亮与行号",
       "表格与合并单元格",
       "引用块与常用排版组件",
+    ]);
+  });
+
+  it("keeps editor view mode options stable", () => {
+    expect(EDITOR_VIEW_MODE_OPTIONS).toEqual([
+      { id: "split", label: "双栏" },
+      { id: "editor", label: "仅编辑" },
+      { id: "preview", label: "仅预览" },
     ]);
   });
 

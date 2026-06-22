@@ -1,6 +1,13 @@
 import type { SettingsCategory, SettingsSection } from "@/components/settings/settingsTypes";
 
 export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
+export type EditorViewMode = "split" | "editor" | "preview";
+
+export const EDITOR_VIEW_MODE_OPTIONS: Array<{ id: EditorViewMode; label: string }> = [
+  { id: "split", label: "双栏" },
+  { id: "editor", label: "仅编辑" },
+  { id: "preview", label: "仅预览" },
+];
 
 export const MARKDOWN_CAPABILITIES = [
   "数学公式",
