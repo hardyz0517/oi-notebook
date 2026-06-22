@@ -51,9 +51,9 @@ import {
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
+  buildTagMapBranchView,
   buildTagMapView,
   buildCollectionOverviewView,
-  collectTagChips,
   isTagDiagnosticsEnabled,
   type TagChipItem,
 } from "./blogViewModel";
@@ -592,7 +592,7 @@ function TagMap({
   );
 }
 
-function TagMapBranch({ node, chips = node.children.flatMap(collectTagChips) }: { node: TagTreeNode; chips?: TagChipItem[] }) {
+function TagMapBranch({ node, chips = buildTagMapBranchView(node).chips }: { node: TagTreeNode; chips?: TagChipItem[] }) {
   return (
     <section className="tag-map-branch">
       <a className="tag-map-branch-title" href={getTagHref(node.fullPath)}>

@@ -515,6 +515,13 @@ export function collectRelatedTagChips(node: TagTreeNode): TagChipItem[] {
   });
 }
 
+export function buildTagMapBranchView(node: TagTreeNode): TagMapBranchView {
+  return {
+    node,
+    chips: node.children.flatMap(collectTagChips),
+  };
+}
+
 export function normalizeTagSearchText(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
 }
@@ -559,12 +566,14 @@ export function buildVisibleTagMapGroups(tagTree: TagTreeNode[], query: string):
         .filter((item) => matchesTagChipSearch(item, trimmedQuery));
       const branches = group.children
         .filter((child) => child.children.length > 0)
-        .map((child) => ({
-          node: child,
-          chips: child.children
-            .flatMap(collectTagChips)
-            .filter((item) => matchesTagChipSearch(item, trimmedQuery)),
-        }))
+        .map((child) => {
+          const branch = buildTagMapBranchView(child);
+
+          return {
+            ...branch,
+            chips: branch.chips.filter((item) => matchesTagChipSearch(item, trimmedQuery)),
+          };
+        })
         .filter((branch) => branch.chips.length > 0);
 
       return { group, directChips, branches };

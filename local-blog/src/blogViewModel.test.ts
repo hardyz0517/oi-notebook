@@ -23,6 +23,7 @@ import {
   buildTagDiagnostics,
   buildTagDetailRouteView,
   buildTagDetailHeaderView,
+  buildTagMapBranchView,
   buildTagMapView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
@@ -259,6 +260,46 @@ describe("blogViewModel", () => {
       },
     ]);
     expect(buildVisibleTagMapGroups(tree, "不存在")).toEqual([]);
+  });
+
+  it("builds tag map branch view data from child chips", () => {
+    const branch = tagNode({
+      name: "图论",
+      fullPath: "算法/图论",
+      depth: 2,
+      count: 4,
+      children: [
+        tagNode({
+          name: "最短路",
+          fullPath: "算法/图论/最短路",
+          depth: 3,
+          count: 3,
+          children: [
+            tagNode({
+              name: "Dijkstra",
+              fullPath: "算法/图论/最短路/Dijkstra",
+              depth: 4,
+              count: 1,
+            }),
+          ],
+        }),
+        tagNode({
+          name: "网络流",
+          fullPath: "算法/图论/网络流",
+          depth: 3,
+          count: 1,
+        }),
+      ],
+    });
+
+    expect(buildTagMapBranchView(branch)).toEqual({
+      node: branch,
+      chips: [
+        { label: "最短路", fullPath: "算法/图论/最短路", count: 3 },
+        { label: "最短路 / Dijkstra", fullPath: "算法/图论/最短路/Dijkstra", count: 1 },
+        { label: "网络流", fullPath: "算法/图论/网络流", count: 1 },
+      ],
+    });
   });
 
   it("builds tag map route state from tag tree loading and search state", () => {
