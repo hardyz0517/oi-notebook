@@ -2044,6 +2044,45 @@ mod tests {
         }
     }
 
+    fn indexed_chunk(text: &str, heading_path: Vec<String>, is_code: bool) -> IndexedChunk {
+        IndexedChunk {
+            chunk_id: "chunk-test".to_string(),
+            chunk_index: 0,
+            heading_path,
+            text_preview: truncate_chars(text, 80),
+            searchable_text: text.to_string(),
+            text: text.to_string(),
+            normalized_text: normalize_text_for_search(text),
+            line_start: 1,
+            line_end: text.lines().count().max(1),
+            is_code,
+            detected_problem_ids: detect_problem_ids(text),
+            detected_algorithm_terms: detect_algorithm_terms(&normalize_text_for_search(text)),
+        }
+    }
+
+    fn indexed_note(
+        relative_path: &str,
+        title: &str,
+        tags: Vec<String>,
+        chunks: Vec<IndexedChunk>,
+    ) -> IndexedNote {
+        IndexedNote {
+            relative_path: relative_path.to_string(),
+            modified_secs: 1,
+            size: 128,
+            title: title.to_string(),
+            tags,
+            summary: "focused local search fixture".to_string(),
+            frontmatter_text: String::new(),
+            headings: chunks
+                .iter()
+                .flat_map(|chunk| chunk.heading_path.iter().cloned())
+                .collect(),
+            chunks,
+        }
+    }
+
     #[test]
     fn normalizes_safe_relative_note_paths() {
         assert_eq!(
@@ -2054,6 +2093,16 @@ mod tests {
         assert_eq!(normalize_relative_note_path("/absolute.md"), None);
         assert_eq!(normalize_relative_note_path("tricks/../secret.md"), None);
         assert_eq!(normalize_relative_note_path("bad\0path.md"), None);
+    }
+
+    #[test]
+    fn skips_hidden_and_generated_search_entries() {
+        assert!(!should_visit_entry(Path::new(".git")));
+        assert!(!should_visit_entry(Path::new("node_modules")));
+        assert!(!should_visit_entry(Path::new("target")));
+        assert!(!should_visit_entry(Path::new(".hidden-note.md")));
+        assert!(should_visit_entry(Path::new("tricks")));
+        assert!(should_visit_entry(Path::new("graph.md")));
     }
 
     #[test]
@@ -2106,6 +2155,56 @@ mod tests {
     }
 
     #[test]
+    fn ascii_terms_require_word_boundaries() {
+        let text = normalize_text_for_search("classic dp keeps LCA and BIT separate");
+
+        assert!(term_matches(&text, "lca"));
+        assert!(term_matches(&text, "bit"));
+        assert_eq!(term_match_count(&text, "lca"), 1);
+        assert!(!term_matches(&text, "ass"));
+        assert!(!term_matches(&text, "it"));
+    }
+
+    #[test]
+    fn scores_problem_id_title_tags_and_current_note_boosts() {
+        let terms = build_search_terms(&LocalNoteSearchInput {
+            query: "P3379 LCA 倍增".to_string(),
+            problem_id: Some("P3379".to_string()),
+            problem_title: Some("最近公共祖先".to_string()),
+            algorithm_keywords: vec!["LCA".to_string()],
+            current_note_path: Some("tricks/graph/lca.md".to_string()),
+            max_results: None,
+            max_chars_per_result: None,
+        });
+        let chunk = indexed_chunk(
+            "P3379 最近公共祖先倍增实现，注意 depth 初始化和 fa 数组边界。",
+            vec!["图论".to_string(), "LCA".to_string()],
+            false,
+        );
+        let note = indexed_note(
+            "tricks/graph/lca.md",
+            "P3379 LCA 倍增复盘",
+            vec!["图论".to_string(), "LCA".to_string()],
+            vec![chunk],
+        );
+
+        let scored = score_note_chunks(note, true, &terms);
+
+        assert_eq!(scored.len(), 1);
+        assert!(scored[0].score >= MIN_RESULT_SCORE);
+        assert!(scored[0].is_current_note);
+        assert!(scored[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("problem id matched P3379")));
+        assert!(scored[0]
+            .reasons
+            .iter()
+            .any(|reason| reason == "current note boost"));
+        assert!(scored[0].matched_terms.iter().any(|term| term == "P3379"));
+    }
+
+    #[test]
     fn splits_markdown_chunks_with_heading_context() {
         let chunks = split_markdown_chunks(
             "tricks/graph/lca.md",
@@ -2124,5 +2223,20 @@ mod tests {
         assert!(chunks
             .iter()
             .any(|chunk| chunk.heading_path == vec!["图论", "最近公共祖先"]));
+    }
+
+    #[test]
+    fn prepares_snippet_with_code_limit_and_ellipsis() {
+        let long_code = (0..80)
+            .map(|index| format!("int value_{index} = {index};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let snippet =
+            prepare_snippet_block(&format!("before\n```cpp\n{long_code}\n```\nafter"), 180);
+
+        assert!(snippet.contains("before"));
+        assert!(snippet.contains("```cpp"));
+        assert!(snippet.contains("[code block truncated]") || snippet.ends_with("..."));
+        assert!(snippet.chars().count() <= 183);
     }
 }
