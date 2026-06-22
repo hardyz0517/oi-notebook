@@ -6,6 +6,7 @@ mod frontmatter;
 mod git;
 mod local_search;
 mod luogu;
+mod luogu_reader;
 mod notes;
 mod paths;
 mod prompts;
