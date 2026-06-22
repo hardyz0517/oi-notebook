@@ -1045,13 +1045,30 @@ describe("blogViewModel", () => {
     });
   });
 
-  it("keeps local-blog App from importing lower-level list and pagination helpers directly", () => {
+  it("keeps local-blog App imports from blogContent limited to loading and normalization boundaries", () => {
     const appSource = readFileSync(localBlogAppSourcePath, "utf8");
+    const blogContentImportEnd = appSource.indexOf('} from "./blogContent";');
+    const blogContentImportStart = appSource.lastIndexOf("import {", blogContentImportEnd);
+    const blogContentImportBody = appSource.slice(blogContentImportStart + "import {".length, blogContentImportEnd);
 
-    expect(appSource).not.toContain("getCategoryCounts as getBlogCategoryCounts");
-    expect(appSource).not.toContain("getShortNoteExcerpt as getBlogShortNoteExcerpt");
-    expect(appSource).not.toContain("getTagCounts as getBlogTagCounts");
-    expect(appSource).not.toContain("paginateNotes as paginateBlogNotes");
+    expect(blogContentImportEnd).toBeGreaterThan(-1);
+    expect(blogContentImportStart).toBeGreaterThan(-1);
+    expect(blogContentImportBody
+      .split("\n")
+      .map((line) => line.trim().replace(/,$/, ""))
+      .filter(Boolean)).toEqual([
+        "buildCollections as buildBlogCollections",
+        "defaultBlogConfig as blogDefaultConfig",
+        "normalizeBlogConfig as normalizeBlogConfigDraft",
+        "normalizeNoteDetail as normalizeBlogNoteDetail",
+        "normalizeNoteSummary as normalizeBlogNoteSummary",
+        "type BlogConfig",
+        "type CollectionGroup",
+        "type NoteDetail",
+        "type NoteSummary",
+        "type RawNoteDetail",
+        "type RawNoteSummary",
+      ]);
   });
 
   it("builds article toc item classes", () => {

@@ -22,7 +22,6 @@ import {
   normalizeNoteSummary as normalizeBlogNoteSummary,
   type BlogConfig,
   type CollectionGroup,
-  type CountItem,
   type NoteDetail,
   type NoteSummary,
   type RawNoteDetail,
@@ -597,23 +596,6 @@ function TagMapBranch({ node, chips = buildTagMapBranchView(node).chips }: { nod
         </div>
       ) : null}
     </section>
-  );
-}
-
-function TagCloud({ tags }: { tags: CountItem[] }) {
-  if (tags.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="term-list" aria-label={"\u6807\u7b7e\u5217\u8868"}>
-      {tags.map((tag) => (
-        <a className="term-pill" href={getTagHref(tag.name)} key={tag.name}>
-          <span>{tag.name}</span>
-          <small>{tag.count}</small>
-        </a>
-      ))}
-    </div>
   );
 }
 
