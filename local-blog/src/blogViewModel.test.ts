@@ -32,6 +32,8 @@ import {
   chooseActiveArticleTocHeadingId,
   collectRelatedTagChips,
   collectTagChips,
+  getBrowserTagDiagnosticsEnvironment,
+  isBrowserTagDiagnosticsEnabled,
   getPaginationItems,
   getTagChipLabel,
   isTagDiagnosticsEnabled,
@@ -1071,6 +1073,16 @@ describe("blogViewModel", () => {
       ]);
   });
 
+  it("keeps App wired to the browser diagnostics environment helper", () => {
+    const appSource = readFileSync(localBlogAppSourcePath, "utf8");
+
+    expect(appSource).toContain("isBrowserTagDiagnosticsEnabled");
+    expect(appSource).not.toContain("getBrowserTagDiagnosticsEnvironment");
+    expect(appSource).not.toContain("isTagDiagnosticsEnabled");
+    expect(appSource).not.toContain('routeDebugTag: params.get("debugTags")');
+    expect(appSource).not.toContain('searchDebugTag: searchParams.get("debugTags")');
+  });
+
   it("builds article toc item classes", () => {
     expect(buildArticleTocView({
       items: [
@@ -1348,6 +1360,53 @@ describe("blogViewModel", () => {
       routeDebugTag: "0",
       searchDebugTag: null,
       localStorageDebugTag: null,
+    })).toBe(false);
+  });
+
+  it("builds tag diagnostics environment from browser state strings", () => {
+    expect(getBrowserTagDiagnosticsEnvironment({
+      hash: "#/tags?debugTags=1",
+      search: "?debugTags=0",
+      localStorageDebugTag: "0",
+      isDev: false,
+    })).toEqual({
+      isDev: false,
+      routeDebugTag: "1",
+      searchDebugTag: "0",
+      localStorageDebugTag: "0",
+    });
+
+    expect(getBrowserTagDiagnosticsEnvironment({
+      hash: "#/tags",
+      search: "?debugTags=1",
+      localStorageDebugTag: null,
+      isDev: true,
+    })).toEqual({
+      isDev: true,
+      routeDebugTag: null,
+      searchDebugTag: "1",
+      localStorageDebugTag: null,
+    });
+  });
+
+  it("derives browser tag diagnostics enablement from browser state strings", () => {
+    expect(isBrowserTagDiagnosticsEnabled({
+      hash: "#/tags?debugTags=1",
+      search: "",
+      localStorageDebugTag: null,
+      isDev: false,
+    })).toBe(true);
+    expect(isBrowserTagDiagnosticsEnabled({
+      hash: "#/tags",
+      search: "?debugTags=1",
+      localStorageDebugTag: null,
+      isDev: false,
+    })).toBe(true);
+    expect(isBrowserTagDiagnosticsEnabled({
+      hash: "#/tags",
+      search: "",
+      localStorageDebugTag: "0",
+      isDev: false,
     })).toBe(false);
   });
 

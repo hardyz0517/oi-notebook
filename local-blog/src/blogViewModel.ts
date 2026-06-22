@@ -73,6 +73,13 @@ export type TagDiagnosticsEnvironment = {
   localStorageDebugTag?: string | null;
 };
 
+export type BrowserTagDiagnosticsEnvironmentInput = {
+  hash: string;
+  search: string;
+  localStorageDebugTag: string | null;
+  isDev: boolean;
+};
+
 export type TagDiagnosticRawRow = {
   title: string;
   path: string;
@@ -1038,6 +1045,23 @@ export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) 
     environment.searchDebugTag === "1" ||
     environment.localStorageDebugTag === "1"
   );
+}
+
+export function getBrowserTagDiagnosticsEnvironment(input: BrowserTagDiagnosticsEnvironmentInput): TagDiagnosticsEnvironment {
+  const hashQuery = input.hash.includes("?") ? input.hash.slice(input.hash.indexOf("?")) : "";
+  const hashParams = new URLSearchParams(hashQuery);
+  const searchParams = new URLSearchParams(input.search);
+
+  return {
+    isDev: input.isDev,
+    routeDebugTag: hashParams.get("debugTags"),
+    searchDebugTag: searchParams.get("debugTags"),
+    localStorageDebugTag: input.localStorageDebugTag,
+  };
+}
+
+export function isBrowserTagDiagnosticsEnabled(input: BrowserTagDiagnosticsEnvironmentInput): boolean {
+  return isTagDiagnosticsEnabled(getBrowserTagDiagnosticsEnvironment(input));
 }
 
 export function buildTagDiagnostics(

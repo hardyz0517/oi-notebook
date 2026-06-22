@@ -4,7 +4,6 @@ import { extractMarkdownHeadings, MarkdownRenderer, type MarkdownHeading } from 
 import {
   getArticlesHref,
   getCollectionHref,
-  getHashParams,
   getHomeHref,
   getNoteReturnTargetFromHash,
   getRouteFromHash,
@@ -50,7 +49,7 @@ import {
   buildTagMapView,
   buildCollectionOverviewView,
   chooseActiveArticleTocHeadingId,
-  isTagDiagnosticsEnabled,
+  isBrowserTagDiagnosticsEnabled,
   type TagChipItem,
 } from "./blogViewModel";
 import {
@@ -71,13 +70,11 @@ function getNoteReturnTarget(): ReturnTarget {
 }
 
 function isDebugTagsEnabled() {
-  const params = getHashParams(window.location.hash);
-  const searchParams = new URLSearchParams(window.location.search);
   const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
-  return isTagDiagnosticsEnabled({
+  return isBrowserTagDiagnosticsEnabled({
+    hash: window.location.hash,
+    search: window.location.search,
     isDev: viteEnv?.DEV === true,
-    routeDebugTag: params.get("debugTags"),
-    searchDebugTag: searchParams.get("debugTags"),
     localStorageDebugTag: window.localStorage.getItem("local-blog.debugTags"),
   });
 }
