@@ -463,6 +463,14 @@ export type NoteDetailRouteViewInput = {
   sourceHref: string;
 };
 
+export type NoteDetailPageState = "loading" | "error" | "ready";
+
+export type NoteDetailPageStateInput = {
+  isLoading: boolean;
+  error: string | null;
+  note: NoteDetail | null;
+};
+
 export type SiteNavName = "home" | "articles" | "tags" | "collections" | "search";
 
 export type SiteNavLinkView = {
@@ -990,6 +998,18 @@ export function buildNoteDetailRouteView(input: NoteDetailRouteViewInput): NoteD
     nextNote: header.nextNote,
     hasNavigation: header.hasNavigation,
   };
+}
+
+export function buildNoteDetailPageState(input: NoteDetailPageStateInput): NoteDetailPageState {
+  if (input.isLoading) {
+    return "loading";
+  }
+
+  if (input.error || !input.note) {
+    return "error";
+  }
+
+  return "ready";
 }
 
 export function buildSiteNavView(route: SiteNavViewInput): SiteNavView {

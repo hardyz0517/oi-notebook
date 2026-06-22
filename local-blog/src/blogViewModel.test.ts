@@ -13,6 +13,7 @@ import {
   buildCollectionEntryListView,
   buildNoteDetailRouteView,
   buildNoteDetailHeaderView,
+  buildNoteDetailPageState,
   buildNoteNavigationItemView,
   buildSiteNavView,
   buildArticleTocView,
@@ -1021,6 +1022,29 @@ describe("blogViewModel", () => {
     });
   });
 
+  it("builds note detail page state from loading, error, and loaded note", () => {
+    const note = {
+      relativePath: "posts/current.md",
+      category: "inbox",
+      collection: "技术",
+      collections: ["技术"],
+      title: "当前",
+      tags: [],
+      created: null,
+      updated: null,
+      date: null,
+      draft: false,
+      summary: null,
+      metadata: {},
+      body: "# 当前",
+    };
+
+    expect(buildNoteDetailPageState({ isLoading: true, error: null, note: null })).toBe("loading");
+    expect(buildNoteDetailPageState({ isLoading: false, error: "failed", note })).toBe("error");
+    expect(buildNoteDetailPageState({ isLoading: false, error: null, note: null })).toBe("error");
+    expect(buildNoteDetailPageState({ isLoading: false, error: null, note })).toBe("ready");
+  });
+
   it("builds site nav active state and ready-to-render links", () => {
     expect(buildSiteNavView({ name: "home", page: 1 })).toEqual({
       activeName: "home",
@@ -1081,6 +1105,13 @@ describe("blogViewModel", () => {
     expect(appSource).not.toContain("isTagDiagnosticsEnabled");
     expect(appSource).not.toContain('routeDebugTag: params.get("debugTags")');
     expect(appSource).not.toContain('searchDebugTag: searchParams.get("debugTags")');
+  });
+
+  it("keeps App wired to centralized note detail page state", () => {
+    const appSource = readFileSync(localBlogAppSourcePath, "utf8");
+
+    expect(appSource).toContain("buildNoteDetailPageState");
+    expect(appSource).not.toContain("if (error || !note)");
   });
 
   it("builds article toc item classes", () => {

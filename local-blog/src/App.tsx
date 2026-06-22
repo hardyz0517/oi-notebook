@@ -35,6 +35,7 @@ import {
   buildCollectionEntryListView,
   buildArticleTocView,
   buildHomeRouteView,
+  buildNoteDetailPageState,
   buildNoteDetailRouteView,
   buildNoteNavigationCardView,
   buildPaginationView,
@@ -1178,8 +1179,9 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
     heading.scrollIntoView({ block: "start", behavior: "smooth" });
     setActiveHeadingId(id);
   };
+  const pageState = buildNoteDetailPageState({ isLoading, error, note });
 
-  if (isLoading) {
+  if (pageState === "loading") {
     return (
       <article className="note-page">
         <a className="back-link" href={returnTarget.href}>
@@ -1190,7 +1192,7 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
     );
   }
 
-  if (error || !note) {
+  if (pageState === "error") {
     return (
       <article className="note-page">
         <a className="back-link" href={returnTarget.href}>
