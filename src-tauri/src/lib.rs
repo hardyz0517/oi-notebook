@@ -1,4 +1,5 @@
 mod ai;
+mod blog_content;
 mod blog_service;
 mod blog_server;
 mod frontmatter;
