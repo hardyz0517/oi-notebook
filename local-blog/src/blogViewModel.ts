@@ -336,6 +336,12 @@ export type ArticleArchiveRouteViewInput = {
   error?: string | null;
 };
 
+export type ArticleArchiveScrollInput = {
+  targetYear: string | null;
+  isLoading: boolean;
+  error: string | null;
+};
+
 export type HomeRouteView = {
   latestNote: RecentUpdateView | null;
   paged: {
@@ -874,6 +880,10 @@ export function buildArticleArchiveRouteView(input: ArticleArchiveRouteViewInput
     isEmpty,
     entriesState,
   };
+}
+
+export function shouldScrollArticleArchiveToYear(input: ArticleArchiveScrollInput): boolean {
+  return Boolean(input.targetYear && !input.isLoading && !input.error);
 }
 
 export function buildHomeRouteView(input: HomeRouteViewInput): HomeRouteView {

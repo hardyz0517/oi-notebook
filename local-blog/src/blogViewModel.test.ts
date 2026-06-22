@@ -7,6 +7,7 @@ import {
   buildArchiveIndexView,
   buildArchiveListView,
   buildArticleArchiveRouteView,
+  shouldScrollArticleArchiveToYear,
   buildHomeRouteView,
   buildCollectionDetailHeaderView,
   buildCollectionDetailRouteView,
@@ -1114,6 +1115,13 @@ describe("blogViewModel", () => {
     expect(appSource).not.toContain("if (error || !note)");
   });
 
+  it("keeps App wired to centralized article archive scroll state", () => {
+    const appSource = readFileSync(localBlogAppSourcePath, "utf8");
+
+    expect(appSource).toContain("shouldScrollArticleArchiveToYear");
+    expect(appSource).not.toContain("!targetYear || isLoading || error");
+  });
+
   it("builds article toc item classes", () => {
     expect(buildArticleTocView({
       items: [
@@ -1339,6 +1347,13 @@ describe("blogViewModel", () => {
       isLoading: false,
       error: null,
     }).entriesState).toBe("empty");
+  });
+
+  it("decides when the article archive should scroll to a target year", () => {
+    expect(shouldScrollArticleArchiveToYear({ targetYear: "2026", isLoading: false, error: null })).toBe(true);
+    expect(shouldScrollArticleArchiveToYear({ targetYear: null, isLoading: false, error: null })).toBe(false);
+    expect(shouldScrollArticleArchiveToYear({ targetYear: "2026", isLoading: true, error: null })).toBe(false);
+    expect(shouldScrollArticleArchiveToYear({ targetYear: "2026", isLoading: false, error: "failed" })).toBe(false);
   });
 
   it("builds home route data", () => {

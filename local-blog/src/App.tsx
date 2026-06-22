@@ -51,6 +51,7 @@ import {
   buildCollectionOverviewView,
   chooseActiveArticleTocHeadingId,
   isBrowserTagDiagnosticsEnabled,
+  shouldScrollArticleArchiveToYear,
   type TagChipItem,
 } from "./blogViewModel";
 import {
@@ -708,7 +709,7 @@ function ArticleArchiveView({
   });
 
   useEffect(() => {
-    if (!targetYear || isLoading || error) {
+    if (!shouldScrollArticleArchiveToYear({ targetYear, isLoading, error })) {
       return;
     }
 
