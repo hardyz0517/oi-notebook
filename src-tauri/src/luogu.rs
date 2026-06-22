@@ -1162,6 +1162,18 @@ fn safe_title_for_filename(title: &str, fallback: &str) -> String {
     }
 }
 
+fn ai_luogu_note_relative_path(problem_id: &str, title: &str) -> Result<String, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    let safe_title = safe_title_for_filename(title.trim(), &problem_id);
+    Ok(format!("luogu/{problem_id}-{safe_title}.md"))
+}
+
+fn raw_luogu_note_relative_path(problem_id: &str, title: &str) -> Result<String, String> {
+    let problem_id = normalize_problem_id(problem_id)?;
+    let safe_title = safe_title_for_filename(title.trim(), "raw-draft");
+    Ok(format!("luogu/{problem_id}-{safe_title}.md"))
+}
+
 fn extract_oinb_insight(source_code: &str) -> Result<String, String> {
     let marker = "/* @oinb-insight";
     let start = source_code.find(marker).ok_or_else(|| {
@@ -1488,8 +1500,7 @@ fn build_ai_prepared_luogu_note(
     ai_model: &str,
 ) -> Result<PreparedLuoguNote, String> {
     let problem_id = normalize_problem_id(problem_id)?;
-    let safe_title = safe_title_for_filename(insight.title.trim(), &problem_id);
-    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let relative_path = ai_luogu_note_relative_path(&problem_id, &insight.title)?;
     let markdown = build_ai_note_markdown(&problem_id, problem_title, submission_id, insight, ai_model);
     let (final_content, warning) = frontmatter::process_for_write(&markdown, &relative_path);
     if let Some(warning) = warning {
@@ -1515,8 +1526,7 @@ fn write_ai_luogu_note_to_notes_dir(
     insight: &OrganizedLuoguInsight,
     ai_model: &str,
 ) -> Result<ImportLuoguInsightResult, String> {
-    let safe_title = safe_title_for_filename(insight.title.trim(), problem_id);
-    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let relative_path = ai_luogu_note_relative_path(problem_id, &insight.title)?;
     let target_path = notes_dir.join(&relative_path);
 
     if let Some(parent) = target_path.parent() {
@@ -1608,8 +1618,7 @@ fn build_raw_prepared_luogu_note(
     fallback_reason: &str,
 ) -> Result<PreparedLuoguNote, String> {
     let problem_id = normalize_problem_id(problem_id)?;
-    let safe_title = safe_title_for_filename(problem_title.trim(), "raw-draft");
-    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let relative_path = raw_luogu_note_relative_path(&problem_id, problem_title)?;
     let markdown = build_raw_luogu_draft_markdown(
         &problem_id,
         problem_title,
@@ -1644,8 +1653,7 @@ fn write_raw_luogu_draft_to_notes_dir(
     _fallback_reason: &str,
 ) -> Result<ImportLuoguInsightResult, String> {
     let problem_id = normalize_problem_id(problem_id)?;
-    let safe_title = safe_title_for_filename(problem_title.trim(), "raw-draft");
-    let relative_path = format!("luogu/{problem_id}-{safe_title}.md");
+    let relative_path = raw_luogu_note_relative_path(&problem_id, problem_title)?;
     let target_path = notes_dir.join(&relative_path);
 
     if let Some(parent) = target_path.parent() {
@@ -2865,6 +2873,18 @@ Keep one sentinel item to avoid special casing.
             "a-b-c-d"
         );
         assert_eq!(safe_title_for_filename("///", "P1000"), "P1000");
+    }
+
+    #[test]
+    fn builds_luogu_note_relative_paths_with_normalized_problem_ids() {
+        assert_eq!(
+            ai_luogu_note_relative_path("1234", "  a <b>: c / d  ").unwrap(),
+            "luogu/P1234-a-b-c-d.md"
+        );
+        assert_eq!(
+            raw_luogu_note_relative_path("p1000", "///").unwrap(),
+            "luogu/P1000-raw-draft.md"
+        );
     }
 
     #[test]
