@@ -218,6 +218,56 @@ export function createMergeEditorStateSnapshot(state: MergeEditorState): MergeEd
   };
 }
 
+export function createNodeSelectionStateSnapshot(state: TagManagerNodeSelectionState): TagManagerNodeSelectionState {
+  return {
+    activeRoot: state.activeRoot,
+    selectedGroupOrderKey: state.selectedGroupOrderKey,
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagCreateDraft: state.customTagCreateDraft,
+    customTagCreateError: state.customTagCreateError,
+  };
+}
+
+export function createCustomTagEditorStateSnapshot(state: CustomTagEditorState): CustomTagEditorState {
+  return {
+    createDraft: state.createDraft,
+    createError: state.createError,
+    editDraft: state.editDraft,
+    editError: state.editError,
+  };
+}
+
+export function createCustomTagCreateSelectionStateSnapshot(state: CustomTagCreateSelectionState): CustomTagCreateSelectionState {
+  return {
+    activeRoot: state.activeRoot,
+    expandedGroups: state.expandedGroups,
+    filterMode: state.filterMode,
+    selectedGroupOrderKey: state.selectedGroupOrderKey,
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagCreateDraft: state.customTagCreateDraft,
+    customTagCreateError: state.customTagCreateError,
+  };
+}
+
+export function createCustomTagEditSelectionStateSnapshot(state: CustomTagEditSelectionState): CustomTagEditSelectionState {
+  return {
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagEditDraft: state.customTagEditDraft,
+    customTagEditError: state.customTagEditError,
+  };
+}
+
+export function createSelectionChangeTransientStateSnapshot(state: TagManagerSelectionChangeTransientState): TagManagerSelectionChangeTransientState {
+  return {
+    aliasInput: state.aliasInput,
+    aliasError: state.aliasError,
+    customTagCreateError: state.customTagCreateError,
+    customTagEditDraft: state.customTagEditDraft,
+    customTagEditError: state.customTagEditError,
+    mergeEditor: createMergeEditorStateSnapshot(state.mergeEditor),
+  };
+}
+
 export function createCollectionEditStateSnapshot(state: CollectionEditState): CollectionEditState {
   return {
     editingName: state.editingName,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, VISIBILITY_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCollectionEditStateSnapshot, createCollectionPanelStateSnapshot, createCustomTagCreateSelectionPlan, createCustomTagEntry, createMergeEditorStateSnapshot, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagDeleteConfirmOptions, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getTagVisibilitySavePlan, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, VISIBILITY_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCollectionEditStateSnapshot, createCollectionPanelStateSnapshot, createCustomTagCreateSelectionPlan, createCustomTagCreateSelectionStateSnapshot, createCustomTagEditSelectionStateSnapshot, createCustomTagEditorStateSnapshot, createCustomTagEntry, createMergeEditorStateSnapshot, createNodeSelectionStateSnapshot, createSelectionChangeTransientStateSnapshot, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagDeleteConfirmOptions, getCustomTagEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getTagVisibilitySavePlan, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -545,6 +545,17 @@ describe("tagManagerConfig collection edit state", () => {
 });
 
 describe("tagManagerConfig workspace state snapshots", () => {
+  const createDraft: CustomTagCreateDraft = {
+    parentPathText: "Algorithms / Graph",
+    parentLocked: true,
+    name: "Shortest Path",
+    aliasesText: "spfa",
+  };
+  const editDraft = {
+    name: "Shortest Path",
+    aliasesText: "dijkstra",
+  };
+
   it("creates merge editor state snapshots from workspace source state", () => {
     expect(createMergeEditorStateSnapshot({
       isOpen: true,
@@ -584,6 +595,96 @@ describe("tagManagerConfig workspace state snapshots", () => {
       createInput: "New Collection",
       createError: "old create error",
       editError: "old edit error",
+    });
+  });
+
+  it("creates node selection state snapshots from workspace source state", () => {
+    expect(createNodeSelectionStateSnapshot({
+      activeRoot: "Algorithms",
+      selectedGroupOrderKey: "algorithm.group.graph",
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagCreateDraft: createDraft,
+      customTagCreateError: "old create error",
+    })).toEqual({
+      activeRoot: "Algorithms",
+      selectedGroupOrderKey: "algorithm.group.graph",
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagCreateDraft: createDraft,
+      customTagCreateError: "old create error",
+    });
+  });
+
+  it("creates custom tag editor state snapshots from workspace source state", () => {
+    expect(createCustomTagEditorStateSnapshot({
+      createDraft,
+      createError: "old create error",
+      editDraft,
+      editError: "old edit error",
+    })).toEqual({
+      createDraft,
+      createError: "old create error",
+      editDraft,
+      editError: "old edit error",
+    });
+  });
+
+  it("creates custom tag create selection state snapshots from workspace source state", () => {
+    expect(createCustomTagCreateSelectionStateSnapshot({
+      activeRoot: "Algorithms",
+      expandedGroups: { "algorithm.group.graph": true },
+      filterMode: "user",
+      selectedGroupOrderKey: "algorithm.group.graph",
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagCreateDraft: createDraft,
+      customTagCreateError: "old create error",
+    })).toEqual({
+      activeRoot: "Algorithms",
+      expandedGroups: { "algorithm.group.graph": true },
+      filterMode: "user",
+      selectedGroupOrderKey: "algorithm.group.graph",
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagCreateDraft: createDraft,
+      customTagCreateError: "old create error",
+    });
+  });
+
+  it("creates custom tag edit selection state snapshots from workspace source state", () => {
+    expect(createCustomTagEditSelectionStateSnapshot({
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagEditDraft: editDraft,
+      customTagEditError: "old edit error",
+    })).toEqual({
+      selectedSuggestionId: "algorithm.graph.shortest-path",
+      customTagEditDraft: editDraft,
+      customTagEditError: "old edit error",
+    });
+  });
+
+  it("creates selection change transient state snapshots from workspace source state", () => {
+    expect(createSelectionChangeTransientStateSnapshot({
+      aliasInput: "spfa",
+      aliasError: "old alias error",
+      customTagCreateError: "old create error",
+      customTagEditDraft: editDraft,
+      customTagEditError: "old edit error",
+      mergeEditor: {
+        isOpen: true,
+        searchQuery: "graph",
+        selectedTargetId: "algorithm.graph.shortest-path",
+        error: "old merge error",
+      },
+    })).toEqual({
+      aliasInput: "spfa",
+      aliasError: "old alias error",
+      customTagCreateError: "old create error",
+      customTagEditDraft: editDraft,
+      customTagEditError: "old edit error",
+      mergeEditor: {
+        isOpen: true,
+        searchQuery: "graph",
+        selectedTargetId: "algorithm.graph.shortest-path",
+        error: "old merge error",
+      },
     });
   });
 });
