@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getTagSuggestionList, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 
-import { MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionCreateSaveState, getAppliedCollectionDeleteSaveState, getAppliedCollectionEditSaveState, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedCustomTagCreateDraftSelection, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getDeletedCollectionEditState, getFailedAliasSaveState, getFailedCollectionCreateSaveState, getFailedCollectionDeleteSaveState, getFailedCollectionEditSaveState, getFailedMergeSaveState, getGroupedCustomTagCreateDraftSelection, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getSearchedMergeEditorState, getSuggestionCustomTagCreateDraftSelection, getUserAliasesForSuggestion, setTagSuggestionHiddenInConfig, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 
 describe("tagManagerConfig alias rules", () => {
   const config: UserTagTaxonomyConfig = {
@@ -645,6 +645,55 @@ describe("tagManagerConfig merge save resolutions", () => {
       searchQuery: "kmp",
       selectedTargetId: "algorithm.string.z-function",
       error: MERGE_SAVE_FAILURE_MESSAGE,
+    });
+  });
+});
+
+describe("tagManagerConfig alias editor state rules", () => {
+  const state: AliasEditorState = {
+    input: "new alias",
+    error: "old alias error",
+  };
+
+  it("stores alias save failures while preserving the current input", () => {
+    expect(getFailedAliasSaveState(state, ALIAS_SAVE_FAILURE_MESSAGE)).toEqual({
+      input: "new alias",
+      error: ALIAS_SAVE_FAILURE_MESSAGE,
+    });
+  });
+});
+
+describe("tagManagerConfig alias save resolutions", () => {
+  const state: AliasEditorState = {
+    input: "new alias",
+    error: "old alias error",
+  };
+
+  it("resolves alias save success by clearing input and error", () => {
+    expect(getAliasSaveResolution(state, true, ALIAS_SAVE_FAILURE_MESSAGE)).toEqual({
+      input: "",
+      error: null,
+    });
+  });
+
+  it("resolves alias save failure by preserving input and updating error", () => {
+    expect(getAliasSaveResolution(state, false, ALIAS_SAVE_FAILURE_MESSAGE)).toEqual({
+      input: "new alias",
+      error: ALIAS_SAVE_FAILURE_MESSAGE,
+    });
+  });
+
+  it("resolves alias delete success by preserving cleared error and current input", () => {
+    expect(getAliasDeleteSaveResolution(state, true, ALIAS_SAVE_FAILURE_MESSAGE)).toEqual({
+      input: "new alias",
+      error: null,
+    });
+  });
+
+  it("resolves alias delete failure by preserving input and updating error", () => {
+    expect(getAliasDeleteSaveResolution(state, false, ALIAS_SAVE_FAILURE_MESSAGE)).toEqual({
+      input: "new alias",
+      error: ALIAS_SAVE_FAILURE_MESSAGE,
     });
   });
 });

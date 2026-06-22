@@ -10,7 +10,7 @@ import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { COLLECTION_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getAppliedCustomTagCreateSelectionState, getAppliedCustomTagEditSelectionState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, setTagSuggestionHiddenInConfig, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
 import { createOrderOverrides, getDebugGroupOrderRows, getSortEndPlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
@@ -149,6 +149,14 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
     applyCollectionPanelState(panelState);
     applyCollectionEditState(editState);
   }, [applyCollectionEditState, applyCollectionPanelState]);
+  const getCurrentAliasEditorState = useCallback((): AliasEditorState => ({
+    input: aliasInput,
+    error: aliasError,
+  }), [aliasError, aliasInput]);
+  const applyAliasEditorState = useCallback((state: AliasEditorState) => {
+    setAliasInput(state.input);
+    setAliasError(state.error);
+  }, []);
   const getCurrentMergeEditorState = useCallback((): MergeEditorState => ({
     isOpen: isMergeEditorOpen,
     searchQuery: mergeSearchQuery,
@@ -468,14 +476,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    setAliasError(null);
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原别名", "alias");
-    if (saved) {
-      setAliasInput("");
-    } else {
-      setAliasError("保存失败，已恢复原别名");
-    }
-  }, [aliasInput, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
+    applyAliasEditorState({
+      input: aliasInput,
+      error: null,
+    });
+    const saved = await saveWorkingConfig(result.config, currentConfig, ALIAS_SAVE_FAILURE_MESSAGE, "alias");
+    applyAliasEditorState(getAliasSaveResolution(
+      getCurrentAliasEditorState(),
+      saved,
+      ALIAS_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [aliasInput, applyAliasEditorState, getCurrentAliasEditorState, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
 
   const deleteUserAlias = useCallback(async (alias: string) => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -485,12 +496,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    setAliasError(null);
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原别名", "alias");
-    if (!saved) {
-      setAliasError("保存失败，已恢复原别名");
-    }
-  }, [saveWorkingConfig, selectedSuggestion, workingConfig]);
+    applyAliasEditorState({
+      input: aliasInput,
+      error: null,
+    });
+    const saved = await saveWorkingConfig(result.config, currentConfig, ALIAS_SAVE_FAILURE_MESSAGE, "alias");
+    applyAliasEditorState(getAliasDeleteSaveResolution(
+      getCurrentAliasEditorState(),
+      saved,
+      ALIAS_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [aliasInput, applyAliasEditorState, getCurrentAliasEditorState, saveWorkingConfig, selectedSuggestion, workingConfig]);
 
   const toggleGroup = useCallback((groupKey: string) => {
     setExpandedGroups((current) => ({ ...current, [groupKey]: !current[groupKey] }));

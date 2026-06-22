@@ -4,6 +4,7 @@ import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerF
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
 export const MERGE_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原合并规则";
+export const ALIAS_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原别名";
 export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
 
 export type TagTaxonomyConfigImportPreview = {
@@ -87,6 +88,11 @@ export type MergeEditorState = {
   isOpen: boolean;
   searchQuery: string;
   selectedTargetId: string | null;
+  error: string | null;
+};
+
+export type AliasEditorState = {
+  input: string;
   error: string | null;
 };
 
@@ -257,6 +263,42 @@ export function getMergeDeleteResolution(
   return saved
     ? getClosedMergeEditorState(state)
     : getFailedMergeSaveState(state, failureMessage);
+}
+
+export function getFailedAliasSaveState(
+  state: AliasEditorState,
+  error: string,
+): AliasEditorState {
+  return {
+    ...state,
+    error,
+  };
+}
+
+export function getAliasSaveResolution(
+  state: AliasEditorState,
+  saved: boolean,
+  failureMessage: string,
+): AliasEditorState {
+  return saved
+    ? {
+      input: "",
+      error: null,
+    }
+    : getFailedAliasSaveState(state, failureMessage);
+}
+
+export function getAliasDeleteSaveResolution(
+  state: AliasEditorState,
+  saved: boolean,
+  failureMessage: string,
+): AliasEditorState {
+  return saved
+    ? {
+      ...state,
+      error: null,
+    }
+    : getFailedAliasSaveState(state, failureMessage);
 }
 
 export function getOpenedCustomTagCreateState(
