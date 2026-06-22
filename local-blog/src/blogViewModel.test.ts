@@ -1015,14 +1015,30 @@ describe("blogViewModel", () => {
     });
   });
 
-  it("builds site nav active state", () => {
-    expect(buildSiteNavView({ name: "home", page: 1 })).toEqual({ activeName: "home" });
-    expect(buildSiteNavView({ name: "note", encodedPath: "posts/current.md", relativePath: "posts/current.md" })).toEqual({
-      activeName: "articles",
+  it("builds site nav active state and ready-to-render links", () => {
+    expect(buildSiteNavView({ name: "home", page: 1 })).toEqual({
+      activeName: "home",
+      links: [
+        { name: "home", href: "#/", label: "主页", className: "active" },
+        { name: "articles", href: "#/articles", label: "文章列表", className: undefined },
+        { name: "tags", href: "#/tags", label: "标签", className: undefined },
+        { name: "collections", href: "#/collections", label: "文集", className: undefined },
+      ],
+      searchLink: {
+        href: "#/search",
+        label: "搜索",
+        className: "search-link",
+      },
     });
-    expect(buildSiteNavView({ name: "tag", tag: "算法", page: 1 })).toEqual({ activeName: "tags" });
-    expect(buildSiteNavView({ name: "collection", collection: "技术", page: 1 })).toEqual({ activeName: "collections" });
-    expect(buildSiteNavView({ name: "search", query: "图论", page: 1 })).toEqual({ activeName: "search" });
+    expect(buildSiteNavView({ name: "note", encodedPath: "posts/current.md", relativePath: "posts/current.md" }).activeName).toBe("articles");
+    expect(buildSiteNavView({ name: "tag", tag: "算法", page: 1 }).activeName).toBe("tags");
+    expect(buildSiteNavView({ name: "collection", collection: "技术", page: 1 }).activeName).toBe("collections");
+    expect(buildSiteNavView({ name: "search", query: "图论", page: 1 })).toMatchObject({
+      activeName: "search",
+      searchLink: {
+        className: "search-link active",
+      },
+    });
   });
 
   it("builds article toc item classes", () => {

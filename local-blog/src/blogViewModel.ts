@@ -456,8 +456,25 @@ export type NoteDetailRouteViewInput = {
   sourceHref: string;
 };
 
+export type SiteNavName = "home" | "articles" | "tags" | "collections" | "search";
+
+export type SiteNavLinkView = {
+  name: Exclude<SiteNavName, "search">;
+  href: string;
+  label: string;
+  className: string | undefined;
+};
+
+export type SiteNavSearchLinkView = {
+  href: string;
+  label: string;
+  className: string;
+};
+
 export type SiteNavView = {
-  activeName: "home" | "articles" | "tags" | "collections" | "search";
+  activeName: SiteNavName;
+  links: SiteNavLinkView[];
+  searchLink: SiteNavSearchLinkView;
 };
 
 export type SiteNavViewInput = Route;
@@ -975,10 +992,25 @@ export function buildSiteNavView(route: SiteNavViewInput): SiteNavView {
       : route.name === "tag"
         ? "tags"
         : route.name === "collection"
-          ? "collections"
-          : route.name;
+        ? "collections"
+        : route.name;
 
-  return { activeName };
+  const links: SiteNavLinkView[] = [
+    { name: "home", href: "#/", label: "主页", className: activeName === "home" ? "active" : undefined },
+    { name: "articles", href: "#/articles", label: "文章列表", className: activeName === "articles" ? "active" : undefined },
+    { name: "tags", href: "#/tags", label: "标签", className: activeName === "tags" ? "active" : undefined },
+    { name: "collections", href: "#/collections", label: "文集", className: activeName === "collections" ? "active" : undefined },
+  ];
+
+  return {
+    activeName,
+    links,
+    searchLink: {
+      href: "#/search",
+      label: "搜索",
+      className: activeName === "search" ? "search-link active" : "search-link",
+    },
+  };
 }
 
 export function buildArticleTocView(input: ArticleTocViewInput): ArticleTocViewItem[] {

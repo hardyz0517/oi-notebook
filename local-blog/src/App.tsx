@@ -427,25 +427,18 @@ function IndexView({
 }
 
 function SiteNav({ route }: { route: Route }) {
-  const { activeName } = buildSiteNavView(route);
+  const { links, searchLink } = buildSiteNavView(route);
 
   return (
     <div className="primary-nav-row">
       <nav className="nav-links" aria-label={"\u535a\u5ba2\u5bfc\u822a"}>
-        <a className={activeName === "home" ? "active" : undefined} href="#/">
-          {"\u4e3b\u9875"}
-        </a>
-        <a className={activeName === "articles" ? "active" : undefined} href="#/articles">
-          {"\u6587\u7ae0\u5217\u8868"}
-        </a>
-        <a className={activeName === "tags" ? "active" : undefined} href="#/tags">
-          {"\u6807\u7b7e"}
-        </a>
-        <a className={activeName === "collections" ? "active" : undefined} href="#/collections">
-          {"\u6587\u96c6"}
-        </a>
+        {links.map((link) => (
+          <a key={link.name} className={link.className} href={link.href}>
+            {link.label}
+          </a>
+        ))}
       </nav>
-      <a className={activeName === "search" ? "search-link active" : "search-link"} href="#/search" aria-label={"\u641c\u7d22"} title={"\u641c\u7d22"} />
+      <a className={searchLink.className} href={searchLink.href} aria-label={searchLink.label} title={searchLink.label} />
     </div>
   );
 }
