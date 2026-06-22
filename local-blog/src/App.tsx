@@ -54,6 +54,7 @@ import {
   buildTagMapBranchView,
   buildTagMapView,
   buildCollectionOverviewView,
+  chooseActiveArticleTocHeadingId,
   isTagDiagnosticsEnabled,
   type TagChipItem,
 } from "./blogViewModel";
@@ -1179,12 +1180,14 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const visibleEntries = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const activeId = chooseActiveArticleTocHeadingId(entries.map((entry) => ({
+          id: entry.target.id,
+          isIntersecting: entry.isIntersecting,
+          top: entry.boundingClientRect.top,
+        })));
 
-        if (visibleEntries[0]?.target.id) {
-          setActiveHeadingId(visibleEntries[0].target.id);
+        if (activeId) {
+          setActiveHeadingId(activeId);
         }
       },
       {

@@ -27,6 +27,7 @@ import {
   buildTagMapView,
   buildCollectionOverviewView,
   buildVisibleTagMapGroups,
+  chooseActiveArticleTocHeadingId,
   collectRelatedTagChips,
   collectTagChips,
   getPaginationItems,
@@ -1045,6 +1046,18 @@ describe("blogViewModel", () => {
         text: "Heading 2",
       },
     ]);
+  });
+
+  it("chooses the top visible article toc heading", () => {
+    expect(chooseActiveArticleTocHeadingId([
+      { id: "second", isIntersecting: true, top: 240 },
+      { id: "first", isIntersecting: true, top: 120 },
+      { id: "hidden", isIntersecting: false, top: 1 },
+    ])).toBe("first");
+
+    expect(chooseActiveArticleTocHeadingId([
+      { id: "hidden", isIntersecting: false, top: 1 },
+    ])).toBeNull();
   });
 
   it("builds archive year sections and rows", () => {

@@ -474,6 +474,12 @@ export type ArticleTocViewInput = {
   activeId: string | null;
 };
 
+export type ArticleTocHeadingVisibility = {
+  id: string;
+  isIntersecting: boolean;
+  top: number;
+};
+
 const tagSuggestionSearchByPath = new Map(
   getTagSuggestionList().map((item) => [item.pathText, item.searchText]),
 );
@@ -983,6 +989,14 @@ export function buildArticleTocView(input: ArticleTocViewInput): ArticleTocViewI
       "article-toc-link article-toc-level-" + item.level + (input.activeId === item.id ? " article-toc-link-active" : ""),
     isActive: input.activeId === item.id,
   }));
+}
+
+export function chooseActiveArticleTocHeadingId(entries: ArticleTocHeadingVisibility[]) {
+  const visibleEntries = entries
+    .filter((entry) => entry.isIntersecting)
+    .sort((a, b) => a.top - b.top);
+
+  return visibleEntries[0]?.id ?? null;
 }
 
 export function isTagDiagnosticsEnabled(environment: TagDiagnosticsEnvironment) {
