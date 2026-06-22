@@ -12,7 +12,7 @@ import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
 import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagEditSaveResolution, getMergeDeleteResolution, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
-import { getDebugGroupOrderRows, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
+import { getDebugGroupOrderRows, getGroupOrderAfterWorkingConfigDebugPayload, getGroupOrderRenderDebugPayload, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
 import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
 import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
@@ -259,23 +259,17 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const rawGroups = getDebugGroupOrderRows(activeRootGroup.groups, workingConfig.orderOverrides);
-    const sortedGroups = getDebugGroupOrderRows(activeRootSortedGroups, workingConfig.orderOverrides);
-    const hasGroupOverride = rawGroups.some((group) => group.override !== undefined);
-
-    if (activeRootGroup.root !== "算法" && !hasGroupOverride) {
+    const payload = getGroupOrderRenderDebugPayload({
+      activeRootGroup,
+      activeRootSortedGroups,
+      sortableItems: activeRootSortableItems,
+      orderOverrides: workingConfig.orderOverrides,
+      searchQuery,
+    });
+    if (!payload) {
       return;
     }
 
-    const payload = {
-      activeRootName: activeRootGroup.root,
-      activeRootOrderKey: activeRootGroup.orderKey,
-      rawGroups,
-      activeRootSortedGroups: sortedGroups,
-      sortableItems: activeRootSortableItems,
-      workingOrderOverrideCount: Object.keys(workingConfig.orderOverrides ?? {}).length,
-      searchQueryEmpty: searchQuery.trim().length === 0,
-    };
     const debugKey = JSON.stringify(payload);
 
     if (groupRenderDebugKeyRef.current === debugKey) {
@@ -291,20 +285,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const rawGroups = getDebugGroupOrderRows(activeRootGroup.groups, workingConfig.orderOverrides);
-    const hasGroupOverride = rawGroups.some((group) => group.override !== undefined);
-
-    if (activeRootGroup.root !== "算法" && !hasGroupOverride) {
+    const payload = getGroupOrderAfterWorkingConfigDebugPayload({
+      activeRootGroup,
+      activeRootSortedGroups,
+      sortableItems: activeRootSortableItems,
+      orderOverrides: workingConfig.orderOverrides,
+    });
+    if (!payload) {
       return;
     }
 
-    const payload = {
-      activeRootName: activeRootGroup.root,
-      activeRootOrderKey: activeRootGroup.orderKey,
-      activeRootSortedGroups: getDebugGroupOrderRows(activeRootSortedGroups, workingConfig.orderOverrides),
-      sortableItems: activeRootSortableItems,
-      workingOrderOverrideCount: Object.keys(workingConfig.orderOverrides ?? {}).length,
-    };
     const debugKey = JSON.stringify(payload);
 
     if (groupAfterWorkingConfigDebugKeyRef.current === debugKey) {

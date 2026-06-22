@@ -22,6 +22,41 @@ export type TagSortSavePlan = {
   operation: SaveOperation;
 };
 
+export type DebugGroupOrderRow = {
+  name: string;
+  orderKey: string;
+  override: number | undefined;
+};
+
+export type GroupOrderRenderDebugPayload = {
+  activeRootName: string;
+  activeRootOrderKey: string;
+  rawGroups: DebugGroupOrderRow[];
+  activeRootSortedGroups: DebugGroupOrderRow[];
+  sortableItems: string[];
+  workingOrderOverrideCount: number;
+  searchQueryEmpty: boolean;
+};
+
+export type GroupOrderAfterWorkingConfigDebugPayload = {
+  activeRootName: string;
+  activeRootOrderKey: string;
+  activeRootSortedGroups: DebugGroupOrderRow[];
+  sortableItems: string[];
+  workingOrderOverrideCount: number;
+};
+
+type GroupOrderDebugPayloadInput = {
+  activeRootGroup: RootGroup;
+  activeRootSortedGroups: GroupNode[];
+  sortableItems: string[];
+  orderOverrides: Record<string, number> | undefined;
+};
+
+type GroupOrderRenderDebugPayloadInput = GroupOrderDebugPayloadInput & {
+  searchQuery: string;
+};
+
 export function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -99,10 +134,50 @@ export function sortGroupsByOrderOverrides(
 export function getDebugGroupOrderRows(
   groups: GroupNode[],
   orderOverrides: Record<string, number> | undefined,
-): Array<{ name: string; orderKey: string; override: number | undefined }> {
+): DebugGroupOrderRow[] {
   return groups.map((group) => ({
     name: group.name,
     orderKey: group.orderKey,
     override: orderOverrides?.[group.orderKey],
   }));
+}
+
+function shouldEmitGroupOrderDebugPayload(rootName: string, rawGroups: DebugGroupOrderRow[]): boolean {
+  return rootName === "算法" || rawGroups.some((group) => group.override !== undefined);
+}
+
+export function getGroupOrderRenderDebugPayload(
+  input: GroupOrderRenderDebugPayloadInput,
+): GroupOrderRenderDebugPayload | null {
+  const rawGroups = getDebugGroupOrderRows(input.activeRootGroup.groups, input.orderOverrides);
+  if (!shouldEmitGroupOrderDebugPayload(input.activeRootGroup.root, rawGroups)) {
+    return null;
+  }
+
+  return {
+    activeRootName: input.activeRootGroup.root,
+    activeRootOrderKey: input.activeRootGroup.orderKey,
+    rawGroups,
+    activeRootSortedGroups: getDebugGroupOrderRows(input.activeRootSortedGroups, input.orderOverrides),
+    sortableItems: input.sortableItems,
+    workingOrderOverrideCount: Object.keys(input.orderOverrides ?? {}).length,
+    searchQueryEmpty: input.searchQuery.trim().length === 0,
+  };
+}
+
+export function getGroupOrderAfterWorkingConfigDebugPayload(
+  input: GroupOrderDebugPayloadInput,
+): GroupOrderAfterWorkingConfigDebugPayload | null {
+  const rawGroups = getDebugGroupOrderRows(input.activeRootGroup.groups, input.orderOverrides);
+  if (!shouldEmitGroupOrderDebugPayload(input.activeRootGroup.root, rawGroups)) {
+    return null;
+  }
+
+  return {
+    activeRootName: input.activeRootGroup.root,
+    activeRootOrderKey: input.activeRootGroup.orderKey,
+    activeRootSortedGroups: getDebugGroupOrderRows(input.activeRootSortedGroups, input.orderOverrides),
+    sortableItems: input.sortableItems,
+    workingOrderOverrideCount: Object.keys(input.orderOverrides ?? {}).length,
+  };
 }
