@@ -175,6 +175,8 @@ import {
   getSaveStatusLabel,
 } from "@/lib/appStatusLabels";
 import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yieldToUi } from "@/lib/appAsync";
+import { beginColumnResizeSession } from "@/lib/columnResizeInteraction";
+import { beginFloatingPanelPointerSession } from "@/lib/floatingPanelInteraction";
 import {
   getActiveActivityItem,
   getAiActivityToggleLabel,
@@ -689,6 +691,17 @@ const SettingsSectionAnchor = ({ id, children }: { id: SettingsSection; children
   <div data-settings-section={id}>{children}</div>
 );
 
+function applyFloatingPanelRect(panel: HTMLElement | null, rect: SettingsCenterRect, includeSize: boolean): void {
+  if (!panel) return;
+  panel.style.left = `${rect.left}px`;
+  panel.style.top = `${rect.top}px`;
+  if (includeSize) {
+    panel.style.width = `${rect.width}px`;
+    panel.style.height = `${rect.height}px`;
+  }
+  panel.style.transform = "none";
+}
+
 interface LuoguScanProgress {
   currentPage: number;
   foundCount: number;
@@ -1114,7 +1127,6 @@ export default function App() {
   });
   const aiSidebarWidthRef = useRef(aiSidebarWidth);
   const aiSidebarDragWidthRef = useRef(aiSidebarWidth);
-  const aiSidebarResizeRafRef = useRef<number | null>(null);
   const [uiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
     getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
@@ -1285,7 +1297,6 @@ export default function App() {
   const beginColumnResize = useCallback((handleId: ResizeHandleId, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
 
-    event.preventDefault();
     if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
       aiSidebarResizePerfRef.current = {
         pointerDownAt: performance.now(),
@@ -1309,90 +1320,72 @@ export default function App() {
       : null;
     const editorPreviewRect = editorPreviewContainerRef.current?.getBoundingClientRect() ?? null;
 
-    setActiveResizeHandle(handleId);
-    document.body.classList.add("app-column-resizing");
-
-    if (handleId === "ai-sidebar") {
-      aiSidebarDragWidthRef.current = startAiSidebarWidth;
-    }
-
     const applyAiSidebarDragWidth = (nextWidth: number) => {
       if (!aiSidebarElement) return;
       aiSidebarElement.style.width = `${nextWidth}px`;
       aiSidebarElement.style.flexBasis = `${nextWidth}px`;
       aiSidebarElement.style.maxWidth = "100%";
     };
+    setActiveResizeHandle(handleId);
 
-    const scheduleAiSidebarDragWidth = (nextWidth: number) => {
-      aiSidebarDragWidthRef.current = nextWidth;
-      if (APP_RESIZE_PERF_DEBUG) {
-        aiSidebarResizePerfRef.current.pointerMoveCount += 1;
-        incrementNoteXAiPerfCounter("appResizePointerMove");
-      }
-      if (aiSidebarResizeRafRef.current !== null) return;
-      aiSidebarResizeRafRef.current = window.requestAnimationFrame(() => {
-        aiSidebarResizeRafRef.current = null;
-        if (APP_RESIZE_PERF_DEBUG) {
-          aiSidebarResizePerfRef.current.rafWidthUpdateCount += 1;
-          incrementNoteXAiPerfCounter("appResizeRafCommit");
+    beginColumnResizeSession({
+      event,
+      cursor: "col-resize",
+      onMove: (moveEvent) => {
+        if (handleId === "left-sidebar") {
+          setLeftSidebarWidth(
+            clampNumberRange(
+              startLeftSidebarWidth + moveEvent.clientX - startX,
+              LEFT_SIDEBAR_WIDTH_MIN,
+              LEFT_SIDEBAR_WIDTH_MAX,
+            ),
+          );
+          return;
         }
-        applyAiSidebarDragWidth(aiSidebarDragWidthRef.current);
-      });
-    };
 
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      if (handleId === "left-sidebar") {
-        setLeftSidebarWidth(
-          clampNumberRange(
-            startLeftSidebarWidth + moveEvent.clientX - startX,
-            LEFT_SIDEBAR_WIDTH_MIN,
-            LEFT_SIDEBAR_WIDTH_MAX,
-          ),
-        );
-        return;
-      }
-
-      if (handleId === "ai-sidebar") {
-        scheduleAiSidebarDragWidth(clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX));
-        return;
-      }
-
-      if (!editorPreviewRect) return;
-      const rawRatio = (moveEvent.clientX - editorPreviewRect.left) / editorPreviewRect.width;
-      setEditorPreviewRatio(clampEditorPreviewRatio(rawRatio, editorPreviewRect.width));
-    };
-
-    const stopResize = () => {
-      if (handleId === "ai-sidebar") {
-        if (aiSidebarResizeRafRef.current !== null) {
-          window.cancelAnimationFrame(aiSidebarResizeRafRef.current);
-          aiSidebarResizeRafRef.current = null;
+        if (handleId === "ai-sidebar") {
+          const nextWidth = clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX);
+          aiSidebarDragWidthRef.current = nextWidth;
+          if (APP_RESIZE_PERF_DEBUG) {
+            aiSidebarResizePerfRef.current.pointerMoveCount += 1;
+            incrementNoteXAiPerfCounter("appResizePointerMove");
+          }
+          return;
         }
-        const finalWidth = aiSidebarDragWidthRef.current;
-        applyAiSidebarDragWidth(finalWidth);
-        setAiSidebarWidth(finalWidth);
-        aiSidebarWidthRef.current = finalWidth;
-      }
-      if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
-        incrementNoteXAiPerfCounter("appResizePointerUp");
-        const summary = {
-          ...aiSidebarResizePerfRef.current,
-          pointerMoveTriggersSetAiSidebarWidth: aiSidebarResizePerfRef.current.pointerMoveSetStateCount > 0,
-          durationMs: performance.now() - aiSidebarResizePerfRef.current.pointerDownAt,
-        };
-        setNoteXAiPerfEvent("appResizeLastSummary", summary);
-        console.info("[NoteX Perf] app resize summary", summary);
-      }
-      setActiveResizeHandle(null);
-      document.body.classList.remove("app-column-resizing");
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
+        if (!editorPreviewRect) return;
+        const rawRatio = (moveEvent.clientX - editorPreviewRect.left) / editorPreviewRect.width;
+        setEditorPreviewRatio(clampEditorPreviewRatio(rawRatio, editorPreviewRect.width));
+      },
+      onAnimationFrame: handleId === "ai-sidebar"
+        ? () => {
+          if (APP_RESIZE_PERF_DEBUG) {
+            aiSidebarResizePerfRef.current.rafWidthUpdateCount += 1;
+            incrementNoteXAiPerfCounter("appResizeRafCommit");
+          }
+          applyAiSidebarDragWidth(aiSidebarDragWidthRef.current);
+        }
+        : undefined,
+      onFinish: () => {
+        if (handleId === "ai-sidebar") {
+          const finalWidth = aiSidebarDragWidthRef.current;
+          applyAiSidebarDragWidth(finalWidth);
+          setAiSidebarWidth(finalWidth);
+          aiSidebarWidthRef.current = finalWidth;
+          if (APP_RESIZE_PERF_DEBUG) {
+            incrementNoteXAiPerfCounter("appResizePointerUp");
+            const summary = {
+              ...aiSidebarResizePerfRef.current,
+              pointerMoveTriggersSetAiSidebarWidth: aiSidebarResizePerfRef.current.pointerMoveSetStateCount > 0,
+              durationMs: performance.now() - aiSidebarResizePerfRef.current.pointerDownAt,
+            };
+            setNoteXAiPerfEvent("appResizeLastSummary", summary);
+            console.info("[NoteX Perf] app resize summary", summary);
+          }
+        }
+        setActiveResizeHandle(null);
+      },
+    });
   }, [aiSidebarWidth, leftSidebarWidth]);
 
   const resetColumnSize = useCallback((handleId: ResizeHandleId) => {
@@ -2957,9 +2950,9 @@ export default function App() {
     setIsRestartingBlog(true);
     try {
       await restartBlogServer();
-      toast.success("博客已重启");
+      toast.success("本地博客服务已确认运行");
     } catch (e) {
-      toast.error(`重启博客失败: ${e}`);
+      toast.error(`确认本地博客服务失败: ${e}`);
     } finally {
       setIsRestartingBlog(false);
     }
@@ -5424,119 +5417,39 @@ export default function App() {
   };
 
   const beginSettingsCenterResize = (handle: SettingsResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampSettingsCenterRect(isSettingsCenterMaximized ? getMaximizedSettingsCenterRect() : settingsCenterRect);
     const panel = settingsCenterPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    const cursor = getSettingsCenterResizeCursor(handle);
-    let latestRect = startRect;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = cursor;
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top, width, height";
-    }
     if (isSettingsCenterMaximized) setSettingsCenterRect(startRect);
     setIsSettingsCenterMaximized(false);
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.width = `${rect.width}px`;
-      panel.style.height = `${rect.height}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      const nextRect = getResizedSettingsCenterRect(handle, startRect, moveEvent.clientX - startX, moveEvent.clientY - startY);
-      latestRect = nextRect;
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampSettingsCenterRect(latestRect);
-      latestRect = finalRect;
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setSettingsCenterRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: getSettingsCenterResizeCursor(handle),
+      panel,
+      panelWillChange: "left, top, width, height",
+      getNextRect: ({ startRect, deltaX, deltaY }) => getResizedSettingsCenterRect(handle, startRect, deltaX, deltaY),
+      getFinalRect: clampSettingsCenterRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, true),
+      onCommit: setSettingsCenterRect,
+    });
   };
 
   const beginLuoguDialogResize = (handle: SettingsResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampLuoguDialogRect(isLuoguDialogMaximized ? getMaximizedLuoguDialogRect() : luoguDialogRect);
     const panel = luoguDialogPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    const cursor = getSettingsCenterResizeCursor(handle);
-    let latestRect = startRect;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = cursor;
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top, width, height";
-    }
     if (isLuoguDialogMaximized) setLuoguDialogRect(startRect);
     setIsLuoguDialogMaximized(false);
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.width = `${rect.width}px`;
-      panel.style.height = `${rect.height}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      const nextRect = getResizedLuoguDialogRect(handle, startRect, moveEvent.clientX - startX, moveEvent.clientY - startY);
-      latestRect = nextRect;
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampLuoguDialogRect(latestRect);
-      latestRect = finalRect;
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setLuoguDialogRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: getSettingsCenterResizeCursor(handle),
+      panel,
+      panelWillChange: "left, top, width, height",
+      getNextRect: ({ startRect, deltaX, deltaY }) => getResizedLuoguDialogRect(handle, startRect, deltaX, deltaY),
+      getFinalRect: clampLuoguDialogRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, true),
+      onCommit: setLuoguDialogRect,
+    });
   };
 
   const beginSettingsCenterDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -5545,59 +5458,23 @@ export default function App() {
     if (target.closest("button, input, textarea, select, a, [role='button'], [data-no-window-drag='true']")) return;
     if (isSettingsCenterMaximized) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampSettingsCenterRect(settingsCenterRect);
     const panel = settingsCenterPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    let latestRect = startRect;
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top";
-    }
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      latestRect = clampSettingsCenterRect({
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: "grabbing",
+      panel,
+      panelWillChange: "left, top",
+      getNextRect: ({ startRect, deltaX, deltaY }) => clampSettingsCenterRect({
         ...startRect,
-        left: startRect.left + moveEvent.clientX - startX,
-        top: startRect.top + moveEvent.clientY - startY,
-      });
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampSettingsCenterRect(latestRect);
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setSettingsCenterRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+        left: startRect.left + deltaX,
+        top: startRect.top + deltaY,
+      }),
+      getFinalRect: clampSettingsCenterRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, false),
+      onCommit: setSettingsCenterRect,
+    });
   };
 
   const beginLuoguDialogDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -5606,59 +5483,23 @@ export default function App() {
     if (target.closest("button, input, textarea, select, a, [role='button'], [data-no-window-drag='true']")) return;
     if (isLuoguDialogMaximized) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampLuoguDialogRect(luoguDialogRect);
     const panel = luoguDialogPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    let latestRect = startRect;
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top";
-    }
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      latestRect = clampLuoguDialogRect({
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: "grabbing",
+      panel,
+      panelWillChange: "left, top",
+      getNextRect: ({ startRect, deltaX, deltaY }) => clampLuoguDialogRect({
         ...startRect,
-        left: startRect.left + moveEvent.clientX - startX,
-        top: startRect.top + moveEvent.clientY - startY,
-      });
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampLuoguDialogRect(latestRect);
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setLuoguDialogRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+        left: startRect.left + deltaX,
+        top: startRect.top + deltaY,
+      }),
+      getFinalRect: clampLuoguDialogRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, false),
+      onCommit: setLuoguDialogRect,
+    });
   };
 
   const handleCloseWindow = async () => {

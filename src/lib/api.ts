@@ -1220,7 +1220,7 @@ export async function deleteNoteFolder(relativePath: string): Promise<void> {
 }
 
 /**
- * 在默认浏览器中打开本地 Astro 博客。
+ * 在默认浏览器中打开本地博客。
  * 对应 Rust 命令：open_blog
  */
 export async function openBlog(): Promise<void> {
@@ -1232,7 +1232,7 @@ export async function openBlog(): Promise<void> {
 }
 
 /**
- * 重启后台 Astro dev server。
+ * 确保后台本地博客服务正在运行。
  * 对应 Rust 命令：restart_blog_server
  */
 export async function restartBlogServer(): Promise<void> {

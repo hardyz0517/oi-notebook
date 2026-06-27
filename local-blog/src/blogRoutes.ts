@@ -169,8 +169,16 @@ export function getTagHref(tag: string, page = 1) {
   return withPageParam(`#/tags/${encodeURIComponent(tag)}`, page);
 }
 
+export function getTagsHref(page = 1) {
+  return withPageParam("#/tags", page);
+}
+
 export function getCollectionHref(collection: string, page = 1) {
   return withPageParam(`#/collections/${encodeURIComponent(collection)}`, page);
+}
+
+export function getCollectionsHref(page = 1) {
+  return withPageParam("#/collections", page);
 }
 
 export function getSearchHref(query: string, page = 1) {
@@ -181,9 +189,9 @@ export function getSearchHref(query: string, page = 1) {
 export function getRouteReturnHref(route: Exclude<Route, { name: "note"; encodedPath: string; relativePath: string }>) {
   if (route.name === "home") return getHomeHref(route.page);
   if (route.name === "articles") return getArticlesHref(route.page, route.year);
-  if (route.name === "tags") return withPageParam("#/tags", route.page);
+  if (route.name === "tags") return getTagsHref(route.page);
   if (route.name === "tag") return getTagHref(route.tag, route.page);
-  if (route.name === "collections") return withPageParam("#/collections", route.page);
+  if (route.name === "collections") return getCollectionsHref(route.page);
   if (route.name === "collection") return getCollectionHref(route.collection, route.page);
   if (route.name === "search") return getSearchHref(route.query, route.page);
   return "#/articles";

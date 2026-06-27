@@ -10,7 +10,7 @@ Read these longer docs only when the task actually needs them:
 
 2. PROJECT.md - project overview, tech stack, commands
 3. docs/HANDOFF.md - current state, conventions, gotchas
-4. docs/OI-Notebook-PRD-v1.md - product spec
+4. docs/README.md - documentation map and archive policy
 
 PROJECT.md and docs/HANDOFF.md are kept in sync. PROJECT.md is the neutral
 project overview for all coding agents; HANDOFF.md is the operating manual
@@ -19,7 +19,7 @@ updated at the end of each phase.
 ## Context and token discipline
 
 For small scoped tasks, do not read PROJECT.md, docs/HANDOFF.md,
-docs/OI-Notebook-PRD-v1.md, or other long docs by default.
+docs/archive/**, or other long docs by default.
 
 Read long docs only when the task explicitly needs planning, architecture,
 handoff, release, product-requirements context, or when the relevant source

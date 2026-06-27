@@ -6,6 +6,7 @@ use std::{
 
 use serde::Serialize;
 
+use crate::path_safety;
 use crate::paths;
 
 #[derive(Debug, Serialize)]
@@ -56,44 +57,20 @@ fn git_success(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
     }
 }
 
-fn normalize_note_relative_path(relative_path: &str) -> Result<String, String> {
-    let normalized = relative_path.replace('\\', "/");
-
-    if normalized.is_empty() {
-        return Err("Git commit failed: note path cannot be empty".to_string());
-    }
-
-    if Path::new(&normalized).is_absolute()
-        || normalized.starts_with('/')
-        || relative_path.starts_with('\\')
-    {
-        return Err(format!(
-            "Git commit failed: illegal note path '{relative_path}'"
-        ));
-    }
-
-    for segment in normalized.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return Err(format!(
-                "Git commit failed: illegal note path '{relative_path}'"
-            ));
-        }
-    }
-
-    Ok(normalized)
-}
-
 fn safe_note_pathspec_allow_missing(
     repo_root: &Path,
     relative_path: &str,
 ) -> Result<String, String> {
-    let normalized = normalize_note_relative_path(relative_path)?;
-    let canonical_notes = notes_dir(repo_root)
-        .canonicalize()
+    let normalized = path_safety::normalize_relative_path(relative_path).map_err(|issue| match issue {
+        path_safety::RelativePathIssue::Empty => "Git commit failed: note path cannot be empty".to_string(),
+        path_safety::RelativePathIssue::Absolute | path_safety::RelativePathIssue::Traversal => {
+            format!("Git commit failed: illegal note path '{relative_path}'")
+        }
+    })?;
+    let canonical_notes = path_safety::canonicalize_base_dir(&notes_dir(repo_root))
         .map_err(|e| format!("Git commit failed: cannot resolve notes directory: {e}"))?;
     let target = canonical_notes.join(&normalized);
-
-    if !target.starts_with(&canonical_notes) {
+    if !path_safety::path_is_within_base(&target, &canonical_notes) {
         return Err(format!(
             "Git commit failed: note path '{relative_path}' escapes notes directory"
         ));
@@ -108,8 +85,7 @@ fn safe_note_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, S
         .strip_prefix("notes/")
         .ok_or_else(|| format!("Git commit failed: illegal note path '{relative_path}'"))?;
 
-    let canonical_notes = notes_dir(repo_root)
-        .canonicalize()
+    let canonical_notes = path_safety::canonicalize_base_dir(&notes_dir(repo_root))
         .map_err(|e| format!("Git commit failed: cannot resolve notes directory: {e}"))?;
     let canonical_target = canonical_notes
         .join(normalized)
@@ -118,7 +94,7 @@ fn safe_note_pathspec(repo_root: &Path, relative_path: &str) -> Result<String, S
             format!("Git commit failed: cannot resolve note path '{relative_path}': {e}")
         })?;
 
-    if !canonical_target.starts_with(&canonical_notes) {
+    if !path_safety::path_is_within_base(&canonical_target, &canonical_notes) {
         return Err(format!(
             "Git commit failed: note path '{relative_path}' escapes notes directory"
         ));

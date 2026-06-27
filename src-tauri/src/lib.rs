@@ -8,6 +8,7 @@ mod local_search;
 mod luogu;
 mod luogu_reader;
 mod notes;
+mod path_safety;
 mod paths;
 mod prompts;
 mod tag_taxonomy;
@@ -15,182 +16,38 @@ mod task_status;
 mod web_cache;
 mod web_extract;
 
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 struct BlogServerState {
-    child: Mutex<Option<Child>>,
     production_server: blog_server::ProductionBlogServer,
 }
 
 impl BlogServerState {
     fn new() -> Self {
         Self {
-            child: Mutex::new(None),
             production_server: blog_server::ProductionBlogServer::new(),
         }
     }
 }
 
-impl Drop for BlogServerState {
-    fn drop(&mut self) {
-        if let Err(e) = stop_blog_server(self) {
-            eprintln!("清理 Astro dev server 失败：{e}");
-        }
-    }
-}
-
 fn start_blog_server(state: &BlogServerState) -> Result<(), String> {
-    if cfg!(debug_assertions) {
-        return state.production_server.ensure_running();
-    }
-
-    if !cfg!(debug_assertions) {
-        return state.production_server.ensure_running();
-    }
-
-    let Some(site_dir) = paths::site_dir()? else {
-        return Ok(());
-    };
-
-    if !site_dir.is_dir() {
-        return Err(format!(
-            "site 目录不存在，无法启动 Astro dev server：{}",
-            site_dir.display()
-        ));
-    }
-
-    let mut child_guard = match state.child.lock() {
-        Ok(guard) => guard,
-        Err(e) => return Err(format!("无法获取 Astro dev server 状态锁：{e}")),
-    };
-
-    if child_guard.is_some() {
-        return Ok(());
-    }
-
-    match Command::new("pnpm.cmd")
-        .args(["dev", "--host", "127.0.0.1", "--port", "4321"])
-        .current_dir(&site_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => {
-            *child_guard = Some(child);
-            Ok(())
-        }
-        Err(e) => Err(format!("启动 Astro dev server 失败：{e}")),
-    }
-}
-
-fn stop_blog_server(state: &BlogServerState) -> Result<(), String> {
-    if !cfg!(debug_assertions) {
-        return Ok(());
-    }
-
-    let mut child = match state.child.lock() {
-        Ok(mut guard) => guard.take(),
-        Err(e) => return Err(format!("无法获取 Astro dev server 状态锁：{e}")),
-    };
-
-    if let Some(child) = child.as_mut() {
-        match child.try_wait() {
-            Ok(Some(_status)) => {}
-            Ok(None) => {
-                stop_blog_server_child(child)?;
-            }
-            Err(e) => return Err(format!("检查 Astro dev server 状态失败：{e}")),
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(windows)]
-fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
-    let pid = child.id().to_string();
-    match Command::new("taskkill")
-        .args(["/PID", &pid, "/T", "/F"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-    {
-        Ok(status) if status.success() => {}
-        Ok(status) => {
-            if let Err(kill_error) = child.kill() {
-                return Err(format!(
-                    "taskkill 清理 Astro dev server 进程树失败，状态码：{status}；fallback kill 也失败：{kill_error}"
-                ));
-            }
-            let _ = child.wait();
-            return Err(format!(
-                "taskkill 清理 Astro dev server 进程树失败，状态码：{status}"
-            ));
-        }
-        Err(taskkill_error) => {
-            if let Err(kill_error) = child.kill() {
-                return Err(format!(
-                    "执行 taskkill 清理 Astro dev server 进程树失败：{taskkill_error}；fallback kill 也失败：{kill_error}"
-                ));
-            }
-            let _ = child.wait();
-            return Err(format!(
-                "执行 taskkill 清理 Astro dev server 进程树失败：{taskkill_error}"
-            ));
-        }
-    }
-
-    if let Err(e) = child.wait() {
-        return Err(format!("等待 Astro dev server 退出失败：{e}"));
-    }
-
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn stop_blog_server_child(child: &mut Child) -> Result<(), String> {
-    if let Err(e) = child.kill() {
-        return Err(format!("停止 Astro dev server 失败：{e}"));
-    }
-    if let Err(e) = child.wait() {
-        return Err(format!("等待 Astro dev server 退出失败：{e}"));
-    }
-
-    Ok(())
+    state.production_server.ensure_running()
 }
 
 #[tauri::command]
 fn open_blog(state: tauri::State<'_, BlogServerState>) -> Result<(), String> {
-    if !cfg!(debug_assertions) {
-        start_blog_server(&state)?;
-        return tauri_plugin_opener::open_url("http://127.0.0.1:4321", None::<&str>)
-            .map_err(|e| format!("打开本地博客失败：{e}"));
-    }
-
-    tauri_plugin_opener::open_url("http://localhost:4321", None::<&str>)
+    start_blog_server(&state)?;
+    tauri_plugin_opener::open_url("http://127.0.0.1:4321/local-blog/", None::<&str>)
         .map_err(|e| format!("打开本地博客失败：{e}"))
 }
 
 #[tauri::command]
 fn restart_blog_server(state: tauri::State<'_, BlogServerState>) -> Result<String, String> {
-    if !cfg!(debug_assertions) {
-        start_blog_server(&state)?;
-        return Ok(
-            "Local blog health server is running at http://127.0.0.1:4321. Full blog refresh is not wired yet."
-                .to_string(),
-        );
-    }
-
-    stop_blog_server(&state)?;
     start_blog_server(&state)?;
-    Ok("Astro dev server restarted at http://localhost:4321.".to_string())
+    Ok("Local blog server is running at http://127.0.0.1:4321/local-blog/.".to_string())
 }
 
 #[tauri::command]
@@ -378,9 +235,6 @@ pub fn run() {
                             }
                         }
                         "quit" => {
-                            if let Err(e) = stop_blog_server(&app.state::<BlogServerState>()) {
-                                eprintln!("清理 Astro dev server 失败：{e}");
-                            }
                             app.exit(0);
                         }
                         _ => {}

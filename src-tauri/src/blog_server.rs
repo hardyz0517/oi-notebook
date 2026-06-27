@@ -7,9 +7,24 @@ use crate::{
     paths,
 };
 
+mod path_rules;
+mod request;
+mod response;
+mod route;
+
+use path_rules::{
+    asset_content_type, is_safe_asset_request_relative_path, is_safe_note_relative_path,
+    is_safe_static_request_relative_path, static_asset_content_type,
+};
+use request::{request_target, target_path};
+use response::{
+    write_binary_response, write_json_response, write_redirect_response, write_response,
+};
+use route::{blog_route_for_path, BlogRoute};
+
 use std::{
     fs,
-    io::{Read, Write},
+    io::Read,
     net::{TcpListener, TcpStream},
     path::{Component, Path, PathBuf},
     sync::Mutex,
@@ -31,21 +46,6 @@ const KATEX_CSS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/kat
 const KATEX_JS_URL: &str = "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js";
 const KATEX_AUTO_RENDER_JS_URL: &str =
     "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js";
-
-#[derive(Debug, PartialEq, Eq)]
-enum BlogRoute {
-    BlogConfigApi,
-    NotesApi,
-    NoteApi,
-    NotesAsset,
-    LocalBlogRedirect,
-    LocalBlogStatic,
-    LegacyBlogRedirect,
-    LegacyBlogIndex,
-    LegacyNoteDetail,
-    LocalBlogIndex,
-    NotFound,
-}
 
 #[derive(PartialEq)]
 enum ListKind {
@@ -213,66 +213,6 @@ fn request_route(first_line: &str) -> Option<BlogRoute> {
     Some(blog_route_for_path(request_path(first_line)?))
 }
 
-fn request_target(first_line: &str) -> Option<&str> {
-    let mut parts = first_line.split_whitespace();
-    let method = parts.next()?;
-    let path = parts.next()?;
-
-    if method != "GET" {
-        return None;
-    }
-
-    Some(path)
-}
-
-fn target_path(target: &str) -> &str {
-    target.split('?').next().unwrap_or(target)
-}
-
-fn blog_route_for_path(path: &str) -> BlogRoute {
-    if path == API_BLOG_CONFIG_ROUTE {
-        return BlogRoute::BlogConfigApi;
-    }
-
-    if path == API_NOTES_ROUTE {
-        return BlogRoute::NotesApi;
-    }
-
-    if path == API_NOTE_ROUTE {
-        return BlogRoute::NoteApi;
-    }
-
-    if path.starts_with(ASSET_ROUTE_PREFIX) {
-        return BlogRoute::NotesAsset;
-    }
-
-    if path == LOCAL_BLOG_ROUTE {
-        return BlogRoute::LocalBlogRedirect;
-    }
-
-    if path.starts_with(LOCAL_BLOG_ROUTE_PREFIX) {
-        return BlogRoute::LocalBlogStatic;
-    }
-
-    if path == LEGACY_BLOG_ROUTE {
-        return BlogRoute::LegacyBlogRedirect;
-    }
-
-    if path == LEGACY_BLOG_ROUTE_PREFIX {
-        return BlogRoute::LegacyBlogIndex;
-    }
-
-    if path.starts_with(NOTE_ROUTE_PREFIX) {
-        return BlogRoute::LegacyNoteDetail;
-    }
-
-    if path == "/" {
-        return BlogRoute::LocalBlogIndex;
-    }
-
-    BlogRoute::NotFound
-}
-
 #[tauri::command]
 pub fn get_blog_config() -> Result<BlogConfigFields, String> {
     Ok(read_config()?.blog)
@@ -360,11 +300,11 @@ fn resolve_note_request_path(notes_dir: &Path, request_path: &str) -> Result<Pat
 }
 
 fn resolve_note_relative_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    if !is_safe_note_relative_path(&relative_path) {
+    if !is_safe_note_relative_path(relative_path) {
         return Err("Note path is not available.".to_string());
     }
 
-    let candidate = notes_dir.join(Path::new(&relative_path));
+    let candidate = notes_dir.join(Path::new(relative_path));
     if !candidate.is_file() || !is_markdown_file(&candidate) {
         return Err("Note was not found.".to_string());
     }
@@ -381,17 +321,6 @@ fn resolve_note_relative_path(notes_dir: &Path, relative_path: &str) -> Result<P
     }
 
     Ok(resolved)
-}
-
-fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
-    query.split('&').find_map(|pair| {
-        let (pair_key, value) = pair.split_once('=')?;
-        if pair_key == key {
-            Some(value)
-        } else {
-            None
-        }
-    })
 }
 
 fn resolve_asset_request_path(notes_dir: &Path, request_path: &str) -> Result<BlogAsset, String> {
@@ -471,101 +400,15 @@ fn resolve_local_blog_static_request_path(
     })
 }
 
-fn is_safe_note_relative_path(relative_path: &str) -> bool {
-    if relative_path.is_empty()
-        || relative_path.contains('\\')
-        || relative_path.contains('\0')
-        || !relative_path
-            .rsplit('/')
-            .next()
-            .and_then(|file_name| Path::new(file_name).extension())
-            .and_then(|extension| extension.to_str())
-            .map(|extension| extension.eq_ignore_ascii_case("md"))
-            .unwrap_or(false)
-    {
-        return false;
-    }
-
-    let path = Path::new(relative_path);
-    let mut components = path.components();
-    let Some(first_component) = components.next() else {
-        return false;
-    };
-
-    if matches!(
-        first_component,
-        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir
-    ) || first_component.as_os_str().eq_ignore_ascii_case("assets")
-    {
-        return false;
-    }
-
-    !components.any(|component| {
-        matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir
-        )
+fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query.split('&').find_map(|pair| {
+        let (pair_key, value) = pair.split_once('=')?;
+        if pair_key == key {
+            Some(value)
+        } else {
+            None
+        }
     })
-}
-
-fn is_safe_asset_request_relative_path(relative_path: &str) -> bool {
-    if relative_path.is_empty() || relative_path.contains('\\') || relative_path.contains('\0') {
-        return false;
-    }
-
-    let path = Path::new(relative_path);
-    path.components()
-        .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn is_safe_static_request_relative_path(relative_path: &str) -> bool {
-    if relative_path.is_empty() || relative_path.contains('\\') || relative_path.contains('\0') {
-        return false;
-    }
-
-    let path = Path::new(relative_path);
-    path.components()
-        .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn asset_content_type(relative_path: &str) -> Option<&'static str> {
-    let extension = Path::new(relative_path)
-        .extension()
-        .and_then(|extension| extension.to_str())?;
-
-    match extension.to_ascii_lowercase().as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "webp" => Some("image/webp"),
-        "gif" => Some("image/gif"),
-        "svg" => Some("image/svg+xml"),
-        _ => None,
-    }
-}
-
-fn static_asset_content_type(relative_path: &str) -> &'static str {
-    let extension = Path::new(relative_path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default();
-
-    match extension.to_ascii_lowercase().as_str() {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "json" => "application/json; charset=utf-8",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "ico" => "image/x-icon",
-        "woff2" => "font/woff2",
-        "woff" => "font/woff",
-        "ttf" => "font/ttf",
-        "map" => "application/json; charset=utf-8",
-        _ => "application/octet-stream",
-    }
 }
 
 fn note_detail_url(relative_path: &str) -> String {
@@ -1460,72 +1303,6 @@ fn escape_html(value: &str) -> String {
 
 fn escape_html_attribute(value: &str) -> String {
     escape_html(value)
-}
-
-fn write_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
-    let body = body.as_bytes();
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-
-    if let Err(e) = stream.write_all(response.as_bytes()) {
-        eprintln!("Failed to write local blog response headers: {e}");
-        return;
-    }
-
-    if let Err(e) = stream.write_all(body) {
-        eprintln!("Failed to write local blog response body: {e}");
-    }
-}
-
-fn write_json_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
-    let body = body.as_bytes();
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-
-    if let Err(e) = stream.write_all(response.as_bytes()) {
-        eprintln!("Failed to write local blog JSON response headers: {e}");
-        return;
-    }
-
-    if let Err(e) = stream.write_all(body) {
-        eprintln!("Failed to write local blog JSON response body: {e}");
-    }
-}
-
-fn write_redirect_response(stream: &mut TcpStream, location: &str) {
-    let response = format!(
-        "HTTP/1.1 308 Permanent Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
-
-    if let Err(e) = stream.write_all(response.as_bytes()) {
-        eprintln!("Failed to write local blog redirect response: {e}");
-    }
-}
-
-fn write_binary_response(
-    stream: &mut TcpStream,
-    status: u16,
-    reason: &str,
-    content_type: &str,
-    body: &[u8],
-) {
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-
-    if let Err(e) = stream.write_all(response.as_bytes()) {
-        eprintln!("Failed to write local blog binary response headers: {e}");
-        return;
-    }
-
-    if let Err(e) = stream.write_all(body) {
-        eprintln!("Failed to write local blog binary response body: {e}");
-    }
 }
 
 #[cfg(test)]
