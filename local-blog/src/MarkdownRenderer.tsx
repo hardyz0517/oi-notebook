@@ -16,7 +16,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { highlightCode } from "./highlight";
 import { remarkLuoguCallouts } from "./markdownCallouts";
-import { rehypeTableMerge } from "./rehypeTableMerge";
+import { rehypeTableMerge } from "../../shared/rehypeTableMerge";
 
 type MarkdownRendererProps = {
   markdown: string;

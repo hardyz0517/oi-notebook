@@ -1,8 +1,13 @@
-import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, normalizeTagPath, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
-import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode } from "./types";
+import { BUILTIN_TAG_TAXONOMY, findTagSuggestionsByQuery, getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import type { GroupNode, MergePreviewInfo, RootGroup, SaveOperation, TagManagerFilterMode, TagManagerWorkspaceView } from "./types";
 
 const builtinTagTaxonomyEntryIds = new Set(BUILTIN_TAG_TAXONOMY.map((entry) => entry.id));
 const CUSTOM_COLLECTIONS_STORAGE_KEY = "oi-notebook.customCollections";
+export const MERGE_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原合并规则";
+export const ALIAS_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原别名";
+export const CUSTOM_TAG_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原自定义标签";
+export const COLLECTION_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原文集候选";
+export const VISIBILITY_SAVE_FAILURE_MESSAGE = "保存失败，已恢复原状态";
 
 export type TagTaxonomyConfigImportPreview = {
   entriesCount: number;
@@ -28,6 +33,14 @@ export type CustomTagCreateDraft = {
   parentLocked: boolean;
   name: string;
   aliasesText: string;
+};
+
+export type CustomTagCreateSelectionPlan = {
+  activeRoot: string | null;
+  expandedGroupOrderKey: string | null;
+  filterMode: TagManagerFilterMode;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string;
 };
 
 export type CustomTagEditResult =
@@ -73,6 +86,69 @@ export type MergeRuleUpdateResult =
     error: string;
   };
 
+export type MergeEditorState = {
+  isOpen: boolean;
+  searchQuery: string;
+  selectedTargetId: string | null;
+  error: string | null;
+};
+
+export type AliasEditorState = {
+  input: string;
+  error: string | null;
+};
+
+export type CustomTagEditorState = {
+  createDraft: CustomTagCreateDraft | null;
+  createError: string | null;
+  editDraft: CustomTagEditDraft | null;
+  editError: string | null;
+};
+
+export type TagManagerNodeSelectionState = {
+  activeRoot: string | null;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string | null;
+  customTagCreateDraft: CustomTagCreateDraft | null;
+  customTagCreateError: string | null;
+};
+
+export type CustomTagCreateSelectionState = {
+  activeRoot: string | null;
+  expandedGroups: Record<string, boolean>;
+  filterMode: TagManagerFilterMode;
+  selectedGroupOrderKey: string | null;
+  selectedSuggestionId: string | null;
+  customTagCreateDraft: CustomTagCreateDraft | null;
+  customTagCreateError: string | null;
+};
+
+export type CustomTagEditSelectionState = {
+  selectedSuggestionId: string | null;
+  customTagEditDraft: CustomTagEditDraft | null;
+  customTagEditError: string | null;
+};
+
+export type TagManagerSelectionChangeTransientState = {
+  aliasInput: string;
+  aliasError: string | null;
+  customTagCreateError: string | null;
+  customTagEditDraft: CustomTagEditDraft | null;
+  customTagEditError: string | null;
+  mergeEditor: MergeEditorState;
+};
+
+export type UserAliasUpdateResult =
+  | {
+    ok: true;
+    config: UserTagTaxonomyConfig;
+    alias: string;
+  }
+  | {
+    ok: false;
+    error: string;
+  };
+
 export type CollectionCandidateSource = "builtin" | "custom" | "article";
 
 export type CollectionCandidateRow = {
@@ -92,6 +168,305 @@ export type CustomCollectionUpdateResult =
     ok: false;
     error: string;
   };
+
+export type CollectionEditSavePlan =
+  | {
+    action: "cancel";
+  }
+  | {
+    action: "rename";
+    nextName: string;
+  };
+
+export type CollectionEditState = {
+  editingName: string | null;
+  editInput: string;
+  editError: string | null;
+  createError: string | null;
+};
+
+export type CollectionPanelState = {
+  activeView: TagManagerWorkspaceView;
+  createInput: string;
+  createError: string | null;
+  editError: string | null;
+};
+
+export type CollectionSaveResolution = {
+  panelState: CollectionPanelState;
+  editState: CollectionEditState;
+};
+
+export type TagVisibilitySavePlan = {
+  previousConfig: UserTagTaxonomyConfig;
+  nextConfig: UserTagTaxonomyConfig;
+  failureMessage: string;
+  operation: SaveOperation;
+};
+
+export type CollectionSaveState = {
+  panelState: CollectionPanelState;
+  editState: CollectionEditState;
+};
+
+export function createMergeEditorStateSnapshot(state: MergeEditorState): MergeEditorState {
+  return {
+    isOpen: state.isOpen,
+    searchQuery: state.searchQuery,
+    selectedTargetId: state.selectedTargetId,
+    error: state.error,
+  };
+}
+
+export function createNodeSelectionStateSnapshot(state: TagManagerNodeSelectionState): TagManagerNodeSelectionState {
+  return {
+    activeRoot: state.activeRoot,
+    selectedGroupOrderKey: state.selectedGroupOrderKey,
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagCreateDraft: state.customTagCreateDraft,
+    customTagCreateError: state.customTagCreateError,
+  };
+}
+
+export function createCustomTagEditorStateSnapshot(state: CustomTagEditorState): CustomTagEditorState {
+  return {
+    createDraft: state.createDraft,
+    createError: state.createError,
+    editDraft: state.editDraft,
+    editError: state.editError,
+  };
+}
+
+export function createCustomTagCreateSelectionStateSnapshot(state: CustomTagCreateSelectionState): CustomTagCreateSelectionState {
+  return {
+    activeRoot: state.activeRoot,
+    expandedGroups: state.expandedGroups,
+    filterMode: state.filterMode,
+    selectedGroupOrderKey: state.selectedGroupOrderKey,
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagCreateDraft: state.customTagCreateDraft,
+    customTagCreateError: state.customTagCreateError,
+  };
+}
+
+export function createCustomTagEditSelectionStateSnapshot(state: CustomTagEditSelectionState): CustomTagEditSelectionState {
+  return {
+    selectedSuggestionId: state.selectedSuggestionId,
+    customTagEditDraft: state.customTagEditDraft,
+    customTagEditError: state.customTagEditError,
+  };
+}
+
+export function createSelectionChangeTransientStateSnapshot(state: TagManagerSelectionChangeTransientState): TagManagerSelectionChangeTransientState {
+  return {
+    aliasInput: state.aliasInput,
+    aliasError: state.aliasError,
+    customTagCreateError: state.customTagCreateError,
+    customTagEditDraft: state.customTagEditDraft,
+    customTagEditError: state.customTagEditError,
+    mergeEditor: createMergeEditorStateSnapshot(state.mergeEditor),
+  };
+}
+
+export function createCollectionEditStateSnapshot(state: CollectionEditState): CollectionEditState {
+  return {
+    editingName: state.editingName,
+    editInput: state.editInput,
+    editError: state.editError,
+    createError: state.createError,
+  };
+}
+
+export function createCollectionPanelStateSnapshot(state: CollectionPanelState): CollectionPanelState {
+  return {
+    activeView: state.activeView,
+    createInput: state.createInput,
+    createError: state.createError,
+    editError: state.editError,
+  };
+}
+
+export type TagManagerConfirmOptions = {
+  title: string;
+  description: string;
+  confirmText: string;
+  danger: boolean;
+};
+
+export function getMergeSaveConfirmOptions(
+  sourcePathText: string,
+  targetPathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: "确认合并标签？",
+    description: `确认把“${sourcePathText}”合并到“${targetPathText}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`,
+    confirmText: "合并",
+    danger: true,
+  };
+}
+
+export function getCustomTagDeleteConfirmOptions(
+  pathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: `删除自定义标签“${pathText}”？`,
+    description: "不会自动修改 notes。",
+    confirmText: "删除",
+    danger: true,
+  };
+}
+
+export function getMergeDeleteConfirmOptions(
+  sourcePathText: string,
+): TagManagerConfirmOptions {
+  return {
+    title: "取消合并规则？",
+    description: `确认取消“${sourcePathText}”的合并规则？\n\n不会自动修改 notes。`,
+    confirmText: "取消合并",
+    danger: true,
+  };
+}
+
+export function getCollectionDeleteConfirmOptions(
+  collectionName: string,
+): TagManagerConfirmOptions {
+  return {
+    title: `删除自定义文集“${collectionName}”？`,
+    description: "只会删除候选，不会修改已有文章。",
+    confirmText: "删除",
+    danger: true,
+  };
+}
+
+export function getOpenedMergeEditorState(): MergeEditorState {
+  return {
+    isOpen: true,
+    searchQuery: "",
+    selectedTargetId: null,
+    error: null,
+  };
+}
+
+export function getClosedMergeEditorState(_state: MergeEditorState): MergeEditorState {
+  return {
+    isOpen: false,
+    searchQuery: "",
+    selectedTargetId: null,
+    error: null,
+  };
+}
+
+export function getSearchedMergeEditorState(state: MergeEditorState, searchQuery: string): MergeEditorState {
+  return {
+    ...state,
+    searchQuery,
+    selectedTargetId: null,
+    error: null,
+  };
+}
+
+export function getSelectedMergeTargetState(state: MergeEditorState, selectedTargetId: string): MergeEditorState {
+  return {
+    ...state,
+    selectedTargetId,
+    error: null,
+  };
+}
+
+export function getFailedMergeSaveState(
+  state: MergeEditorState,
+  error: string,
+): MergeEditorState {
+  return {
+    ...state,
+    error,
+  };
+}
+
+export function getMergeSaveResolution(
+  state: MergeEditorState,
+  saved: boolean,
+  failureMessage: string,
+): MergeEditorState {
+  return saved
+    ? getClosedMergeEditorState(state)
+    : getFailedMergeSaveState(state, failureMessage);
+}
+
+export function getMergeDeleteResolution(
+  state: MergeEditorState,
+  saved: boolean,
+  failureMessage: string,
+): MergeEditorState {
+  return saved
+    ? getClosedMergeEditorState(state)
+    : getFailedMergeSaveState(state, failureMessage);
+}
+
+export function getFailedAliasSaveState(
+  state: AliasEditorState,
+  error: string,
+): AliasEditorState {
+  return {
+    ...state,
+    error,
+  };
+}
+
+export function getAliasSaveResolution(
+  state: AliasEditorState,
+  saved: boolean,
+  failureMessage: string,
+): AliasEditorState {
+  return saved
+    ? {
+      input: "",
+      error: null,
+    }
+    : getFailedAliasSaveState(state, failureMessage);
+}
+
+export function getAliasDeleteSaveResolution(
+  state: AliasEditorState,
+  saved: boolean,
+  failureMessage: string,
+): AliasEditorState {
+  return saved
+    ? {
+      ...state,
+      error: null,
+    }
+    : getFailedAliasSaveState(state, failureMessage);
+}
+
+export function getOpenedCustomTagCreateState(
+  state: CustomTagEditorState,
+  suggestion: TagSuggestion | null,
+  selectedGroupOrderKey: string | null,
+  activeRootGroups: GroupNode[],
+): CustomTagEditorState {
+  return {
+    ...state,
+    createDraft: getCustomTagCreateDraft(suggestion, selectedGroupOrderKey, activeRootGroups),
+    createError: null,
+    editDraft: null,
+    editError: null,
+  };
+}
+
+export function getOpenedCustomTagEditState(
+  state: CustomTagEditorState,
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+): CustomTagEditorState {
+  return {
+    ...state,
+    createDraft: null,
+    createError: null,
+    editDraft: suggestion?.source === "user" ? getCustomTagEditDraft(config, suggestion) : state.editDraft,
+    editError: null,
+  };
+}
 
 export function normalizeConfig(config: UserTagTaxonomyConfig | null | undefined): UserTagTaxonomyConfig {
   return {
@@ -446,6 +821,185 @@ export function renameCustomCollectionCandidate(
   };
 }
 
+export function getCollectionEditSavePlan(
+  editingCollectionName: string,
+  collectionEditInput: string,
+): CollectionEditSavePlan {
+  const nextName = normalizeCollectionCandidateValue(collectionEditInput);
+  if (nextName === editingCollectionName) {
+    return { action: "cancel" };
+  }
+  return {
+    action: "rename",
+    nextName,
+  };
+}
+
+export function getOpenedCollectionEditState(
+  state: CollectionEditState,
+  name: string,
+): CollectionEditState {
+  return {
+    ...state,
+    editingName: name,
+    editInput: name,
+    editError: null,
+    createError: null,
+  };
+}
+
+export function getCancelledCollectionEditState(
+  state: CollectionEditState,
+): CollectionEditState {
+  return {
+    ...state,
+    editingName: null,
+    editInput: "",
+    editError: null,
+  };
+}
+
+export function getChangedCollectionEditInputState(
+  state: CollectionEditState,
+  editInput: string,
+): CollectionEditState {
+  return {
+    ...state,
+    editInput,
+    editError: null,
+  };
+}
+
+export function getAppliedCollectionEditSaveState(
+  state: CollectionEditState,
+): CollectionEditState {
+  return getCancelledCollectionEditState(state);
+}
+
+export function getAppliedCollectionDeleteSaveState(
+  state: CollectionEditState,
+  deletedName: string,
+): CollectionEditState {
+  return getDeletedCollectionEditState(state, deletedName);
+}
+
+export function getDeletedCollectionEditState(
+  state: CollectionEditState,
+  deletedName: string,
+): CollectionEditState {
+  if (state.editingName !== deletedName) {
+    return state;
+  }
+  return getCancelledCollectionEditState(state);
+}
+
+export function getAppliedCollectionViewState(
+  state: CollectionPanelState,
+  activeView: TagManagerWorkspaceView,
+): CollectionPanelState {
+  return {
+    ...state,
+    activeView,
+    createError: null,
+    editError: null,
+  };
+}
+
+export function getAppliedCollectionCreateSaveState(
+  state: CollectionPanelState,
+): CollectionPanelState {
+  return {
+    ...state,
+    createInput: "",
+    createError: null,
+  };
+}
+
+export function getChangedCollectionCreateInputState(
+  state: CollectionPanelState,
+  createInput: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    createInput,
+    createError: null,
+  };
+}
+
+export function getFailedCollectionCreateSaveState(
+  state: CollectionPanelState,
+  createError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    createError,
+  };
+}
+
+export function getFailedCollectionEditSaveState(
+  state: CollectionPanelState,
+  editError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    editError,
+  };
+}
+
+export function getFailedCollectionDeleteSaveState(
+  state: CollectionPanelState,
+  deleteError: string,
+): CollectionPanelState {
+  return {
+    ...state,
+    editError: deleteError,
+  };
+}
+
+export function getCollectionCreateSaveResolution(
+  state: CollectionSaveState,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? getAppliedCollectionCreateSaveState(state.panelState)
+      : getFailedCollectionCreateSaveState(state.panelState, failureMessage),
+    editState: state.editState,
+  };
+}
+
+export function getCollectionEditSaveResolution(
+  state: CollectionSaveState,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? state.panelState
+      : getFailedCollectionEditSaveState(state.panelState, failureMessage),
+    editState: saved
+      ? getAppliedCollectionEditSaveState(state.editState)
+      : state.editState,
+  };
+}
+
+export function getCollectionDeleteSaveResolution(
+  state: CollectionSaveState,
+  deletedName: string,
+  saved: boolean,
+  failureMessage: string,
+): CollectionSaveResolution {
+  return {
+    panelState: saved
+      ? state.panelState
+      : getFailedCollectionDeleteSaveState(state.panelState, failureMessage),
+    editState: saved
+      ? getAppliedCollectionDeleteSaveState(state.editState, deletedName)
+      : state.editState,
+  };
+}
+
 export function deleteCustomCollectionCandidate(
   config: UserTagTaxonomyConfig,
   name: string,
@@ -558,6 +1112,111 @@ export function getBuiltinAliasesForSuggestion(suggestion: TagSuggestion | null,
   return suggestion.aliases.filter((alias) => !userAliasKeys.has(getAliasCompareKey(alias)));
 }
 
+export function addUserAliasToConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+  aliasInput: string,
+  selectedBuiltinAliases: string[],
+): UserAliasUpdateResult {
+  if (!suggestion || suggestion.path.length < 3) {
+    return { ok: false, error: "只有具体标签支持别名管理" };
+  }
+
+  const alias = aliasInput.trim();
+  const aliasKey = getAliasCompareKey(alias);
+  if (!alias) {
+    return { ok: false, error: "请输入别名" };
+  }
+  if (aliasKey === getAliasCompareKey(suggestion.name) || aliasKey === getAliasCompareKey(suggestion.pathText)) {
+    return { ok: false, error: "该名称已是当前标签，无需添加" };
+  }
+  const builtinAliasOwnerId = normalizeTagPath(alias)?.entryId;
+  if (builtinAliasOwnerId && builtinAliasOwnerId !== suggestion.id) {
+    return { ok: false, error: "该别名已被内置标签使用" };
+  }
+
+  const currentConfig = normalizeConfig(config);
+  const existingUserAlias = Object.keys(currentConfig.aliases ?? {}).some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
+  const existingBuiltinAlias = selectedBuiltinAliases.some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
+
+  if (existingUserAlias || existingBuiltinAlias) {
+    return { ok: false, error: "别名已存在" };
+  }
+
+  return {
+    ok: true,
+    alias,
+    config: normalizeConfig({
+      ...currentConfig,
+      aliases: {
+        ...(currentConfig.aliases ?? {}),
+        [alias]: suggestion.id,
+      },
+    }),
+  };
+}
+
+export function deleteUserAliasFromConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion | null,
+  alias: string,
+): UserAliasUpdateResult {
+  if (!suggestion) {
+    return { ok: false, error: "请先选择标签" };
+  }
+
+  const currentConfig = normalizeConfig(config);
+  const nextAliases = { ...(currentConfig.aliases ?? {}) };
+  const targetId = nextAliases[alias];
+
+  if (targetId !== suggestion.id && normalizeTagPath(alias, currentConfig)?.entryId !== suggestion.id) {
+    return { ok: false, error: "只能删除当前标签的自定义别名" };
+  }
+
+  delete nextAliases[alias];
+  return {
+    ok: true,
+    alias,
+    config: normalizeConfig({
+      ...currentConfig,
+      aliases: nextAliases,
+    }),
+  };
+}
+
+export function setTagSuggestionHiddenInConfig(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion,
+  hidden: boolean,
+): UserTagTaxonomyConfig {
+  const currentConfig = normalizeConfig(config);
+  const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
+  if (hidden) {
+    hiddenIds.add(suggestion.id);
+  } else {
+    hiddenIds.delete(suggestion.id);
+  }
+
+  return normalizeConfig({
+    ...currentConfig,
+    hiddenIds: Array.from(hiddenIds),
+  });
+}
+
+export function getTagVisibilitySavePlan(
+  config: UserTagTaxonomyConfig,
+  suggestion: TagSuggestion,
+  hidden: boolean,
+): TagVisibilitySavePlan {
+  const previousConfig = normalizeConfig(config);
+  return {
+    previousConfig,
+    nextConfig: setTagSuggestionHiddenInConfig(previousConfig, suggestion, hidden),
+    failureMessage: VISIBILITY_SAVE_FAILURE_MESSAGE,
+    operation: "visibility",
+  };
+}
+
 export function getCustomTagCreateDraft(
   suggestion: TagSuggestion | null,
   selectedGroupOrderKey: string | null,
@@ -574,6 +1233,168 @@ export function getCustomTagCreateDraft(
     parentLocked: parentPath.length >= 2,
     name: "",
     aliasesText: "",
+  };
+}
+
+export function getClearedCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+): CustomTagCreateDraft | null {
+  return draft
+    ? {
+      ...draft,
+      parentPathText: "",
+      parentLocked: false,
+    }
+    : draft;
+}
+
+export function getGroupedCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+  group: GroupNode | null,
+): CustomTagCreateDraft | null {
+  return draft && group
+    ? {
+      ...draft,
+      parentPathText: group.path.join(" / "),
+      parentLocked: true,
+    }
+    : draft;
+}
+
+export function getSuggestionCustomTagCreateDraftSelection(
+  draft: CustomTagCreateDraft | null,
+  suggestion: TagSuggestion | null,
+): CustomTagCreateDraft | null {
+  return draft && suggestion && suggestion.path.length >= 3
+    ? {
+      ...draft,
+      parentPathText: suggestion.path.slice(0, -1).join(" / "),
+      parentLocked: true,
+    }
+    : draft;
+}
+
+export function getSelectedRootState(
+  state: TagManagerNodeSelectionState,
+  root: string,
+): TagManagerNodeSelectionState {
+  return {
+    ...getClearedNodeSelectionState(state),
+    activeRoot: root,
+  };
+}
+
+export function getClearedNodeSelectionState(
+  state: TagManagerNodeSelectionState,
+): TagManagerNodeSelectionState {
+  return {
+    ...state,
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: null,
+    customTagCreateDraft: getClearedCustomTagCreateDraftSelection(state.customTagCreateDraft),
+    customTagCreateError: null,
+  };
+}
+
+export function getSelectedGroupState(
+  state: TagManagerNodeSelectionState,
+  groupKey: string,
+  activeRootGroups: GroupNode[],
+): TagManagerNodeSelectionState {
+  const group = activeRootGroups.find((item) => item.orderKey === groupKey) ?? null;
+  return {
+    ...state,
+    selectedGroupOrderKey: groupKey,
+    selectedSuggestionId: null,
+    customTagCreateDraft: getGroupedCustomTagCreateDraftSelection(state.customTagCreateDraft, group),
+    customTagCreateError: null,
+  };
+}
+
+export function getSelectedSuggestionState(
+  state: TagManagerNodeSelectionState,
+  suggestionId: string,
+  suggestions: TagSuggestion[],
+): TagManagerNodeSelectionState {
+  const suggestion = suggestions.find((item) => item.id === suggestionId) ?? null;
+  return {
+    ...state,
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: suggestionId,
+    customTagCreateDraft: getSuggestionCustomTagCreateDraftSelection(state.customTagCreateDraft, suggestion),
+    customTagCreateError: null,
+  };
+}
+
+export function getAppliedCustomTagCreateSelectionState(
+  state: CustomTagCreateSelectionState,
+  plan: CustomTagCreateSelectionPlan,
+): CustomTagCreateSelectionState {
+  return {
+    ...state,
+    activeRoot: plan.activeRoot,
+    expandedGroups: plan.expandedGroupOrderKey
+      ? { ...state.expandedGroups, [plan.expandedGroupOrderKey]: true }
+      : state.expandedGroups,
+    filterMode: plan.filterMode,
+    selectedGroupOrderKey: plan.selectedGroupOrderKey,
+    selectedSuggestionId: plan.selectedSuggestionId,
+    customTagCreateDraft: null,
+    customTagCreateError: null,
+  };
+}
+
+export function getAppliedCustomTagEditSelectionState(
+  state: CustomTagEditSelectionState,
+  selectedSuggestionId: string | null,
+): CustomTagEditSelectionState {
+  return {
+    ...state,
+    selectedSuggestionId,
+    customTagEditDraft: null,
+    customTagEditError: null,
+  };
+}
+
+export function getCustomTagCreateSaveResolution(
+  state: CustomTagCreateSelectionState,
+  saved: boolean,
+  failureMessage: string,
+  plan: CustomTagCreateSelectionPlan,
+): CustomTagCreateSelectionState {
+  return saved
+    ? getAppliedCustomTagCreateSelectionState(state, plan)
+    : {
+      ...state,
+      customTagCreateError: failureMessage,
+    };
+}
+
+export function getCustomTagEditSaveResolution(
+  state: CustomTagEditSelectionState,
+  saved: boolean,
+  failureMessage: string,
+  selectedSuggestionId: string | null,
+): CustomTagEditSelectionState {
+  return saved
+    ? getAppliedCustomTagEditSelectionState(state, selectedSuggestionId)
+    : {
+      ...state,
+      customTagEditError: failureMessage,
+    };
+}
+
+export function getSelectionChangeTransientState(
+  state: TagManagerSelectionChangeTransientState,
+): TagManagerSelectionChangeTransientState {
+  return {
+    ...state,
+    aliasInput: "",
+    aliasError: null,
+    customTagCreateError: null,
+    customTagEditDraft: null,
+    customTagEditError: null,
+    mergeEditor: getClosedMergeEditorState(state.mergeEditor),
   };
 }
 
@@ -624,6 +1445,27 @@ export function createCustomTagEntry(config: UserTagTaxonomyConfig, draft: Custo
     }),
     entryId,
     pathText: nextPathText,
+  };
+}
+
+export function createCustomTagCreateSelectionPlan(
+  config: UserTagTaxonomyConfig,
+  entryId: string,
+): CustomTagCreateSelectionPlan {
+  const rootGroups = getTagSuggestionRootGroups(config, { includeHidden: true, includeDeprecated: true });
+  const rootGroup = rootGroups.find((candidateRootGroup) => (
+    candidateRootGroup.groups.some((group) => group.candidates.some((candidate) => candidate.id === entryId))
+  )) ?? null;
+  const group = rootGroup?.groups.find((candidateGroup) => (
+    candidateGroup.candidates.some((candidate) => candidate.id === entryId)
+  )) ?? null;
+
+  return {
+    activeRoot: rootGroup?.root ?? null,
+    expandedGroupOrderKey: group?.orderKey ?? null,
+    filterMode: "all",
+    selectedGroupOrderKey: null,
+    selectedSuggestionId: entryId,
   };
 }
 

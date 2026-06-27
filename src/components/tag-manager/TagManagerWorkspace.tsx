@@ -1,19 +1,19 @@
-import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
-import { arrayMove } from "@dnd-kit/sortable";
+﻿import { PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { saveTagTaxonomyConfig } from "@/lib/api";
-import { getTagSuggestionList, getTagSuggestionRootGroups, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import { TagManagerCollectionsPanel } from "./TagManagerCollectionsPanel";
 import { TagManagerDetailsPanel } from "./TagManagerDetailsPanel";
 import { TagManagerGroupColumn } from "./TagManagerGroupColumn";
 import { TagManagerRootColumn } from "./TagManagerRootColumn";
 import { TagManagerShell } from "./TagManagerShell";
-import { buildCollectionCandidateRows, createCustomCollectionCandidate, createCustomTagEntry, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, filterTagRootGroups, filterTagSuggestions, getAliasCompareKey, getBuiltinAliasesForSuggestion, getCustomTagCreateDraft, getCustomTagEditDraft, getMergePreviewInfo, getMergeTargetCandidates, getSaveEventBase, getUserAliasesForSuggestion, isLeafTagSuggestion, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type CustomTagCreateDraft, type CustomTagEditDraft } from "./tagManagerConfig";
+import { ALIAS_SAVE_FAILURE_MESSAGE, COLLECTION_SAVE_FAILURE_MESSAGE, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, MERGE_SAVE_FAILURE_MESSAGE, addUserAliasToConfig, createCollectionEditStateSnapshot, createCollectionPanelStateSnapshot, createCustomCollectionCandidate, createCustomTagCreateSelectionPlan, createCustomTagCreateSelectionStateSnapshot, createCustomTagEditSelectionStateSnapshot, createCustomTagEditorStateSnapshot, createCustomTagEntry, createMergeEditorStateSnapshot, createNodeSelectionStateSnapshot, createSelectionChangeTransientStateSnapshot, deleteCustomCollectionCandidate, deleteCustomTagEntry, deleteMergeRule, deleteUserAliasFromConfig, getAliasDeleteSaveResolution, getAliasSaveResolution, getAppliedCollectionViewState, getCancelledCollectionEditState, getChangedCollectionCreateInputState, getChangedCollectionEditInputState, getClearedNodeSelectionState, getClosedMergeEditorState, getCollectionCreateSaveResolution, getCollectionDeleteConfirmOptions, getCollectionDeleteSaveResolution, getCollectionEditSavePlan, getCollectionEditSaveResolution, getCustomTagCreateSaveResolution, getCustomTagDeleteConfirmOptions, getCustomTagEditSaveResolution, getMergeDeleteConfirmOptions, getMergeDeleteResolution, getMergeSaveConfirmOptions, getMergeSaveResolution, getOpenedCollectionEditState, getOpenedCustomTagCreateState, getOpenedCustomTagEditState, getOpenedMergeEditorState, getSaveEventBase, getSearchedMergeEditorState, getSelectedGroupState, getSelectedMergeTargetState, getSelectedRootState, getSelectedSuggestionState, getSelectionChangeTransientState, getTagVisibilitySavePlan, normalizeConfig, renameCustomCollectionCandidate, setMergeRule, updateCustomTagEntry, writeStoredCustomCollections, type AliasEditorState, type CollectionEditState, type CollectionPanelState, type CollectionSaveState, type CustomTagCreateDraft, type CustomTagCreateSelectionState, type CustomTagEditDraft, type CustomTagEditSelectionState, type CustomTagEditorState, type MergeEditorState, type TagManagerNodeSelectionState, type TagManagerSelectionChangeTransientState } from "./tagManagerConfig";
 import { DEBUG_LOG_KEY, debugEvent } from "./tagManagerDebug";
-import { areStringArraysEqual, createOrderOverrides, getDebugGroupOrderRows, sortGroupsByOrderOverrides } from "./tagManagerOrdering";
+import { getDebugGroupOrderRows, getGroupOrderAfterWorkingConfigDebugPayload, getGroupOrderRenderDebugPayload, getSortEndPlan, getTagSortSavePlan } from "./tagManagerOrdering";
+import { deriveTagManagerWorkspaceViewModel } from "./tagManagerViewModel";
 import type { GroupNode, GroupOrderSaveDebugContext, SaveOperation, SortScope, TagManagerCloseReason, TagManagerFilterMode, TagManagerWorkspaceProps, TagManagerWorkspaceView } from "./types";
 
 export type { TagManagerCloseReason };
@@ -57,6 +57,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const groupRenderDebugKeyRef = useRef<string | null>(null);
   const groupAfterWorkingConfigDebugKeyRef = useRef<string | null>(null);
+  const previousSelectionIdRef = useRef<string | null>(selectedSuggestionId);
   const requestConfirm = useCallback((options: Omit<ConfirmDialogState, "resolve">) => {
     return new Promise<boolean>((resolve) => {
       setConfirmDialog({ ...options, resolve });
@@ -74,58 +75,174 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return null;
     });
   }, []);
+  const applyMergeEditorState = useCallback((state: MergeEditorState) => {
+    setIsMergeEditorOpen(state.isOpen);
+    setMergeSearchQuery(state.searchQuery);
+    setSelectedMergeTargetId(state.selectedTargetId);
+    setMergeError(state.error);
+  }, []);
+  const applyCustomTagEditorState = useCallback((state: CustomTagEditorState) => {
+    setCustomTagCreateDraft(state.createDraft);
+    setCustomTagCreateError(state.createError);
+    setCustomTagEditDraft(state.editDraft);
+    setCustomTagEditError(state.editError);
+  }, []);
+  const applyNodeSelectionState = useCallback((state: TagManagerNodeSelectionState) => {
+    setActiveRoot(state.activeRoot);
+    setSelectedGroupOrderKey(state.selectedGroupOrderKey);
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagCreateDraft(state.customTagCreateDraft);
+    setCustomTagCreateError(state.customTagCreateError);
+  }, []);
+  const applyCustomTagCreateSelectionState = useCallback((state: CustomTagCreateSelectionState) => {
+    setActiveRoot(state.activeRoot);
+    setExpandedGroups(state.expandedGroups);
+    setFilterMode(state.filterMode);
+    setSelectedGroupOrderKey(state.selectedGroupOrderKey);
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagCreateDraft(state.customTagCreateDraft);
+    setCustomTagCreateError(state.customTagCreateError);
+  }, []);
+  const applyCustomTagEditSelectionState = useCallback((state: CustomTagEditSelectionState) => {
+    setSelectedSuggestionId(state.selectedSuggestionId);
+    setCustomTagEditDraft(state.customTagEditDraft);
+    setCustomTagEditError(state.customTagEditError);
+  }, []);
+  const applySelectionChangeTransientState = useCallback((state: TagManagerSelectionChangeTransientState) => {
+    setAliasInput(state.aliasInput);
+    setAliasError(state.aliasError);
+    setCustomTagCreateError(state.customTagCreateError);
+    setCustomTagEditDraft(state.customTagEditDraft);
+    setCustomTagEditError(state.customTagEditError);
+    applyMergeEditorState(state.mergeEditor);
+  }, [applyMergeEditorState]);
+  const applyCollectionEditState = useCallback((state: CollectionEditState) => {
+    setEditingCollectionName(state.editingName);
+    setCollectionEditInput(state.editInput);
+    setCollectionEditError(state.editError);
+    setCollectionCreateError(state.createError);
+  }, []);
+  const applyCollectionPanelState = useCallback((state: CollectionPanelState) => {
+    setActiveView(state.activeView);
+    setCollectionCreateInput(state.createInput);
+    setCollectionCreateError(state.createError);
+    setCollectionEditError(state.editError);
+  }, []);
+
+  const getCurrentNodeSelectionState = useCallback((): TagManagerNodeSelectionState => createNodeSelectionStateSnapshot({
+    activeRoot,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+    customTagCreateDraft,
+    customTagCreateError,
+  }), [activeRoot, customTagCreateDraft, customTagCreateError, selectedGroupOrderKey, selectedSuggestionId]);
+  const getCurrentCustomTagEditorState = useCallback((): CustomTagEditorState => createCustomTagEditorStateSnapshot({
+    createDraft: customTagCreateDraft,
+    createError: customTagCreateError,
+    editDraft: customTagEditDraft,
+    editError: customTagEditError,
+  }), [customTagCreateDraft, customTagCreateError, customTagEditDraft, customTagEditError]);
+  const getCurrentCustomTagCreateSelectionState = useCallback((): CustomTagCreateSelectionState => createCustomTagCreateSelectionStateSnapshot({
+    activeRoot,
+    expandedGroups,
+    filterMode,
+    selectedGroupOrderKey,
+    selectedSuggestionId,
+    customTagCreateDraft,
+    customTagCreateError,
+  }), [activeRoot, customTagCreateDraft, customTagCreateError, expandedGroups, filterMode, selectedGroupOrderKey, selectedSuggestionId]);
+  const getCurrentCustomTagEditSelectionState = useCallback((): CustomTagEditSelectionState => createCustomTagEditSelectionStateSnapshot({
+    selectedSuggestionId,
+    customTagEditDraft,
+    customTagEditError,
+  }), [customTagEditDraft, customTagEditError, selectedSuggestionId]);
+  const getCurrentCollectionEditState = useCallback((): CollectionEditState => createCollectionEditStateSnapshot({
+    editingName: editingCollectionName,
+    editInput: collectionEditInput,
+    editError: collectionEditError,
+    createError: collectionCreateError,
+  }), [collectionCreateError, collectionEditError, collectionEditInput, editingCollectionName]);
+  const getCurrentCollectionPanelState = useCallback((): CollectionPanelState => createCollectionPanelStateSnapshot({
+    activeView,
+    createInput: collectionCreateInput,
+    createError: collectionCreateError,
+    editError: collectionEditError,
+  }), [activeView, collectionCreateError, collectionCreateInput, collectionEditError]);
+  const getCurrentCollectionSaveState = useCallback((): CollectionSaveState => ({
+    panelState: getCurrentCollectionPanelState(),
+    editState: getCurrentCollectionEditState(),
+  }), [getCurrentCollectionEditState, getCurrentCollectionPanelState]);
+  const applyCollectionSaveResolution = useCallback((panelState: CollectionPanelState, editState: CollectionEditState) => {
+    applyCollectionPanelState(panelState);
+    applyCollectionEditState(editState);
+  }, [applyCollectionEditState, applyCollectionPanelState]);
+  const getCurrentAliasEditorState = useCallback((): AliasEditorState => ({
+    input: aliasInput,
+    error: aliasError,
+  }), [aliasError, aliasInput]);
+  const applyAliasEditorState = useCallback((state: AliasEditorState) => {
+    setAliasInput(state.input);
+    setAliasError(state.error);
+  }, []);
+  const getCurrentMergeEditorState = useCallback((): MergeEditorState => createMergeEditorStateSnapshot({
+    isOpen: isMergeEditorOpen,
+    searchQuery: mergeSearchQuery,
+    selectedTargetId: selectedMergeTargetId,
+    error: mergeError,
+  }), [isMergeEditorOpen, mergeError, mergeSearchQuery, selectedMergeTargetId]);
+  const getCurrentSelectionChangeTransientState = useCallback((): TagManagerSelectionChangeTransientState => createSelectionChangeTransientStateSnapshot({
+    aliasInput,
+    aliasError,
+    customTagCreateError,
+    customTagEditDraft,
+    customTagEditError,
+    mergeEditor: getCurrentMergeEditorState(),
+  }), [aliasError, aliasInput, customTagCreateError, customTagEditDraft, customTagEditError, getCurrentMergeEditorState]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const includeHidden = showHidden || filterMode === "hidden";
-  const baseSuggestions = useMemo(() => getTagSuggestionList(workingConfig, { includeHidden, includeDeprecated: true }), [includeHidden, workingConfig]);
-  const baseRootGroups = useMemo(() => getTagSuggestionRootGroups(workingConfig, { includeHidden, includeDeprecated: true }), [includeHidden, workingConfig]);
-  const suggestions = useMemo(() => filterTagSuggestions(baseSuggestions, filterMode), [baseSuggestions, filterMode]);
-  const rootGroups = useMemo(() => filterTagRootGroups(baseRootGroups, filterMode), [baseRootGroups, filterMode]);
-  const activeRootGroup = useMemo(() => rootGroups.find((group) => group.root === activeRoot) ?? rootGroups[0] ?? null, [activeRoot, rootGroups]);
-  const activeRootSortedGroups = useMemo(
-    () => activeRootGroup ? sortGroupsByOrderOverrides(activeRootGroup.groups, workingConfig.orderOverrides) : [],
-    [activeRootGroup, workingConfig.orderOverrides],
-  );
-  const activeRootSortableItems = useMemo(
-    () => activeRootSortedGroups.map((group) => group.orderKey),
-    [activeRootSortedGroups],
-  );
-  const selectedSuggestion = useMemo(() => suggestions.find((suggestion) => suggestion.id === selectedSuggestionId) ?? null, [selectedSuggestionId, suggestions]);
-  const selectedUserAliases = useMemo(() => getUserAliasesForSuggestion(workingConfig, selectedSuggestion), [selectedSuggestion, workingConfig]);
-  const selectedBuiltinAliases = useMemo(() => getBuiltinAliasesForSuggestion(selectedSuggestion, selectedUserAliases), [selectedSuggestion, selectedUserAliases]);
-  const mergePreview = useMemo(() => getMergePreviewInfo(workingConfig, selectedSuggestion, baseSuggestions), [baseSuggestions, selectedSuggestion, workingConfig]);
-  const canEditMergeRule = isLeafTagSuggestion(selectedSuggestion);
-  const mergeTargetCandidates = useMemo(
-    () => getMergeTargetCandidates(baseSuggestions, selectedSuggestion, workingConfig, mergeSearchQuery),
-    [baseSuggestions, mergeSearchQuery, selectedSuggestion, workingConfig],
-  );
-  const selectedMergeTarget = useMemo(
-    () => mergeTargetCandidates.find((candidate) => candidate.id === selectedMergeTargetId)
-      ?? baseSuggestions.find((candidate) => candidate.id === selectedMergeTargetId)
-      ?? null,
-    [baseSuggestions, mergeTargetCandidates, selectedMergeTargetId],
-  );
-  const collectionRows = useMemo(
-    () => buildCollectionCandidateRows(builtinCollections, workingConfig.customCollections ?? [], noteCollections),
-    [builtinCollections, noteCollections, workingConfig.customCollections],
-  );
-  const collectionExistingCandidates = useMemo(
-    () => [
-      ...builtinCollections,
-      ...noteCollections,
-      ...(workingConfig.customCollections ?? []),
-    ],
-    [builtinCollections, noteCollections, workingConfig.customCollections],
-  );
-  const canManageAliases = Boolean(selectedSuggestion && selectedSuggestion.path.length >= 3);
-  const isSortDisabled = Boolean(searchQuery.trim()) || filterMode !== "all";
-  const searchResults = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-    return suggestions
-      .filter((suggestion) => [suggestion.id, suggestion.name, suggestion.pathText, suggestion.searchText, ...suggestion.aliases].join("\n").toLowerCase().includes(query))
-      .slice(0, 100);
-  }, [searchQuery, suggestions]);
+  const tagManagerView = useMemo(() => deriveTagManagerWorkspaceViewModel({
+    config: workingConfig,
+    showHidden,
+    filterMode,
+    activeRoot,
+    selectedSuggestionId,
+    selectedMergeTargetId,
+    mergeSearchQuery,
+    searchQuery,
+    builtinCollections,
+    noteCollections,
+  }), [
+    activeRoot,
+    builtinCollections,
+    filterMode,
+    mergeSearchQuery,
+    noteCollections,
+    searchQuery,
+    selectedMergeTargetId,
+    selectedSuggestionId,
+    showHidden,
+    workingConfig,
+  ]);
+  const {
+    rootGroups,
+    activeRootGroup,
+    nextActiveRoot,
+    activeRootSortedGroups,
+    activeRootSortableItems,
+    suggestions,
+    selectedSuggestion,
+    selectedUserAliases,
+    selectedBuiltinAliases,
+    mergePreview,
+    canEditMergeRule,
+    mergeTargetCandidates,
+    selectedMergeTarget,
+    collectionRows,
+    collectionExistingCandidates,
+    canManageAliases,
+    isSortDisabled,
+    searchResults,
+  } = tagManagerView;
 
   useEffect(() => {
     debugEvent("manager.mount", {
@@ -136,47 +253,38 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, [initialConfig]);
 
   useEffect(() => {
-    if (rootGroups.length === 0) {
-      setActiveRoot(null);
-      return;
-    }
-    setActiveRoot((current) => (current && rootGroups.some((group) => group.root === current) ? current : rootGroups[0].root));
-  }, [rootGroups]);
+    setActiveRoot(nextActiveRoot);
+  }, [nextActiveRoot]);
 
   useEffect(() => {
-    setAliasInput("");
-    setAliasError(null);
-    setCustomTagCreateError(null);
-    setCustomTagEditDraft(null);
-    setCustomTagEditError(null);
-    setIsMergeEditorOpen(false);
-    setMergeSearchQuery("");
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, [selectedSuggestionId]);
+    if (previousSelectionIdRef.current === selectedSuggestionId) {
+      return;
+    }
+
+    previousSelectionIdRef.current = selectedSuggestionId;
+    applySelectionChangeTransientState(getSelectionChangeTransientState(getCurrentSelectionChangeTransientState()));
+  }, [
+    applySelectionChangeTransientState,
+    getCurrentSelectionChangeTransientState,
+    selectedSuggestionId,
+  ]);
 
   useEffect(() => {
     if (!activeRootGroup) {
       return;
     }
 
-    const rawGroups = getDebugGroupOrderRows(activeRootGroup.groups, workingConfig.orderOverrides);
-    const sortedGroups = getDebugGroupOrderRows(activeRootSortedGroups, workingConfig.orderOverrides);
-    const hasGroupOverride = rawGroups.some((group) => group.override !== undefined);
-
-    if (activeRootGroup.root !== "算法" && !hasGroupOverride) {
+    const payload = getGroupOrderRenderDebugPayload({
+      activeRootGroup,
+      activeRootSortedGroups,
+      sortableItems: activeRootSortableItems,
+      orderOverrides: workingConfig.orderOverrides,
+      searchQuery,
+    });
+    if (!payload) {
       return;
     }
 
-    const payload = {
-      activeRootName: activeRootGroup.root,
-      activeRootOrderKey: activeRootGroup.orderKey,
-      rawGroups,
-      activeRootSortedGroups: sortedGroups,
-      sortableItems: activeRootSortableItems,
-      workingOrderOverrideCount: Object.keys(workingConfig.orderOverrides ?? {}).length,
-      searchQueryEmpty: searchQuery.trim().length === 0,
-    };
     const debugKey = JSON.stringify(payload);
 
     if (groupRenderDebugKeyRef.current === debugKey) {
@@ -192,20 +300,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const rawGroups = getDebugGroupOrderRows(activeRootGroup.groups, workingConfig.orderOverrides);
-    const hasGroupOverride = rawGroups.some((group) => group.override !== undefined);
-
-    if (activeRootGroup.root !== "算法" && !hasGroupOverride) {
+    const payload = getGroupOrderAfterWorkingConfigDebugPayload({
+      activeRootGroup,
+      activeRootSortedGroups,
+      sortableItems: activeRootSortableItems,
+      orderOverrides: workingConfig.orderOverrides,
+    });
+    if (!payload) {
       return;
     }
 
-    const payload = {
-      activeRootName: activeRootGroup.root,
-      activeRootOrderKey: activeRootGroup.orderKey,
-      activeRootSortedGroups: getDebugGroupOrderRows(activeRootSortedGroups, workingConfig.orderOverrides),
-      sortableItems: activeRootSortableItems,
-      workingOrderOverrideCount: Object.keys(workingConfig.orderOverrides ?? {}).length,
-    };
     const debugKey = JSON.stringify(payload);
 
     if (groupAfterWorkingConfigDebugKeyRef.current === debugKey) {
@@ -268,11 +372,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const saveOrder = useCallback((nextIds: string[], debugContext?: GroupOrderSaveDebugContext) => {
-    const currentConfig = normalizeConfig(workingConfig);
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      orderOverrides: createOrderOverrides(currentConfig.orderOverrides, nextIds),
-    });
+    const savePlan = getTagSortSavePlan(workingConfig, nextIds);
 
     if (debugContext?.scope === "group") {
       debugEvent("manager.groupOrder.saveNext", {
@@ -283,22 +383,22 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
         previousIds: debugContext.previousIds,
         nextIds: debugContext.nextIds,
         currentGroups: debugContext.currentGroups
-          ? getDebugGroupOrderRows(debugContext.currentGroups, currentConfig.orderOverrides)
+          ? getDebugGroupOrderRows(debugContext.currentGroups, savePlan.previousConfig.orderOverrides)
           : [],
         previousOverridesForNextIds: debugContext.nextIds.map((key) => ({
           key,
-          value: currentConfig.orderOverrides?.[key],
+          value: savePlan.previousConfig.orderOverrides?.[key],
         })),
         savedOverridesForNextIds: debugContext.nextIds.map((key) => ({
           key,
-          value: nextConfig.orderOverrides?.[key],
+          value: savePlan.nextConfig.orderOverrides?.[key],
         })),
-        orderOverrideCountBefore: Object.keys(currentConfig.orderOverrides ?? {}).length,
-        orderOverrideCountAfter: Object.keys(nextConfig.orderOverrides ?? {}).length,
+        orderOverrideCountBefore: Object.keys(savePlan.previousConfig.orderOverrides ?? {}).length,
+        orderOverrideCountAfter: Object.keys(savePlan.nextConfig.orderOverrides ?? {}).length,
       });
     }
 
-    void saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原顺序", "sort");
+    void saveWorkingConfig(savePlan.nextConfig, savePlan.previousConfig, savePlan.failureMessage, savePlan.operation);
   }, [saveWorkingConfig, workingConfig]);
 
   const handleSortStart = useCallback((scope: SortScope, parentKey: string | undefined, event: DragStartEvent) => {
@@ -325,199 +425,108 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   ) => {
     const activeId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
+    const sortEndPlan = getSortEndPlan(currentIds, activeId, overId);
     if (scope === "group") {
       setActiveDraggingGroupId(null);
     }
-    if (!overId || activeId === overId) {
-      if (scope === "group") {
-        debugEvent("manager.groupOrder.dragEnd", {
-          scope,
-          parentKey,
-          activeRootName: parentKey,
-          activeId,
-          overId,
-          currentIds,
-          nextIds: currentIds,
-          changed: false,
-          currentIdsSource,
-          currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
-        });
-      }
-      debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed: false });
-      return;
-    }
-    const oldIndex = currentIds.indexOf(activeId);
-    const newIndex = currentIds.indexOf(overId);
-    if (oldIndex < 0 || newIndex < 0) {
-      if (scope === "group") {
-        debugEvent("manager.groupOrder.dragEnd", {
-          scope,
-          parentKey,
-          activeRootName: parentKey,
-          activeId,
-          overId,
-          currentIds,
-          nextIds: currentIds,
-          changed: false,
-          currentIdsSource,
-          reason: "invalid-index",
-          currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
-        });
-      }
-      debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed: false, reason: "invalid-index" });
-      return;
-    }
-    const nextIds = arrayMove(currentIds, oldIndex, newIndex);
-    const changed = !areStringArraysEqual(nextIds, currentIds);
     if (scope === "group") {
       debugEvent("manager.groupOrder.dragEnd", {
         scope,
         parentKey,
         activeRootName: parentKey,
-        activeId,
-        overId,
+        activeId: sortEndPlan.activeId,
+        overId: sortEndPlan.overId,
         currentIds,
-        nextIds,
-        changed,
+        nextIds: sortEndPlan.nextIds,
+        changed: sortEndPlan.changed,
         currentIdsSource,
+        ...(sortEndPlan.reason ? { reason: sortEndPlan.reason } : {}),
         currentGroups: currentGroups ? getDebugGroupOrderRows(currentGroups, workingConfig.orderOverrides) : [],
       });
     }
-    debugEvent("manager.drag.end", { scope, parentKey, activeId, overId, changed });
-    if (!changed) return;
-    saveOrder(nextIds, {
+    debugEvent("manager.drag.end", {
+      scope,
+      parentKey,
+      activeId: sortEndPlan.activeId,
+      overId: sortEndPlan.overId,
+      changed: sortEndPlan.changed,
+      ...(sortEndPlan.reason ? { reason: sortEndPlan.reason } : {}),
+    });
+    if (!sortEndPlan.changed) return;
+    saveOrder(sortEndPlan.nextIds, {
       scope,
       parentKey,
       previousIds: currentIds,
-      nextIds,
+      nextIds: sortEndPlan.nextIds,
       currentIdsSource,
       currentGroups,
     });
   }, [saveOrder, workingConfig.orderOverrides]);
 
   const setSuggestionHidden = useCallback((suggestion: TagSuggestion, hidden: boolean) => {
-    const currentConfig = normalizeConfig(workingConfig);
-    const hiddenIds = new Set(currentConfig.hiddenIds ?? []);
-    if (hidden) hiddenIds.add(suggestion.id);
-    else hiddenIds.delete(suggestion.id);
-    const nextConfig = normalizeConfig({ ...currentConfig, hiddenIds: Array.from(hiddenIds) });
-    void saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原状态", "visibility");
+    const savePlan = getTagVisibilitySavePlan(workingConfig, suggestion, hidden);
+    void saveWorkingConfig(savePlan.nextConfig, savePlan.previousConfig, savePlan.failureMessage, savePlan.operation);
   }, [saveWorkingConfig, workingConfig]);
 
   const addAlias = useCallback(async () => {
-    if (!selectedSuggestion || !canManageAliases) {
-      setAliasError("只有具体标签支持别名管理");
-      return;
-    }
-
-    const alias = aliasInput.trim();
-    const aliasKey = getAliasCompareKey(alias);
-    if (!alias) {
-      setAliasError("请输入别名");
-      return;
-    }
-    if (aliasKey === getAliasCompareKey(selectedSuggestion.name) || aliasKey === getAliasCompareKey(selectedSuggestion.pathText)) {
-      setAliasError("该名称已是当前标签，无需添加");
-      return;
-    }
-    const builtinAliasOwnerId = normalizeTagPath(alias)?.entryId;
-    if (builtinAliasOwnerId && builtinAliasOwnerId !== selectedSuggestion.id) {
-      setAliasError("该别名已被内置标签使用");
-      return;
-    }
-
     const currentConfig = normalizeConfig(workingConfig);
-    const existingUserAlias = Object.keys(currentConfig.aliases ?? {}).some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
-    const existingBuiltinAlias = selectedBuiltinAliases.some((existingAlias) => getAliasCompareKey(existingAlias) === aliasKey);
-
-    if (existingUserAlias || existingBuiltinAlias) {
-      setAliasError("别名已存在");
+    const result = addUserAliasToConfig(currentConfig, selectedSuggestion, aliasInput, selectedBuiltinAliases);
+    if (!result.ok) {
+      setAliasError(result.error);
       return;
     }
 
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      aliases: {
-        ...(currentConfig.aliases ?? {}),
-        [alias]: selectedSuggestion.id,
-      },
+    applyAliasEditorState({
+      input: aliasInput,
+      error: null,
     });
-    setAliasError(null);
-    const saved = await saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原别名", "alias");
-    if (saved) {
-      setAliasInput("");
-    } else {
-      setAliasError("保存失败，已恢复原别名");
-    }
-  }, [aliasInput, canManageAliases, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, ALIAS_SAVE_FAILURE_MESSAGE, "alias");
+    applyAliasEditorState(getAliasSaveResolution(
+      getCurrentAliasEditorState(),
+      saved,
+      ALIAS_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [aliasInput, applyAliasEditorState, getCurrentAliasEditorState, saveWorkingConfig, selectedBuiltinAliases, selectedSuggestion, workingConfig]);
 
   const deleteUserAlias = useCallback(async (alias: string) => {
-    if (!selectedSuggestion) return;
-
     const currentConfig = normalizeConfig(workingConfig);
-    const nextAliases = { ...(currentConfig.aliases ?? {}) };
-    const targetId = nextAliases[alias];
-
-    if (targetId !== selectedSuggestion.id && normalizeTagPath(alias, currentConfig)?.entryId !== selectedSuggestion.id) {
-      setAliasError("只能删除当前标签的自定义别名");
+    const result = deleteUserAliasFromConfig(currentConfig, selectedSuggestion, alias);
+    if (!result.ok) {
+      setAliasError(result.error);
       return;
     }
 
-    delete nextAliases[alias];
-    const nextConfig = normalizeConfig({
-      ...currentConfig,
-      aliases: nextAliases,
+    applyAliasEditorState({
+      input: aliasInput,
+      error: null,
     });
-    setAliasError(null);
-    const saved = await saveWorkingConfig(nextConfig, currentConfig, "保存失败，已恢复原别名", "alias");
-    if (!saved) {
-      setAliasError("保存失败，已恢复原别名");
-    }
-  }, [saveWorkingConfig, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, ALIAS_SAVE_FAILURE_MESSAGE, "alias");
+    applyAliasEditorState(getAliasDeleteSaveResolution(
+      getCurrentAliasEditorState(),
+      saved,
+      ALIAS_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [aliasInput, applyAliasEditorState, getCurrentAliasEditorState, saveWorkingConfig, selectedSuggestion, workingConfig]);
 
   const toggleGroup = useCallback((groupKey: string) => {
     setExpandedGroups((current) => ({ ...current, [groupKey]: !current[groupKey] }));
   }, []);
 
   const clearSelectedNode = useCallback(() => {
-    setSelectedGroupOrderKey(null);
-    setSelectedSuggestionId(null);
-    setCustomTagCreateDraft((current) => current ? {
-      ...current,
-      parentPathText: "",
-      parentLocked: false,
-    } : current);
-    setCustomTagCreateError(null);
-  }, []);
+    applyNodeSelectionState(getClearedNodeSelectionState(getCurrentNodeSelectionState()));
+  }, [applyNodeSelectionState, getCurrentNodeSelectionState]);
 
   const selectRoot = useCallback((root: string) => {
-    setActiveRoot(root);
-    clearSelectedNode();
-  }, [clearSelectedNode]);
+    applyNodeSelectionState(getSelectedRootState(getCurrentNodeSelectionState(), root));
+  }, [applyNodeSelectionState, getCurrentNodeSelectionState]);
 
   const selectGroup = useCallback((groupKey: string) => {
-    const group = activeRootSortedGroups.find((item) => item.orderKey === groupKey) ?? null;
-    setSelectedGroupOrderKey(groupKey);
-    setSelectedSuggestionId(null);
-    setCustomTagCreateDraft((current) => current && group ? {
-      ...current,
-      parentPathText: group.path.join(" / "),
-      parentLocked: true,
-    } : current);
-    setCustomTagCreateError(null);
-  }, [activeRootSortedGroups]);
+    applyNodeSelectionState(getSelectedGroupState(getCurrentNodeSelectionState(), groupKey, activeRootSortedGroups));
+  }, [activeRootSortedGroups, applyNodeSelectionState, getCurrentNodeSelectionState]);
 
   const selectSuggestion = useCallback((suggestionId: string) => {
-    const suggestion = suggestions.find((item) => item.id === suggestionId) ?? null;
-    setSelectedGroupOrderKey(null);
-    setSelectedSuggestionId(suggestionId);
-    setCustomTagCreateDraft((current) => current && suggestion && suggestion.path.length >= 3 ? {
-      ...current,
-      parentPathText: suggestion.path.slice(0, -1).join(" / "),
-      parentLocked: true,
-    } : current);
-    setCustomTagCreateError(null);
-  }, [suggestions]);
+    applyNodeSelectionState(getSelectedSuggestionState(getCurrentNodeSelectionState(), suggestionId, suggestions));
+  }, [applyNodeSelectionState, getCurrentNodeSelectionState, suggestions]);
 
   const handleAliasInputChange = useCallback((value: string) => {
     setAliasInput(value);
@@ -525,13 +534,16 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
   }, []);
 
   const startCustomTagCreate = useCallback(() => {
-    setCustomTagCreateDraft(getCustomTagCreateDraft(selectedSuggestion, selectedGroupOrderKey, activeRootSortedGroups));
-    setCustomTagCreateError(null);
-    setCustomTagEditDraft(null);
-    setCustomTagEditError(null);
+    applyCustomTagEditorState(getOpenedCustomTagCreateState(getCurrentCustomTagEditorState(), selectedSuggestion, selectedGroupOrderKey, activeRootSortedGroups));
     setIsMergeEditorOpen(false);
     setMergeError(null);
-  }, [activeRootSortedGroups, selectedGroupOrderKey, selectedSuggestion]);
+  }, [
+    activeRootSortedGroups,
+    applyCustomTagEditorState,
+    getCurrentCustomTagEditorState,
+    selectedGroupOrderKey,
+    selectedSuggestion,
+  ]);
 
   const cancelCustomTagCreate = useCallback(() => {
     setCustomTagCreateDraft(null);
@@ -553,34 +565,30 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      const nextRootGroups = getTagSuggestionRootGroups(result.config, { includeHidden: true, includeDeprecated: true });
-      const nextRootGroup = nextRootGroups.find((rootGroup) => rootGroup.groups.some((group) => group.candidates.some((candidate) => candidate.id === result.entryId)));
-      const nextGroup = nextRootGroup?.groups.find((group) => group.candidates.some((candidate) => candidate.id === result.entryId));
-      if (nextRootGroup) {
-        setActiveRoot(nextRootGroup.root);
-      }
-      if (nextGroup) {
-        setExpandedGroups((current) => ({ ...current, [nextGroup.orderKey]: true }));
-      }
-      setFilterMode("all");
-      setSelectedGroupOrderKey(null);
-      setSelectedSuggestionId(result.entryId);
-      setCustomTagCreateDraft(null);
-      setCustomTagCreateError(null);
-    } else {
-      setCustomTagCreateError("保存失败，已恢复原自定义标签");
-    }
-  }, [customTagCreateDraft, saveWorkingConfig, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagCreateSelectionState(getCustomTagCreateSaveResolution(
+      getCurrentCustomTagCreateSelectionState(),
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      createCustomTagCreateSelectionPlan(result.config, result.entryId),
+    ));
+  }, [
+    applyCustomTagCreateSelectionState,
+    customTagCreateDraft,
+    getCurrentCustomTagCreateSelectionState,
+    saveWorkingConfig,
+    workingConfig,
+  ]);
 
   const startCustomTagEdit = useCallback(() => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;
-    setCustomTagEditDraft(getCustomTagEditDraft(workingConfig, selectedSuggestion));
-    setCustomTagEditError(null);
-    setCustomTagCreateDraft(null);
-    setCustomTagCreateError(null);
-  }, [selectedSuggestion, workingConfig]);
+    applyCustomTagEditorState(getOpenedCustomTagEditState(getCurrentCustomTagEditorState(), workingConfig, selectedSuggestion));
+  }, [
+    applyCustomTagEditorState,
+    getCurrentCustomTagEditorState,
+    selectedSuggestion,
+    workingConfig,
+  ]);
 
   const cancelCustomTagEdit = useCallback(() => {
     setCustomTagEditDraft(null);
@@ -602,24 +610,25 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      setSelectedSuggestionId(selectedSuggestion.id);
-      setCustomTagEditDraft(null);
-      setCustomTagEditError(null);
-    } else {
-      setCustomTagEditError("保存失败，已恢复原自定义标签");
-    }
-  }, [customTagEditDraft, saveWorkingConfig, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagEditSelectionState(getCustomTagEditSaveResolution(
+      getCurrentCustomTagEditSelectionState(),
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      selectedSuggestion.id,
+    ));
+  }, [
+    applyCustomTagEditSelectionState,
+    customTagEditDraft,
+    getCurrentCustomTagEditSelectionState,
+    saveWorkingConfig,
+    selectedSuggestion,
+    workingConfig,
+  ]);
 
   const deleteCustomTag = useCallback(async () => {
     if (!selectedSuggestion || selectedSuggestion.source !== "user") return;
-    const confirmed = await requestConfirm({
-      title: `删除自定义标签“${selectedSuggestion.pathText}”？`,
-      description: "不会自动修改 notes。",
-      confirmText: "删除",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getCustomTagDeleteConfirmOptions(selectedSuggestion.pathText));
     if (!confirmed) return;
 
     const currentConfig = normalizeConfig(workingConfig);
@@ -629,39 +638,41 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原自定义标签", "alias");
-    if (saved) {
-      setSelectedSuggestionId(null);
-      setCustomTagEditDraft(null);
-      setCustomTagEditError(null);
-    } else {
-      setCustomTagEditError("保存失败，已恢复原自定义标签");
-    }
-  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, CUSTOM_TAG_SAVE_FAILURE_MESSAGE, "alias");
+    applyCustomTagEditSelectionState(getCustomTagEditSaveResolution(
+      getCurrentCustomTagEditSelectionState(),
+      saved,
+      CUSTOM_TAG_SAVE_FAILURE_MESSAGE,
+      null,
+    ));
+  }, [
+    applyCustomTagEditSelectionState,
+    getCurrentCustomTagEditSelectionState,
+    requestConfirm,
+    saveWorkingConfig,
+    selectedSuggestion,
+    workingConfig,
+  ]);
 
   const startMergeEdit = useCallback(() => {
     if (!canEditMergeRule) {
       setMergeError("只有具体标签可以设置合并规则。");
       return;
     }
-    setIsMergeEditorOpen(true);
-    setMergeSearchQuery("");
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, [canEditMergeRule]);
+    applyMergeEditorState(getOpenedMergeEditorState());
+  }, [applyMergeEditorState, canEditMergeRule]);
 
   const cancelMergeEdit = useCallback(() => {
-    setIsMergeEditorOpen(false);
-    setMergeSearchQuery("");
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, []);
+    applyMergeEditorState(getClosedMergeEditorState(getCurrentMergeEditorState()));
+  }, [applyMergeEditorState, getCurrentMergeEditorState]);
 
   const handleMergeSearchQueryChange = useCallback((value: string) => {
-    setMergeSearchQuery(value);
-    setSelectedMergeTargetId(null);
-    setMergeError(null);
-  }, []);
+    applyMergeEditorState(getSearchedMergeEditorState(getCurrentMergeEditorState(), value));
+  }, [applyMergeEditorState, getCurrentMergeEditorState]);
+
+  const handleMergeTargetSelect = useCallback((suggestion: TagSuggestion) => {
+    applyMergeEditorState(getSelectedMergeTargetState(getCurrentMergeEditorState(), suggestion.id));
+  }, [applyMergeEditorState, getCurrentMergeEditorState]);
 
   const saveMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -671,26 +682,21 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = await requestConfirm({
-      title: "确认合并标签？",
-      description: `确认把“${selectedSuggestion?.pathText ?? ""}”合并到“${selectedMergeTarget?.pathText ?? ""}”？\n\n以后规范化和建议会优先指向目标标签；不会自动修改 notes。`,
-      confirmText: "合并",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getMergeSaveConfirmOptions(
+      selectedSuggestion?.pathText ?? "",
+      selectedMergeTarget?.pathText ?? "",
+    ));
     if (!confirmed) {
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
-    if (saved) {
-      setIsMergeEditorOpen(false);
-      setMergeSearchQuery("");
-      setSelectedMergeTargetId(null);
-      setMergeError(null);
-    } else {
-      setMergeError("保存失败，已恢复原合并规则");
-    }
-  }, [requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, MERGE_SAVE_FAILURE_MESSAGE, "merge");
+    applyMergeEditorState(getMergeSaveResolution(
+      getCurrentMergeEditorState(),
+      saved,
+      MERGE_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [applyMergeEditorState, getCurrentMergeEditorState, requestConfirm, saveWorkingConfig, selectedMergeTarget, selectedSuggestion, workingConfig]);
 
   const removeMergeRule = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
@@ -700,110 +706,119 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
       return;
     }
 
-    const confirmed = await requestConfirm({
-      title: "取消合并规则？",
-      description: `确认取消“${selectedSuggestion?.pathText ?? ""}”的合并规则？\n\n不会自动修改 notes。`,
-      confirmText: "取消合并",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getMergeDeleteConfirmOptions(
+      selectedSuggestion?.pathText ?? "",
+    ));
     if (!confirmed) {
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原合并规则", "merge");
-    if (saved) {
-      setIsMergeEditorOpen(false);
-      setMergeSearchQuery("");
-      setSelectedMergeTargetId(null);
-      setMergeError(null);
-    } else {
-      setMergeError("保存失败，已恢复原合并规则");
-    }
-  }, [requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, MERGE_SAVE_FAILURE_MESSAGE, "merge");
+    applyMergeEditorState(getMergeDeleteResolution(
+      getCurrentMergeEditorState(),
+      saved,
+      MERGE_SAVE_FAILURE_MESSAGE,
+    ));
+  }, [applyMergeEditorState, getCurrentMergeEditorState, requestConfirm, saveWorkingConfig, selectedSuggestion, workingConfig]);
 
   const handleActiveViewChange = useCallback((nextView: TagManagerWorkspaceView) => {
-    setActiveView(nextView);
-    setCollectionCreateError(null);
-    setCollectionEditError(null);
-  }, []);
+    applyCollectionPanelState(getAppliedCollectionViewState(getCurrentCollectionPanelState(), nextView));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
+
+  const handleCollectionCreateInputChange = useCallback((value: string) => {
+    applyCollectionPanelState(getChangedCollectionCreateInputState(getCurrentCollectionPanelState(), value));
+  }, [applyCollectionPanelState, getCurrentCollectionPanelState]);
 
   const createCollection = useCallback(async () => {
     const currentConfig = normalizeConfig(workingConfig);
     const result = createCustomCollectionCandidate(currentConfig, collectionCreateInput, collectionExistingCandidates);
     if (!result.ok) {
-      setCollectionCreateError(result.error);
+      const resolution = getCollectionCreateSaveResolution(
+        getCurrentCollectionSaveState(),
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
-    if (saved) {
-      setCollectionCreateInput("");
-      setCollectionCreateError(null);
-    } else {
-      setCollectionCreateError("保存失败，已恢复原文集候选");
-    }
-  }, [collectionCreateInput, collectionExistingCandidates, saveWorkingConfig, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
+    const resolution = getCollectionCreateSaveResolution(
+      getCurrentCollectionSaveState(),
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, collectionCreateInput, collectionExistingCandidates, getCurrentCollectionSaveState, saveWorkingConfig, workingConfig]);
 
   const startCollectionEdit = useCallback((name: string) => {
-    setEditingCollectionName(name);
-    setCollectionEditInput(name);
-    setCollectionEditError(null);
-    setCollectionCreateError(null);
-  }, []);
+    applyCollectionEditState(getOpenedCollectionEditState(getCurrentCollectionEditState(), name));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
 
   const cancelCollectionEdit = useCallback(() => {
-    setEditingCollectionName(null);
-    setCollectionEditInput("");
-    setCollectionEditError(null);
-  }, []);
+    applyCollectionEditState(getCancelledCollectionEditState(getCurrentCollectionEditState()));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
+
+  const handleCollectionEditInputChange = useCallback((value: string) => {
+    applyCollectionEditState(getChangedCollectionEditInputState(getCurrentCollectionEditState(), value));
+  }, [applyCollectionEditState, getCurrentCollectionEditState]);
 
   const saveCollectionEdit = useCallback(async () => {
     if (!editingCollectionName) return;
 
-    const nextName = collectionEditInput.trim().replace(/\s+/g, " ");
-    if (nextName === editingCollectionName) {
+    const savePlan = getCollectionEditSavePlan(editingCollectionName, collectionEditInput);
+    if (savePlan.action === "cancel") {
       cancelCollectionEdit();
       return;
     }
 
     const currentConfig = normalizeConfig(workingConfig);
-    const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, nextName, collectionExistingCandidates);
+    const result = renameCustomCollectionCandidate(currentConfig, editingCollectionName, savePlan.nextName, collectionExistingCandidates);
     if (!result.ok) {
-      setCollectionEditError(result.error);
+      const resolution = getCollectionEditSaveResolution(
+        getCurrentCollectionSaveState(),
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
-    if (saved) {
-      cancelCollectionEdit();
-    } else {
-      setCollectionEditError("保存失败，已恢复原文集候选");
-    }
-  }, [cancelCollectionEdit, collectionEditInput, collectionExistingCandidates, editingCollectionName, saveWorkingConfig, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
+    const resolution = getCollectionEditSaveResolution(
+      getCurrentCollectionSaveState(),
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, collectionEditInput, collectionExistingCandidates, editingCollectionName, getCurrentCollectionSaveState, saveWorkingConfig, workingConfig]);
 
   const deleteCollection = useCallback(async (name: string) => {
-    const confirmed = await requestConfirm({
-      title: `删除自定义文集“${name}”？`,
-      description: "只会删除候选，不会修改已有文章。",
-      confirmText: "删除",
-      danger: true,
-    });
+    const confirmed = await requestConfirm(getCollectionDeleteConfirmOptions(name));
     if (!confirmed) return;
 
     const currentConfig = normalizeConfig(workingConfig);
     const result = deleteCustomCollectionCandidate(currentConfig, name);
     if (!result.ok) {
-      setCollectionEditError(result.error);
+      const resolution = getCollectionDeleteSaveResolution(
+        getCurrentCollectionSaveState(),
+        name,
+        false,
+        result.error,
+      );
+      applyCollectionSaveResolution(resolution.panelState, resolution.editState);
       return;
     }
 
-    const saved = await saveWorkingConfig(result.config, currentConfig, "保存失败，已恢复原文集候选", "collection");
-    if (saved && editingCollectionName === name) {
-      cancelCollectionEdit();
-    } else if (!saved) {
-      setCollectionEditError("保存失败，已恢复原文集候选");
-    }
-  }, [cancelCollectionEdit, editingCollectionName, requestConfirm, saveWorkingConfig, workingConfig]);
+    const saved = await saveWorkingConfig(result.config, currentConfig, COLLECTION_SAVE_FAILURE_MESSAGE, "collection");
+    const resolution = getCollectionDeleteSaveResolution(
+      getCurrentCollectionSaveState(),
+      name,
+      saved,
+      COLLECTION_SAVE_FAILURE_MESSAGE,
+    );
+    applyCollectionSaveResolution(resolution.panelState, resolution.editState);
+  }, [applyCollectionSaveResolution, getCurrentCollectionSaveState, requestConfirm, saveWorkingConfig, workingConfig]);
 
   const handleClose = useCallback(() => {
     debugEvent("manager.closeButton.click", {
@@ -896,10 +911,7 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
             onStartMergeEdit={startMergeEdit}
             onCancelMergeEdit={cancelMergeEdit}
             onMergeSearchQueryChange={handleMergeSearchQueryChange}
-            onSelectMergeTarget={(suggestion) => {
-              setSelectedMergeTargetId(suggestion.id);
-              setMergeError(null);
-            }}
+            onSelectMergeTarget={handleMergeTargetSelect}
             onSaveMergeRule={() => void saveMergeRule()}
             onDeleteMergeRule={() => void removeMergeRule()}
             onSetSuggestionHidden={setSuggestionHidden}
@@ -914,16 +926,10 @@ export default function TagManagerWorkspace({ initialConfig, initialFilterMode =
           editInput={collectionEditInput}
           editError={collectionEditError}
           isSaving={isSaving}
-          onCreateInputChange={(value) => {
-            setCollectionCreateInput(value);
-            setCollectionCreateError(null);
-          }}
+          onCreateInputChange={handleCollectionCreateInputChange}
           onCreate={() => void createCollection()}
           onStartEdit={startCollectionEdit}
-          onEditInputChange={(value) => {
-            setCollectionEditInput(value);
-            setCollectionEditError(null);
-          }}
+          onEditInputChange={handleCollectionEditInputChange}
           onCancelEdit={cancelCollectionEdit}
           onSaveEdit={() => void saveCollectionEdit()}
           onDelete={(name) => void deleteCollection(name)}

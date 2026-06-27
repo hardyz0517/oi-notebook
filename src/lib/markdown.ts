@@ -11,7 +11,7 @@ import { visit } from "unist-util-visit";
 import type { Element, Root } from "hast";
 import type { BuiltinLanguage, ShikiTransformer } from "shiki";
 import { remarkLuoguCallouts } from "./markdownCallouts";
-import { rehypeTableMerge } from "./rehypeTableMerge";
+import { rehypeTableMerge } from "../../shared/rehypeTableMerge";
 import { markPreviewMarkdownRender, markShikiCacheLookup } from "./previewPerf";
 
 type CodeMeta = {

@@ -7,6 +7,7 @@ import { SettingRow } from "../SettingsPages";
 import { SettingsPageLayout } from "../v2/components/SettingsPageLayout";
 import { SettingsBadge } from "../v2/primitives/SettingsBadge";
 import { SettingsButton } from "../v2/primitives/SettingsButton";
+import type { LuoguAccountSettingsView } from "@/lib/luoguConfigForm";
 
 export interface LuoguRuleSettingOption {
   value: string;
@@ -72,9 +73,7 @@ export function LuoguAccountSettingsPage({
   uid,
   lastSubmissionId,
   aiConfigured,
-  isLoadingConfig,
-  isSavingConfig,
-  isTestingConnection,
+  accountSettingsView,
   onOpenSettings,
 }: {
   className: string;
@@ -85,9 +84,7 @@ export function LuoguAccountSettingsPage({
   uid: string;
   lastSubmissionId: string;
   aiConfigured: boolean;
-  isLoadingConfig: boolean;
-  isSavingConfig: boolean;
-  isTestingConnection: boolean;
+  accountSettingsView: LuoguAccountSettingsView;
   onOpenSettings: () => void;
 }) {
   return (
@@ -109,8 +106,8 @@ export function LuoguAccountSettingsPage({
       </SettingRow>
       <SettingRow title="账号操作" description="打开现有洛谷设置窗口，可测试连接并保存配置。">
         <div className="flex flex-wrap gap-2">
-          <SettingsButton onClick={onOpenSettings} disabled={isLoadingConfig || isSavingConfig || isTestingConnection}>
-            {isLoadingConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+          <SettingsButton onClick={onOpenSettings} disabled={accountSettingsView.isOpenSettingsDisabled}>
+            {accountSettingsView.showOpenSettingsSpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
             打开账号配置
           </SettingsButton>
         </div>

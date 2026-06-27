@@ -6,8 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import type { TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import type {
+  TagNormalizationApplyResult,
+  TagNormalizationPanelView,
+  TagNormalizationScanResult,
+  TagNormalizationScanStats,
+} from "@/components/tag-manager/tagNormalizationScan";
 import { cn } from "@/lib/utils";
 import type { TagNormalizationReason, TagNormalizationSuggestion, TagTaxonomyEntry } from "@/lib/tagTaxonomy";
+import type { TagTaxonomySettingsView } from "@/lib/tagTaxonomySettingsModel";
 
 import { SettingsPageLayout } from "../v2/components/SettingsPageLayout";
 
@@ -27,45 +34,18 @@ interface TagTaxonomyStatItem {
   value: string | number;
 }
 
-interface TagNormalizationScanStats {
-  noteCount: number;
-  suggestionCount: number;
-  rewriteCount: number;
-  aliasCount: number;
-  mergeCount: number;
-  aliasToMergedSourceCount: number;
-  duplicateCount: number;
-  unknownCount: number;
-  hiddenSkippedCount: number;
-}
-
-interface TagNormalizationScanResult {
-  path: string;
-  title: string;
-  suggestions: TagNormalizationSuggestion[];
-}
-
-interface TagNormalizationApplyResult {
-  successCount: number;
-  normalizedTagCount: number;
-  duplicateTagCount: number;
-  skippedCount: number;
-  failures: Array<{ path: string; error: string }>;
-}
-
 export interface BlogTaxonomySettingsPageProps {
   className: string;
   embedded?: boolean;
-  isLoadingTagTaxonomyConfig: boolean;
   tagTaxonomyConfigError: string | null;
   tagTaxonomyStats: TagTaxonomyStats;
+  tagTaxonomySettingsView: TagTaxonomySettingsView;
   tagTaxonomyStatItems: TagTaxonomyStatItem[];
   tagTaxonomyImportFileInputRef: RefObject<HTMLInputElement | null>;
   tagTaxonomyImportMessage: string | null;
   tagTaxonomyImportJsonInput: string;
   tagTaxonomyImportPreview: TagTaxonomyConfigImportResult | null;
   tagTaxonomyImportError: string | null;
-  isSavingTagTaxonomyConfig: boolean;
   tagTaxonomyUserEntries: TagTaxonomyEntry[];
   displayedTagTaxonomyUserEntries: TagTaxonomyEntry[];
   isTagTaxonomyEntryListExpanded: boolean;
@@ -79,13 +59,12 @@ export interface BlogTaxonomySettingsPageProps {
   tagTaxonomyAliasTargetInput: string;
   tagTaxonomyAliasListQuery: string;
   tagTaxonomySaveError: string | null;
-  isScanningTagNormalization: boolean;
   tagNormalizationScanError: string | null;
   tagNormalizationApplyResult: TagNormalizationApplyResult | null;
   tagNormalizationScanResults: TagNormalizationScanResult[] | null;
   tagNormalizationScanIssueCount: number;
   tagNormalizationScanStats: TagNormalizationScanStats;
-  isApplyingTagNormalizationScan: boolean;
+  tagNormalizationPanelView: TagNormalizationPanelView;
   selectedTagNormalizationScanStats: TagNormalizationScanStats;
   selectedTagNormalizationScanPaths: Set<string>;
   loadTagTaxonomyConfig: () => void | Promise<void>;
@@ -195,9 +174,9 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
               variant="outline"
               size="sm"
               onClick={() => void props.loadTagTaxonomyConfig()}
-              disabled={props.isLoadingTagTaxonomyConfig}
+              disabled={props.tagTaxonomySettingsView.isReloadDisabled}
             >
-              <RefreshCw className={cn("h-3.5 w-3.5", props.isLoadingTagTaxonomyConfig && "animate-spin")} />
+              <RefreshCw className={cn("h-3.5 w-3.5", props.tagTaxonomySettingsView.showReloadSpinner && "animate-spin")} />
               重新加载
             </Button>
           </div>
@@ -206,9 +185,9 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
             <span
               className={cn(
                 "inline-flex rounded-sm border px-2 py-0.5 text-xs",
-                props.tagTaxonomyConfigError
+                props.tagTaxonomySettingsView.statusTone === "warning"
                   ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-                  : props.tagTaxonomyStats.userConfigItemCount > 0
+                  : props.tagTaxonomySettingsView.statusTone === "success"
                     ? "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
                     : "border-border/70 bg-muted/20 text-muted-foreground",
               )}
@@ -246,7 +225,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => void props.handleExportTagTaxonomyConfig()}
-                disabled={props.isSavingTagTaxonomyConfig}
+                disabled={props.tagTaxonomySettingsView.areConfigActionsDisabled}
               >
                 <Download className="h-3.5 w-3.5" />
                 导出
@@ -256,7 +235,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => props.tagTaxonomyImportFileInputRef.current?.click()}
-                disabled={props.isSavingTagTaxonomyConfig}
+                disabled={props.tagTaxonomySettingsView.areConfigActionsDisabled}
               >
                 <Upload className="h-3.5 w-3.5" />
                 选择 JSON
@@ -311,9 +290,9 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 size="sm"
                 className="w-fit"
                 onClick={() => void props.handleConfirmTagTaxonomyImport()}
-                disabled={props.isSavingTagTaxonomyConfig}
+                disabled={props.tagTaxonomySettingsView.isConfirmImportDisabled}
               >
-                {props.isSavingTagTaxonomyConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                {props.tagTaxonomySettingsView.showConfirmImportSpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                 确认导入
               </Button>
             </div>
@@ -357,7 +336,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 onChange={(event) => props.setTagTaxonomyEntryAliasesInput(event.target.value)}
                 placeholder="别名，逗号分隔"
               />
-              <Button type="button" variant="outline" size="sm" onClick={() => void props.handleAddTagTaxonomyEntry()} disabled={props.isSavingTagTaxonomyConfig}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void props.handleAddTagTaxonomyEntry()} disabled={props.tagTaxonomySettingsView.areEditActionsDisabled}>
                 <Plus className="h-3.5 w-3.5" />
                 添加
               </Button>
@@ -396,7 +375,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                     size="icon"
                     className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                     onClick={() => void props.handleDeleteTagTaxonomyEntry(entry.id)}
-                    disabled={props.isSavingTagTaxonomyConfig}
+                    disabled={props.tagTaxonomySettingsView.areEditActionsDisabled}
                     aria-label="删除自定义标签"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -424,7 +403,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 onChange={(event) => props.setTagTaxonomyAliasTargetInput(event.target.value)}
                 placeholder="目标标签路径"
               />
-              <Button type="button" variant="outline" size="sm" onClick={() => void props.handleAddTagTaxonomyAlias()} disabled={props.isSavingTagTaxonomyConfig}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void props.handleAddTagTaxonomyAlias()} disabled={props.tagTaxonomySettingsView.areEditActionsDisabled}>
                 <Plus className="h-3.5 w-3.5" />
                 添加
               </Button>
@@ -462,7 +441,7 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                     size="icon"
                     className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                     onClick={() => void props.handleDeleteTagTaxonomyAlias(aliasName)}
-                    disabled={props.isSavingTagTaxonomyConfig}
+                    disabled={props.tagTaxonomySettingsView.areEditActionsDisabled}
                     aria-label="删除别名"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -486,9 +465,9 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                 扫描已有笔记中的自由标签，按当前标签体系生成规范化建议。
               </div>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => void props.handleScanLegacyTags()} disabled={props.isScanningTagNormalization}>
-              {props.isScanningTagNormalization ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              扫描旧标签
+            <Button type="button" variant="outline" size="sm" onClick={() => void props.handleScanLegacyTags()} disabled={props.tagNormalizationPanelView.isScanDisabled}>
+              {props.tagNormalizationPanelView.showScanSpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+              {props.tagNormalizationPanelView.scanButtonLabel}
             </Button>
           </div>
 
@@ -528,10 +507,10 @@ export function BlogTaxonomySettingsPage(props: BlogTaxonomySettingsPageProps) {
                     variant="outline"
                     size="sm"
                     onClick={() => void props.applySelectedTagNormalizationScanResults()}
-                    disabled={props.isApplyingTagNormalizationScan || selectedCount === 0}
+                    disabled={props.tagNormalizationPanelView.isApplyDisabled}
                   >
-                    {props.isApplyingTagNormalizationScan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                    应用选择
+                    {props.tagNormalizationPanelView.showApplySpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    {props.tagNormalizationPanelView.applyButtonLabel}
                   </Button>
                 </div>
               </div>

@@ -11,6 +11,7 @@ import { SettingRow as PrimitiveSettingRow } from "./v2/primitives/SettingRow";
 import { SettingsButton } from "./v2/primitives/SettingsButton";
 import { SettingsCard, SettingsSection } from "./v2/primitives/SettingsCard";
 import { ToggleSwitch } from "./v2/primitives/ToggleSwitch";
+import type { BlogSettingsView } from "@/lib/blogConfig";
 
 const L = {
   appearance: "\u5916\u89c2",
@@ -389,12 +390,10 @@ export function BlogPreviewSettingsPage({
   blogTitle,
   blogSubtitle,
   blogConfigError,
-  isLoadingBlogConfig,
-  isSavingBlogConfig,
+  blogSettingsView,
   onBlogTitleChange,
   onBlogSubtitleChange,
   onSaveBlogInfo,
-  isRestartingBlog,
   onOpenBlog,
   onRestartBlog,
 }: {
@@ -403,12 +402,10 @@ export function BlogPreviewSettingsPage({
   blogTitle: string;
   blogSubtitle: string;
   blogConfigError: string | null;
-  isLoadingBlogConfig: boolean;
-  isSavingBlogConfig: boolean;
+  blogSettingsView: BlogSettingsView;
   onBlogTitleChange: (value: string) => void;
   onBlogSubtitleChange: (value: string) => void;
   onSaveBlogInfo: () => void;
-  isRestartingBlog: boolean;
   onOpenBlog: () => void;
   onRestartBlog: () => void;
 }) {
@@ -420,15 +417,15 @@ export function BlogPreviewSettingsPage({
             <div className="settings-v2-blog-info-form">
               <label className="settings-v2-field-label settings-v2-blog-info-field">
                 {L.blogName}
-                <Input value={blogTitle} onChange={(event) => onBlogTitleChange(event.target.value)} placeholder="OI Notebook" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
+                <Input value={blogTitle} onChange={(event) => onBlogTitleChange(event.target.value)} placeholder="OI Notebook" disabled={blogSettingsView.areFieldsDisabled} className="settings-v2-field-input" />
               </label>
               <label className="settings-v2-field-label settings-v2-blog-info-field">
                 {L.blogSubtitle}
-                <Input value={blogSubtitle} onChange={(event) => onBlogSubtitleChange(event.target.value)} placeholder="OI Notebook Blog" disabled={isLoadingBlogConfig || isSavingBlogConfig} className="settings-v2-field-input" />
+                <Input value={blogSubtitle} onChange={(event) => onBlogSubtitleChange(event.target.value)} placeholder="OI Notebook Blog" disabled={blogSettingsView.areFieldsDisabled} className="settings-v2-field-input" />
               </label>
               {blogConfigError ? <div className="settings-v2-field-error settings-v2-blog-info-error">{blogConfigError}</div> : null}
               <div className="settings-v2-blog-info-actions">
-                <SettingsButton onClick={onSaveBlogInfo} disabled={isLoadingBlogConfig || isSavingBlogConfig}>{isSavingBlogConfig ? L.saving : L.saveBlog}</SettingsButton>
+                <SettingsButton onClick={onSaveBlogInfo} disabled={blogSettingsView.isSaveDisabled}>{blogSettingsView.saveButtonLabel}</SettingsButton>
               </div>
             </div>
           </SettingsCard>
@@ -438,10 +435,10 @@ export function BlogPreviewSettingsPage({
         <SettingsSection title={L.localPreview}>
           <SettingsCard>
             <div className="settings-v2-action-row">
-              <SettingsButton onClick={onOpenBlog}><ExternalLink className="h-3.5 w-3.5" />{L.openBlog}</SettingsButton>
-              <SettingsButton onClick={onRestartBlog} disabled={isRestartingBlog}>
+              <SettingsButton onClick={onOpenBlog} disabled={blogSettingsView.isOpenDisabled}><ExternalLink className="h-3.5 w-3.5" />{blogSettingsView.openButtonLabel}</SettingsButton>
+              <SettingsButton onClick={onRestartBlog} disabled={blogSettingsView.isRestartDisabled}>
                 <RotateCcw className="h-3.5 w-3.5" />
-                {isRestartingBlog ? L.restarting : L.restartBlog}
+                {blogSettingsView.restartButtonLabel}
               </SettingsButton>
             </div>
           </SettingsCard>

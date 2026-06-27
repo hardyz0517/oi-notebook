@@ -6,7 +6,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
 import { SettingsSidebar } from "./v2/components/SettingsSidebar";
-import { filterSettingsTree } from "./v2/settingsSearch";
+import { filterSettingsTreeByQuery } from "./settingsSearch";
 import "./v2/settingsV2.css";
 import type {
   BeginSettingsCenterResize,
@@ -205,7 +205,7 @@ export default function SettingsCenterShell({
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [managerDialogRect, setManagerDialogRect] = useState<ManagerDialogRect>(() => getDefaultManagerDialogRect(null));
   const filteredSettingsTree = useMemo(
-    () => filterSettingsTree(visibleSettingsTree, settingsSearchQuery),
+    () => filterSettingsTreeByQuery(visibleSettingsTree, settingsSearchQuery),
     [settingsSearchQuery, visibleSettingsTree],
   );
 

@@ -15,15 +15,21 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import TagManagerWorkspace, { type TagManagerCloseReason } from "@/components/tag-manager/TagManagerWorkspace";
 import type { TagManagerFilterMode } from "@/components/tag-manager/types";
-import { mergeConfigWithStoredCustomCollections, normalizeCustomCollections, parseUserTagTaxonomyConfigJson, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import { mergeConfigWithStoredCustomCollections, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
+import { useCollectionCandidatesFromNotes } from "@/components/tag-manager/useCollectionCandidatesFromNotes";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
-import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorScrollApi, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
-import MarkdownPreview, { type MarkdownPreviewScrollApi } from "@/components/editor/MarkdownPreview";
+import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
+import MarkdownPreview from "@/components/editor/MarkdownPreview";
+import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreviewScrollSync";
 import FileTree from "@/components/file-tree/FileTree";
 import OpenTabsBar, { type OpenFileTab, type OpenReviewTab, type OpenTab } from "@/components/layout/OpenTabsBar";
+import { useOpenTabsController } from "@/components/layout/useOpenTabsController";
+import { useDisplayNoteFiles } from "@/components/notes/useDisplayNoteFiles";
+import { useNotesListController } from "@/components/notes/useNotesListController";
+import { useLocalNoteSearchController } from "@/components/search/useLocalNoteSearchController";
 import AiConfigManager from "@/components/settings/AiConfigManager";
 import { LuoguAccountManager } from "@/components/settings/LuoguAccountManager";
 import SettingsCenterHost, { type SettingsCenterHostHandle } from "@/components/settings/SettingsCenterHost";
@@ -45,10 +51,6 @@ import {
   type ReducedMotionMode,
   type ThemeMode,
 } from "@/components/settings/v2/pages/AppearanceSettingsPage";
-import { getSettingsThemeCssVariables } from "@/components/settings/v2/theme/settingsThemeApply";
-import { normalizeSettingsThemeState } from "@/components/settings/v2/theme/settingsThemeCodec";
-import { DEFAULT_SETTINGS_THEME_STATE } from "@/components/settings/v2/theme/settingsThemePresets";
-import type { SettingsThemeState } from "@/components/settings/v2/theme/settingsThemeTypes";
 import { GeneralSettingsPage } from "@/components/settings/v2/pages/GeneralSettingsPage";
 import { KeyboardSettingsPage } from "@/components/settings/v2/pages/KeyboardSettingsPage";
 import {
@@ -58,11 +60,93 @@ import {
   SettingsInlineSelect,
   type LuoguRuleSettingRow,
 } from "@/components/settings/pages/LuoguSettingsPages";
+import {
+  getLuoguScanRangeLabel,
+  getLuoguSubmissionCandidateState,
+  type LuoguScanCountLimit,
+  type LuoguScanDaysLimit,
+  type LuoguScanMode,
+} from "@/components/settings/pages/luoguImportDomain";
+import {
+  createIdleLuoguPrepareSourceState,
+  createIdleLuoguScanSourceState,
+  createIdleLuoguWriteSourceState,
+  createInitialLuoguPrepareProgress,
+  createLuoguWriteProgress,
+  createQueuedLuoguPrepareStatuses,
+  deriveLuoguImportCenterView,
+  deriveLuoguPrepareTaskState,
+  deriveLuoguScanTaskState,
+  deriveLuoguTaskView,
+  deriveLuoguWriteTaskState,
+  failLuoguScanSourceState,
+  finishLuoguScanSourceState,
+  finishLuoguPrepareStatuses,
+  formatLuoguPreviewReviewSummary,
+  formatLuoguScanResultSummary,
+  getNextLuoguSelectableSelection,
+  getLuoguPrepareSelectionPlan,
+  getLuoguScanCompletionSelection,
+  getLuoguSubmissionIdSet,
+  pauseLuoguScanSourceState,
+  startLuoguPrepareSourceState,
+  startLuoguScanSourceState,
+  startLuoguWriteSourceState,
+  stopQueuedLuoguPrepareStatuses,
+  stopLuoguPrepareSourceState,
+  updateLuoguPrepareSourceProgress,
+  updateLuoguScanSourceProgress,
+  updateLuoguWriteSourceProgress,
+} from "@/components/luogu/luoguImportDisplay";
+import {
+  formatLuoguSubmissionStatus,
+  formatLuoguSubmissionTime,
+  formatLuoguCandidateSuggestionTitle,
+  getLuoguCandidateDisplayState,
+  getLuoguPreviewStatusBadgeClass,
+  getLuoguPreviewStatusLabel,
+  getLuoguStatusBadgeClass,
+  parseLuoguSubmitTimeMs,
+} from "@/components/luogu/luoguDisplay";
+import { useLuoguImportController } from "@/components/luogu/useLuoguImportController";
+import { useLuoguImportWorkflow } from "@/components/luogu/useLuoguImportWorkflow";
+import {
+  applyLuoguPreparedRules,
+  buildLuoguImportRuleRowModels,
+  getLuoguImportRuleUpdate,
+  isLuoguRuleControlDisabled as getLuoguRuleControlDisabled,
+  normalizeLuoguImportRules,
+  readStoredLuoguImportRules,
+  saveStoredLuoguImportRules,
+  validateLuoguSaveDirectoryInput,
+  type LuoguImportRules,
+} from "@/components/settings/pages/luoguImportRules";
 import { BlogTaxonomySettingsPage } from "@/components/settings/pages/BlogTaxonomySettingsPage";
 import SearchDiagnosticsPanel from "@/components/settings/SearchDiagnosticsPanel";
+import { SETTINGS_SECTION_FALLBACK, SETTINGS_SECTION_LABELS, SETTINGS_TREE } from "@/components/settings/settingsNavigation";
+import { shouldRenderSettingsGroup, shouldRenderSettingsPage } from "@/components/settings/settingsRenderGuards";
 import type { SettingsCategory, SettingsGroupId, SettingsResizeHandle, SettingsSection, SettingsTarget, SettingsView } from "@/components/settings/settingsTypes";
+import {
+  areSettingsCenterRectsEqual,
+  clampLuoguDialogRect,
+  clampSettingsCenterRect,
+  getDefaultLuoguDialogRect,
+  getDefaultSettingsCenterRect,
+  getLuoguDialogMaxSize,
+  getLuoguDialogMinSize,
+  getMaximizedLuoguDialogRect,
+  getMaximizedSettingsCenterRect,
+  getResizedLuoguDialogRect,
+  getResizedSettingsCenterRect,
+  getSafeOpenedLuoguDialogRect,
+  getSafeOpenedSettingsCenterRect,
+  getSettingsCenterMaxSize,
+  getSettingsCenterMinSize,
+  getSettingsCenterResizeCursor,
+  type SettingsCenterRect,
+} from "@/components/settings/settingsGeometry";
 import { cn } from "@/lib/utils";
-import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, searchNotes, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -72,15 +156,201 @@ import {
   markPreviewMarkdownSet,
   markPreviewScheduleCancelled,
   markPreviewEditorChange,
-  markPreviewScrollSync,
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
-import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, NoteSearchResult, PrepareLuoguSubmissionNoteResult, WriteLuoguPreparedNoteResult, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
-import { mergeFrontmatterFields, parseFrontmatterFields, splitFrontmatter } from "@/lib/frontmatter";
+import { getCommittedMarkdownSyncDelayMs, getPreviewMarkdownSyncDelayMs } from "@/lib/previewSyncTiming";
+import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import { extractCursorParagraph } from "@/lib/editorContext";
+import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
+import { buildLuoguConfigFormState, buildLuoguConfigSavePayload, deriveLuoguAccountSettingsView } from "@/lib/luoguConfigForm";
+import {
+  formatZoomLabel,
+  getBlogStatusLabel,
+  getEditorViewModeLabel,
+  getLuoguImportCenterAccountLabel,
+  getLuoguSettingsStatusDescription,
+  getLuoguSettingsStatusTone,
+  getLuoguStatusLabel,
+  getSaveStatusLabel,
+} from "@/lib/appStatusLabels";
+import { getErrorMessage, runLimitedConcurrencyQueue, sleepMs, withTimeout, yieldToUi } from "@/lib/appAsync";
+import { beginColumnResizeSession } from "@/lib/columnResizeInteraction";
+import { beginFloatingPanelPointerSession } from "@/lib/floatingPanelInteraction";
+import {
+  getActiveActivityItem,
+  getAiActivityToggleLabel,
+  getActivityButtonClassName,
+  getNotesActivityToggleLabel,
+  getSettingsOpenTarget,
+  deriveEditorViewLayout,
+  getSaveStatusActionLabel,
+  isAiActivitySelected,
+  shouldEnsureAiConfigForSettingsPage,
+  shouldRefreshAiConfigForSettingsDiagnostics,
+  EDITOR_VIEW_MODE_OPTIONS,
+  MARKDOWN_CAPABILITIES,
+  type ActivityBarItem,
+  type EditorViewMode,
+} from "@/lib/appShell";
+import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
+import {
+  addTagNormalizationPlanStats,
+  createEmptyTagNormalizationScanStats,
+  deriveTagNormalizationPanelView,
+  deriveTagNormalizationScanTaskState,
+  deriveTagNormalizationTaskView,
+  formatTagNormalizationReason,
+  getAllTagNormalizationScanSelection,
+  getSelectedTagNormalizationScanStats,
+  getTagNormalizationScanStats,
+  type TagNormalizationApplyFailure,
+  type TagNormalizationApplyResult,
+  type TagNormalizationScanResult,
+  type TagNormalizationScanStats,
+} from "@/components/tag-manager/tagNormalizationScan";
+import {
+  COMMON_NOTE_TAGS,
+  COMMON_COLLECTIONS,
+  buildCollectionCandidates,
+  getDisplayTags,
+  getEffectiveCollections,
+  normalizeCollectionValues,
+} from "@/lib/collectionTags";
 import type { FrontmatterFields } from "@/lib/frontmatter";
 import { prewarmMarkdownRenderer } from "@/lib/markdown";
-import { analyzeTagListNormalization, applyTagNormalizationPlan, getTagSuggestionList, normalizeTagPath, type TagNormalizationPlan, type TagNormalizationReason, type TagNormalizationSuggestion, type TagTaxonomyEntry, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import { combineMarkdown, isSnapshotDirty, splitLoadedMarkdown, type SavedNoteSnapshot } from "@/lib/markdownDocument";
+import {
+  ACCENT_COLOR_STORAGE_KEY,
+  APP_ZOOM_DEFAULT,
+  APP_ZOOM_STEP,
+  APP_ZOOM_STORAGE_KEY,
+  CONTENT_ZOOM_STEP,
+  CONTENT_ZOOM_STORAGE_KEY,
+  CONTRAST_STORAGE_KEY,
+  DEVELOPER_MODE_STORAGE_KEY,
+  DIFF_MARKER_MODE_STORAGE_KEY,
+  EDITOR_FONT_SIZE_DEFAULT,
+  EDITOR_FONT_SIZE_STORAGE_KEY,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  POINTER_CURSOR_STORAGE_KEY,
+  PREVIEW_FONT_SIZE_DEFAULT,
+  PREVIEW_FONT_SIZE_STORAGE_KEY,
+  PROMPT_EDITOR_FONT_SIZE_DEFAULT,
+  PROMPT_EDITOR_FONT_SIZE_MAX,
+  PROMPT_EDITOR_FONT_SIZE_MIN,
+  PROMPT_EDITOR_FONT_SIZE_STEP,
+  READING_DENSITY_OPTIONS,
+  READING_DENSITY_STORAGE_KEY,
+  REDUCED_MOTION_STORAGE_KEY,
+  SETTINGS_FONT_SIZE_DEFAULT,
+  SETTINGS_FONT_SIZE_MAX,
+  SETTINGS_FONT_SIZE_MIN,
+  SETTINGS_FONT_SIZE_STORAGE_KEY,
+  TOOLBAR_FONT_SIZE_DEFAULT,
+  TOOLBAR_FONT_SIZE_MAX,
+  TOOLBAR_FONT_SIZE_MIN,
+  TOOLBAR_FONT_SIZE_STORAGE_KEY,
+  TRANSLUCENT_SIDEBAR_STORAGE_KEY,
+  UI_SCALE_DEFAULT,
+  UI_SCALE_STORAGE_KEY,
+  clampAppZoom,
+  clampContentZoom,
+  clampFontSize,
+  clampNumberRange,
+  getInitialAppZoom,
+  getInitialBooleanSetting,
+  getInitialContentZoom,
+  getInitialDeveloperMode,
+  getInitialDiffMarkerMode,
+  getInitialFontSize,
+  getInitialNumberRange,
+  getInitialReadingDensity,
+  getInitialReducedMotion,
+  getInitialScale,
+  type ReadingDensity,
+} from "@/lib/appPreferences";
+import {
+  AI_SIDEBAR_WIDTH_DEFAULT,
+  AI_SIDEBAR_WIDTH_MIN,
+  EDITOR_PREVIEW_RATIO_DEFAULT,
+  LEFT_SIDEBAR_WIDTH_DEFAULT,
+  LEFT_SIDEBAR_WIDTH_MAX,
+  LEFT_SIDEBAR_WIDTH_MIN,
+  clampEditorPreviewRatio,
+  getInitialAiSidebarWidth,
+  getInitialEditorPreviewRatio,
+  getInitialLeftSidebarWidth,
+  writeStoredAiSidebarWidth,
+  writeStoredEditorPreviewRatio,
+  writeStoredLeftSidebarWidth,
+} from "@/lib/layoutPreferences";
+import { formatSearchDate } from "@/lib/localSearchResults";
+import {
+  buildLocalIndexRebuildSuccessMessage,
+  buildLocalIndexStatusMessage,
+  deriveLocalIndexDetailsView,
+  deriveLocalIndexTaskView,
+  getLocalIndexRebuildRunningMessage,
+  getLocalIndexStatusBadgeClassName,
+} from "@/lib/localIndexStatus";
+import { LUOGU_DIFFICULTY_OPTIONS, getDifficultyOptionClassName, getDifficultyOptionTextColor } from "@/lib/luoguDifficulty";
+import {
+  buildOpenFileTabs,
+  getNoteDisplayName,
+  getNextOpenTabPathAfterClose,
+} from "@/lib/openTabs";
+import { analyzeTagListNormalization, applyTagNormalizationPlan, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
+import {
+  buildTagTaxonomyStatItems,
+  buildTagTaxonomyStats,
+  deriveTagTaxonomySettingsView,
+  filterTagTaxonomyUserAliases,
+  filterTagTaxonomyUserEntries,
+  getDisplayedTagTaxonomyList,
+  getTagManagerAvailableCandidateCount,
+  getTagTaxonomyUserAliases,
+  getTagTaxonomyUserEntries,
+} from "@/lib/tagTaxonomySettingsModel";
+import {
+  addTagTaxonomyAlias,
+  addTagTaxonomyEntry,
+  buildTagTaxonomyConfigExport,
+  deleteTagTaxonomyAlias,
+  deleteTagTaxonomyEntry,
+  mergeTagsStable,
+  normalizeUserTagTaxonomyConfig,
+  previewTagTaxonomyConfigImportJson,
+} from "@/lib/tagTaxonomyUserConfig";
+import { createIdleTaskState, failTaskState, finishTaskState, startTaskState, updateTaskProgress, type TaskProgress, type TaskState } from "@/lib/taskStatus";
+import {
+  buildNewNoteMarkdown,
+  getCreateFolderPlan,
+  getCreateNotePlan,
+  getClosedNoteDialogState,
+  findEntryCaseInsensitive as findNoteEntryCaseInsensitive,
+  getCreateFolderDialogInitialState,
+  getCurrentNoteDirectory,
+  getDefaultNewNoteCreateParent as getDefaultNewNoteCreateParentPath,
+  getFolderDialogState,
+  getNoteDirectories,
+  getRenameDialogInitialState,
+  getRenameNotePlan,
+  getSelectedTreeCreateParent as getSelectedTreeCreateParentPath,
+  getTreeSelectionAfterClear,
+  getTreeSelectionAfterDirectorySelect,
+  getTreeSelectionAfterFileSelect,
+  getTreeInlineCreateState,
+  getTreeSelectionAfterRootSelect,
+  removeDeletedNoteWorkingCopies,
+  removeDeletedNoteWorkspaceReferences,
+  rewriteNotePathReference,
+  rewriteNoteWorkspaceReferences,
+  resolveNewNoteDirectory,
+  type NewNoteLocationOption,
+} from "@/lib/noteWorkspace";
+import { useThemeEngine, type SettingsThemeState } from "@/theme";
 import {
   createExternalWorkingCopy,
   createNoteWorkingCopy,
@@ -90,7 +360,6 @@ import {
   updateWorkingCopyContent,
   type WorkingCopy,
 } from "@/lib/workingCopies";
-import type { NoteFileInfo } from "@/types/note";
 
 // 欢迎内容：未选中文件时在编辑器和预览里显示
 const INITIAL_MARKDOWN = `# OI Notebook
@@ -121,72 +390,6 @@ OI Notebook 是给 OIer 用的本地笔记工具，目标是把训练中遇到�
 
 const APP_ICON_URL = new URL("../src-tauri/icons/32x32.png", import.meta.url).href;
 const APP_EMPTY_STATE_ICON_URL = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
-const DEFAULT_BLOG_TITLE = "OI Notebook";
-const DEFAULT_BLOG_SUBTITLE = "一本地算法笔记与题解博客";
-const THEME_STORAGE_KEY = "oi-notebook.theme";
-const CONTENT_ZOOM_STORAGE_KEY = "oi-notebook.contentZoom";
-const APP_ZOOM_STORAGE_KEY = "oi-notebook.appZoom";
-const APP_ZOOM_MIN = 0.8;
-const APP_ZOOM_MAX = 1.6;
-const APP_ZOOM_STEP = 0.1;
-const APP_ZOOM_DEFAULT = 1;
-const CONTENT_ZOOM_MIN = 0.8;
-const CONTENT_ZOOM_MAX = 2;
-const CONTENT_ZOOM_STEP = 0.1;
-const CONTENT_ZOOM_DEFAULT = 1;
-const UI_SCALE_STORAGE_KEY = "oi-notebook.uiScale";
-const UI_SCALE_DEFAULT = 1;
-const EDITOR_FONT_SIZE_STORAGE_KEY = "oi-notebook.editorFontSize";
-const PREVIEW_FONT_SIZE_STORAGE_KEY = "oi-notebook.previewFontSize";
-const READING_DENSITY_STORAGE_KEY = "oi-notebook.readingDensity";
-const TOOLBAR_FONT_SIZE_STORAGE_KEY = "oi-notebook.toolbarFontSize";
-const SETTINGS_FONT_SIZE_STORAGE_KEY = "oi-notebook.settingsFontSize";
-const ACCENT_COLOR_STORAGE_KEY = "oi-notebook.settingsV2.accentColor";
-const TRANSLUCENT_SIDEBAR_STORAGE_KEY = "oi-notebook.settingsV2.translucentSidebar";
-const CONTRAST_STORAGE_KEY = "oi-notebook.settingsV2.contrast";
-const SETTINGS_THEME_V1_STORAGE_KEY = "oi-notebook.settingsThemeV1";
-const POINTER_CURSOR_STORAGE_KEY = "oi-notebook.settingsV2.pointerCursor";
-const REDUCED_MOTION_STORAGE_KEY = "oi-notebook.settingsV2.reducedMotion";
-const DIFF_MARKER_MODE_STORAGE_KEY = "oi-notebook.settingsV2.diffMarkerMode";
-const DEVELOPER_MODE_STORAGE_KEY = "oi-notebook.developerMode";
-const FONT_SIZE_MIN = 13;
-const FONT_SIZE_MAX = 20;
-const EDITOR_FONT_SIZE_DEFAULT = 14;
-const PREVIEW_FONT_SIZE_DEFAULT = 14;
-const TOOLBAR_FONT_SIZE_MIN = 12;
-const TOOLBAR_FONT_SIZE_MAX = 18;
-const TOOLBAR_FONT_SIZE_DEFAULT = 12;
-const SETTINGS_FONT_SIZE_MIN = 13;
-const SETTINGS_FONT_SIZE_MAX = 18;
-const SETTINGS_FONT_SIZE_DEFAULT = 14;
-const SETTINGS_CENTER_MIN_WIDTH = 860;
-const SETTINGS_CENTER_MIN_HEIGHT = 560;
-const SETTINGS_CENTER_DEFAULT_WIDTH = 1180;
-const SETTINGS_CENTER_DEFAULT_HEIGHT = 780;
-const SETTINGS_CENTER_MAXIMIZED_MARGIN_X = 24;
-const SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP = 56;
-const SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM = 40;
-const LUOGU_DIALOG_MIN_WIDTH = 1080;
-const LUOGU_DIALOG_MIN_HEIGHT = 700;
-const LUOGU_DIALOG_DEFAULT_WIDTH = 1440;
-const LUOGU_DIALOG_DEFAULT_HEIGHT = 900;
-const LUOGU_DIALOG_MARGIN_X = 16;
-const LUOGU_DIALOG_MARGIN_TOP = 16;
-const LUOGU_DIALOG_MARGIN_BOTTOM = 16;
-const PROMPT_EDITOR_FONT_SIZE_MIN = 12;
-const PROMPT_EDITOR_FONT_SIZE_MAX = 22;
-const PROMPT_EDITOR_FONT_SIZE_DEFAULT = 14;
-const PROMPT_EDITOR_FONT_SIZE_STEP = 1;
-const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.leftSidebarWidth";
-const AI_SIDEBAR_WIDTH_STORAGE_KEY = "oi-notebook.layout.aiSidebarWidth";
-const EDITOR_PREVIEW_RATIO_STORAGE_KEY = "oi-notebook.layout.editorPreviewRatio";
-const OPEN_TABS_STORAGE_KEY = "oi-notebook.openTabs";
-const OPEN_TABS_ACTIVE_STORAGE_KEY = "oi-notebook.openTabs.activePath";
-const LEFT_SIDEBAR_WIDTH_DEFAULT = 260;
-const LEFT_SIDEBAR_WIDTH_MIN = 200;
-const LEFT_SIDEBAR_WIDTH_MAX = 420;
-const AI_SIDEBAR_WIDTH_DEFAULT = 390;
-const AI_SIDEBAR_WIDTH_MIN = 320;
 const AI_SIDEBAR_PERF_DEBUG_STORAGE_KEY = "oinb.aiSidebarPerfDebug";
 
 function isAiPerfDebugEnabled(): boolean {
@@ -304,334 +507,6 @@ const setNoteXAiPerfEvent = (name: string, value: unknown) => {
   perf.lastEvents[name] = value;
 };
 const ACTIVITY_BAR_BASE_WIDTH = 52;
-const EDITOR_PREVIEW_RATIO_DEFAULT = 0.5;
-const EDITOR_PREVIEW_RATIO_MIN = 0.2;
-const EDITOR_PREVIEW_RATIO_MAX = 0.8;
-const EDITOR_PREVIEW_MIN_PANE_WIDTH = 320;
-
-type SettingsCenterRect = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
-function areSettingsCenterRectsEqual(a: SettingsCenterRect, b: SettingsCenterRect): boolean {
-  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
-}
-
-function isFinitePositiveNumber(value: number): boolean {
-  return Number.isFinite(value) && value > 0;
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  const safeMax = Math.max(min, max);
-  return Math.min(Math.max(value, min), safeMax);
-}
-
-function getSettingsViewportSize() {
-  if (typeof window === "undefined") {
-    return {
-      width: SETTINGS_CENTER_DEFAULT_WIDTH + SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2,
-      height: SETTINGS_CENTER_DEFAULT_HEIGHT + SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP + SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM,
-    };
-  }
-  const viewportWidth = Number.isFinite(window.innerWidth) ? window.innerWidth : SETTINGS_CENTER_DEFAULT_WIDTH + SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2;
-  const viewportHeight = Number.isFinite(window.innerHeight) ? window.innerHeight : SETTINGS_CENTER_DEFAULT_HEIGHT + SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP + SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM;
-  return {
-    width: Math.max(320, viewportWidth),
-    height: Math.max(360, viewportHeight),
-  };
-}
-
-function getSettingsCenterMaxSize() {
-  const viewport = getSettingsViewportSize();
-  return {
-    width: Math.max(1, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X * 2),
-    height: Math.max(1, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM),
-  };
-}
-
-function getLuoguDialogMaxSize() {
-  const viewport = getSettingsViewportSize();
-  return {
-    width: Math.max(1, viewport.width - LUOGU_DIALOG_MARGIN_X * 2),
-    height: Math.max(1, viewport.height - LUOGU_DIALOG_MARGIN_TOP - LUOGU_DIALOG_MARGIN_BOTTOM),
-  };
-}
-
-function getDefaultSettingsCenterRect(): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getSettingsCenterMaxSize();
-  const width = Math.min(SETTINGS_CENTER_DEFAULT_WIDTH, maxSize.width);
-  const height = Math.min(SETTINGS_CENTER_DEFAULT_HEIGHT, maxSize.height);
-  const left = Math.max(0, Math.min(Math.max(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, (viewport.width - width) / 2), viewport.width - width));
-  const top = Math.max(0, Math.min(Math.max(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, (viewport.height - height) / 2), viewport.height - height));
-  return {
-    left,
-    top,
-    width,
-    height,
-  };
-}
-
-function getDefaultLuoguDialogRect(): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getLuoguDialogMaxSize();
-  const width = Math.min(LUOGU_DIALOG_DEFAULT_WIDTH, maxSize.width);
-  const height = Math.min(LUOGU_DIALOG_DEFAULT_HEIGHT, maxSize.height);
-  const left = Math.max(0, Math.min(Math.max(LUOGU_DIALOG_MARGIN_X, (viewport.width - width) / 2), viewport.width - width));
-  const top = Math.max(0, Math.min(Math.max(LUOGU_DIALOG_MARGIN_TOP, (viewport.height - height) / 2), viewport.height - height));
-  return {
-    left,
-    top,
-    width,
-    height,
-  };
-}
-
-function getMaximizedSettingsCenterRect(): SettingsCenterRect {
-  const maxSize = getSettingsCenterMaxSize();
-  return clampSettingsCenterRect({
-    left: SETTINGS_CENTER_MAXIMIZED_MARGIN_X,
-    top: SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP,
-    width: maxSize.width,
-    height: maxSize.height,
-  });
-}
-
-function getMaximizedLuoguDialogRect(): SettingsCenterRect {
-  const maxSize = getLuoguDialogMaxSize();
-  return clampLuoguDialogRect({
-    left: LUOGU_DIALOG_MARGIN_X,
-    top: LUOGU_DIALOG_MARGIN_TOP,
-    width: maxSize.width,
-    height: maxSize.height,
-  });
-}
-
-function clampSettingsCenterRect(rect: SettingsCenterRect): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getSettingsCenterMaxSize();
-  const defaultRect = getDefaultSettingsCenterRect();
-  const minWidth = Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width);
-  const minHeight = Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height);
-  const width = Math.min(
-    Math.max(isFinitePositiveNumber(rect.width) ? rect.width : defaultRect.width, minWidth),
-    maxSize.width,
-  );
-  const height = Math.min(
-    Math.max(isFinitePositiveNumber(rect.height) ? rect.height : defaultRect.height, minHeight),
-    maxSize.height,
-  );
-  const minLeft = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, Math.max(0, viewport.width - width));
-  const maxLeft = Math.max(minLeft, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X - width);
-  const minTop = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, Math.max(0, viewport.height - height));
-  const maxTop = Math.max(minTop, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM - height);
-  const safeLeft = Number.isFinite(rect.left) ? rect.left : defaultRect.left;
-  const safeTop = Number.isFinite(rect.top) ? rect.top : defaultRect.top;
-  return {
-    left: Math.min(Math.max(safeLeft, minLeft), maxLeft),
-    top: Math.min(Math.max(safeTop, minTop), maxTop),
-    width,
-    height,
-  };
-}
-
-function clampLuoguDialogRect(rect: SettingsCenterRect): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getLuoguDialogMaxSize();
-  const defaultRect = getDefaultLuoguDialogRect();
-  const minWidth = Math.min(LUOGU_DIALOG_MIN_WIDTH, maxSize.width);
-  const minHeight = Math.min(LUOGU_DIALOG_MIN_HEIGHT, maxSize.height);
-  const width = Math.min(
-    Math.max(isFinitePositiveNumber(rect.width) ? rect.width : defaultRect.width, minWidth),
-    maxSize.width,
-  );
-  const height = Math.min(
-    Math.max(isFinitePositiveNumber(rect.height) ? rect.height : defaultRect.height, minHeight),
-    maxSize.height,
-  );
-  const minLeft = Math.min(LUOGU_DIALOG_MARGIN_X, Math.max(0, viewport.width - width));
-  const maxLeft = Math.max(minLeft, viewport.width - LUOGU_DIALOG_MARGIN_X - width);
-  const minTop = Math.min(LUOGU_DIALOG_MARGIN_TOP, Math.max(0, viewport.height - height));
-  const maxTop = Math.max(minTop, viewport.height - LUOGU_DIALOG_MARGIN_BOTTOM - height);
-  const safeLeft = Number.isFinite(rect.left) ? rect.left : defaultRect.left;
-  const safeTop = Number.isFinite(rect.top) ? rect.top : defaultRect.top;
-  return {
-    left: Math.min(Math.max(safeLeft, minLeft), maxLeft),
-    top: Math.min(Math.max(safeTop, minTop), maxTop),
-    width,
-    height,
-  };
-}
-
-function isSettingsCenterRectFullyVisible(rect: SettingsCenterRect): boolean {
-  const viewport = getSettingsViewportSize();
-  return (
-    Number.isFinite(rect.left) &&
-    Number.isFinite(rect.top) &&
-    isFinitePositiveNumber(rect.width) &&
-    isFinitePositiveNumber(rect.height) &&
-    rect.left >= 0 &&
-    rect.top >= 0 &&
-    rect.left + rect.width <= viewport.width &&
-    rect.top + rect.height <= viewport.height
-  );
-}
-
-function isLuoguDialogRectFullyVisible(rect: SettingsCenterRect): boolean {
-  return isSettingsCenterRectFullyVisible(rect);
-}
-
-function getSafeOpenedSettingsCenterRect(rect: SettingsCenterRect): SettingsCenterRect {
-  const defaultRect = getDefaultSettingsCenterRect();
-  const maxSize = getSettingsCenterMaxSize();
-  if (!isFinitePositiveNumber(rect.width) || !isFinitePositiveNumber(rect.height)) return defaultRect;
-  const width = Math.min(Math.max(rect.width, Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width)), maxSize.width);
-  const height = Math.min(Math.max(rect.height, Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height)), maxSize.height);
-  const viewport = getSettingsViewportSize();
-  const centeredRect = clampSettingsCenterRect({
-    left: (viewport.width - width) / 2,
-    top: (viewport.height - height) / 2,
-    width,
-    height,
-  });
-  return isSettingsCenterRectFullyVisible(centeredRect) ? centeredRect : defaultRect;
-}
-
-function getSafeOpenedLuoguDialogRect(rect: SettingsCenterRect): SettingsCenterRect {
-  const defaultRect = getDefaultLuoguDialogRect();
-  const maxSize = getLuoguDialogMaxSize();
-  if (!isFinitePositiveNumber(rect.width) || !isFinitePositiveNumber(rect.height)) return defaultRect;
-  const width = Math.min(Math.max(rect.width, Math.min(LUOGU_DIALOG_MIN_WIDTH, maxSize.width)), maxSize.width);
-  const height = Math.min(Math.max(rect.height, Math.min(LUOGU_DIALOG_MIN_HEIGHT, maxSize.height)), maxSize.height);
-  const viewport = getSettingsViewportSize();
-  const centeredRect = clampLuoguDialogRect({
-    left: (viewport.width - width) / 2,
-    top: (viewport.height - height) / 2,
-    width,
-    height,
-  });
-  return isLuoguDialogRectFullyVisible(centeredRect) ? centeredRect : defaultRect;
-}
-
-function getSettingsCenterResizeCursor(handle: SettingsResizeHandle): string {
-  if (handle === "left" || handle === "right") return "ew-resize";
-  if (handle === "top" || handle === "bottom") return "ns-resize";
-  if (handle === "top-left" || handle === "bottom-right") return "nwse-resize";
-  return "nesw-resize";
-}
-
-function getLocalIndexStatusLabel(status: LocalNoteIndexStatusResult | null, isBuilding: boolean): string {
-  if (isBuilding) return "正在建立本地笔记索引...";
-  if (!status) return "尚未读取";
-  if (status.status === "ready") return "可用";
-  if (status.status === "stale") return "建议重建";
-  if (status.status === "error") return "读取失败";
-  if (!status.exists) return "尚未建立";
-  return status.status || "未知";
-}
-
-function getLocalIndexUpdatedLabel(status: LocalNoteIndexStatusResult | null): string {
-  if (!status?.updatedAt) return "尚未记录";
-  return new Date(status.updatedAt * 1000).toLocaleString();
-}
-
-function formatLocalIndexSize(bytes: number | null | undefined, includeBytes = false): string {
-  const safeBytes = Math.max(0, bytes ?? 0);
-  const units = ["B", "KB", "MB", "GB"];
-  let size = safeBytes;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  const formattedSize = unitIndex === 0 ? `${safeBytes} B` : `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
-  return includeBytes && unitIndex > 0 ? `${formattedSize} (${safeBytes.toLocaleString()} bytes)` : formattedSize;
-}
-
-function getLocalIndexAccessLabel(status: LocalNoteIndexStatusResult): string {
-  if (status.readable && status.writable) return "可读写";
-  if (status.readable) return "只读";
-  if (status.writable) return "仅可写入";
-  return "不可读取";
-}
-
-function getResizedLuoguDialogRect(handle: SettingsResizeHandle, startRect: SettingsCenterRect, deltaX: number, deltaY: number): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getLuoguDialogMaxSize();
-  const minWidth = Math.min(LUOGU_DIALOG_MIN_WIDTH, maxSize.width);
-  const minHeight = Math.min(LUOGU_DIALOG_MIN_HEIGHT, maxSize.height);
-  const minLeft = Math.min(LUOGU_DIALOG_MARGIN_X, Math.max(0, viewport.width - minWidth));
-  const minTop = Math.min(LUOGU_DIALOG_MARGIN_TOP, Math.max(0, viewport.height - minHeight));
-  const rightLimit = Math.max(1, viewport.width - LUOGU_DIALOG_MARGIN_X);
-  const bottomLimit = Math.max(1, viewport.height - LUOGU_DIALOG_MARGIN_BOTTOM);
-  const startRight = startRect.left + startRect.width;
-  const startBottom = startRect.top + startRect.height;
-  let left = startRect.left;
-  let top = startRect.top;
-  let right = startRight;
-  let bottom = startBottom;
-
-  if (handle.includes("left")) {
-    left = clampNumber(startRect.left + deltaX, minLeft, startRight - minWidth);
-  }
-  if (handle.includes("right")) {
-    right = clampNumber(startRight + deltaX, startRect.left + minWidth, rightLimit);
-  }
-  if (handle.includes("top")) {
-    top = clampNumber(startRect.top + deltaY, minTop, startBottom - minHeight);
-  }
-  if (handle.includes("bottom")) {
-    bottom = clampNumber(startBottom + deltaY, startRect.top + minHeight, bottomLimit);
-  }
-
-  return clampLuoguDialogRect({
-    left,
-    top,
-    width: right - left,
-    height: bottom - top,
-  });
-}
-
-function getResizedSettingsCenterRect(handle: SettingsResizeHandle, startRect: SettingsCenterRect, deltaX: number, deltaY: number): SettingsCenterRect {
-  const viewport = getSettingsViewportSize();
-  const maxSize = getSettingsCenterMaxSize();
-  const minWidth = Math.min(SETTINGS_CENTER_MIN_WIDTH, maxSize.width);
-  const minHeight = Math.min(SETTINGS_CENTER_MIN_HEIGHT, maxSize.height);
-  const minLeft = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_X, Math.max(0, viewport.width - minWidth));
-  const minTop = Math.min(SETTINGS_CENTER_MAXIMIZED_MARGIN_TOP, Math.max(0, viewport.height - minHeight));
-  const rightLimit = Math.max(1, viewport.width - SETTINGS_CENTER_MAXIMIZED_MARGIN_X);
-  const bottomLimit = Math.max(1, viewport.height - SETTINGS_CENTER_MAXIMIZED_MARGIN_BOTTOM);
-  const startRight = startRect.left + startRect.width;
-  const startBottom = startRect.top + startRect.height;
-  let left = startRect.left;
-  let top = startRect.top;
-  let right = startRight;
-  let bottom = startBottom;
-
-  if (handle.includes("left")) {
-    left = clampNumber(startRect.left + deltaX, minLeft, startRight - minWidth);
-  }
-  if (handle.includes("right")) {
-    right = clampNumber(startRight + deltaX, startRect.left + minWidth, rightLimit);
-  }
-  if (handle.includes("top")) {
-    top = clampNumber(startRect.top + deltaY, minTop, startBottom - minHeight);
-  }
-  if (handle.includes("bottom")) {
-    bottom = clampNumber(startBottom + deltaY, startRect.top + minHeight, bottomLimit);
-  }
-
-  return clampSettingsCenterRect({
-    left,
-    top,
-    width: right - left,
-    height: bottom - top,
-  });
-}
-
 type DialogMode = "create" | "rename" | "create-folder";
 type ConfirmDialogState = {
   title: string;
@@ -641,42 +516,23 @@ type ConfirmDialogState = {
   danger?: boolean;
   resolve: (confirmed: boolean) => void;
 };
-type NoteLocationOptionId = "root" | "current" | "tricks" | "problems" | "custom";
-type EditorViewMode = "split" | "editor" | "preview";
+type NoteLocationOptionId = NewNoteLocationOption;
 type LuoguImportCenterTab = "scan" | "manual";
-type LuoguImportStep = "scan" | "preview";
-type LuoguPreviewDetailTab = "rendered" | "markdown" | "source";
-type LuoguScanMode = "count" | "days";
-type LuoguScanCountLimit = 20 | 50 | 100 | 200;
-type LuoguScanDaysLimit = 30 | 90 | 180 | 365;
-type LuoguSubmitFilter = "acOnly" | "includeNonAc";
-type LuoguProblemIdFilter = "all" | "onlyP";
-type LuoguSameProblemStrategy = "latestAc" | "allAc" | "manual";
-type LuoguImportedProblemPolicy = "skip" | "showUnselected" | "regenerate";
-type LuoguMissingInsightStrategy = "skip" | "draft" | "review";
-type LuoguScanResultVisibility = "hideSkipped" | "showAll";
-type LuoguDefaultSaveLocation = "luogu" | "problems" | "custom";
-type LuoguWriteStrategy = "createNew" | "askOnConflict" | "overwrite";
-type LuoguDefaultDraftStatus = "draft" | "published";
-type LuoguIncludeSourceCode = "no" | "yes";
 type LuoguWriteMode = "createNew" | "overwrite";
-type LuoguPrepareItemStatus = "queued" | "running" | "stopped";
-type LuoguPrepareProgress = {
-  current: number;
-  total: number;
-  succeeded: number;
-  failed: number;
-  skipped: number;
-};
+type LuoguPrepareProgress = TaskProgress;
+type LuoguWriteProgress = TaskProgress;
 type AppTheme = ThemeMode;
-type ReadingDensity = "compact" | "standard" | "comfortable";
-type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
 type ResizeHandleId = "left-sidebar" | "editor-preview" | "ai-sidebar";
 type WorkspaceTabId = string;
 
 const TAG_MANAGER_DEBUG_STORAGE_KEY = "oi-notebook.debugTagManager";
 const TAG_MANAGER_DEBUG_LOG_STORAGE_KEY = "oi-notebook.debugTagManagerLog";
 const TAG_MANAGER_DEBUG_LOG_LIMIT = 300;
+const EDITOR_VIEW_MODE_ICON_BY_ID: Record<EditorViewMode, typeof Columns2> = {
+  split: Columns2,
+  editor: SquarePen,
+  preview: Eye,
+};
 
 function isTagManagerDebugEnabled(): boolean {
   try {
@@ -706,94 +562,9 @@ function recordTagManagerDebugEvent(event: string, payload?: unknown): void {
   }
 }
 
-type TagNormalizationScanResult = {
-  path: string;
-  title: string;
-  plan: TagNormalizationPlan;
-  suggestions: TagNormalizationSuggestion[];
-};
-
-type TagNormalizationApplyFailure = {
-  path: string;
-  error: string;
-};
-
-type TagNormalizationApplyResult = {
-  successCount: number;
-  normalizedTagCount: number;
-  duplicateTagCount: number;
-  skippedCount: number;
-  failures: TagNormalizationApplyFailure[];
-};
-
-type TagNormalizationScanStats = {
-  noteCount: number;
-  suggestionCount: number;
-  rewriteCount: number;
-  aliasCount: number;
-  mergeCount: number;
-  aliasToMergedSourceCount: number;
-  duplicateCount: number;
-  unknownCount: number;
-  hiddenSkippedCount: number;
-};
-
-function createEmptyTagNormalizationScanStats(): TagNormalizationScanStats {
-  return {
-    noteCount: 0,
-    suggestionCount: 0,
-    rewriteCount: 0,
-    aliasCount: 0,
-    mergeCount: 0,
-    aliasToMergedSourceCount: 0,
-    duplicateCount: 0,
-    unknownCount: 0,
-    hiddenSkippedCount: 0,
-  };
-}
-
-function addTagNormalizationPlanStats(stats: TagNormalizationScanStats, plan: TagNormalizationPlan): TagNormalizationScanStats {
-  return {
-    noteCount: stats.noteCount + 1,
-    suggestionCount: stats.suggestionCount + plan.suggestions.length,
-    rewriteCount: stats.rewriteCount + plan.stats.rewriteCount,
-    aliasCount: stats.aliasCount + plan.stats.aliasCount,
-    mergeCount: stats.mergeCount + plan.stats.mergeCount,
-    aliasToMergedSourceCount: stats.aliasToMergedSourceCount + plan.stats.aliasToMergedSourceCount,
-    duplicateCount: stats.duplicateCount + plan.stats.duplicateCount,
-    unknownCount: stats.unknownCount + plan.stats.unknownCount,
-    hiddenSkippedCount: stats.hiddenSkippedCount + plan.stats.hiddenSkippedCount,
-  };
-}
-
-function formatTagNormalizationReason(reason: TagNormalizationReason) {
-  switch (reason) {
-    case "alias_to_canonical":
-      return "别名";
-    case "merge_to_target":
-      return "已合并";
-    case "alias_to_merged_source":
-      return "别名指向已合并标签";
-    case "duplicate_after_normalize":
-      return "去重";
-    case "hidden_no_change":
-      return "隐藏，跳过";
-    case "unknown_freeform":
-      return "自由标签，跳过";
-    case "already_canonical":
-    default:
-      return "已规范";
-  }
-}
-
 interface PolishReviewTab {
   id: string;
   preview: AiPolishPreview;
-}
-
-interface CursorParagraphContext {
-  text: string;
-  isCode: boolean;
 }
 
 function getReviewStatusLabel(preview: AiPolishPreview, currentFilePath: string | null, currentMarkdown: string): string {
@@ -916,123 +687,20 @@ const LUOGU_SCAN_MAX_PAGES = 50;
 const LUOGU_SCAN_COUNT_OPTIONS: LuoguScanCountLimit[] = [20, 50, 100, 200];
 const LUOGU_SCAN_DAYS_OPTIONS: LuoguScanDaysLimit[] = [30, 90, 180, 365];
 const LUOGU_PREPARE_CONCURRENCY = 2;
-const LUOGU_IMPORT_RULES_STORAGE_KEY = "oi-notebook.luoguImportRules";
-const READING_DENSITY_OPTIONS: Array<{
-  id: ReadingDensity;
-  label: string;
-  description: string;
-  lineHeight: number;
-  blockSpacing: string;
-  listItemSpacing: string;
-  calloutSpacing: string;
-}> = [
-  {
-    id: "compact",
-    label: "紧凑",
-    description: "减少段落和列表间距，适合高信息密度浏览。",
-    lineHeight: 1.55,
-    blockSpacing: "0.55rem",
-    listItemSpacing: "0.15rem",
-    calloutSpacing: "0.75rem",
-  },
-  {
-    id: "standard",
-    label: "标准",
-    description: "保持当前阅读节奏，适合日常编辑和预览。",
-    lineHeight: 1.7,
-    blockSpacing: "0.75rem",
-    listItemSpacing: "0.25rem",
-    calloutSpacing: "1rem",
-  },
-  {
-    id: "comfortable",
-    label: "宽松",
-    description: "增加正文呼吸感，适合长文审阅。",
-    lineHeight: 1.85,
-    blockSpacing: "1rem",
-    listItemSpacing: "0.4rem",
-    calloutSpacing: "1.25rem",
-  },
-];
-const SETTINGS_TREE: Array<{
-  id: SettingsGroupId;
-  label: string;
-  developerOnly?: boolean;
-  children: Array<{ id: SettingsSection; label: string }>;
-}> = [
-  { id: "general", label: "常规", children: [{ id: "general-basics", label: "基础偏好" }] },
-  { id: "appearance", label: "外观", children: [{ id: "appearance-theme", label: "主题" }] },
-  {
-    id: "ai",
-    label: "AI",
-    children: [
-      { id: "ai-api", label: "模型与 API" },
-      { id: "ai-local-notes", label: "本地笔记索引" },
-      { id: "ai-web-search", label: "联网搜索" },
-      { id: "ai-prompts", label: "提示词模板" },
-    ],
-  },
-  {
-    id: "luogu",
-    label: "洛谷",
-    children: [
-      { id: "luogu-account", label: "账号配置" },
-      { id: "luogu-rules", label: "导入规则" },
-      { id: "luogu-import-center", label: "导入中心" },
-    ],
-  },
-  {
-    id: "blog",
-    label: "博客",
-    children: [
-      { id: "blog-info", label: "博客信息" },
-      { id: "blog-preview", label: "本地预览" },
-      { id: "blog-tag-taxonomy", label: "标签体系" },
-      { id: "blog-tag-manager", label: "标签管理器" },
-    ],
-  },
-  { id: "data", label: "数据与存储", children: [{ id: "data-storage", label: "目录与缓存" }] },
-  { id: "keyboard", label: "键盘快捷键", children: [{ id: "keyboard-shortcuts", label: "快捷键" }] },
-  {
-    id: "advanced",
-    label: "高级 / 开发者",
-    children: [
-      { id: "advanced-developer", label: "开发者" },
-      { id: "diagnostics-search", label: "搜索自检" },
-    ],
-  },
-  {
-    id: "about",
-    label: "关于",
-    children: [{ id: "about-version", label: "关于 OI Notebook" }],
-  },
-];
-const SETTINGS_SECTION_FALLBACK: Record<SettingsCategory, SettingsSection> = {
-  general: "general-basics",
-  appearance: "appearance-theme",
-  ai: "ai-api",
-  luogu: "luogu-account",
-  blog: "blog-info",
-  data: "data-storage",
-  keyboard: "keyboard-shortcuts",
-  advanced: "advanced-developer",
-  about: "about-version",
-  diagnostics: "diagnostics-search",
-  editor: "about-version",
-};
-const SETTINGS_SECTION_LABELS = SETTINGS_TREE.reduce((labels, group) => {
-  for (const child of group.children) labels[child.id] = { group: group.label, groupId: group.id, section: child.label };
-  return labels;
-}, {} as Record<SettingsSection, { group: string; groupId: SettingsGroupId; section: string }>);
 const SettingsSectionAnchor = ({ id, children }: { id: SettingsSection; children: ReactNode }) => (
   <div data-settings-section={id}>{children}</div>
 );
-const MARKDOWN_CAPABILITIES = [
-  "数学公式",
-  "代码高亮与行号",
-  "表格与合并单元格",
-  "引用块与常用排版组件",
-];
+
+function applyFloatingPanelRect(panel: HTMLElement | null, rect: SettingsCenterRect, includeSize: boolean): void {
+  if (!panel) return;
+  panel.style.left = `${rect.left}px`;
+  panel.style.top = `${rect.top}px`;
+  if (includeSize) {
+    panel.style.width = `${rect.width}px`;
+    panel.style.height = `${rect.height}px`;
+  }
+  panel.style.transform = "none";
+}
 
 interface LuoguScanProgress {
   currentPage: number;
@@ -1047,172 +715,6 @@ interface LuoguScanSummary {
   candidateCount: number;
   skippedCount: number;
   rangeLabel: string;
-}
-
-interface LuoguImportRules {
-  requireAc: boolean;
-  submitFilter: LuoguSubmitFilter;
-  problemIdFilter: LuoguProblemIdFilter;
-  sameProblemStrategy: LuoguSameProblemStrategy;
-  keepLatestAcOnly: boolean;
-  importedProblemPolicy: LuoguImportedProblemPolicy;
-  missingInsightStrategy: LuoguMissingInsightStrategy;
-  scanResultVisibility: LuoguScanResultVisibility;
-  defaultSaveLocation: LuoguDefaultSaveLocation;
-  customSaveDirectory: string;
-  writeStrategy: LuoguWriteStrategy;
-  defaultDraftStatus: LuoguDefaultDraftStatus;
-  includeSourceCode: boolean;
-}
-
-interface LuoguSubmissionCandidateState {
-  canSelect: boolean;
-  defaultSelected: boolean;
-  statusLabel: string;
-}
-
-interface LuoguScanResultStats {
-  total: number;
-  candidateCount: number;
-  skippedCount: number;
-  acCount: number;
-  nonAcCount: number;
-  oldSubmissionCount: number;
-  sameProblemOldAcCount: number;
-}
-
-interface LuoguCandidateDisplayState {
-  label: string;
-  detail: string;
-  tone: "success" | "warning" | "muted" | "danger" | "info" | "primary";
-  output: string;
-}
-
-const DEFAULT_LUOGU_IMPORT_RULES: LuoguImportRules = {
-  requireAc: true,
-  submitFilter: "acOnly",
-  problemIdFilter: "all",
-  sameProblemStrategy: "latestAc",
-  keepLatestAcOnly: true,
-  importedProblemPolicy: "skip",
-  missingInsightStrategy: "draft",
-  scanResultVisibility: "showAll",
-  defaultSaveLocation: "luogu",
-  customSaveDirectory: "",
-  writeStrategy: "createNew",
-  defaultDraftStatus: "draft",
-  includeSourceCode: false,
-};
-
-function normalizeLuoguImportRules(value: Partial<LuoguImportRules> | null | undefined): LuoguImportRules {
-  const sameProblemStrategy =
-    value?.sameProblemStrategy ??
-    (value?.keepLatestAcOnly === false ? "allAc" : DEFAULT_LUOGU_IMPORT_RULES.sameProblemStrategy);
-  const submitFilter = value?.submitFilter ?? (value?.requireAc === false ? "includeNonAc" : "acOnly");
-
-  return {
-    ...DEFAULT_LUOGU_IMPORT_RULES,
-    ...value,
-    submitFilter,
-    requireAc: submitFilter === "acOnly",
-    problemIdFilter: value?.problemIdFilter === "onlyP" ? "onlyP" : DEFAULT_LUOGU_IMPORT_RULES.problemIdFilter,
-    sameProblemStrategy,
-    keepLatestAcOnly: sameProblemStrategy === "latestAc",
-    missingInsightStrategy: value?.missingInsightStrategy ?? DEFAULT_LUOGU_IMPORT_RULES.missingInsightStrategy,
-    customSaveDirectory: typeof value?.customSaveDirectory === "string" ? value.customSaveDirectory : DEFAULT_LUOGU_IMPORT_RULES.customSaveDirectory,
-    includeSourceCode: value?.includeSourceCode === true,
-  };
-}
-
-function readStoredLuoguImportRules(): LuoguImportRules {
-  if (typeof window === "undefined") return DEFAULT_LUOGU_IMPORT_RULES;
-
-  try {
-    const stored = window.localStorage.getItem(LUOGU_IMPORT_RULES_STORAGE_KEY);
-    if (!stored) return DEFAULT_LUOGU_IMPORT_RULES;
-    return normalizeLuoguImportRules(JSON.parse(stored) as Partial<LuoguImportRules>);
-  } catch {
-    return DEFAULT_LUOGU_IMPORT_RULES;
-  }
-}
-
-function saveStoredLuoguImportRules(rules: LuoguImportRules): void {
-  window.localStorage.setItem(LUOGU_IMPORT_RULES_STORAGE_KEY, JSON.stringify(rules));
-}
-
-function validateLuoguSaveDirectoryInput(value: string): string | null {
-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  if (!normalized) return "目录不能为空";
-  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return "不能使用绝对路径";
-  if (normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) return "不能包含空段或 ..";
-  if (/[<>:"|?*]/.test(normalized)) return "不能包含 Windows 非法字符";
-  return null;
-}
-
-function normalizeLuoguSaveDirectory(rules: LuoguImportRules): string {
-  if (rules.defaultSaveLocation === "problems") return "problems";
-  if (rules.defaultSaveLocation === "custom") {
-    const custom = rules.customSaveDirectory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return validateLuoguSaveDirectoryInput(custom) ? "luogu" : custom;
-  }
-  return "luogu";
-}
-
-function rewriteLuoguPreparedRelativePath(relativePath: string, rules: LuoguImportRules): string {
-  const targetDir = normalizeLuoguSaveDirectory(rules);
-  const fileName = relativePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-  if (!fileName) return relativePath;
-  return `${targetDir}/${fileName}`;
-}
-
-function setMarkdownDraftValue(markdown: string, draftValue: boolean): string {
-  const nextDraft = `draft: ${draftValue ? "true" : "false"}`;
-  if (markdown.startsWith("---")) {
-    const end = markdown.indexOf("\n---", 3);
-    if (end > 0) {
-      const frontmatter = markdown.slice(0, end);
-      if (/^draft:\s*(true|false)\s*$/m.test(frontmatter)) {
-        return markdown.replace(/^draft:\s*(true|false)\s*$/m, nextDraft);
-      }
-      return `${frontmatter}\n${nextDraft}${markdown.slice(end)}`;
-    }
-  }
-  return markdown;
-}
-
-function applyLuoguPreparedRules(
-  prepared: PrepareLuoguSubmissionNoteResult,
-  rules: LuoguImportRules,
-): PrepareLuoguSubmissionNoteResult {
-  if (prepared.skipped || prepared.aiStatus === "failed" || !prepared.markdown.trim() || !prepared.suggestedRelativePath.trim()) return prepared;
-  return {
-    ...prepared,
-    suggestedRelativePath: rewriteLuoguPreparedRelativePath(prepared.suggestedRelativePath, rules),
-    markdown: setMarkdownDraftValue(prepared.markdown, rules.defaultDraftStatus === "draft"),
-  };
-}
-
-const COMMON_NOTE_TAGS = ["题解", "技巧", "复盘", "模板", "总结", "调试", "草稿"];
-const COMMON_COLLECTIONS = ["题解", "技巧", "复盘", "杂谈", "集训日志"];
-const LUOGU_DIFFICULTY_OPTIONS = [
-  { value: "", label: "无", className: "text-muted-foreground", textColor: "var(--muted-foreground)", darkTextColor: "var(--muted-foreground)" },
-  { value: "入门", label: "入门", className: "text-[#fe4c61]", textColor: "#fe4c61", darkTextColor: "#fe4c61" },
-  { value: "普及-", label: "普及-", className: "text-[#f39c11]", textColor: "#f39c11", darkTextColor: "#f39c11" },
-  { value: "普及/提高-", label: "普及/提高-", className: "text-[#d89b00] dark:text-[#ffc116]", textColor: "#ffc116", darkTextColor: "#ffc116" },
-  { value: "普及+/提高", label: "普及+/提高", className: "text-[#52c41a]", textColor: "#52c41a", darkTextColor: "#52c41a" },
-  { value: "提高+/省选-", label: "提高+/省选-", className: "text-[#3498db]", textColor: "#3498db", darkTextColor: "#3498db" },
-  { value: "省选/NOI-", label: "省选/NOI-", className: "text-[#9d3dcf] dark:text-[#c084fc]", textColor: "#9d3dcf", darkTextColor: "#c084fc" },
-  { value: "NOI/NOI+/CTSC", label: "NOI/NOI+/CTSC", className: "text-[#0e1d69] dark:text-[#9aa7ff]", textColor: "#0e1d69", darkTextColor: "#9aa7ff" },
-] as const;
-
-function getDifficultyOptionClassName(value: string): string {
-  return LUOGU_DIFFICULTY_OPTIONS.find((option) => option.value === value)?.className ?? "text-foreground";
-}
-
-function getDifficultyOptionTextColor(value: string, theme: AppTheme): CSSProperties["color"] {
-  const option = LUOGU_DIFFICULTY_OPTIONS.find((difficultyOption) => difficultyOption.value === value);
-  if (!option) return undefined;
-  return theme === "dark" ? option.darkTextColor : option.textColor;
 }
 
 function cloneAiConfig(config: AiConfig): AiConfig {
@@ -1303,107 +805,6 @@ function createAiModelDraft(modelId: string, source: "manual" | "synced" = "manu
   };
 }
 
-function normalizeBlogConfigDraft(config: BlogConfig): BlogConfig {
-  const normalizeText = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
-  return {
-    title: normalizeText(config.title),
-    subtitle: normalizeText(config.subtitle),
-  };
-}
-
-function quoteYamlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function extractCursorParagraph(markdownContent: string, cursorOffset: number | null): CursorParagraphContext | null {
-  if (cursorOffset === null || markdownContent.trim().length === 0) return null;
-
-  const safeOffset = Math.max(0, Math.min(markdownContent.length, cursorOffset));
-  let lineStart = 0;
-  let inFence = false;
-  let fenceStart = 0;
-  let fenceMarker = "";
-
-  while (lineStart <= markdownContent.length) {
-    const lineEnd = markdownContent.indexOf("\n", lineStart);
-    const nextLineStart = lineEnd === -1 ? markdownContent.length + 1 : lineEnd + 1;
-    const lineText = markdownContent.slice(lineStart, lineEnd === -1 ? markdownContent.length : lineEnd);
-    const fenceMatch = lineText.match(/^\s*(`{3,}|~{3,})/);
-
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      if (!inFence) {
-        inFence = true;
-        fenceStart = lineStart;
-        fenceMarker = marker;
-      } else if (marker === fenceMarker) {
-        if (safeOffset >= fenceStart && safeOffset <= nextLineStart) {
-          return {
-            text: markdownContent.slice(fenceStart, nextLineStart).trim(),
-            isCode: true,
-          };
-        }
-        inFence = false;
-        fenceMarker = "";
-      }
-    }
-
-    if (safeOffset < nextLineStart) break;
-    lineStart = nextLineStart;
-  }
-
-  if (inFence && safeOffset >= fenceStart) {
-    const closingPattern = new RegExp(`(^|\\n)\\s*${fenceMarker}{3,}[^\\n]*(\\n|$)`);
-    const rest = markdownContent.slice(safeOffset);
-    const closingMatch = rest.match(closingPattern);
-    const fenceEnd = closingMatch?.index === undefined
-      ? markdownContent.length
-      : safeOffset + closingMatch.index + closingMatch[0].length;
-    return {
-      text: markdownContent.slice(fenceStart, fenceEnd).trim(),
-      isCode: true,
-    };
-  }
-
-  const beforeCursor = markdownContent.slice(0, safeOffset);
-  const paragraphStartMatch = beforeCursor.match(/\n\s*\n[ \t]*[^\n]*$/);
-  const paragraphStart = paragraphStartMatch?.index === undefined
-    ? 0
-    : paragraphStartMatch.index + paragraphStartMatch[0].match(/^\n\s*\n/)![0].length;
-  const afterCursor = markdownContent.slice(safeOffset);
-  const paragraphEndMatch = afterCursor.match(/\n\s*\n/);
-  const paragraphEnd = paragraphEndMatch?.index === undefined ? markdownContent.length : safeOffset + paragraphEndMatch.index;
-  const paragraphText = markdownContent.slice(paragraphStart, paragraphEnd).trim();
-
-  return paragraphText ? { text: paragraphText, isCode: false } : null;
-}
-
-function buildNewNoteMarkdown(title: string, tags: string[]): string {
-  const quotedTitle = quoteYamlString(title);
-  const tagText = tags.length > 0 ? `[${tags.map(quoteYamlString).join(", ")}]` : "[]";
-  return `---\ntitle: ${quotedTitle}\ntags: ${tagText}\ncreatedAt: ${quoteYamlString(new Date().toISOString())}\n---\n`;
-}
-
-function getErrorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timeoutId);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timeoutId);
-        reject(error);
-      },
-    );
-  });
-}
-
 function formatWebSearchTestError(error: unknown): string {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
@@ -1431,580 +832,6 @@ function formatWebSearchTestError(error: unknown): string {
   return message || "搜索测试失败。测试失败不影响设置保存，也不影响普通聊天。";
 }
 
-function normalizeTagValue(tag: string): string {
-  return tag.trim().replace(/\s+/g, " ");
-}
-
-function isCollectionTag(tag: string): boolean {
-  const normalized = normalizeTagValue(tag).toLocaleLowerCase();
-  return normalized.startsWith("文集:") || normalized.startsWith("collection:");
-}
-
-function getCollectionFromTag(tag: string): string | null {
-  const normalized = normalizeTagValue(tag);
-  const lower = normalized.toLocaleLowerCase();
-  if (normalized.startsWith("文集:")) return normalizeTagValue(normalized.slice("文集:".length)) || null;
-  if (lower.startsWith("collection:")) return normalizeTagValue(normalized.slice("collection:".length)) || null;
-  return null;
-}
-
-function getDisplayTags(tags: string[]): string[] {
-  return tags.filter((tag) => !isCollectionTag(tag));
-}
-
-function normalizeCollectionValues(collections: string[]): string[] {
-  const normalizedCollections: string[] = [];
-  const seen = new Set<string>();
-
-  for (const rawCollection of collections) {
-    const collection = normalizeTagValue(rawCollection);
-    if (!collection || collection === "未归档") continue;
-    const key = collection.toLocaleLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    normalizedCollections.push(collection);
-  }
-
-  return normalizedCollections;
-}
-
-function getEffectiveCollections(fields: FrontmatterFields): string[] {
-  const collections = [...fields.collection];
-
-  const legacyCategory = normalizeTagValue(fields.category);
-  if (legacyCategory) collections.push(legacyCategory);
-  for (const tag of fields.tags) {
-    const collection = getCollectionFromTag(tag);
-    if (collection) collections.push(collection);
-  }
-
-  return normalizeCollectionValues(collections);
-}
-
-function buildCollectionCandidates(fields: FrontmatterFields, customCandidates: string[] = [], extraCandidates: string[] = []): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-
-  const addCandidate = (rawCandidate: string | null | undefined) => {
-    const candidate = normalizeTagValue(rawCandidate ?? "");
-    if (!candidate || candidate === "未归档") return;
-    const key = candidate.toLocaleLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    candidates.push(candidate);
-  };
-
-  for (const collection of COMMON_COLLECTIONS) addCandidate(collection);
-  for (const collection of customCandidates) addCandidate(collection);
-  for (const collection of fields.collection) addCandidate(collection);
-  addCandidate(fields.category);
-  for (const tag of fields.tags) addCandidate(getCollectionFromTag(tag));
-  for (const collection of extraCandidates) addCandidate(collection);
-
-  return candidates;
-}
-
-function normalizeUserTagTaxonomyConfig(config?: UserTagTaxonomyConfig | null): UserTagTaxonomyConfig {
-  return {
-    version: config?.version ?? 1,
-    entries: [...(config?.entries ?? [])],
-    aliases: { ...(config?.aliases ?? {}) },
-    hiddenIds: [...(config?.hiddenIds ?? [])],
-    orderOverrides: { ...(config?.orderOverrides ?? {}) },
-    merges: { ...(config?.merges ?? {}) },
-    customCollections: normalizeCustomCollections(config?.customCollections),
-  };
-}
-
-function parseTagPathInput(value: string): string[] {
-  return value
-    .split("/")
-    .map((segment) => normalizeTagValue(segment))
-    .filter(Boolean);
-}
-
-function parseAliasListInput(value: string): string[] {
-  const aliases: string[] = [];
-  const seen = new Set<string>();
-  for (const rawAlias of value.split(/[,，]/)) {
-    const alias = normalizeTagValue(rawAlias);
-    const key = alias.toLocaleLowerCase();
-    if (!alias || seen.has(key)) continue;
-    seen.add(key);
-    aliases.push(alias);
-  }
-  return aliases;
-}
-
-function getStableTagPathHash(pathText: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < pathText.length; index += 1) {
-    hash ^= pathText.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function slugifyUserTagIdSegment(value: string): string {
-  return value
-    .normalize("NFKD")
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function createUserTagEntryId(path: string[], existingEntries: TagTaxonomyEntry[]): string {
-  const pathText = path.join("/");
-  const pathSlug = path.map(slugifyUserTagIdSegment).filter(Boolean).join(".");
-  const baseId = `user.${pathSlug || "tag"}.${getStableTagPathHash(pathText)}`;
-  const existingIds = new Set(existingEntries.map((entry) => entry.id));
-  if (!existingIds.has(baseId)) return baseId;
-
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${baseId}.${index}`;
-    if (!existingIds.has(candidate)) return candidate;
-  }
-
-  return `${baseId}.${existingIds.size + 1}`;
-}
-
-function resolveTagTaxonomyAliasTarget(targetInput: string, userConfig?: UserTagTaxonomyConfig | null): string | null {
-  const target = normalizeTagValue(targetInput);
-  if (!target) return null;
-
-  const normalizedTargetPath = target.split("/").map(normalizeTagValue).filter(Boolean).join("/");
-  const normalizedReadablePath = target.split("/").map(normalizeTagValue).filter(Boolean).join(" / ");
-  const suggestion = getTagSuggestionList(userConfig).find((candidate) => (
-    candidate.id === target ||
-    candidate.pathText === normalizedTargetPath ||
-    formatTagSuggestionPath(candidate.pathText) === normalizedReadablePath ||
-    candidate.path.join("/") === normalizedTargetPath
-  ));
-  if (suggestion) return suggestion.id;
-
-  if (/^[a-z0-9._:-]+$/i.test(target)) return target;
-  return null;
-}
-
-function getTagIdentityKey(tag: string, userConfig?: UserTagTaxonomyConfig | null): string {
-  const normalized = normalizeTagPath(tag, userConfig);
-  if (normalized?.entryId) {
-    return `entry:${normalized.entryId}`;
-  }
-  if (normalized?.fullPath) {
-    return `path:${normalized.fullPath.toLocaleLowerCase()}`;
-  }
-  return `text:${normalizeTagValue(tag).toLocaleLowerCase()}`;
-}
-
-function mergeTagsStable(
-  existingTags: string[],
-  suggestedTags: string[],
-  userConfig?: UserTagTaxonomyConfig | null,
-): string[] {
-  const merged: string[] = [];
-  const seen = new Set<string>();
-
-  for (const tag of [...existingTags, ...suggestedTags]) {
-    const normalized = normalizeTagValue(tag);
-    const identityKey = getTagIdentityKey(normalized, userConfig);
-    if (!normalized || seen.has(identityKey)) continue;
-    seen.add(identityKey);
-    merged.push(normalized);
-  }
-
-  return merged;
-}
-
-function formatTagSuggestionPath(pathText: string): string {
-  return pathText.split("/").join(" / ");
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function yieldToUi(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(() => resolve());
-      return;
-    }
-    window.setTimeout(resolve, 0);
-  });
-}
-
-async function runLimitedConcurrencyQueue<T>(
-  items: T[],
-  concurrency: number,
-  shouldContinue: () => boolean,
-  worker: (item: T, index: number) => Promise<void>,
-): Promise<void> {
-  const workerCount = Math.max(1, Math.min(concurrency, items.length));
-  let nextIndex = 0;
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (shouldContinue()) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= items.length) return;
-        await worker(items[index], index);
-        await yieldToUi();
-      }
-    }),
-  );
-}
-
-function isLuoguImportCandidate(submission: PreviewLuoguSubmission): boolean {
-  return submission.statusLabel === "可候选";
-}
-
-function isLuoguProblemIdAllowedByRules(problemId: string, rules: LuoguImportRules): boolean {
-  if (rules.problemIdFilter !== "onlyP") return true;
-  return problemId.trim().toUpperCase().startsWith("P");
-}
-
-function parseLuoguSubmissionId(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getLuoguSubmissionCandidateState(
-  submission: PreviewLuoguSubmission,
-  submissions: PreviewLuoguSubmission[],
-  rules: LuoguImportRules,
-  lastSubmissionId: number | null,
-  skippedIds: Set<string>,
-): LuoguSubmissionCandidateState {
-  if (skippedIds.has(submission.submissionId)) {
-    return { canSelect: false, defaultSelected: false, statusLabel: "已跳过" };
-  }
-
-  if (!isLuoguProblemIdAllowedByRules(submission.problemId, rules)) {
-    return { canSelect: false, defaultSelected: false, statusLabel: "题号类型不符合规则" };
-  }
-
-  const submissionId = parseLuoguSubmissionId(submission.submissionId);
-  if (lastSubmissionId !== null && submissionId !== null && submissionId <= lastSubmissionId) {
-    if (rules.importedProblemPolicy === "regenerate") {
-      return { canSelect: true, defaultSelected: true, statusLabel: "已导入，可重新生成" };
-    }
-    if (rules.importedProblemPolicy === "showUnselected") {
-      return { canSelect: true, defaultSelected: false, statusLabel: "已导入，默认不选" };
-    }
-    return { canSelect: false, defaultSelected: false, statusLabel: "已导入" };
-  }
-
-  if (rules.requireAc && !submission.isAc) {
-    return { canSelect: false, defaultSelected: false, statusLabel: "跳过：非 AC" };
-  }
-
-  if (!submission.isAc) {
-    return { canSelect: true, defaultSelected: false, statusLabel: "非 AC，默认不选" };
-  }
-
-  const latestSameProblemAcId = submissions.reduce<number | null>((latest, item) => {
-    if (!item.isAc || item.problemId !== submission.problemId) return latest;
-    const itemId = parseLuoguSubmissionId(item.submissionId);
-    if (itemId === null) return latest;
-    return latest === null ? itemId : Math.max(latest, itemId);
-  }, null);
-
-  if (rules.sameProblemStrategy === "latestAc") {
-    if (latestSameProblemAcId !== null && submissionId !== null && submissionId < latestSameProblemAcId) {
-      return { canSelect: false, defaultSelected: false, statusLabel: "跳过：同题旧提交" };
-    }
-  }
-
-  if (rules.sameProblemStrategy === "manual" && latestSameProblemAcId !== null && submissionId !== null && submissionId < latestSameProblemAcId) {
-    return {
-      canSelect: isLuoguImportCandidate(submission) || submission.isAc,
-      defaultSelected: false,
-      statusLabel: "同题旧提交，手动选择",
-    };
-  }
-
-  return {
-    canSelect: isLuoguImportCandidate(submission) || submission.isAc,
-    defaultSelected: true,
-    statusLabel: "可候选",
-  };
-}
-
-function getLuoguScanRangeLabel(
-  mode: LuoguScanMode,
-  countLimit: LuoguScanCountLimit,
-  daysLimit: LuoguScanDaysLimit,
-): string {
-  return mode === "count" ? `最近 ${countLimit} 条` : `最近 ${daysLimit} 天`;
-}
-
-function parseLuoguSubmitTimeMs(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (/^\d+$/.test(trimmed)) {
-    const numeric = Number(trimmed);
-    if (!Number.isFinite(numeric)) return null;
-    const milliseconds = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
-    return Number.isNaN(milliseconds) ? null : milliseconds;
-  }
-
-  const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
-  const parsed = new Date(normalized).getTime();
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function formatLuoguSubmissionTime(value: string): { absolute: string; compact: string; relative: string } {
-  const timestamp = parseLuoguSubmitTimeMs(value);
-  if (timestamp === null) {
-    const fallback = value.trim() || "—";
-    return {
-      absolute: fallback,
-      compact: fallback,
-      relative: "",
-    };
-  }
-
-  const date = new Date(timestamp);
-  const now = Date.now();
-  const diffMs = now - timestamp;
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-  const absolute = date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const compact = date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-
-  if (diffMs >= 0 && diffMinutes < 1) return { absolute, compact, relative: "刚刚" };
-  if (diffMs >= 0 && diffMinutes < 60) return { absolute, compact, relative: `${diffMinutes}分钟前` };
-  if (diffMs >= 0 && diffHours < 24) return { absolute, compact, relative: `${diffHours}小时前` };
-  if (diffMs >= 0 && diffDays < 7) return { absolute, compact, relative: `${diffDays}天前` };
-  return { absolute, compact, relative: "" };
-}
-
-function formatLuoguSubmissionStatus(status: number | string | null | undefined): string {
-  if (status == null || status === "") return "未知";
-  if (String(status) === "12") return "通过";
-  return String(status);
-}
-
-function getLuoguStatusBadgeClass(tone: LuoguCandidateDisplayState["tone"]): string {
-  if (tone === "success") return "border-emerald-500/35 bg-emerald-500/10 text-emerald-200";
-  if (tone === "warning") return "border-amber-500/35 bg-amber-500/10 text-amber-200";
-  if (tone === "danger") return "border-destructive/40 bg-destructive/10 text-destructive";
-  if (tone === "info") return "border-sky-500/35 bg-sky-500/10 text-sky-200";
-  if (tone === "primary") return "border-primary/40 bg-primary/10 text-foreground";
-  return "border-border bg-muted/25 text-muted-foreground";
-}
-
-function getLuoguCandidateDisplayState({
-  submission,
-  candidateState,
-  prepared,
-  prepareError,
-  writeResult,
-  prepareStatus,
-  currentlyPreparingId,
-  currentlyWritingId,
-  selectedIds,
-  skippedIds,
-}: {
-  submission: PreviewLuoguSubmission;
-  candidateState: LuoguSubmissionCandidateState;
-  prepared: PrepareLuoguSubmissionNoteResult | undefined;
-  prepareError: string | undefined;
-  writeResult: WriteLuoguPreparedNoteResult | undefined;
-  prepareStatus: LuoguPrepareItemStatus | undefined;
-  currentlyPreparingId: string | null;
-  currentlyWritingId: string | null;
-  selectedIds: Set<string>;
-  skippedIds: Set<string>;
-}): LuoguCandidateDisplayState {
-  if (skippedIds.has(submission.submissionId)) {
-    return { label: "已跳过", detail: "用户已手动跳过这条候选", tone: "muted", output: "—" };
-  }
-
-  if (writeResult) {
-    if (writeResult.skipped) return { label: "写入跳过", detail: writeResult.skipReason ?? "写入阶段跳过", tone: "muted", output: writeResult.relativePath ?? "—" };
-    if (writeResult.failed) return { label: "写入失败", detail: writeResult.error ?? "写入阶段失败", tone: "danger", output: writeResult.relativePath ?? "—" };
-    if (writeResult.relativePath) return { label: "已写入", detail: "笔记已写入", tone: "success", output: writeResult.relativePath };
-    return { label: "已写入", detail: "写入完成", tone: "success", output: "—" };
-  }
-
-  if (currentlyWritingId === submission.submissionId) {
-    return { label: "写入中", detail: "正在写入本地笔记", tone: "primary", output: prepared?.suggestedRelativePath ?? "—" };
-  }
-
-  if (prepareError) {
-    return { label: "预览失败", detail: prepareError, tone: "danger", output: prepared?.suggestedRelativePath ?? "—" };
-  }
-
-  if (prepared) {
-    const output = prepared.suggestedRelativePath || "—";
-    if (prepared.skipped) return { label: "跳过", detail: prepared.skipReason ?? prepared.reason ?? "生成预览阶段跳过", tone: "muted", output };
-    if (prepared.aiStatus === "failed") return { label: "生成失败", detail: prepared.reason ?? "AI 生成失败", tone: "danger", output };
-    if (prepared.existing) return { label: "已预览", detail: "目标文件已存在，写入不会覆盖", tone: "info", output };
-    if (prepared.draftFallback) return { label: "草稿预览", detail: "缺少心得，生成草稿", tone: "warning", output };
-    return { label: "已预览", detail: "可确认写入", tone: "success", output };
-  }
-
-  if (prepareStatus === "running" || currentlyPreparingId === submission.submissionId) {
-    return { label: "生成中", detail: "正在生成预览", tone: "primary", output: "生成预览后确定" };
-  }
-  if (prepareStatus === "queued") {
-    return { label: "等待中", detail: "已进入预览生成队列", tone: "primary", output: "生成预览后确定" };
-  }
-  if (prepareStatus === "stopped") {
-    return { label: "已停止", detail: "预览生成已停止", tone: "muted", output: "—" };
-  }
-
-  if (!candidateState.canSelect) {
-    const isNonAc = candidateState.statusLabel.includes("非 AC");
-    return {
-      label: "跳过",
-      detail: candidateState.statusLabel,
-      tone: isNonAc ? "warning" : "muted",
-      output: "—",
-    };
-  }
-
-  if (candidateState.statusLabel.includes("非 AC")) {
-    return { label: "非 AC", detail: candidateState.statusLabel, tone: "warning", output: "生成时会由后端安全跳过" };
-  }
-
-  if (candidateState.statusLabel.includes("已导入") && !selectedIds.has(submission.submissionId)) {
-    return { label: "已导入", detail: candidateState.statusLabel, tone: "info", output: "—" };
-  }
-
-  if (candidateState.statusLabel.includes("同题旧提交") && !selectedIds.has(submission.submissionId)) {
-    return { label: "同题旧提交", detail: candidateState.statusLabel, tone: "muted", output: "—" };
-  }
-
-  if (selectedIds.has(submission.submissionId)) {
-    return { label: "待生成", detail: "已选择，等待生成预览", tone: "primary", output: "生成预览后确定" };
-  }
-
-  return { label: "可导入", detail: "符合当前规则，可选择生成预览", tone: "success", output: "生成预览后确定" };
-}
-
-function getLuoguPreviewStatusLabel({
-  prepared,
-  prepareError,
-  writeResult,
-  edited,
-}: {
-  prepared?: PrepareLuoguSubmissionNoteResult;
-  prepareError?: string;
-  writeResult?: WriteLuoguPreparedNoteResult;
-  edited?: boolean;
-}): string {
-  if (writeResult) {
-    if (writeResult.failed) return "失败";
-    if (writeResult.skipped) return "已跳过";
-    return "已写入";
-  }
-  if (prepareError || prepared?.aiStatus === "failed") return "生成失败";
-  if (prepared?.skipped) return "已跳过";
-  if (edited) return "已修改";
-  if (prepared?.draftFallback) return "草稿就绪";
-  if (prepared) return "预览就绪";
-  return "待生成";
-}
-
-function getLuoguPreviewStatusBadgeClass(statusLabel: string): string {
-  if (statusLabel === "预览就绪") return "border-teal-500/35 bg-teal-500/10 text-teal-200";
-  if (statusLabel === "草稿就绪") return "border-amber-500/35 bg-amber-500/10 text-amber-200";
-  if (statusLabel === "已修改") return "border-sky-500/35 bg-sky-500/10 text-sky-200";
-  if (statusLabel === "已写入") return "border-emerald-500/35 bg-emerald-500/10 text-emerald-200";
-  if (statusLabel === "生成失败" || statusLabel === "失败") return "border-destructive/40 bg-destructive/10 text-destructive";
-  if (statusLabel === "已跳过") return "border-border bg-muted/20 text-muted-foreground";
-  return "border-border bg-muted/20 text-muted-foreground";
-}
-
-function clampAppZoom(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(APP_ZOOM_MAX, Math.max(APP_ZOOM_MIN, stepped));
-}
-
-function clampContentZoom(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, stepped));
-}
-
-function clampScale(value: number): number {
-  const stepped = Math.round(value * 10) / 10;
-  return Math.min(1.3, Math.max(0.9, stepped));
-}
-
-function clampFontSize(value: number): number {
-  const rounded = Math.round(value);
-  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, rounded));
-}
-
-function clampNumberRange(value: number, min: number, max: number): number {
-  const rounded = Math.round(value);
-  return Math.min(max, Math.max(min, rounded));
-}
-
-function getInitialAppZoom(): number {
-  const stored = window.localStorage.getItem(APP_ZOOM_STORAGE_KEY);
-  if (stored === null) return APP_ZOOM_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return APP_ZOOM_DEFAULT;
-  return clampAppZoom(parsed);
-}
-
-function getInitialContentZoom(): number {
-  const stored = window.localStorage.getItem(CONTENT_ZOOM_STORAGE_KEY);
-  if (stored === null) return CONTENT_ZOOM_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return CONTENT_ZOOM_DEFAULT;
-  return clampContentZoom(parsed);
-}
-
-function getInitialScale(storageKey: string, fallback: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampScale(parsed);
-}
-
-function getInitialFontSize(storageKey: string, fallback: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampFontSize(parsed);
-}
-
-function getInitialNumberRange(storageKey: string, fallback: number, min: number, max: number): number {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === null) return fallback;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return fallback;
-  return clampNumberRange(parsed, min, max);
-}
-
 function getAiSidebarWidthMax(): number {
   const appZoom = Number.parseFloat(
     window.getComputedStyle(document.documentElement).getPropertyValue("--app-zoom"),
@@ -2016,161 +843,6 @@ function getAiSidebarWidthMax(): number {
 function clampAiSidebarWidth(value: number): number {
   const maxWidth = Math.max(AI_SIDEBAR_WIDTH_MIN, getAiSidebarWidthMax());
   return clampNumberRange(value, AI_SIDEBAR_WIDTH_MIN, maxWidth);
-}
-
-function getInitialAiSidebarWidth(): number {
-  const stored = window.localStorage.getItem(AI_SIDEBAR_WIDTH_STORAGE_KEY);
-  if (stored === null) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return clampAiSidebarWidth(AI_SIDEBAR_WIDTH_DEFAULT);
-  return clampAiSidebarWidth(parsed);
-}
-
-function clampEditorPreviewRatio(value: number, containerWidth?: number): number {
-  let minRatio = EDITOR_PREVIEW_RATIO_MIN;
-  let maxRatio = EDITOR_PREVIEW_RATIO_MAX;
-
-  if (containerWidth && containerWidth > EDITOR_PREVIEW_MIN_PANE_WIDTH * 2) {
-    minRatio = Math.max(minRatio, EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
-    maxRatio = Math.min(maxRatio, 1 - EDITOR_PREVIEW_MIN_PANE_WIDTH / containerWidth);
-  }
-
-  return Math.min(maxRatio, Math.max(minRatio, value));
-}
-
-function getInitialEditorPreviewRatio(): number {
-  const stored = window.localStorage.getItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY);
-  if (stored === null) return EDITOR_PREVIEW_RATIO_DEFAULT;
-
-  const parsed = Number(stored);
-  if (!Number.isFinite(parsed)) return EDITOR_PREVIEW_RATIO_DEFAULT;
-  return clampEditorPreviewRatio(parsed);
-}
-
-function isAppTheme(value: string | null): value is AppTheme {
-  return value === "dark" || value === "light" || value === "system";
-}
-
-function getInitialAppTheme(): AppTheme {
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return isAppTheme(stored) ? stored : "dark";
-}
-
-function isReadingDensity(value: string | null): value is ReadingDensity {
-  return value === "compact" || value === "standard" || value === "comfortable";
-}
-
-function getInitialReadingDensity(): ReadingDensity {
-  const stored = window.localStorage.getItem(READING_DENSITY_STORAGE_KEY);
-  return isReadingDensity(stored) ? stored : "standard";
-}
-
-function isHexColor(value: string | null): value is string {
-  return /^#[0-9a-fA-F]{6}$/.test(value ?? "");
-}
-
-function getInitialAccentColor(): string {
-  const stored = window.localStorage.getItem(ACCENT_COLOR_STORAGE_KEY);
-  return isHexColor(stored) ? stored.toUpperCase() : "#0169CC";
-}
-
-function getInitialBooleanSetting(storageKey: string, defaultValue: boolean): boolean {
-  const stored = window.localStorage.getItem(storageKey);
-  if (stored === "true") return true;
-  if (stored === "false") return false;
-  return defaultValue;
-}
-
-function getInitialContrast(): number {
-  const rawValue = window.localStorage.getItem(CONTRAST_STORAGE_KEY);
-  if (rawValue === null) return 56;
-  const parsed = Number(rawValue);
-  return Number.isFinite(parsed) ? clampNumberRange(parsed, 0, 100) : 56;
-}
-
-function getInitialSettingsThemeState(): SettingsThemeState {
-  try {
-    const rawValue = window.localStorage.getItem(SETTINGS_THEME_V1_STORAGE_KEY);
-    if (rawValue) {
-      return normalizeSettingsThemeState(JSON.parse(rawValue));
-    }
-  } catch {
-    // Fall through to the legacy setting bridge.
-  }
-
-  const variant = getInitialAppTheme();
-  const resolvedVariant = variant === "system" ? getInitialSystemTheme() : variant;
-  const initialState = normalizeSettingsThemeState({
-    ...DEFAULT_SETTINGS_THEME_STATE,
-    mode: variant,
-  });
-  return {
-    ...initialState,
-    [resolvedVariant]: {
-      ...initialState[resolvedVariant],
-      theme: {
-        ...initialState[resolvedVariant].theme,
-        accent: getInitialAccentColor(),
-        contrast: getInitialContrast(),
-        ink: resolvedVariant === "dark" ? "#F3F4F6" : "#0D0D0D",
-        opaqueWindows: getInitialBooleanSetting(TRANSLUCENT_SIDEBAR_STORAGE_KEY, false),
-        surface: resolvedVariant === "dark" ? "#1D1D1D" : "#F7F7F5",
-      },
-    },
-  };
-}
-
-function getInitialReducedMotion(): ReducedMotionMode {
-  const stored = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
-  return stored === "on" || stored === "off" || stored === "system" ? stored : "system";
-}
-
-function getInitialDiffMarkerMode(): DiffMarkerMode {
-  const stored = window.localStorage.getItem(DIFF_MARKER_MODE_STORAGE_KEY);
-  return stored === "symbols" ? "symbols" : "color";
-}
-
-function getInitialSystemTheme(): "dark" | "light" {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function getInitialDeveloperMode(): boolean {
-  return window.localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) === "true";
-}
-
-function getNoteDisplayName(path: string, files: NoteFileInfo[]): string {
-  const file = files.find((item) => item.path === path);
-  const title = file?.displayTitle?.trim();
-  if (title) return title;
-  const name = file?.name ?? path.split("/").pop() ?? path;
-  return name.replace(/\.md$/i, "") || path;
-}
-
-function getInitialOpenTabPaths(): string[] {
-  const stored = window.localStorage.getItem(OPEN_TABS_STORAGE_KEY);
-  if (stored === null) return [];
-
-  try {
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-    const paths: string[] = [];
-    for (const value of parsed) {
-      if (typeof value !== "string") continue;
-      const path = value.trim();
-      if (!path || paths.includes(path)) continue;
-      paths.push(path);
-    }
-    return paths;
-  } catch {
-    return [];
-  }
-}
-
-function getInitialOpenTabsActivePath(): string | null {
-  const stored = window.localStorage.getItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
-  const path = stored?.trim();
-  return path || null;
 }
 
 interface PromptUsageInfo {
@@ -2401,257 +1073,8 @@ function getPromptUsageInfo(fileName: string): PromptUsageInfo {
   };
 }
 
-interface LoadedMarkdownParts {
-  frontmatterPrefix: string;
-  body: string;
-  warning: string | null;
-}
-
-interface SavedNoteSnapshot {
-  path: string | null;
-  frontmatterPrefix: string;
-  markdown: string;
-}
-
-interface SearchResultItem {
-  path: string;
-  title: string;
-  category: string;
-  modified: string;
-  tags: string[];
-  summary: string;
-  excerpt: string;
-  score: number;
-  source: "backend" | "local";
-}
-
-function splitLoadedMarkdown(markdown: string): LoadedMarkdownParts {
-  const split = splitFrontmatter(markdown);
-
-  if (split.kind === "found") {
-    return {
-      frontmatterPrefix: markdown.slice(0, markdown.length - split.body.length),
-      body: split.body,
-      warning: null,
-    };
-  }
-
-  if (split.kind === "unclosed") {
-    return {
-      frontmatterPrefix: "",
-      body: markdown,
-      warning: "frontmatter 缺少闭合 ---，已作为正文载入以避免丢数据",
-    };
-  }
-
-  return {
-    frontmatterPrefix: "",
-    body: split.body,
-    warning: null,
-  };
-}
-
-function combineMarkdown(frontmatterPrefix: string, body: string): string {
-  return `${frontmatterPrefix}${body}`;
-}
-
-function isSnapshotDirty(
-  snapshot: SavedNoteSnapshot,
-  path: string | null,
-  nextFrontmatterPrefix: string,
-  nextMarkdown: string,
-): boolean {
-  if (path === null) return false;
-  return (
-    snapshot.path !== path ||
-    snapshot.frontmatterPrefix !== nextFrontmatterPrefix ||
-    snapshot.markdown !== nextMarkdown
-  );
-}
-
-function formatSearchDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
-function normalizeSearchText(value: string): string {
-  return value.toLocaleLowerCase().replace(/\s+/g, "");
-}
-
-function splitSearchTokens(query: string): string[] {
-  return query
-    .trim()
-    .split(/\s+/)
-    .map(normalizeSearchText)
-    .filter(Boolean);
-}
-
-function scoreSubsequence(needle: string, haystack: string): number {
-  if (!needle || !haystack) return 0;
-
-  let needleIndex = 0;
-  let firstMatch = -1;
-  let lastMatch = -1;
-
-  for (let haystackIndex = 0; haystackIndex < haystack.length && needleIndex < needle.length; haystackIndex += 1) {
-    if (haystack[haystackIndex] !== needle[needleIndex]) continue;
-
-    if (firstMatch === -1) firstMatch = haystackIndex;
-    lastMatch = haystackIndex;
-    needleIndex += 1;
-  }
-
-  if (needleIndex !== needle.length) return 0;
-
-  const span = Math.max(lastMatch - firstMatch + 1, needle.length);
-  const compactness = needle.length / span;
-  const earlyBonus = firstMatch === 0 ? 0.18 : 0;
-  return 0.45 + compactness * 0.35 + earlyBonus;
-}
-
-function scoreSearchField(token: string, value: string, weight: number): number {
-  const normalizedValue = normalizeSearchText(value);
-  if (!token || !normalizedValue) return 0;
-
-  const index = normalizedValue.indexOf(token);
-  if (index >= 0) {
-    const earlyBonus = index === 0 ? 0.25 : 0;
-    const coverageBonus = Math.min(token.length / normalizedValue.length, 0.35);
-    return weight * (1.15 + earlyBonus + coverageBonus);
-  }
-
-  return weight * scoreSubsequence(token, normalizedValue);
-}
-
-function toSearchResultItem(result: NoteSearchResult): SearchResultItem {
-  return {
-    path: result.path,
-    title: result.title || result.path.split("/").pop()?.replace(/\.md$/i, "") || result.path,
-    category: getDashboardNoteCategory(result.path),
-    modified: result.date,
-    tags: result.tags,
-    summary: result.summary,
-    excerpt: result.excerpt,
-    score: 0,
-    source: "backend",
-  };
-}
-
-function buildLocalSearchResults(files: NoteFileInfo[], query: string): SearchResultItem[] {
-  const tokens = splitSearchTokens(query);
-  const sortedByModified = [...files].sort(
-    (a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime(),
-  );
-
-  if (tokens.length === 0) {
-    return sortedByModified.slice(0, 30).map((file) => ({
-      path: file.path,
-      title: file.name.replace(/\.md$/i, ""),
-      category: getDashboardNoteCategory(file.path),
-      modified: file.modified,
-      tags: [],
-      summary: "",
-      excerpt: "",
-      score: 0,
-      source: "local",
-    }));
-  }
-
-  return sortedByModified
-    .map((file): SearchResultItem | null => {
-      const title = file.name.replace(/\.md$/i, "");
-      const category = getDashboardNoteCategory(file.path);
-      const fields = [
-        { value: title, weight: 120 },
-        { value: file.name, weight: 95 },
-        { value: category, weight: 70 },
-        { value: file.path, weight: 55 },
-      ];
-
-      let score = 0;
-      for (const token of tokens) {
-        const tokenScore = Math.max(...fields.map((field) => scoreSearchField(token, field.value, field.weight)));
-        if (tokenScore <= 0) return null;
-        score += tokenScore;
-      }
-
-      return {
-        path: file.path,
-        title,
-        category,
-        modified: file.modified,
-        tags: [],
-        summary: "",
-        excerpt: "",
-        score,
-        source: "local",
-      } satisfies SearchResultItem;
-    })
-    .filter((result): result is SearchResultItem => result !== null)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return new Date(b.modified).getTime() - new Date(a.modified).getTime();
-    })
-    .slice(0, 50);
-}
-
-function getDashboardNoteCategory(path: string): string {
-  const [topLevel] = path.split("/");
-  if (!topLevel || topLevel === path) return "notes";
-
-  switch (topLevel) {
-    case "tricks":
-      return "tricks";
-    case "problems":
-      return "problems";
-    case "luogu":
-      return "luogu";
-    case "inbox":
-      return "inbox";
-    default:
-      return topLevel;
-  }
-}
-
-function getCommittedMarkdownSyncDelayMs(docLength: number): number {
-  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
-
-  if (docLength <= 2_000 && lastParseMs < 40) {
-    return 50;
-  }
-  if (docLength <= 15_000 && lastParseMs < 90) {
-    return 90;
-  }
-  if (docLength >= 25_000 || lastParseMs >= 120) {
-    return 160;
-  }
-  return 120;
-}
-
-function getPreviewMarkdownSyncDelayMs(docLength: number): number {
-  const lastParseMs = getPreviewPerfStats()?.lastParseMs ?? 0;
-
-  if (docLength < 3_000) {
-    return 25;
-  }
-  if (docLength < 12_000) {
-    return lastParseMs >= 90 ? 90 : 65;
-  }
-  if (docLength >= 25_000 || lastParseMs >= 120) {
-    return 150;
-  }
-  return 120;
-}
-
 export default function App() {
-  const [files, setFiles] = useState<NoteFileInfo[]>([]);
-  const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [openTabPaths, setOpenTabPaths] = useState<string[]>(getInitialOpenTabPaths);
   const [openReviewTabs, setOpenReviewTabs] = useState<PolishReviewTab[]>([]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<WorkspaceTabId | null>(null);
   const [workingCopies, setWorkingCopies] = useState<Record<string, WorkingCopy>>({});
@@ -2668,24 +1091,23 @@ export default function App() {
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(() =>
-    getInitialNumberRange(
-      LEFT_SIDEBAR_WIDTH_STORAGE_KEY,
-      LEFT_SIDEBAR_WIDTH_DEFAULT,
-      LEFT_SIDEBAR_WIDTH_MIN,
-      LEFT_SIDEBAR_WIDTH_MAX,
-    ),
-  );
-  const [aiSidebarWidth, setAiSidebarWidth] = useState(getInitialAiSidebarWidth);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
+  const [aiSidebarWidth, setAiSidebarWidth] = useState(() => getInitialAiSidebarWidth(clampAiSidebarWidth));
   const [editorPreviewRatio, setEditorPreviewRatio] = useState(getInitialEditorPreviewRatio);
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandleId | null>(null);
   const [editorSelectedText, setEditorSelectedText] = useState("");
   const [editorSelectedTextLength, setEditorSelectedTextLength] = useState<number | null>(null);
   const [editorCursorOffset, setEditorCursorOffset] = useState<number | null>(null);
   const [aiContextSelectionRange, setAiContextSelectionRange] = useState<MarkdownEditorSelectionRange | null>(null);
-  const [settingsThemeState, setSettingsThemeState] = useState(getInitialSettingsThemeState);
-  const [appTheme, setAppTheme] = useState<AppTheme>(settingsThemeState.mode);
-  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getInitialSystemTheme);
+  const {
+    activeTheme: activeSettingsTheme,
+    appTheme,
+    applyThemeState,
+    resolvedTheme,
+    setAppTheme,
+    themeState: settingsThemeState,
+    themeVariables: settingsThemeVariables,
+  } = useThemeEngine();
   const [appZoom, setAppZoom] = useState(getInitialAppZoom);
   const [contentZoom, setContentZoom] = useState(getInitialContentZoom);
   const contentZoomRef = useRef(contentZoom);
@@ -2705,7 +1127,6 @@ export default function App() {
   });
   const aiSidebarWidthRef = useRef(aiSidebarWidth);
   const aiSidebarDragWidthRef = useRef(aiSidebarWidth);
-  const aiSidebarResizeRafRef = useRef<number | null>(null);
   const [uiScale] = useState(() => getInitialScale(UI_SCALE_STORAGE_KEY, UI_SCALE_DEFAULT));
   const [editorFontSize, setEditorFontSize] = useState(() =>
     getInitialFontSize(EDITOR_FONT_SIZE_STORAGE_KEY, EDITOR_FONT_SIZE_DEFAULT),
@@ -2753,8 +1174,7 @@ export default function App() {
   const [isSavingTagTaxonomyConfig, setIsSavingTagTaxonomyConfig] = useState(false);
   const [tagTaxonomySaveError, setTagTaxonomySaveError] = useState<string | null>(null);
   const [blogInfoDraft, setBlogInfoDraft] = useState<BlogConfig>({
-    title: DEFAULT_BLOG_TITLE,
-    subtitle: DEFAULT_BLOG_SUBTITLE,
+    ...DEFAULT_BLOG_CONFIG,
   });
   const [blogConfigError, setBlogConfigError] = useState<string | null>(null);
   const [isLoadingBlogConfig, setIsLoadingBlogConfig] = useState(false);
@@ -2779,18 +1199,20 @@ export default function App() {
   const [tagNormalizationScanError, setTagNormalizationScanError] = useState<string | null>(null);
   const [tagNormalizationScanIssueCount, setTagNormalizationScanIssueCount] = useState(0);
   const [selectedTagNormalizationScanPaths, setSelectedTagNormalizationScanPaths] = useState<Set<string>>(() => new Set());
-  const [isApplyingTagNormalizationScan, setIsApplyingTagNormalizationScan] = useState(false);
+  const [tagNormalizationApplyTaskState, setTagNormalizationApplyTaskState] = useState<TaskState>(createIdleTaskState);
   const [tagNormalizationApplyResult, setTagNormalizationApplyResult] = useState<TagNormalizationApplyResult | null>(null);
   const tagTaxonomyUserConfig = tagTaxonomyConfigError ? null : tagTaxonomyConfig;
   const tagManagerSessionRef = useRef(tagManagerSession);
   const currentFilePathRef = useRef(currentFilePath);
   const [markdownToolbarApi, setMarkdownToolbarApi] = useState<MarkdownEditorToolbarApi | null>(null);
   const editorPreviewContainerRef = useRef<HTMLDivElement | null>(null);
-  const editorScrollApiRef = useRef<MarkdownEditorScrollApi | null>(null);
-  const previewScrollApiRef = useRef<MarkdownPreviewScrollApi | null>(null);
-  const scrollSyncRafRef = useRef<number | null>(null);
-  const scrollSyncSuppressRafRef = useRef<number | null>(null);
-  const suppressedScrollPaneRef = useRef<"editor" | "preview" | null>(null);
+  const {
+    handleEditorScroll,
+    handlePreviewScroll,
+    handleEditorScrollApiChange,
+    handlePreviewScrollApiChange,
+    requestEditorMeasure,
+  } = useEditorPreviewScrollSync();
 
   useEffect(() => {
     tagManagerSessionRef.current = tagManagerSession;
@@ -2800,6 +1222,17 @@ export default function App() {
     currentFilePathRef.current = currentFilePath;
     activeFileKeyRef.current = currentFilePath;
   }, [currentFilePath]);
+
+  const handleNotesChangedForList = useCallback(() => {
+    debugTagManager("notes.changed", {
+      hasTagManagerSession: Boolean(tagManagerSessionRef.current),
+      currentFilePath: currentFilePathRef.current,
+      refreshList: true,
+    });
+  }, []);
+  const { files, setFiles, hasLoadedNotes } = useNotesListController({
+    onNotesChanged: handleNotesChangedForList,
+  });
 
   useEffect(() => {
     workingCopiesRef.current = workingCopies;
@@ -2813,36 +1246,6 @@ export default function App() {
     aiSidebarWidthRef.current = aiSidebarWidth;
     aiSidebarDragWidthRef.current = aiSidebarWidth;
   }, [aiSidebarWidth]);
-
-  const syncEditorPreviewScroll = useCallback((source: "editor" | "preview", ratio: number) => {
-    if (suppressedScrollPaneRef.current === source) return;
-
-    if (scrollSyncRafRef.current !== null) {
-      window.cancelAnimationFrame(scrollSyncRafRef.current);
-    }
-
-    scrollSyncRafRef.current = window.requestAnimationFrame(() => {
-      scrollSyncRafRef.current = null;
-      markPreviewScrollSync();
-
-      const targetPane = source === "editor" ? "preview" : "editor";
-      const targetApi = source === "editor" ? previewScrollApiRef.current : editorScrollApiRef.current;
-      if (!targetApi) return;
-
-      suppressedScrollPaneRef.current = targetPane;
-      targetApi.scrollToRatio(ratio);
-
-      if (scrollSyncSuppressRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
-      }
-      scrollSyncSuppressRafRef.current = window.requestAnimationFrame(() => {
-        scrollSyncSuppressRafRef.current = null;
-        if (suppressedScrollPaneRef.current === targetPane) {
-          suppressedScrollPaneRef.current = null;
-        }
-      });
-    });
-  }, []);
 
   const loadTagTaxonomyConfig = useCallback(async () => {
     setIsLoadingTagTaxonomyConfig(true);
@@ -2868,18 +1271,12 @@ export default function App() {
     setIsLoadingBlogConfig(true);
     try {
       const config = await getBlogConfig();
-      setBlogInfoDraft({
-        title: config.title ?? DEFAULT_BLOG_TITLE,
-        subtitle: config.subtitle ?? DEFAULT_BLOG_SUBTITLE,
-      });
+      setBlogInfoDraft(resolveBlogConfigDraft(config));
       setBlogConfigError(null);
     } catch (error) {
       const message = getErrorMessage(error);
       console.warn("Failed to load blog config; using defaults.", message);
-      setBlogInfoDraft({
-        title: DEFAULT_BLOG_TITLE,
-        subtitle: DEFAULT_BLOG_SUBTITLE,
-      });
+      setBlogInfoDraft(resolveBlogConfigDraft(null));
       setBlogConfigError(message);
     } finally {
       setIsLoadingBlogConfig(false);
@@ -2900,7 +1297,6 @@ export default function App() {
   const beginColumnResize = useCallback((handleId: ResizeHandleId, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
 
-    event.preventDefault();
     if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
       aiSidebarResizePerfRef.current = {
         pointerDownAt: performance.now(),
@@ -2924,90 +1320,72 @@ export default function App() {
       : null;
     const editorPreviewRect = editorPreviewContainerRef.current?.getBoundingClientRect() ?? null;
 
-    setActiveResizeHandle(handleId);
-    document.body.classList.add("app-column-resizing");
-
-    if (handleId === "ai-sidebar") {
-      aiSidebarDragWidthRef.current = startAiSidebarWidth;
-    }
-
     const applyAiSidebarDragWidth = (nextWidth: number) => {
       if (!aiSidebarElement) return;
       aiSidebarElement.style.width = `${nextWidth}px`;
       aiSidebarElement.style.flexBasis = `${nextWidth}px`;
       aiSidebarElement.style.maxWidth = "100%";
     };
+    setActiveResizeHandle(handleId);
 
-    const scheduleAiSidebarDragWidth = (nextWidth: number) => {
-      aiSidebarDragWidthRef.current = nextWidth;
-      if (APP_RESIZE_PERF_DEBUG) {
-        aiSidebarResizePerfRef.current.pointerMoveCount += 1;
-        incrementNoteXAiPerfCounter("appResizePointerMove");
-      }
-      if (aiSidebarResizeRafRef.current !== null) return;
-      aiSidebarResizeRafRef.current = window.requestAnimationFrame(() => {
-        aiSidebarResizeRafRef.current = null;
-        if (APP_RESIZE_PERF_DEBUG) {
-          aiSidebarResizePerfRef.current.rafWidthUpdateCount += 1;
-          incrementNoteXAiPerfCounter("appResizeRafCommit");
+    beginColumnResizeSession({
+      event,
+      cursor: "col-resize",
+      onMove: (moveEvent) => {
+        if (handleId === "left-sidebar") {
+          setLeftSidebarWidth(
+            clampNumberRange(
+              startLeftSidebarWidth + moveEvent.clientX - startX,
+              LEFT_SIDEBAR_WIDTH_MIN,
+              LEFT_SIDEBAR_WIDTH_MAX,
+            ),
+          );
+          return;
         }
-        applyAiSidebarDragWidth(aiSidebarDragWidthRef.current);
-      });
-    };
 
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      if (handleId === "left-sidebar") {
-        setLeftSidebarWidth(
-          clampNumberRange(
-            startLeftSidebarWidth + moveEvent.clientX - startX,
-            LEFT_SIDEBAR_WIDTH_MIN,
-            LEFT_SIDEBAR_WIDTH_MAX,
-          ),
-        );
-        return;
-      }
-
-      if (handleId === "ai-sidebar") {
-        scheduleAiSidebarDragWidth(clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX));
-        return;
-      }
-
-      if (!editorPreviewRect) return;
-      const rawRatio = (moveEvent.clientX - editorPreviewRect.left) / editorPreviewRect.width;
-      setEditorPreviewRatio(clampEditorPreviewRatio(rawRatio, editorPreviewRect.width));
-    };
-
-    const stopResize = () => {
-      if (handleId === "ai-sidebar") {
-        if (aiSidebarResizeRafRef.current !== null) {
-          window.cancelAnimationFrame(aiSidebarResizeRafRef.current);
-          aiSidebarResizeRafRef.current = null;
+        if (handleId === "ai-sidebar") {
+          const nextWidth = clampAiSidebarWidth(startAiSidebarWidth + startX - moveEvent.clientX);
+          aiSidebarDragWidthRef.current = nextWidth;
+          if (APP_RESIZE_PERF_DEBUG) {
+            aiSidebarResizePerfRef.current.pointerMoveCount += 1;
+            incrementNoteXAiPerfCounter("appResizePointerMove");
+          }
+          return;
         }
-        const finalWidth = aiSidebarDragWidthRef.current;
-        applyAiSidebarDragWidth(finalWidth);
-        setAiSidebarWidth(finalWidth);
-        aiSidebarWidthRef.current = finalWidth;
-      }
-      if (APP_RESIZE_PERF_DEBUG && handleId === "ai-sidebar") {
-        incrementNoteXAiPerfCounter("appResizePointerUp");
-        const summary = {
-          ...aiSidebarResizePerfRef.current,
-          pointerMoveTriggersSetAiSidebarWidth: aiSidebarResizePerfRef.current.pointerMoveSetStateCount > 0,
-          durationMs: performance.now() - aiSidebarResizePerfRef.current.pointerDownAt,
-        };
-        setNoteXAiPerfEvent("appResizeLastSummary", summary);
-        console.info("[NoteX Perf] app resize summary", summary);
-      }
-      setActiveResizeHandle(null);
-      document.body.classList.remove("app-column-resizing");
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
+        if (!editorPreviewRect) return;
+        const rawRatio = (moveEvent.clientX - editorPreviewRect.left) / editorPreviewRect.width;
+        setEditorPreviewRatio(clampEditorPreviewRatio(rawRatio, editorPreviewRect.width));
+      },
+      onAnimationFrame: handleId === "ai-sidebar"
+        ? () => {
+          if (APP_RESIZE_PERF_DEBUG) {
+            aiSidebarResizePerfRef.current.rafWidthUpdateCount += 1;
+            incrementNoteXAiPerfCounter("appResizeRafCommit");
+          }
+          applyAiSidebarDragWidth(aiSidebarDragWidthRef.current);
+        }
+        : undefined,
+      onFinish: () => {
+        if (handleId === "ai-sidebar") {
+          const finalWidth = aiSidebarDragWidthRef.current;
+          applyAiSidebarDragWidth(finalWidth);
+          setAiSidebarWidth(finalWidth);
+          aiSidebarWidthRef.current = finalWidth;
+          if (APP_RESIZE_PERF_DEBUG) {
+            incrementNoteXAiPerfCounter("appResizePointerUp");
+            const summary = {
+              ...aiSidebarResizePerfRef.current,
+              pointerMoveTriggersSetAiSidebarWidth: aiSidebarResizePerfRef.current.pointerMoveSetStateCount > 0,
+              durationMs: performance.now() - aiSidebarResizePerfRef.current.pointerDownAt,
+            };
+            setNoteXAiPerfEvent("appResizeLastSummary", summary);
+            console.info("[NoteX Perf] app resize summary", summary);
+          }
+        }
+        setActiveResizeHandle(null);
+      },
+    });
   }, [aiSidebarWidth, leftSidebarWidth]);
 
   const resetColumnSize = useCallback((handleId: ResizeHandleId) => {
@@ -3023,16 +1401,6 @@ export default function App() {
 
     setEditorPreviewRatio(EDITOR_PREVIEW_RATIO_DEFAULT);
   }, []);
-  useEffect(() => {
-    return () => {
-      if (scrollSyncRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncRafRef.current);
-      }
-      if (scrollSyncSuppressRafRef.current !== null) {
-        window.cancelAnimationFrame(scrollSyncSuppressRafRef.current);
-      }
-    };
-  }, []);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
   useEffect(() => {
@@ -3045,7 +1413,6 @@ export default function App() {
   const [newNoteCustomDirectory, setNewNoteCustomDirectory] = useState("");
   const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
-  const [collectionCandidatesFromNotes, setCollectionCandidatesFromNotes] = useState<string[]>([]);
   const [isTagNormalizationDetailsOpen, setIsTagNormalizationDetailsOpen] = useState(false);
   const [folderParentDirectory, setFolderParentDirectory] = useState("");
   const [returnToCreateAfterFolder, setReturnToCreateAfterFolder] = useState(false);
@@ -3054,7 +1421,6 @@ export default function App() {
   const [isTreeRootCollapsed, setIsTreeRootCollapsed] = useState(false);
   const [createFileRequest, setCreateFileRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
   const [createFolderRequest, setCreateFolderRequest] = useState<{ parentPath: string; requestId: number } | null>(null);
-  const [displayTitleByPath, setDisplayTitleByPath] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameTargetIsDirectory, setRenameTargetIsDirectory] = useState(false);
   const [isRestartingBlog, setIsRestartingBlog] = useState(false);
@@ -3065,8 +1431,9 @@ export default function App() {
   const [isTestingLuoguConnection, setIsTestingLuoguConnection] = useState(false);
   const [luoguConnectionResult, setLuoguConnectionResult] = useState<TestLuoguConnectionResult | null>(null);
   const [luoguConnectionError, setLuoguConnectionError] = useState<string | null>(null);
-  const [isScanningLuoguPreview, setIsScanningLuoguPreview] = useState(false);
-  const [isLuoguScanPaused, setIsLuoguScanPaused] = useState(false);
+  const [luoguScanSourceState, setLuoguScanSourceState] = useState(createIdleLuoguScanSourceState);
+  const isScanningLuoguPreview = luoguScanSourceState.isScanning;
+  const isLuoguScanPaused = luoguScanSourceState.isPaused;
   const luoguScanPauseFlagRef = useRef(false);
   const luoguScanResumeRef = useRef<{
     submissions: PreviewLuoguSubmission[];
@@ -3078,40 +1445,64 @@ export default function App() {
     rangeLabel: string;
   } | null>(null);
   const [luoguPreviewResult, setLuoguPreviewResult] = useState<PreviewLuoguSubmissionsResult | null>(null);
-  const [luoguScanError, setLuoguScanError] = useState<string | null>(null);
+  const luoguScanError = luoguScanSourceState.error;
   const [luoguScanMode, setLuoguScanMode] = useState<LuoguScanMode>("count");
   const [luoguScanCountLimit, setLuoguScanCountLimit] = useState<LuoguScanCountLimit>(20);
   const [luoguScanDaysLimit, setLuoguScanDaysLimit] = useState<LuoguScanDaysLimit>(30);
   const [luoguImportRules, setLuoguImportRules] = useState<LuoguImportRules>(readStoredLuoguImportRules);
   const [expandedLuoguRuleId, setExpandedLuoguRuleId] = useState<string | null>(null);
   const [expandedWebSearchSelectId, setExpandedWebSearchSelectId] = useState<string | null>(null);
-  const [luoguScanProgress, setLuoguScanProgress] = useState<LuoguScanProgress | null>(null);
-  const [luoguScanSummary, setLuoguScanSummary] = useState<LuoguScanSummary | null>(null);
-  const [selectedLuoguSubmissionIds, setSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [skippedLuoguSubmissionIds, setSkippedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
-  const [isPreparingSelectedLuogu, setIsPreparingSelectedLuogu] = useState(false);
-  const [luoguPreparedNotesById, setLuoguPreparedNotesById] = useState<Record<string, PrepareLuoguSubmissionNoteResult>>({});
-  const [luoguPrepareErrorsById, setLuoguPrepareErrorsById] = useState<Record<string, string>>({});
-  const [luoguPrepareStatusesById, setLuoguPrepareStatusesById] = useState<Record<string, LuoguPrepareItemStatus>>({});
-  const [currentlyPreparingLuoguId, setCurrentlyPreparingLuoguId] = useState<string | null>(null);
-  const [luoguPrepareProgress, setLuoguPrepareProgress] = useState<LuoguPrepareProgress | null>(null);
-  const [isStoppingLuoguPrepare, setIsStoppingLuoguPrepare] = useState(false);
-  const [isWritingPreparedLuogu, setIsWritingPreparedLuogu] = useState(false);
-  const [luoguWriteResultsById, setLuoguWriteResultsById] = useState<Record<string, WriteLuoguPreparedNoteResult>>({});
-  const [currentlyWritingLuoguId, setCurrentlyWritingLuoguId] = useState<string | null>(null);
-  const [luoguWriteProgress, setLuoguWriteProgress] = useState<{ current: number; total: number } | null>(null);
-  const [activeLuoguPreparedPreviewId, setActiveLuoguPreparedPreviewId] = useState<string | null>(null);
-  const [activeLuoguPreviewDetailTab, setActiveLuoguPreviewDetailTab] = useState<LuoguPreviewDetailTab>("rendered");
-  const [editedLuoguPreparedMarkdownIds, setEditedLuoguPreparedMarkdownIds] = useState<Set<string>>(() => new Set());
-  const [reviewSelectedLuoguSubmissionIds, setReviewSelectedLuoguSubmissionIds] = useState<Set<string>>(() => new Set());
+  const luoguScanProgress = luoguScanSourceState.progress as LuoguScanProgress | null;
+  const luoguScanSummary = luoguScanSourceState.summary as LuoguScanSummary | null;
+  const luoguImportWorkflow = useLuoguImportWorkflow();
+  const selectedLuoguSubmissionIds = luoguImportWorkflow.selectedSubmissionIds;
+  const setSelectedLuoguSubmissionIds = luoguImportWorkflow.setSelectedSubmissionIds;
+  const skippedLuoguSubmissionIds = luoguImportWorkflow.skippedSubmissionIds;
+  const luoguPrepareSourceState = luoguImportWorkflow.prepareSourceState;
+  const setLuoguPrepareSourceState = luoguImportWorkflow.setPrepareSourceState;
+  const isPreparingSelectedLuogu = luoguImportWorkflow.isPreparingSelected;
+  const luoguPreparedNotesById = luoguImportWorkflow.preparedNotesById;
+  const setLuoguPreparedNotesById = luoguImportWorkflow.setPreparedNotesById;
+  const luoguPrepareErrorsById = luoguImportWorkflow.prepareErrorsById;
+  const setLuoguPrepareErrorsById = luoguImportWorkflow.setPrepareErrorsById;
+  const luoguPrepareStatusesById = luoguImportWorkflow.prepareStatusesById;
+  const setLuoguPrepareStatusesById = luoguImportWorkflow.setPrepareStatusesById;
+  const currentlyPreparingLuoguId = luoguImportWorkflow.currentlyPreparingId;
+  const setCurrentlyPreparingLuoguId = luoguImportWorkflow.setCurrentlyPreparingId;
+  const luoguPrepareProgress = luoguPrepareSourceState.progress as LuoguPrepareProgress | null;
+  const isStoppingLuoguPrepare = luoguImportWorkflow.isStoppingPrepare;
+  const luoguWriteSourceState = luoguImportWorkflow.writeSourceState;
+  const setLuoguWriteSourceState = luoguImportWorkflow.setWriteSourceState;
+  const isWritingPreparedLuogu = luoguImportWorkflow.isWritingPrepared;
+  const luoguWriteResultsById = luoguImportWorkflow.writeResultsById;
+  const setLuoguWriteResultsById = luoguImportWorkflow.setWriteResultsById;
+  const currentlyWritingLuoguId = luoguImportWorkflow.currentlyWritingId;
+  const setCurrentlyWritingLuoguId = luoguImportWorkflow.setCurrentlyWritingId;
+  const luoguWriteProgress = luoguWriteSourceState.progress as LuoguWriteProgress | null;
+  const activeLuoguPreparedPreviewId = luoguImportWorkflow.activePreparedPreviewId;
+  const setActiveLuoguPreparedPreviewId = luoguImportWorkflow.setActivePreparedPreviewId;
+  const activeLuoguPreviewDetailTab = luoguImportWorkflow.activePreviewDetailTab;
+  const setActiveLuoguPreviewDetailTab = luoguImportWorkflow.setActivePreviewDetailTab;
+  const editedLuoguPreparedMarkdownIds = luoguImportWorkflow.editedPreparedMarkdownIds;
+  const reviewSelectedLuoguSubmissionIds = luoguImportWorkflow.reviewSelectedSubmissionIds;
+  const setReviewSelectedLuoguSubmissionIds = luoguImportWorkflow.setReviewSelectedSubmissionIds;
   const [luoguImportCenterTab, setLuoguImportCenterTab] = useState<LuoguImportCenterTab>("scan");
-  const [luoguImportStep, setLuoguImportStep] = useState<LuoguImportStep>("scan");
+  const luoguImportStep = luoguImportWorkflow.importStep;
+  const setLuoguImportStep = luoguImportWorkflow.setImportStep;
   const isSyncingLuogu = false;
   const [luoguSyncResult] = useState<SyncLuoguInsightsResult | null>(null);
   const [luoguConfigUid, setLuoguConfigUid] = useState("");
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
+  const resetLuoguPreparationWorkspace = luoguImportWorkflow.resetPreparationWorkspace;
+  const applyLuoguConfigFormState = useCallback((config: LuoguConfig) => {
+    const formState = buildLuoguConfigFormState(config);
+    setLuoguConfigUid(formState.uid);
+    setLuoguConfigClientId(formState.clientId);
+    setLuoguConfigLastSubmissionId(formState.lastSubmissionId);
+    setLuoguConfigAiConfigured(formState.aiConfigured);
+  }, []);
   const isUpdatingLuoguLastSubmissionId = false;
   const [isLoadingAiConfig, setIsLoadingAiConfig] = useState(false);
   const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
@@ -3120,8 +1511,8 @@ export default function App() {
   const [isClearingWebCache, setIsClearingWebCache] = useState(false);
   const [webCacheMessage, setWebCacheMessage] = useState<string | null>(null);
   const [localIndexStatus, setLocalIndexStatus] = useState<LocalNoteIndexStatusResult | null>(null);
-  const [isLoadingLocalIndexStatus, setIsLoadingLocalIndexStatus] = useState(false);
-  const [isRebuildingLocalIndex, setIsRebuildingLocalIndex] = useState(false);
+  const [localIndexLoadTask, setLocalIndexLoadTask] = useState<TaskState>(createIdleTaskState);
+  const [localIndexRebuildTask, setLocalIndexRebuildTask] = useState<TaskState>(createIdleTaskState);
   const [localIndexMessage, setLocalIndexMessage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiConfigDraft, setAiConfigDraft] = useState<AiConfig | null>(null);
@@ -3135,7 +1526,6 @@ export default function App() {
   const [promptContent, setPromptContent] = useState("");
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [settingsCenterRect, setSettingsCenterRect] = useState<SettingsCenterRect>(getDefaultSettingsCenterRect);
   const [isSettingsCenterMaximized, setIsSettingsCenterMaximized] = useState(false);
   const [luoguDialogRect, setLuoguDialogRect] = useState<SettingsCenterRect>(getDefaultLuoguDialogRect);
@@ -3145,10 +1535,6 @@ export default function App() {
   const [promptPolishMessage, setPromptPolishMessage] = useState<string | null>(null);
   const [promptEditorFontSize, setPromptEditorFontSize] = useState(PROMPT_EDITOR_FONT_SIZE_DEFAULT);
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(getInitialDeveloperMode);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [backendSearchResults, setBackendSearchResults] = useState<NoteSearchResult[]>([]);
-  const [isSearchLoading, setIsSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [pendingFileSelection, setPendingFileSelection] = useState<{ path: string; closeSearchOnSuccess: boolean } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [isImportingLuogu, setIsImportingLuogu] = useState(false);
@@ -3160,7 +1546,6 @@ export default function App() {
   const [luoguSourceCode, setLuoguSourceCode] = useState("");
   const [, setPendingAssetsByFile] = useState<Record<string, string[]>>({});
   const [previewMarkdown, setPreviewMarkdown] = useState(INITIAL_MARKDOWN);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsCenterHostRef = useRef<SettingsCenterHostHandle>(null);
   const settingsCenterOpenRef = useRef(false);
   const settingsCenterMaximizedRef = useRef(false);
@@ -3179,7 +1564,6 @@ export default function App() {
   const promptPolishRunRef = useRef(0);
   const settingsCloseCleanupRafRef = useRef<number | null>(null);
   const settingsCloseCleanupTimeoutRef = useRef<number | null>(null);
-  const searchRequestSeqRef = useRef(0);
   const luoguPrepareRunSeqRef = useRef(0);
   const luoguPrepareRunRef = useRef<{ id: number; cancelled: boolean }>({ id: 0, cancelled: false });
   const isMountedRef = useRef(true);
@@ -3208,8 +1592,6 @@ export default function App() {
   const pendingChatResponseStyleRef = useRef<string | null>(null);
   const chatResponseStyleAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingChatResponseStyleRef = useRef(false);
-  const initialOpenTabsActivePathRef = useRef<string | null>(getInitialOpenTabsActivePath());
-  const hasRestoredOpenTabsRef = useRef(false);
   const skipNextReadForPathRef = useRef<string | null>(null);
   const savedSnapshotRef = useRef<SavedNoteSnapshot>({
     path: null,
@@ -3316,7 +1698,7 @@ export default function App() {
     markPreviewMarkdownSchedule(nextMarkdown.length);
     pendingPreviewVersionRef.current = version;
     const scheduledVersion = pendingPreviewVersionRef.current;
-    const delayMs = getPreviewMarkdownSyncDelayMs(nextMarkdown.length);
+    const delayMs = getPreviewMarkdownSyncDelayMs(nextMarkdown.length, getPreviewPerfStats()?.lastParseMs ?? 0);
     pendingPreviewTimerRef.current = window.setTimeout(() => {
       pendingPreviewTimerRef.current = null;
       pendingPreviewVersionRef.current = null;
@@ -3378,7 +1760,7 @@ export default function App() {
         markPreviewStaleRender();
       }
       const scheduledVersion = pendingCommitVersionRef.current;
-      const delayMs = getCommittedMarkdownSyncDelayMs(markdownLiveRef.current.length);
+      const delayMs = getCommittedMarkdownSyncDelayMs(markdownLiveRef.current.length, getPreviewPerfStats()?.lastParseMs ?? 0);
       pendingCommitTimerRef.current = window.setTimeout(() => {
         pendingCommitTimerRef.current = null;
         pendingCommitVersionRef.current = null;
@@ -3421,6 +1803,8 @@ export default function App() {
   useEffect(() => {
     setEditorSelectedTextLength(null);
   }, [currentFilePath, editorViewMode]);
+  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
+  const collectionCandidatesFromNotes = useCollectionCandidatesFromNotes(noteFiles);
   const deferredFullMarkdown = useMemo(
     () => (currentFilePath === null ? previewMarkdown : combineMarkdown(frontmatterPrefix, previewMarkdown)),
     [currentFilePath, previewMarkdown, frontmatterPrefix],
@@ -3443,85 +1827,100 @@ export default function App() {
       setIsTagNormalizationDetailsOpen(false);
     }
   }, [tagNormalizationSuggestions.length]);
-  const luoguSubmissionCandidateStates = useMemo(() => {
-    const submissions = luoguPreviewResult?.submissions ?? [];
-    return Object.fromEntries(
-      submissions.map((submission) => [
-        submission.submissionId,
-        getLuoguSubmissionCandidateState(
-          submission,
-          submissions,
-          luoguImportRules,
-          luoguPreviewResult?.lastSubmissionId ?? null,
-          skippedLuoguSubmissionIds,
-        ),
-      ]),
-    ) as Record<string, LuoguSubmissionCandidateState>;
-  }, [luoguImportRules, luoguPreviewResult, skippedLuoguSubmissionIds]);
-  const luoguCurrentCandidateCount = Object.values(luoguSubmissionCandidateStates).filter(
-    (state) => state.canSelect,
-  ).length;
-  const luoguScanResultStats = useMemo<LuoguScanResultStats>(() => {
-    const submissions = luoguPreviewResult?.submissions ?? [];
-    const states = submissions.map((submission) => luoguSubmissionCandidateStates[submission.submissionId] ?? { canSelect: false, defaultSelected: false, statusLabel: submission.statusLabel });
-    const candidateCount = states.filter((state) => state.canSelect).length;
-    return {
-      total: submissions.length,
-      candidateCount,
-      skippedCount: Math.max(0, submissions.length - candidateCount),
-      acCount: submissions.filter((submission) => submission.isAc).length,
-      nonAcCount: submissions.filter((submission) => !submission.isAc).length,
-      oldSubmissionCount: states.filter((state) => state.statusLabel.includes("旧提交")).length,
-      sameProblemOldAcCount: states.filter((state) => state.statusLabel.includes("同题旧 AC")).length,
-    };
-  }, [luoguPreviewResult, luoguSubmissionCandidateStates]);
-  const luoguSelectableSubmissionIds = useMemo(
-    () =>
-      luoguPreviewResult?.submissions
-        .filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect)
-        .map((submission) => submission.submissionId) ?? [],
-    [luoguPreviewResult, luoguSubmissionCandidateStates],
-  );
-  const displayedLuoguPreviewSubmissions = useMemo(
-    () => {
-      const submissions = luoguPreviewResult?.submissions ?? [];
-      const allowedSubmissions = submissions.filter((submission) =>
-        isLuoguProblemIdAllowedByRules(submission.problemId, luoguImportRules),
-      );
-      if (luoguImportRules.scanResultVisibility !== "hideSkipped") return allowedSubmissions;
-      return allowedSubmissions.filter((submission) => luoguSubmissionCandidateStates[submission.submissionId]?.canSelect);
-    },
-    [luoguImportRules, luoguPreviewResult, luoguSubmissionCandidateStates],
-  );
-  const selectedLuoguSelectableCount = useMemo(
-    () => luoguSelectableSubmissionIds.filter((submissionId) => selectedLuoguSubmissionIds.has(submissionId)).length,
-    [luoguSelectableSubmissionIds, selectedLuoguSubmissionIds],
-  );
-  const areAllLuoguSelectableSubmissionsSelected =
-    luoguSelectableSubmissionIds.length > 0 && selectedLuoguSelectableCount === luoguSelectableSubmissionIds.length;
-  const isLuoguSelectableSelectionMixed =
-    selectedLuoguSelectableCount > 0 && selectedLuoguSelectableCount < luoguSelectableSubmissionIds.length;
+  const {
+    luoguSubmissionCandidateStates,
+    luoguCurrentCandidateCount,
+    luoguScanResultStats,
+    luoguSelectableSubmissionIds,
+    displayedLuoguPreviewSubmissions,
+    areAllLuoguSelectableSubmissionsSelected,
+    isLuoguSelectableSelectionMixed,
+    selectedLuoguImportCount,
+    preparedLuoguNotes,
+    writableLuoguPreparedNotes,
+    hasReusableLuoguPreparedPreview,
+    selectedLuoguPreviewSubmissions,
+    luoguPrepareQueueSubmissions,
+    luoguReusablePreviewCount,
+    currentlyPreparingLuoguSubmission,
+    activeLuoguPreparedPreview,
+  } = useLuoguImportController({
+    luoguPreviewResult,
+    luoguImportRules,
+    selectedLuoguSubmissionIds,
+    skippedLuoguSubmissionIds,
+    luoguPreparedNotesById,
+    luoguWriteResultsById,
+    reviewSelectedLuoguSubmissionIds,
+    currentlyPreparingLuoguId,
+    activeLuoguPreparedPreviewId,
+  });
+  const luoguScanResultSummaryLabel = formatLuoguScanResultSummary({
+    isPaused: isLuoguScanPaused,
+    progress: luoguScanProgress,
+    summary: luoguScanSummary,
+    hasPreviewResult: Boolean(luoguPreviewResult),
+    stats: luoguScanResultStats,
+  });
+  const luoguScanTaskState = deriveLuoguScanTaskState({
+    isScanning: isScanningLuoguPreview,
+    isPaused: isLuoguScanPaused,
+    progress: luoguScanProgress,
+    summary: luoguScanSummary,
+    error: luoguScanError,
+  });
+  const luoguPrepareTaskState = deriveLuoguPrepareTaskState({
+    isPreparing: isPreparingSelectedLuogu,
+    isStopping: isStoppingLuoguPrepare,
+    progress: luoguPrepareProgress,
+  });
+  const luoguWriteTaskState = deriveLuoguWriteTaskState({
+    isWriting: isWritingPreparedLuogu,
+    progress: luoguWriteProgress,
+  });
+  const luoguConfigured =
+    luoguConfigUid.trim() !== "" &&
+    luoguConfigClientId.trim() !== "";
+  const luoguScanTaskView = deriveLuoguTaskView(luoguScanTaskState, "scan");
+  const luoguPrepareTaskView = deriveLuoguTaskView(luoguPrepareTaskState, "prepare");
+  const luoguWriteTaskView = deriveLuoguTaskView(luoguWriteTaskState, "write");
+  const luoguPreviewReviewSummaryLabel = formatLuoguPreviewReviewSummary({
+    prepareProgress: luoguPrepareProgress,
+    writeProgress: luoguWriteProgress,
+    preparedCount: preparedLuoguNotes.length,
+    writableCount: writableLuoguPreparedNotes.length,
+  });
+  const luoguImportCenterView = deriveLuoguImportCenterView({
+    isConfigured: luoguConfigured,
+    isLoadingConfig: isLoadingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
+    isImporting: isImportingLuogu,
+    isSyncing: isSyncingLuogu,
+    selectedCount: selectedLuoguImportCount,
+    selectableCount: luoguSelectableSubmissionIds.length,
+    prepareQueueCount: luoguPrepareQueueSubmissions.length,
+    reusablePreviewCount: luoguReusablePreviewCount,
+    writableCount: writableLuoguPreparedNotes.length,
+    scanTask: luoguScanTaskState,
+    prepareTask: luoguPrepareTaskState,
+    writeTask: luoguWriteTaskState,
+    scanView: luoguScanTaskView,
+    prepareView: luoguPrepareTaskView,
+    writeView: luoguWriteTaskView,
+    prepareProgress: luoguPrepareProgress,
+  });
+  const isLuoguImportCenterBusyNow = luoguImportCenterView.isBusy;
   useEffect(() => {
     if (luoguSelectAllCheckboxRef.current) {
       luoguSelectAllCheckboxRef.current.indeterminate = isLuoguSelectableSelectionMixed;
     }
   }, [isLuoguSelectableSelectionMixed]);
-  const selectedLuoguImportCount = selectedLuoguSubmissionIds.size;
-  const showEditorPane = editorViewMode !== "preview";
-  const showPreviewPane = editorViewMode !== "editor";
-  const editorViewModeButtons: Array<{
-    id: EditorViewMode;
-    label: string;
-    icon: typeof Columns2;
-  }> = [
-    { id: "split", label: "双栏", icon: Columns2 },
-    { id: "editor", label: "仅编辑", icon: SquarePen },
-    { id: "preview", label: "仅预览", icon: Eye },
-  ];
+  const editorViewLayout = deriveEditorViewLayout(editorViewMode);
+  const { showEditorPane, showPreviewPane, isEditorPreviewSplit } = editorViewLayout;
   const editorViewModeSwitcher = (
     <div className="editor-view-mode-switcher flex items-center gap-1" aria-label="编辑器视图模式">
-      {editorViewModeButtons.map((mode) => {
-        const Icon = mode.icon;
+      {EDITOR_VIEW_MODE_OPTIONS.map((mode) => {
+        const Icon = EDITOR_VIEW_MODE_ICON_BY_ID[mode.id];
         const isActive = editorViewMode === mode.id;
 
         return (
@@ -3545,62 +1944,6 @@ export default function App() {
       })}
     </div>
   );
-  const preparedLuoguNotes = Object.values(luoguPreparedNotesById).filter(
-    (prepared) => !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "",
-  );
-  const writableLuoguPreparedNotes = preparedLuoguNotes.filter(
-    (prepared) => reviewSelectedLuoguSubmissionIds.has(prepared.submissionId) && !luoguWriteResultsById[prepared.submissionId],
-  );
-  const hasReusableLuoguPreparedPreview = (submissionId: string): boolean => {
-    const prepared = luoguPreparedNotesById[submissionId];
-    return Boolean(prepared && !prepared.skipped && prepared.markdown.trim() !== "" && prepared.suggestedRelativePath.trim() !== "");
-  };
-  const selectedLuoguPreviewSubmissions = useMemo(
-    () => luoguPreviewResult?.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId)) ?? [],
-    [luoguPreviewResult, selectedLuoguSubmissionIds],
-  );
-  const luoguPrepareQueueSubmissions = useMemo(
-    () =>
-      selectedLuoguPreviewSubmissions.filter((submission) => {
-        const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-        return (
-          candidateState?.canSelect &&
-          !skippedLuoguSubmissionIds.has(submission.submissionId) &&
-          !hasReusableLuoguPreparedPreview(submission.submissionId)
-        );
-      }),
-    [selectedLuoguPreviewSubmissions, luoguSubmissionCandidateStates, skippedLuoguSubmissionIds, luoguPreparedNotesById],
-  );
-  const luoguReusablePreviewCount = selectedLuoguPreviewSubmissions.filter((submission) =>
-    hasReusableLuoguPreparedPreview(submission.submissionId),
-  ).length;
-  const luoguReadyPreviewSubmissions = useMemo(
-    () =>
-      selectedLuoguPreviewSubmissions.filter((submission) => {
-        const prepared = luoguPreparedNotesById[submission.submissionId];
-        return Boolean(
-          prepared &&
-            !prepared.skipped &&
-            prepared.aiStatus !== "failed" &&
-            prepared.markdown.trim() !== "" &&
-            prepared.suggestedRelativePath.trim() !== "",
-        );
-      }),
-    [selectedLuoguPreviewSubmissions, luoguPreparedNotesById],
-  );
-  const currentlyPreparingLuoguSubmission = useMemo(
-    () => selectedLuoguPreviewSubmissions.find((submission) => submission.submissionId === currentlyPreparingLuoguId) ?? null,
-    [currentlyPreparingLuoguId, selectedLuoguPreviewSubmissions],
-  );
-  const activeLuoguPreparedPreviewCandidate =
-    activeLuoguPreparedPreviewId && luoguReadyPreviewSubmissions.some((submission) => submission.submissionId === activeLuoguPreparedPreviewId)
-      ? luoguPreparedNotesById[activeLuoguPreparedPreviewId]
-      : undefined;
-  const activeLuoguPreparedPreview =
-    activeLuoguPreparedPreviewCandidate ??
-    (luoguReadyPreviewSubmissions[0] ? luoguPreparedNotesById[luoguReadyPreviewSubmissions[0].submissionId] : undefined) ??
-    null;
-
   const aiConfigured =
     aiConfig?.providers.some((provider) => (
       provider.enabled &&
@@ -3625,126 +1968,107 @@ export default function App() {
       model.source.toLowerCase().includes(query),
     );
   }, [aiModelSearchQuery, selectedAiProvider]);
-  const luoguConfigured =
-    luoguConfigUid.trim() !== "" &&
-    luoguConfigClientId.trim() !== "";
   const activeWorkingCopy = activeWorkingCopyId ? workingCopies[activeWorkingCopyId] ?? null : null;
   const hasActiveEditorDocument = Boolean(currentFilePath || activeWorkingCopy);
   const activeEditorDirty = activeWorkingCopy?.dirty ?? isDirty;
-  const saveStatusLabel =
-    !hasActiveEditorDocument ? "未选择文件" : isSavingNote ? "保存中" : activeEditorDirty ? "未保存" : "已保存";
-  const blogStatusLabel = isRestartingBlog ? "重启中" : "打开 / 重启";
+  const saveStatusLabel = getSaveStatusLabel({
+    hasActiveEditorDocument,
+    isSavingNote,
+    isDirty: activeEditorDirty,
+  });
+  const saveStatusActionLabel = getSaveStatusActionLabel({
+    isDirty: activeEditorDirty,
+    isUntitled: activeWorkingCopy?.kind === "untitled",
+    saveStatusLabel,
+  });
+  const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
+  const aiActivityToggleLabel = getAiActivityToggleLabel(isAiSidebarOpen);
+  const blogSettingsView = deriveBlogSettingsView({
+    isLoadingBlogConfig,
+    isSavingBlogConfig,
+    isRestartingBlog,
+  });
+  const blogStatusLabel = getBlogStatusLabel(isRestartingBlog);
   const aiStatusLabel =
     !hasLoadedAiConfigStatus || isLoadingAiConfig ? "读取中" : aiConfigured ? "已配置" : "未配置";
-  const tagTaxonomyStats = useMemo(() => {
-    const entriesCount = tagTaxonomyConfig?.entries?.length ?? 0;
-    const aliasesCount = Object.keys(tagTaxonomyConfig?.aliases ?? {}).length;
-    const hiddenIdsCount = tagTaxonomyConfig?.hiddenIds?.length ?? 0;
-    const orderOverridesCount = Object.keys(tagTaxonomyConfig?.orderOverrides ?? {}).length;
-    const mergesCount = Object.keys(tagTaxonomyConfig?.merges ?? {}).length;
-    const customCollectionsCount = tagTaxonomyConfig?.customCollections?.length ?? 0;
-    const userConfigItemCount = entriesCount + aliasesCount + hiddenIdsCount + orderOverridesCount + mergesCount + customCollectionsCount;
-    const availableCandidateCount = getTagSuggestionList(tagTaxonomyUserConfig)
-      .filter((suggestion) => !suggestion.hidden && !suggestion.deprecated)
-      .length;
-    const statusLabel = isLoadingTagTaxonomyConfig
-      ? "正在读取"
-      : tagTaxonomyConfigError
-        ? "加载失败，已回退内置默认配置"
-        : userConfigItemCount > 0
-          ? "已加载用户配置"
-          : "使用内置默认配置";
-
-    return {
-      statusLabel,
-      entriesCount,
-      aliasesCount,
-      hiddenIdsCount,
-      orderOverridesCount,
-      mergesCount,
-      customCollectionsCount,
-      availableCandidateCount,
-      userConfigItemCount,
-    };
-  }, [isLoadingTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyConfigError, tagTaxonomyUserConfig]);
+  const tagTaxonomyStats = useMemo(
+    () => buildTagTaxonomyStats({
+      config: tagTaxonomyConfig,
+      userConfig: tagTaxonomyUserConfig,
+      isLoading: isLoadingTagTaxonomyConfig,
+      loadError: tagTaxonomyConfigError,
+    }),
+    [isLoadingTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyConfigError, tagTaxonomyUserConfig],
+  );
   const tagTaxonomyStatItems = useMemo(
-    () => [
-      { label: "自定义标签", value: tagTaxonomyStats.entriesCount },
-      { label: "自定义别名", value: tagTaxonomyStats.aliasesCount },
-      { label: "隐藏默认标签", value: tagTaxonomyStats.hiddenIdsCount },
-      { label: "排序覆盖", value: tagTaxonomyStats.orderOverridesCount },
-      { label: "合并规则", value: tagTaxonomyStats.mergesCount },
-      { label: "自定义文集", value: tagTaxonomyStats.customCollectionsCount },
-    ],
+    () => buildTagTaxonomyStatItems(tagTaxonomyStats),
     [tagTaxonomyStats],
   );
+  const tagTaxonomySettingsView = deriveTagTaxonomySettingsView({
+    isLoading: isLoadingTagTaxonomyConfig,
+    isSaving: isSavingTagTaxonomyConfig,
+    hasLoadError: Boolean(tagTaxonomyConfigError),
+    userConfigItemCount: tagTaxonomyStats.userConfigItemCount,
+  });
   const tagNormalizationScanStats = useMemo(
-    () => tagNormalizationScanAllStats ?? tagNormalizationScanResults?.reduce(
-      (stats, result) => addTagNormalizationPlanStats(stats, result.plan),
-      createEmptyTagNormalizationScanStats(),
-    ) ?? createEmptyTagNormalizationScanStats(),
+    () => getTagNormalizationScanStats(tagNormalizationScanAllStats, tagNormalizationScanResults),
     [tagNormalizationScanAllStats, tagNormalizationScanResults],
   );
-  const selectedTagNormalizationScanStats = useMemo(() => {
-    if (!tagNormalizationScanResults) {
-      return createEmptyTagNormalizationScanStats();
-    }
-
-    return tagNormalizationScanResults.reduce(
-      (stats, result) => {
-        if (!selectedTagNormalizationScanPaths.has(result.path)) {
-          return stats;
-        }
-
-        return addTagNormalizationPlanStats(stats, result.plan);
-      },
-      createEmptyTagNormalizationScanStats(),
-    );
-  }, [selectedTagNormalizationScanPaths, tagNormalizationScanResults]);
+  const tagNormalizationScanTaskState = deriveTagNormalizationScanTaskState({
+    isScanning: isScanningTagNormalization,
+    error: tagNormalizationScanError,
+    results: tagNormalizationScanResults,
+    stats: tagNormalizationScanStats,
+  });
+  const tagNormalizationScanTaskView = deriveTagNormalizationTaskView(tagNormalizationScanTaskState, "scan");
+  const selectedTagNormalizationScanStats = useMemo(
+    () => getSelectedTagNormalizationScanStats(tagNormalizationScanResults, selectedTagNormalizationScanPaths),
+    [selectedTagNormalizationScanPaths, tagNormalizationScanResults],
+  );
+  const tagNormalizationApplyTaskView = deriveTagNormalizationTaskView(tagNormalizationApplyTaskState, "apply");
+  const tagNormalizationPanelView = deriveTagNormalizationPanelView({
+    scanTaskView: tagNormalizationScanTaskView,
+    applyTaskView: tagNormalizationApplyTaskView,
+    selectedCount: selectedTagNormalizationScanPaths.size,
+  });
   const tagTaxonomyUserEntries = useMemo(
-    () => [...(tagTaxonomyConfig?.entries ?? [])].sort((left, right) => left.path.join("/").localeCompare(right.path.join("/"), "zh-Hans-CN")),
+    () => getTagTaxonomyUserEntries(tagTaxonomyConfig),
     [tagTaxonomyConfig],
   );
   const tagTaxonomyUserAliases = useMemo(
-    () => Object.entries(tagTaxonomyConfig?.aliases ?? {}).sort(([left], [right]) => left.localeCompare(right, "zh-Hans-CN")),
+    () => getTagTaxonomyUserAliases(tagTaxonomyConfig),
     [tagTaxonomyConfig],
   );
-  const filteredTagTaxonomyUserEntries = useMemo(() => {
-    const query = tagTaxonomyEntryListQuery.trim().toLowerCase();
-    if (!query) return tagTaxonomyUserEntries;
-    return tagTaxonomyUserEntries.filter((entry) => {
-      const searchText = [
-        entry.id,
-        entry.path.join("/"),
-        entry.path.join(" / "),
-        ...(entry.aliases ?? []),
-      ].join("\n").toLowerCase();
-      return searchText.includes(query);
-    });
-  }, [tagTaxonomyEntryListQuery, tagTaxonomyUserEntries]);
+  const filteredTagTaxonomyUserEntries = useMemo(
+    () => filterTagTaxonomyUserEntries(tagTaxonomyUserEntries, tagTaxonomyEntryListQuery),
+    [tagTaxonomyEntryListQuery, tagTaxonomyUserEntries],
+  );
   const displayedTagTaxonomyUserEntries = useMemo(() => {
-    if (tagTaxonomyEntryListQuery.trim() || isTagTaxonomyEntryListExpanded) {
-      return filteredTagTaxonomyUserEntries;
-    }
-    return filteredTagTaxonomyUserEntries.slice(0, 5);
+    return getDisplayedTagTaxonomyList(filteredTagTaxonomyUserEntries, tagTaxonomyEntryListQuery, isTagTaxonomyEntryListExpanded);
   }, [filteredTagTaxonomyUserEntries, isTagTaxonomyEntryListExpanded, tagTaxonomyEntryListQuery]);
-  const filteredTagTaxonomyUserAliases = useMemo(() => {
-    const query = tagTaxonomyAliasListQuery.trim().toLowerCase();
-    if (!query) return tagTaxonomyUserAliases;
-    return tagTaxonomyUserAliases.filter(([aliasName, target]) =>
-      `${aliasName}\n${target}`.toLowerCase().includes(query),
-    );
-  }, [tagTaxonomyAliasListQuery, tagTaxonomyUserAliases]);
+  const filteredTagTaxonomyUserAliases = useMemo(
+    () => filterTagTaxonomyUserAliases(tagTaxonomyUserAliases, tagTaxonomyAliasListQuery),
+    [tagTaxonomyAliasListQuery, tagTaxonomyUserAliases],
+  );
   const displayedTagTaxonomyUserAliases = useMemo(() => {
-    if (tagTaxonomyAliasListQuery.trim() || isTagTaxonomyAliasListExpanded) {
-      return filteredTagTaxonomyUserAliases;
-    }
-    return filteredTagTaxonomyUserAliases.slice(0, 5);
+    return getDisplayedTagTaxonomyList(filteredTagTaxonomyUserAliases, tagTaxonomyAliasListQuery, isTagTaxonomyAliasListExpanded);
   }, [filteredTagTaxonomyUserAliases, isTagTaxonomyAliasListExpanded, tagTaxonomyAliasListQuery]);
   const tagManagerAvailableCandidateCount = useMemo(
-    () => getTagSuggestionList(tagTaxonomyUserConfig).filter((suggestion) => !suggestion.hidden).length,
+    () => getTagManagerAvailableCandidateCount(tagTaxonomyUserConfig),
     [tagTaxonomyUserConfig],
   );
+  const localIndexTaskView = deriveLocalIndexTaskView({
+    status: localIndexStatus,
+    loadTask: localIndexLoadTask,
+    rebuildTask: localIndexRebuildTask,
+    fallbackMessage: localIndexMessage,
+  });
+  const localIndexDetailsView = deriveLocalIndexDetailsView(localIndexStatus);
+  const isLoadingLocalIndexStatus = localIndexTaskView.isLoading;
+  const isRebuildingLocalIndex = localIndexTaskView.isRebuilding;
+  const localIndexActionDisabled = localIndexTaskView.actionDisabled;
+  const localIndexRebuildButtonLabel = localIndexTaskView.rebuildButtonLabel;
+  const localIndexDisplayMessage = localIndexTaskView.message;
   const openTagManagerWorkspace = useCallback((initialFilterMode: TagManagerFilterMode = "all") => {
     const returnTarget: SettingsTarget = { type: "page", page: "blog-tag-manager" };
     debugTagManager("app.openTagManager.request", {
@@ -3809,16 +2133,15 @@ export default function App() {
     }
   }, []);
   const handleExportTagTaxonomyConfig = useCallback(async () => {
-    const exportConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const json = `${JSON.stringify(exportConfig, null, 2)}\n`;
+    const exportPayload = buildTagTaxonomyConfigExport(tagTaxonomyConfig);
     setTagTaxonomyImportError(null);
 
     try {
-      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const blob = new Blob([exportPayload.json], { type: "application/json;charset=utf-8" });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `oi-notebook-tag-taxonomy-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = exportPayload.fileName;
       link.rel = "noopener";
       document.body.appendChild(link);
       link.click();
@@ -3827,7 +2150,7 @@ export default function App() {
       setTagTaxonomyImportMessage("已导出标签配置 JSON");
     } catch {
       try {
-        await navigator.clipboard.writeText(json);
+        await navigator.clipboard.writeText(exportPayload.json);
         setTagTaxonomyImportMessage("已复制标签配置 JSON");
       } catch (clipboardError) {
         setTagTaxonomyImportMessage(null);
@@ -3836,24 +2159,17 @@ export default function App() {
     }
   }, [tagTaxonomyConfig]);
   const previewTagTaxonomyImport = useCallback((jsonText: string) => {
-    const text = jsonText.trim();
-    if (!text) {
+    const preview = previewTagTaxonomyConfigImportJson(jsonText);
+    if (!preview.ok) {
       setTagTaxonomyImportPreview(null);
-      setTagTaxonomyImportError("请先粘贴标签配置 JSON。");
+      setTagTaxonomyImportError(preview.error);
       return null;
     }
 
-    try {
-      const result = parseUserTagTaxonomyConfigJson(text);
-      setTagTaxonomyImportPreview(result);
-      setTagTaxonomyImportError(null);
-      setTagTaxonomyImportMessage(null);
-      return result;
-    } catch (error) {
-      setTagTaxonomyImportPreview(null);
-      setTagTaxonomyImportError(getErrorMessage(error));
-      return null;
-    }
+    setTagTaxonomyImportPreview(preview.result);
+    setTagTaxonomyImportError(null);
+    setTagTaxonomyImportMessage(null);
+    return preview.result;
   }, []);
   const handleTagTaxonomyImportInputChange = useCallback((value: string) => {
     setTagTaxonomyImportJsonInput(value);
@@ -3910,229 +2226,67 @@ export default function App() {
     setTagTaxonomyImportMessage("已导入标签配置");
   }, [previewTagTaxonomyImport, requestConfirm, saveUserTagTaxonomyConfig, tagTaxonomyImportJsonInput]);
   const handleAddTagTaxonomyEntry = useCallback(async () => {
-    const path = parseTagPathInput(tagTaxonomyEntryPathInput);
-    if (path.length === 0) {
-      setTagTaxonomySaveError("标签路径不能为空。");
+    const result = addTagTaxonomyEntry(tagTaxonomyConfig, tagTaxonomyEntryPathInput, tagTaxonomyEntryAliasesInput);
+    if (!result.ok) {
+      setTagTaxonomySaveError(result.error);
       return;
     }
 
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const pathText = path.join("/");
-    const existingSuggestion = getTagSuggestionList(currentConfig).find((suggestion) => suggestion.pathText === pathText);
-    if (existingSuggestion) {
-      setTagTaxonomySaveError("这个标签路径已经存在。");
-      return;
-    }
-
-    const nextEntry: TagTaxonomyEntry = {
-      id: createUserTagEntryId(path, currentConfig.entries ?? []),
-      path,
-      aliases: parseAliasListInput(tagTaxonomyEntryAliasesInput),
-      source: "user",
-    };
-    const saved = await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      entries: [...(currentConfig.entries ?? []), nextEntry],
-    });
+    const saved = await saveUserTagTaxonomyConfig(result.config);
     if (!saved) return;
 
     setTagTaxonomyEntryPathInput("");
     setTagTaxonomyEntryAliasesInput("");
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig, tagTaxonomyEntryAliasesInput, tagTaxonomyEntryPathInput]);
   const handleDeleteTagTaxonomyEntry = useCallback(async (entryId: string) => {
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      entries: (currentConfig.entries ?? []).filter((entry) => entry.id !== entryId),
-    });
+    await saveUserTagTaxonomyConfig(deleteTagTaxonomyEntry(tagTaxonomyConfig, entryId));
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
   const handleAddTagTaxonomyAlias = useCallback(async () => {
-    const aliasName = normalizeTagValue(tagTaxonomyAliasNameInput);
-    if (!aliasName) {
-      setTagTaxonomySaveError("别名不能为空。");
+    const result = addTagTaxonomyAlias(tagTaxonomyConfig, tagTaxonomyAliasNameInput, tagTaxonomyAliasTargetInput);
+    if (!result.ok) {
+      setTagTaxonomySaveError(result.error);
       return;
     }
 
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const target = resolveTagTaxonomyAliasTarget(tagTaxonomyAliasTargetInput, currentConfig);
-    if (!target) {
-      setTagTaxonomySaveError("目标标签不能为空；请填写 canonical id，或填写已存在的标签路径。");
-      return;
-    }
-
-    const saved = await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      aliases: {
-        ...(currentConfig.aliases ?? {}),
-        [aliasName]: target,
-      },
-    });
+    const saved = await saveUserTagTaxonomyConfig(result.config);
     if (!saved) return;
 
     setTagTaxonomyAliasNameInput("");
     setTagTaxonomyAliasTargetInput("");
   }, [saveUserTagTaxonomyConfig, tagTaxonomyAliasNameInput, tagTaxonomyAliasTargetInput, tagTaxonomyConfig]);
   const handleDeleteTagTaxonomyAlias = useCallback(async (aliasName: string) => {
-    const currentConfig = normalizeUserTagTaxonomyConfig(tagTaxonomyConfig);
-    const nextAliases = { ...(currentConfig.aliases ?? {}) };
-    delete nextAliases[aliasName];
-    await saveUserTagTaxonomyConfig({
-      ...currentConfig,
-      aliases: nextAliases,
-    });
+    await saveUserTagTaxonomyConfig(deleteTagTaxonomyAlias(tagTaxonomyConfig, aliasName));
   }, [saveUserTagTaxonomyConfig, tagTaxonomyConfig]);
-  const luoguStatusLabel =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "读取中"
-      : !luoguConfigured
-        ? "未配置"
-        : luoguConnectionError
-          ? "连接失败"
-          : "已配置";
-  const luoguSettingsStatusTone =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "border-sky-300/50 bg-sky-500/10 text-sky-700 dark:text-sky-200"
-      : !luoguConfigured
-        ? "border-amber-300/60 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-        : luoguConnectionError
-          ? "border-red-300/60 bg-red-500/10 text-red-700 dark:text-red-200"
-          : "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200";
-  const luoguSettingsStatusDescription =
-    !hasLoadedLuoguConfigStatus || isLoadingLuoguConfig
-      ? "正在读取本机洛谷配置。"
-      : !luoguConfigured
-        ? "尚未配置 _uid 和 __client_id，请先配置账号。"
-        : luoguConnectionError
-          ? "最近一次测试连接失败，请检查 Cookie 后重试。"
-          : luoguConnectionResult
-            ? "最近测试正常。"
-            : "账号 Cookie 已保存，可手动测试连接。";
-  const isLuoguRuleControlDisabled =
-    isLoadingLuoguConfig ||
-    isTestingLuoguConnection ||
-    isScanningLuoguPreview ||
-    isPreparingSelectedLuogu ||
-    isWritingPreparedLuogu ||
-    isSyncingLuogu;
-  const luoguRuleSettingRows: LuoguRuleSettingRow[] = [
-    {
-      id: "submitFilter",
-      title: "提交筛选",
-      description: "控制扫描时哪些提交会进入候选。",
-      value: luoguImportRules.submitFilter,
-      onChange: (value: string) => updateLuoguImportRules({ submitFilter: value as LuoguSubmitFilter }),
-      options: [
-        { value: "acOnly", label: "只处理 AC" },
-        { value: "includeNonAc", label: "包含非 AC" },
-      ],
-    },
-    {
-      id: "problemIdFilter",
-      title: "题号类型筛选",
-      description: "只保留 P 开头的公开题库题目，过滤 U / T 等题号。",
-      value: luoguImportRules.problemIdFilter,
-      onChange: (value: string) => updateLuoguImportRules({ problemIdFilter: value as LuoguProblemIdFilter }),
-      options: [
-        { value: "all", label: "全部题号" },
-        { value: "onlyP", label: "仅保留 P 题" },
-      ],
-    },
-    {
-      id: "sameProblemStrategy",
-      title: "同题策略",
-      description: "同一道题有多次提交时如何处理。",
-      value: luoguImportRules.sameProblemStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ sameProblemStrategy: value as LuoguSameProblemStrategy }),
-      options: [
-        { value: "latestAc", label: "同题保留最新 AC" },
-        { value: "allAc", label: "保留全部 AC" },
-        { value: "manual", label: "手动选择" },
-      ],
-    },
-    {
-      id: "importedProblemPolicy",
-      title: "已导入题目",
-      description: "本地已有记录时如何处理。",
-      value: luoguImportRules.importedProblemPolicy,
-      onChange: (value: string) => updateLuoguImportRules({ importedProblemPolicy: value as LuoguImportedProblemPolicy }),
-      options: [
-        { value: "skip", label: "跳过" },
-        { value: "showUnselected", label: "显示但默认不选" },
-        { value: "regenerate", label: "允许重新生成" },
-      ],
-    },
-    {
-      id: "missingInsightStrategy",
-      title: "无心得时",
-      description: "没有找到文末启示或可整理心得时如何处理。",
-      value: luoguImportRules.missingInsightStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ missingInsightStrategy: value as LuoguMissingInsightStrategy }),
-      options: [
-        { value: "draft", label: "生成草稿" },
-        { value: "skip", label: "跳过" },
-        { value: "review", label: "进入手动审阅" },
-      ],
-    },
-    {
-      id: "scanResultVisibility",
-      title: "扫描结果显示",
-      description: "扫描界面是否显示被规则跳过的提交。",
-      value: luoguImportRules.scanResultVisibility,
-      onChange: (value: string) => updateLuoguImportRules({ scanResultVisibility: value as LuoguScanResultVisibility }),
-      options: [
-        { value: "showAll", label: "显示全部" },
-        { value: "hideSkipped", label: "隐藏跳过项" },
-      ],
-    },
-    {
-      id: "defaultSaveLocation",
-      title: "默认保存位置",
-      description: "生成笔记默认写入目录。",
-      value: luoguImportRules.defaultSaveLocation,
-      onChange: (value: string) => updateLuoguImportRules({ defaultSaveLocation: value as LuoguDefaultSaveLocation }),
-      options: [
-        { value: "luogu", label: "luogu/" },
-        { value: "problems", label: "problems/" },
-        { value: "custom", label: "自定义目录" },
-      ],
-    },
-    {
-      id: "writeStrategy",
-      title: "写入策略",
-      description: "目标文件已存在时如何处理。",
-      value: luoguImportRules.writeStrategy,
-      onChange: (value: string) => updateLuoguImportRules({ writeStrategy: value as LuoguWriteStrategy }),
-      options: [
-        { value: "createNew", label: "仅新建，不覆盖" },
-        { value: "askOnConflict", label: "冲突时询问" },
-        { value: "overwrite", label: "允许覆盖" },
-      ],
-    },
-    {
-      id: "defaultDraftStatus",
-      title: "默认草稿状态",
-      description: "写入后的 frontmatter 草稿状态默认值。",
-      value: luoguImportRules.defaultDraftStatus,
-      onChange: (value: string) => updateLuoguImportRules({ defaultDraftStatus: value as LuoguDefaultDraftStatus }),
-      options: [
-        { value: "draft", label: "写入为草稿" },
-        { value: "published", label: "写入为正式笔记" },
-      ],
-    },
-    {
-      id: "includeSourceCode",
-      title: "导入时包含源代码",
-      description: "默认只生成复盘笔记；开启后在文末附上完整提交代码。",
-      value: luoguImportRules.includeSourceCode ? "yes" : "no",
-      onChange: (value: string) => updateLuoguImportRules({ includeSourceCode: (value as LuoguIncludeSourceCode) === "yes" }),
-      options: [
-        { value: "no", label: "不包含" },
-        { value: "yes", label: "包含源代码" },
-      ],
-    },
-  ];
-  const luoguImportCenterAccountLabel =
-    isLoadingLuoguConfig ? "读取中" : luoguConfigured ? "已连接" : "未配置";
+  const luoguStatusInput = {
+    hasLoadedLuoguConfigStatus,
+    isLoadingLuoguConfig,
+    isConfigured: luoguConfigured,
+    hasConnectionError: Boolean(luoguConnectionError),
+  };
+  const luoguStatusLabel = getLuoguStatusLabel(luoguStatusInput);
+  const luoguSettingsStatusTone = getLuoguSettingsStatusTone(luoguStatusInput);
+  const luoguSettingsStatusDescription = getLuoguSettingsStatusDescription({
+    ...luoguStatusInput,
+    hasConnectionResult: Boolean(luoguConnectionResult),
+  });
+  const luoguAccountSettingsView = deriveLuoguAccountSettingsView({
+    isLoadingConfig: isLoadingLuoguConfig,
+    isSavingConfig: isSavingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
+  });
+  const isLuoguRuleControlDisabled = getLuoguRuleControlDisabled({
+    isLoadingConfig: isLoadingLuoguConfig,
+    isTestingConnection: isTestingLuoguConnection,
+    isScanningPreview: isScanningLuoguPreview,
+    isPreparingSelected: isPreparingSelectedLuogu,
+    isWritingPrepared: isWritingPreparedLuogu,
+    isSyncing: isSyncingLuogu,
+  });
+  const luoguRuleSettingRows: LuoguRuleSettingRow[] = buildLuoguImportRuleRowModels(luoguImportRules).map((row) => ({
+    ...row,
+    onChange: (value: string) => updateLuoguImportRules(getLuoguImportRuleUpdate(row.id, value)),
+  }));
+  const luoguImportCenterAccountLabel = getLuoguImportCenterAccountLabel(isLoadingLuoguConfig, luoguConfigured);
   const luoguImportCenterAiLabel =
     isLoadingLuoguConfig ? "读取中" : luoguConfigAiConfigured ? "已配置" : "未配置";
   const luoguImportCenterRangeLabel = getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
@@ -4140,20 +2294,10 @@ export default function App() {
     () => SETTINGS_TREE.filter((group) => developerModeEnabled || !group.developerOnly),
     [developerModeEnabled],
   );
-  const shouldRenderSettingsPage = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
-    const activeGroupId =
-      activeTarget.type === "category"
-        ? activeTarget.category
-        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
-    return SETTINGS_SECTION_LABELS[pageKey]?.groupId === activeGroupId;
-  };
-  const shouldRenderSettingsGroup = (groupId: SettingsGroupId, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean => {
-    const activeGroupId =
-      activeTarget.type === "category"
-        ? activeTarget.category
-        : SETTINGS_SECTION_LABELS[activePageKey]?.groupId;
-    return activeGroupId === groupId;
-  };
+  const shouldRenderSettingsPageForTarget = (pageKey: SettingsSection, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean =>
+    shouldRenderSettingsPage(pageKey, activePageKey, activeTarget, SETTINGS_SECTION_LABELS);
+  const shouldRenderSettingsGroupForTarget = (groupId: SettingsGroupId, activePageKey: SettingsSection, activeTarget: SettingsTarget): boolean =>
+    shouldRenderSettingsGroup(groupId, activePageKey, activeTarget, SETTINGS_SECTION_LABELS);
   const settingsPageSectionClass = "settings-v2-legacy-page grid min-w-0 gap-0";
   const promptTemplateRows = useMemo(
     () => promptTemplates.map((prompt) => ({
@@ -4162,36 +2306,46 @@ export default function App() {
     })),
     [promptTemplates],
   );
+  const { openTabPaths, setOpenTabPaths } = useOpenTabsController({
+    currentFilePath,
+    setCurrentFilePath,
+    noteFiles,
+    hasLoadedNotes,
+  });
+  const {
+    isSearchOpen,
+    setIsSearchOpen,
+    searchQuery,
+    setSearchQuery,
+    trimmedSearchQuery,
+    searchResults,
+    isSearchLoading,
+    searchError,
+    searchInputRef,
+  } = useLocalNoteSearchController(noteFiles);
   const isSettingsCenterOpenForRender = settingsCenterOpenRef.current;
-  const editorViewModeLabel =
-    editorViewMode === "split" ? "双栏" : editorViewMode === "editor" ? "仅编辑" : "仅预览";
-  const activeActivityItem: ActivityBarItem | null =
-    isSettingsCenterOpenForRender
-      ? "settings"
-      : isLuoguDialogOpen
-        ? "luogu"
-        : isRestartingBlog
-          ? "blog"
-          : isSearchOpen
-            ? "search"
-            : isNotesSidebarOpen
-              ? "notes"
-              : null;
-  const isAiActivityActive =
-    isAiSidebarOpen ||
-    (isSettingsCenterOpenForRender && SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId === "ai");
-  const appZoomLabel = `${Math.round(appZoom * 100)}%`;
-  const contentZoomLabel = `${Math.round(contentZoom * 100)}%`;
+  const editorViewModeLabel = getEditorViewModeLabel(editorViewMode);
+  const activeActivityItem: ActivityBarItem | null = getActiveActivityItem({
+    isSettingsCenterOpen: isSettingsCenterOpenForRender,
+    isLuoguDialogOpen,
+    isRestartingBlog,
+    isSearchOpen,
+    isNotesSidebarOpen,
+  });
+  const isAiActivityActive = isAiActivitySelected({
+    isAiSidebarOpen,
+    isSettingsCenterOpen: isSettingsCenterOpenForRender,
+    activeSettingsGroupId: SETTINGS_SECTION_LABELS[settingsCenterActivePageRef.current]?.groupId,
+  });
+  const appZoomLabel = formatZoomLabel(appZoom);
+  const contentZoomLabel = formatZoomLabel(contentZoom);
   const selectedPromptUsage = useMemo(
     () => getPromptUsageInfo(selectedPromptFileName),
     [selectedPromptFileName],
   );
   const chromeZoom = 1 + (appZoom - 1) * 0.45;
-  const resolvedTheme = appTheme === "system" ? systemTheme : appTheme;
-  const activeSettingsTheme = resolvedTheme === "light" ? settingsThemeState.light : settingsThemeState.dark;
   const appearanceBackgroundColor = activeSettingsTheme.theme.surface;
   const appearanceForegroundColor = activeSettingsTheme.theme.ink;
-  const settingsThemeVariables = useMemo(() => getSettingsThemeCssVariables(activeSettingsTheme), [activeSettingsTheme]);
   const activeReadingDensity =
     READING_DENSITY_OPTIONS.find((option) => option.id === readingDensity) ?? READING_DENSITY_OPTIONS[1];
   const appearanceStyle = {
@@ -4223,10 +2377,7 @@ export default function App() {
     fontSize: "var(--settings-font-size)",
   } as CSSProperties;
   const settingsCenterMaxSize = getSettingsCenterMaxSize();
-  const settingsCenterMinSize = {
-    width: Math.min(SETTINGS_CENTER_MIN_WIDTH, settingsCenterMaxSize.width),
-    height: Math.min(SETTINGS_CENTER_MIN_HEIGHT, settingsCenterMaxSize.height),
-  };
+  const settingsCenterMinSize = getSettingsCenterMinSize();
   const effectiveSettingsCenterRect = isSettingsCenterMaximized ? getMaximizedSettingsCenterRect() : clampSettingsCenterRect(settingsCenterRect);
   const settingsCenterStyle = {
     ...settingsAppearanceStyle,
@@ -4243,10 +2394,7 @@ export default function App() {
     animation: "none",
   } as CSSProperties;
   const luoguDialogMaxSize = getLuoguDialogMaxSize();
-  const luoguDialogMinSize = {
-    width: Math.min(LUOGU_DIALOG_MIN_WIDTH, luoguDialogMaxSize.width),
-    height: Math.min(LUOGU_DIALOG_MIN_HEIGHT, luoguDialogMaxSize.height),
-  };
+  const luoguDialogMinSize = getLuoguDialogMinSize();
   const effectiveLuoguDialogRect = isLuoguDialogMaximized ? getMaximizedLuoguDialogRect() : clampLuoguDialogRect(luoguDialogRect);
   const luoguDialogStyle = {
     ...settingsAppearanceStyle,
@@ -4262,66 +2410,19 @@ export default function App() {
     transition: "none",
     animation: "none",
   } as CSSProperties;
-  const noteFiles = useMemo(() => files.filter((file) => !file.isDirectory), [files]);
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadCollectionCandidates = async () => {
-      const candidates: string[] = [];
-
-      for (const file of noteFiles) {
-        try {
-          const content = await readNote(file.path);
-          const parsed = parseFrontmatterFields(content);
-          candidates.push(...getEffectiveCollections(parsed.fields));
-        } catch (error) {
-          console.warn("Failed to read note collection candidates", file.path, error);
-        }
-      }
-
-      if (!cancelled) {
-        setCollectionCandidatesFromNotes(normalizeCollectionValues(candidates));
-      }
-    };
-
-    void loadCollectionCandidates();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [noteFiles]);
-  const displayFiles = useMemo<NoteFileInfo[]>(
-    () =>
-      files.map((file) => ({
-        ...file,
-        displayTitle: file.isDirectory ? undefined : displayTitleByPath[file.path]?.trim() || undefined,
-      })),
-    [displayTitleByPath, files],
-  );
-  const activeNoteFile = useMemo(
-    () => displayFiles.find((file) => !file.isDirectory && file.path === currentFilePath) ?? null,
-    [displayFiles, currentFilePath],
-  );
+  const {
+    displayFiles,
+    activeNoteFile,
+    setDisplayTitleForPath,
+    rewriteDisplayTitlePaths,
+  } = useDisplayNoteFiles(files, currentFilePath);
   const noteDirectories = useMemo(
-    () => files.filter((file) => file.isDirectory).map((file) => file.path).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" })),
+    () => getNoteDirectories(files),
     [files],
   );
-  const currentNoteDirectory = useMemo(() => {
-    if (!currentFilePath || !currentFilePath.includes("/")) return "";
-    return currentFilePath.slice(0, currentFilePath.lastIndexOf("/"));
-  }, [currentFilePath]);
+  const currentNoteDirectory = useMemo(() => getCurrentNoteDirectory(currentFilePath), [currentFilePath]);
   const openTabs = useMemo<OpenFileTab[]>(
-    () =>
-      Object.values(workingCopies)
-        .filter((copy) => copy.kind !== "note" || openTabPaths.includes(copy.path ?? ""))
-        .map((copy) => ({
-          kind: "file",
-          id: copy.id,
-          path: copy.path,
-          externalPath: copy.absolutePath,
-          displayName: copy.kind === "note" && copy.path ? getNoteDisplayName(copy.path, displayFiles) : copy.displayName,
-          dirty: copy.dirty,
-        })),
+    () => buildOpenFileTabs(workingCopies, openTabPaths, displayFiles),
     [displayFiles, openTabPaths, workingCopies],
   );
   const reviewTabs = useMemo<OpenReviewTab[]>(
@@ -4378,7 +2479,6 @@ export default function App() {
       bodyStartLine: hasOpenNote ? bodyStartLine : null,
     };
   }, [activeNoteFile, aiContextSelectionRange, bodyStartLine, currentFilePath, currentParagraphContext, committedMarkdown, editorSelectedText, editorSelectedTextLength, frontmatter.fields]);
-  const isEditorPreviewSplit = showEditorPane && showPreviewPane;
   const leftSidebarStyle = {
     width: leftSidebarWidth,
     flexBasis: leftSidebarWidth,
@@ -4391,15 +2491,6 @@ export default function App() {
     ...appearanceStyle,
     ...(isEditorPreviewSplit ? { flex: `0 0 ${(1 - editorPreviewRatio) * 100}%` } : {}),
   } as CSSProperties;
-  const trimmedSearchQuery = searchQuery.trim();
-  const searchResults = useMemo(() => {
-    if (trimmedSearchQuery === "") return buildLocalSearchResults(noteFiles, "");
-
-    if (searchError) return buildLocalSearchResults(noteFiles, searchQuery);
-
-    return backendSearchResults.map(toSearchResultItem);
-  }, [backendSearchResults, noteFiles, searchError, searchQuery, trimmedSearchQuery]);
-
   const updateAppZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
     setAppZoom((currentZoom) => {
       const rawZoom = typeof nextZoom === "function" ? nextZoom(currentZoom) : nextZoom;
@@ -4438,19 +2529,11 @@ export default function App() {
   };
 
   const applySettingsThemeState = (nextThemeState: SettingsThemeState) => {
-    const normalizedState = normalizeSettingsThemeState(nextThemeState);
-    const nextResolvedTheme = normalizedState.mode === "system" ? systemTheme : normalizedState.mode;
-    const nextActiveTheme = nextResolvedTheme === "light" ? normalizedState.light : normalizedState.dark;
-    setSettingsThemeState(normalizedState);
-    setAppTheme(normalizedState.mode);
-    setAccentColor(nextActiveTheme.theme.accent);
-    setAppearanceContrast(nextActiveTheme.theme.contrast);
-    setTranslucentSidebar(nextActiveTheme.theme.opaqueWindows);
+    applyThemeState(nextThemeState);
   };
 
   const updateAppTheme = (nextTheme: AppTheme) => {
     setAppTheme(nextTheme);
-    setSettingsThemeState((current) => normalizeSettingsThemeState({ ...current, mode: nextTheme }));
   };
 
   const updateCodeFontSize = (nextSize: number) => {
@@ -4474,94 +2557,58 @@ export default function App() {
     );
   };
 
-  const normalizeFileName = (name: string): string => {
-    const trimmed = name.trim();
-    return trimmed.toLowerCase().endsWith(".md") ? trimmed : `${trimmed}.md`;
-  };
-
-  const validateNamePart = (name: string, kind: "file" | "folder"): string | null => {
-    const trimmed = name.trim();
-    if (!trimmed) return kind === "file" ? "文件名不能为空" : "文件夹名不能为空";
-    if (/[<>:"/\\|?*]/.test(trimmed)) return "名称不能包含 Windows 非法字符 < > : \" / \\ | ? *";
-    if (trimmed.includes("..")) return "名称不能包含路径穿越片段 ..";
-    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "名称不能是绝对路径";
-    return null;
-  };
-
-  const validateDirectoryPathInput = (path: string): string | null => {
-    const trimmed = path.trim();
-    if (!trimmed) return null;
-    if (/[<>:"\\|?*]/.test(trimmed)) return "目录不能包含 Windows 非法字符 < > : \" \\ | ? *";
-    if (trimmed.includes("..")) return "目录不能包含路径穿越片段 ..";
-    if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) return "目录不能是绝对路径";
-    if (trimmed.split("/").some((part) => part.trim() === "")) return "目录不能包含空路径段";
-    return null;
-  };
-
-  const joinNotePath = (directory: string, filename: string): string => {
-    const normalizedDirectory = directory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return normalizedDirectory ? `${normalizedDirectory}/${filename}` : filename;
-  };
-
   const getResolvedNewNoteDirectory = (): string => {
-    if (newNoteLocationOption === "root") return "";
-    if (newNoteLocationOption === "tricks") return "tricks";
-    if (newNoteLocationOption === "problems") return "problems";
-    if (newNoteLocationOption === "custom") return newNoteCustomDirectory.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    return currentNoteDirectory;
+    return resolveNewNoteDirectory(newNoteLocationOption, newNoteCustomDirectory, currentNoteDirectory);
   };
 
   const findEntryCaseInsensitive = (path: string, isDirectory: boolean) => {
-    const normalized = path.toLowerCase();
-    return files.find((file) => Boolean(file.isDirectory) === isDirectory && file.path.toLowerCase() === normalized);
-  };
-
-  const setDisplayTitleForPath = (path: string, title: string) => {
-    const trimmed = title.trim();
-    setDisplayTitleByPath((current) => {
-      if (trimmed) {
-        if (current[path] === trimmed) return current;
-        return { ...current, [path]: trimmed };
-      }
-      if (!(path in current)) return current;
-      const next = { ...current };
-      delete next[path];
-      return next;
-    });
+    return findNoteEntryCaseInsensitive(files, path, isDirectory);
   };
 
   const updatePathReferences = (oldPath: string, newPath: string, isDirectory: boolean) => {
     const rewritePath = (path: string) => {
-      if (isDirectory) {
-        return path === oldPath || path.startsWith(`${oldPath}/`)
-          ? `${newPath}${path.slice(oldPath.length)}`
-          : path;
-      }
-      return path === oldPath ? newPath : path;
+      return rewriteNotePathReference(path, oldPath, newPath, isDirectory);
     };
+    const rewrittenReferences = rewriteNoteWorkspaceReferences(
+      {
+        openTabPaths,
+        pendingFileSelection,
+        pendingAssetsByFile: {},
+        openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
+        currentFilePath,
+        activeWorkspaceTabId,
+        activeWorkingCopyId,
+        activeTreeDirectoryPath,
+        activeTreeFilePath,
+        savedSnapshotPath: savedSnapshotRef.current.path,
+      },
+      oldPath,
+      newPath,
+      isDirectory,
+    );
 
-    setOpenTabPaths((current) => current.map(rewritePath));
-    setPendingFileSelection((current) => current ? { ...current, path: rewritePath(current.path) } : current);
-    setPendingAssetsByFile((current) => {
-      let changed = false;
-      const next: Record<string, string[]> = {};
-      for (const [path, assets] of Object.entries(current)) {
-        const rewritten = rewritePath(path);
-        if (rewritten !== path) changed = true;
-        next[rewritten] = [...(next[rewritten] ?? []), ...assets];
-      }
-      return changed ? next : current;
-    });
-    setDisplayTitleByPath((current) => {
-      let changed = false;
-      const next: Record<string, string> = {};
-      for (const [path, title] of Object.entries(current)) {
-        const rewritten = rewritePath(path);
-        if (rewritten !== path) changed = true;
-        next[rewritten] = title;
-      }
-      return changed ? next : current;
-    });
+    setOpenTabPaths(rewrittenReferences.openTabPaths);
+    setPendingFileSelection(rewrittenReferences.pendingFileSelection as { path: string; closeSearchOnSuccess: boolean } | null);
+    setPendingAssetsByFile((current) =>
+      rewriteNoteWorkspaceReferences(
+        {
+          openTabPaths: [],
+          pendingFileSelection: null,
+          pendingAssetsByFile: current,
+          openReviewTabs: [],
+          currentFilePath: null,
+          activeWorkspaceTabId: null,
+          activeWorkingCopyId: null,
+          activeTreeDirectoryPath: null,
+          activeTreeFilePath: null,
+          savedSnapshotPath: null,
+        },
+        oldPath,
+        newPath,
+        isDirectory,
+      ).pendingAssetsByFile,
+    );
+    rewriteDisplayTitlePaths(rewritePath);
     setOpenReviewTabs((current) =>
       current.map((tab) => {
         const rewritten = rewritePath(tab.preview.notePath);
@@ -4570,25 +2617,12 @@ export default function App() {
           : { ...tab, preview: { ...tab.preview, notePath: rewritten } };
       }),
     );
-    setCurrentFilePath((current) => {
-      if (!current) return current;
-      const rewritten = rewritePath(current);
-      if (rewritten !== current) {
-        skipNextReadForPathRef.current = rewritten;
-      }
-      return rewritten;
-    });
-    setActiveWorkspaceTabId((current) => {
-      if (!current || current.startsWith("review:")) return current;
-      if (current.startsWith("note:")) {
-        return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
-      }
-      return rewritePath(current);
-    });
-    setActiveWorkingCopyId((current) => {
-      if (!current || !current.startsWith("note:")) return current;
-      return getNoteWorkingCopyId(rewritePath(current.slice("note:".length)));
-    });
+    if (rewrittenReferences.currentFilePath !== currentFilePath && rewrittenReferences.currentFilePath) {
+      skipNextReadForPathRef.current = rewrittenReferences.currentFilePath;
+    }
+    setCurrentFilePath(rewrittenReferences.currentFilePath);
+    setActiveWorkspaceTabId(rewrittenReferences.activeWorkspaceTabId);
+    setActiveWorkingCopyId(rewrittenReferences.activeWorkingCopyId);
     setWorkingCopies((current) => {
       let changed = false;
       const next: Record<string, WorkingCopy> = {};
@@ -4615,39 +2649,34 @@ export default function App() {
       }
       return changed ? next : current;
     });
-    setActiveTreeDirectoryPath((current) => current ? rewritePath(current) : current);
-    setActiveTreeFilePath((current) => current ? rewritePath(current) : current);
-    const savedPath = savedSnapshotRef.current.path;
-    if (savedPath) {
-      const rewritten = rewritePath(savedPath);
-      if (rewritten !== savedPath) {
-        savedSnapshotRef.current = {
-          ...savedSnapshotRef.current,
-          path: rewritten,
-        };
-      }
+    setActiveTreeDirectoryPath(rewrittenReferences.activeTreeDirectoryPath);
+    setActiveTreeFilePath(rewrittenReferences.activeTreeFilePath);
+    if (rewrittenReferences.savedSnapshotPath !== savedSnapshotRef.current.path) {
+      savedSnapshotRef.current = {
+        ...savedSnapshotRef.current,
+        path: rewrittenReferences.savedSnapshotPath,
+      };
     }
   };
 
   const getSelectedTreeCreateParent = () => {
-    if (activeTreeDirectoryPath !== null) return activeTreeDirectoryPath;
-    if (activeTreeFilePath) {
-      const slashIndex = activeTreeFilePath.lastIndexOf("/");
-      return slashIndex === -1 ? "" : activeTreeFilePath.slice(0, slashIndex);
-    }
-    return "";
+    return getSelectedTreeCreateParentPath(activeTreeDirectoryPath, activeTreeFilePath);
   };
 
   const getDefaultNewNoteCreateParent = () => {
-    if (activeTreeDirectoryPath !== null || activeTreeFilePath) return getSelectedTreeCreateParent();
-    return currentNoteDirectory;
+    return getDefaultNewNoteCreateParentPath(activeTreeDirectoryPath, activeTreeFilePath, currentNoteDirectory);
   };
 
   const openCreateFolderDialog = () => {
-    setReturnToCreateAfterFolder(dialogMode === "create");
-    setDialogMode("create-folder");
-    setDialogValue("");
-    setFolderParentDirectory(dialogMode === "create" ? getResolvedNewNoteDirectory() : currentNoteDirectory);
+    const createFolderState = getCreateFolderDialogInitialState(
+      dialogMode,
+      getResolvedNewNoteDirectory(),
+      currentNoteDirectory,
+    );
+    setReturnToCreateAfterFolder(createFolderState.returnToCreateAfterFolder);
+    setDialogMode(createFolderState.dialogMode);
+    setDialogValue(createFolderState.dialogValue);
+    setFolderParentDirectory(createFolderState.folderParentDirectory);
   };
 
   const getDefaultFolderCreateParent = () => {
@@ -4656,14 +2685,18 @@ export default function App() {
 
   const requestInlineCreateFolderAt = (parentPath: string) => {
     closeDialog();
-    setIsTreeRootCollapsed(false);
-    setCreateFolderRequest({ parentPath, requestId: Date.now() });
+    const createState = getTreeInlineCreateState("folder", parentPath, Date.now());
+    setIsTreeRootCollapsed(createState.isTreeRootCollapsed);
+    setCreateFileRequest(createState.createFileRequest);
+    setCreateFolderRequest(createState.createFolderRequest);
   };
 
   const requestInlineCreateFileAt = (parentPath: string) => {
     closeDialog();
-    setIsTreeRootCollapsed(false);
-    setCreateFileRequest({ parentPath, requestId: Date.now() });
+    const createState = getTreeInlineCreateState("file", parentPath, Date.now());
+    setIsTreeRootCollapsed(createState.isTreeRootCollapsed);
+    setCreateFileRequest(createState.createFileRequest);
+    setCreateFolderRequest(createState.createFolderRequest);
   };
 
   const requestInlineCreateFolder = () => {
@@ -4675,34 +2708,43 @@ export default function App() {
   };
 
   const handleSelectTreeDirectory = useCallback((path: string) => {
-    setActiveTreeDirectoryPath(path);
-    setActiveTreeFilePath(null);
+    const selection = getTreeSelectionAfterDirectorySelect(path);
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
   }, []);
 
   const handleClearTreeSelection = useCallback(() => {
-    setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(null);
+    const selection = getTreeSelectionAfterClear();
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
+  }, []);
+
+  const handleSelectTreeRoot = useCallback(() => {
+    const selection = getTreeSelectionAfterRootSelect();
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
+    setIsTreeRootCollapsed((current) => !current);
   }, []);
 
   const openRenameDialog = (path: string, isDirectory = false) => {
-    const filename = path.split("/").pop() ?? path;
-    const baseName = isDirectory ? filename : filename.replace(/\.md$/i, "");
-    setDialogMode("rename");
-    setDialogValue(baseName);
-    setRenameTarget(path);
-    setRenameTargetIsDirectory(isDirectory);
+    const renameState = getRenameDialogInitialState(path, isDirectory);
+    setDialogMode(renameState.dialogMode);
+    setDialogValue(renameState.dialogValue);
+    setRenameTarget(renameState.renameTarget);
+    setRenameTargetIsDirectory(renameState.renameTargetIsDirectory);
   };
 
   const closeDialog = () => {
-    setDialogMode(null);
-    setDialogValue("");
-    setNewNoteLocationOption("current");
-    setNewNoteCustomDirectory("");
-    setNewNoteTags([]);
-    setFolderParentDirectory("");
-    setReturnToCreateAfterFolder(false);
-    setRenameTarget(null);
-    setRenameTargetIsDirectory(false);
+    const dialogState = getClosedNoteDialogState();
+    setDialogMode(dialogState.dialogMode);
+    setDialogValue(dialogState.dialogValue);
+    setNewNoteLocationOption(dialogState.newNoteLocationOption);
+    setNewNoteCustomDirectory(dialogState.newNoteCustomDirectory);
+    setNewNoteTags(dialogState.newNoteTags);
+    setFolderParentDirectory(dialogState.folderParentDirectory);
+    setReturnToCreateAfterFolder(dialogState.returnToCreateAfterFolder);
+    setRenameTarget(dialogState.renameTarget);
+    setRenameTargetIsDirectory(dialogState.renameTargetIsDirectory);
   };
 
   const toggleNewNoteTag = (tag: string) => {
@@ -4710,15 +2752,9 @@ export default function App() {
   };
 
   const handleCreate = async () => {
-    const fileErr = validateNamePart(dialogValue, "file");
-    if (fileErr) { toast.error(fileErr); return; }
     const directory = getResolvedNewNoteDirectory();
-    const directoryErr = validateDirectoryPathInput(directory);
-    if (directoryErr) { toast.error(directoryErr); return; }
-
-    const filename = normalizeFileName(dialogValue);
-    const newPath = joinNotePath(directory, filename);
-    if (findEntryCaseInsensitive(newPath, false)) { toast.error("同目录已存在同名笔记"); return; }
+    const createPlan = getCreateNotePlan(files, directory, dialogValue);
+    if (createPlan.error) { toast.error(createPlan.error); return; }
 
     persistActiveWorkingCopyRef.current();
 
@@ -4726,14 +2762,14 @@ export default function App() {
       if (directory && !findEntryCaseInsensitive(directory, true)) {
         await createNoteFolder(directory);
       }
-      await writeNote(newPath, buildNewNoteMarkdown(dialogValue.trim().replace(/\.md$/i, ""), newNoteTags));
+      await writeNote(createPlan.path, buildNewNoteMarkdown(createPlan.title, newNoteTags));
       const updated = await listNotes();
       setFiles(updated);
       closeDialog();
-      setDisplayTitleForPath(newPath, dialogValue.trim().replace(/\.md$/i, ""));
-      setCurrentFilePath(newPath);
-      setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
-      setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
+      setDisplayTitleForPath(createPlan.path, createPlan.title);
+      setCurrentFilePath(createPlan.path);
+      setActiveWorkingCopyId(getNoteWorkingCopyId(createPlan.path));
+      setActiveWorkspaceTabId(getNoteWorkingCopyId(createPlan.path));
       setIsDirty(false);
       toast.success("已创建空白笔记");
     } catch (e) {
@@ -4742,20 +2778,14 @@ export default function App() {
   };
 
   const handleCreateFolder = async () => {
-    const nameErr = validateNamePart(dialogValue, "folder");
-    if (nameErr) { toast.error(nameErr); return; }
-    const parentErr = validateDirectoryPathInput(folderParentDirectory);
-    if (parentErr) { toast.error(parentErr); return; }
-
-    const newPath = joinNotePath(folderParentDirectory, dialogValue.trim());
-    if (findEntryCaseInsensitive(newPath, true)) { toast.error("同目录已存在同名文件夹"); return; }
-    if (findEntryCaseInsensitive(`${newPath}.md`, false)) { toast.error("同目录已存在同名笔记"); return; }
+    const createFolderPlan = getCreateFolderPlan(files, folderParentDirectory, dialogValue);
+    if (createFolderPlan.error) { toast.error(createFolderPlan.error); return; }
 
     try {
-      await createNoteFolder(newPath);
+      await createNoteFolder(createFolderPlan.path);
       const updated = await listNotes();
       setFiles(updated);
-      setNewNoteCustomDirectory(newPath);
+      setNewNoteCustomDirectory(createFolderPlan.path);
       setNewNoteLocationOption("custom");
       if (returnToCreateAfterFolder) {
         setDialogMode("create");
@@ -4772,74 +2802,51 @@ export default function App() {
   };
 
   const handleCreateFolderAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNamePart(name, "folder");
-    if (nameErr) throw new Error(nameErr);
-    const parentErr = validateDirectoryPathInput(parentPath);
-    if (parentErr) throw new Error(parentErr);
+    const createFolderPlan = getCreateFolderPlan(files, parentPath, name);
+    if (createFolderPlan.error) throw new Error(createFolderPlan.error);
 
-    const newPath = joinNotePath(parentPath, name.trim());
-    if (findEntryCaseInsensitive(newPath, true)) throw new Error("同目录已存在同名文件夹");
-    if (findEntryCaseInsensitive(`${newPath}.md`, false)) throw new Error("同目录已存在同名笔记");
-
-    await createNoteFolder(newPath);
+    await createNoteFolder(createFolderPlan.path);
     const updated = await listNotes();
     setFiles(updated);
-    setActiveTreeDirectoryPath(newPath);
+    setActiveTreeDirectoryPath(createFolderPlan.path);
     toast.success("已创建文件夹");
-    return newPath;
+    return createFolderPlan.path;
   }, [files]);
 
   const handleCreateFileAt = useCallback(async (parentPath: string, name: string) => {
-    const nameErr = validateNamePart(name, "file");
-    if (nameErr) throw new Error(nameErr);
-    const parentErr = validateDirectoryPathInput(parentPath);
-    if (parentErr) throw new Error(parentErr);
-
-    const filename = normalizeFileName(name);
-    const newPath = joinNotePath(parentPath, filename);
-    if (findEntryCaseInsensitive(newPath, false)) throw new Error("同目录已存在同名笔记");
+    const createPlan = getCreateNotePlan(files, parentPath, name);
+    if (createPlan.error) throw new Error(createPlan.error);
 
     persistActiveWorkingCopyRef.current();
 
-    await writeNote(newPath, buildNewNoteMarkdown(name.trim().replace(/\.md$/i, ""), []));
+    await writeNote(createPlan.path, buildNewNoteMarkdown(createPlan.title, []));
     const updated = await listNotes();
     setFiles(updated);
-    setDisplayTitleForPath(newPath, name.trim().replace(/\.md$/i, ""));
-    setCurrentFilePath(newPath);
-    setActiveWorkingCopyId(getNoteWorkingCopyId(newPath));
-    setActiveWorkspaceTabId(getNoteWorkingCopyId(newPath));
+    setDisplayTitleForPath(createPlan.path, createPlan.title);
+    setCurrentFilePath(createPlan.path);
+    setActiveWorkingCopyId(getNoteWorkingCopyId(createPlan.path));
+    setActiveWorkspaceTabId(getNoteWorkingCopyId(createPlan.path));
     setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(newPath);
+    setActiveTreeFilePath(createPlan.path);
     setIsDirty(false);
     toast.success("已创建空白笔记");
-    return newPath;
+    return createPlan.path;
   }, [files]);
 
   const handleRename = async () => {
     if (!renameTarget) return;
-    const nameErr = validateNamePart(dialogValue, renameTargetIsDirectory ? "folder" : "file");
-    if (nameErr) { toast.error(nameErr); return; }
-
-    const lastSlashIdx = renameTarget.lastIndexOf("/");
-    const dirPrefix = lastSlashIdx === -1 ? "" : renameTarget.slice(0, lastSlashIdx + 1);
-    const normalizedName = renameTargetIsDirectory ? dialogValue.trim() : normalizeFileName(dialogValue);
-    const newPath = `${dirPrefix}${normalizedName}`;
-    if (newPath === renameTarget) { closeDialog(); return; }
-
-    const existing = findEntryCaseInsensitive(newPath, renameTargetIsDirectory);
-    if (existing && existing.path.toLowerCase() !== renameTarget.toLowerCase()) {
-      toast.error(renameTargetIsDirectory ? "同目录已存在同名文件夹" : "同目录已存在同名笔记");
-      return;
-    }
+    const renamePlan = getRenameNotePlan(files, renameTarget, dialogValue, renameTargetIsDirectory);
+    if (renamePlan.error) { toast.error(renamePlan.error); return; }
+    if (renamePlan.shouldClose) { closeDialog(); return; }
 
     try {
       if (renameTargetIsDirectory) {
-        await renameNoteFolder(renameTarget, newPath);
+        await renameNoteFolder(renameTarget, renamePlan.path);
       } else {
-        await renameNote(renameTarget, newPath);
+        await renameNote(renameTarget, renamePlan.path);
       }
       const updated = await listNotes();
-      updatePathReferences(renameTarget, newPath, renameTargetIsDirectory);
+      updatePathReferences(renameTarget, renamePlan.path, renameTargetIsDirectory);
       setFiles(updated);
       closeDialog();
       toast.success(renameTargetIsDirectory ? "已重命名文件夹" : "已重命名笔记");
@@ -4864,14 +2871,60 @@ export default function App() {
       }
       const updated = await listNotes();
       setFiles(updated);
-      setOpenTabPaths((current) => current.filter((tabPath) => isDirectory ? tabPath !== path && !tabPath.startsWith(`${path}/`) : tabPath !== path));
-      if (isDirectory) {
-        setActiveTreeDirectoryPath((current) => current && (current === path || current.startsWith(`${path}/`)) ? null : current);
+      const references = removeDeletedNoteWorkspaceReferences(
+        {
+          openTabPaths,
+          pendingFileSelection,
+          pendingAssetsByFile: {},
+          openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
+          currentFilePath,
+          activeWorkspaceTabId,
+          activeWorkingCopyId,
+          activeTreeDirectoryPath,
+          activeTreeFilePath,
+          savedSnapshotPath: savedSnapshotRef.current.path,
+        },
+        path,
+        isDirectory,
+      );
+      setOpenTabPaths(references.openTabPaths);
+      setPendingFileSelection(references.pendingFileSelection as { path: string; closeSearchOnSuccess: boolean } | null);
+      setPendingAssetsByFile((current) =>
+        removeDeletedNoteWorkspaceReferences(
+          {
+            openTabPaths: [],
+            pendingFileSelection: null,
+            pendingAssetsByFile: current,
+            openReviewTabs: [],
+            currentFilePath: null,
+            activeWorkspaceTabId: null,
+            activeWorkingCopyId: null,
+            activeTreeDirectoryPath: null,
+            activeTreeFilePath: null,
+            savedSnapshotPath: null,
+          },
+          path,
+          isDirectory,
+        ).pendingAssetsByFile,
+      );
+      setOpenReviewTabs((current) =>
+        current.filter((tab) =>
+          references.openReviewTabs.some((reference) => reference.id === tab.id),
+        ),
+      );
+      setCurrentFilePath(references.currentFilePath);
+      setActiveWorkspaceTabId(references.activeWorkspaceTabId);
+      setActiveWorkingCopyId(references.activeWorkingCopyId);
+      setWorkingCopies((current) => removeDeletedNoteWorkingCopies(current, path, isDirectory));
+      setActiveTreeDirectoryPath(references.activeTreeDirectoryPath);
+      setActiveTreeFilePath(references.activeTreeFilePath);
+      if (references.savedSnapshotPath !== savedSnapshotRef.current.path) {
+        savedSnapshotRef.current = {
+          ...savedSnapshotRef.current,
+          path: references.savedSnapshotPath,
+        };
       }
-      setActiveTreeFilePath((current) => current && (current === path || (isDirectory && current.startsWith(`${path}/`))) ? null : current);
-      if (currentFilePath && (currentFilePath === path || (isDirectory && currentFilePath.startsWith(`${path}/`)))) {
-        setCurrentFilePath(null);
-        setActiveWorkspaceTabId(null);
+      if (references.shouldClearDirty) {
         setIsDirty(false);
       }
       toast.success(isDirectory ? "已删除文件夹" : "已删除笔记");
@@ -4897,21 +2950,26 @@ export default function App() {
     setIsRestartingBlog(true);
     try {
       await restartBlogServer();
-      toast.success("博客已重启");
+      toast.success("本地博客服务已确认运行");
     } catch (e) {
-      toast.error(`重启博客失败: ${e}`);
+      toast.error(`确认本地博客服务失败: ${e}`);
     } finally {
       setIsRestartingBlog(false);
     }
   };
 
   const handleSaveBlogInfo = async () => {
-    const normalizedConfig = normalizeBlogConfigDraft(blogInfoDraft);
+    const saveDraft = buildBlogConfigSaveDraft(blogInfoDraft);
+    if (!saveDraft.ok) {
+      setBlogConfigError(saveDraft.error);
+      toast.error(saveDraft.error);
+      return;
+    }
     setIsSavingBlogConfig(true);
     setBlogConfigError(null);
     try {
-      await saveBlogConfig(normalizedConfig);
-      setBlogInfoDraft(normalizedConfig);
+      await saveBlogConfig(saveDraft.config);
+      setBlogInfoDraft(saveDraft.config);
       toast.success("博客信息已保存");
     } catch (error) {
       const message = getErrorMessage(error);
@@ -4926,16 +2984,7 @@ export default function App() {
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
-      setLuoguConfigUid(config.luogu.uid);
-      setLuoguConfigClientId(config.luogu.client_id);
-      setLuoguConfigLastSubmissionId(
-        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-      );
-      setLuoguConfigAiConfigured(
-        config.ai.base_url.trim() !== "" &&
-        config.ai.api_key.trim() !== "" &&
-        config.ai.model.trim() !== "",
-      );
+      applyLuoguConfigFormState(config);
     } catch (e) {
       toast.error(`洛谷配置读取失败：${e}`);
     } finally {
@@ -4968,26 +3017,19 @@ export default function App() {
   };
 
   const handleSaveLuoguConfig = async () => {
-    const lastSubmissionId = luoguConfigLastSubmissionId.trim();
-    const parsedLastSubmissionId =
-      lastSubmissionId === "" ? null : Number(lastSubmissionId);
-    if (
-      parsedLastSubmissionId !== null &&
-      (!Number.isInteger(parsedLastSubmissionId) || parsedLastSubmissionId < 0)
-    ) {
-      toast.error("last_submission_id 必须是非负整数或留空");
+    const payload = buildLuoguConfigSavePayload({
+      uid: luoguConfigUid,
+      clientId: luoguConfigClientId,
+      lastSubmissionId: luoguConfigLastSubmissionId,
+    });
+    if (!payload.ok) {
+      toast.error(payload.error);
       return;
     }
 
     setIsSavingLuoguConfig(true);
     try {
-      await saveLuoguConfig({
-        luogu: {
-          uid: luoguConfigUid.trim(),
-          client_id: luoguConfigClientId.trim(),
-          last_submission_id: parsedLastSubmissionId,
-        },
-      });
+      await saveLuoguConfig(payload.config);
       setLuoguConnectionError(null);
       toast.success("洛谷配置已保存");
       returnFromLuoguSettings();
@@ -5036,31 +3078,17 @@ export default function App() {
     const rangeLabel = isResume ? saved.rangeLabel : getLuoguScanRangeLabel(luoguScanMode, luoguScanCountLimit, luoguScanDaysLimit);
     const cutoffMs = isResume ? saved.cutoffMs : (luoguScanMode === "days" ? Date.now() - luoguScanDaysLimit * 24 * 60 * 60 * 1000 : null);
 
-    setIsScanningLuoguPreview(true);
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState((current) =>
+      isResume
+        ? { ...current, isScanning: true, isPaused: false, error: null }
+        : startLuoguScanSourceState({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false }),
+    );
     luoguScanPauseFlagRef.current = false;
 
     if (!isResume) {
       setLuoguPreviewResult(null);
-      setLuoguScanError(null);
-      setLuoguScanProgress({ currentPage: 1, foundCount: 0, rangeLabel, waiting: false });
-      setLuoguScanSummary(null);
       setSelectedLuoguSubmissionIds(new Set<string>());
-      setSkippedLuoguSubmissionIds(new Set<string>());
-      setLuoguPreparedNotesById({});
-      setLuoguPrepareErrorsById({});
-      setLuoguPrepareStatusesById({});
-      setEditedLuoguPreparedMarkdownIds(new Set<string>());
-      setReviewSelectedLuoguSubmissionIds(new Set<string>());
-      setCurrentlyPreparingLuoguId(null);
-      setLuoguPrepareProgress(null);
-      setIsStoppingLuoguPrepare(false);
-      setLuoguWriteResultsById({});
-      setCurrentlyWritingLuoguId(null);
-      setLuoguWriteProgress(null);
-      setActiveLuoguPreparedPreviewId(null);
-      setActiveLuoguPreviewDetailTab("rendered");
-      setLuoguImportStep("scan");
+      resetLuoguPreparationWorkspace();
     }
 
     try {
@@ -5084,17 +3112,19 @@ export default function App() {
           };
 
           setLuoguPreviewResult(buildLuoguPreviewResult(submissions, latestPageResult));
-          setLuoguScanSummary(null);
-          setIsLuoguScanPaused(true);
+          setLuoguScanSourceState((current) => pauseLuoguScanSourceState({
+            ...current,
+            summary: null,
+          }));
           return;
         }
 
-        setLuoguScanProgress({
+        setLuoguScanSourceState((current) => updateLuoguScanSourceProgress(current, {
           currentPage: page,
           foundCount: submissions.length,
           rangeLabel,
           waiting: false,
-        });
+        }));
 
         const pageResult = await previewLuoguSubmissionPage(page);
         latestPageResult = pageResult;
@@ -5147,12 +3177,12 @@ export default function App() {
           });
         }
 
-        setLuoguScanProgress({
+        setLuoguScanSourceState((current) => updateLuoguScanSourceProgress(current, {
           currentPage: page,
           foundCount: submissions.length,
           rangeLabel,
           waiting: !shouldStop && pageResult.hasMore && page < LUOGU_SCAN_MAX_PAGES,
-        });
+        }));
 
         if (shouldStop || !pageResult.hasMore || page >= LUOGU_SCAN_MAX_PAGES) {
           break;
@@ -5176,54 +3206,39 @@ export default function App() {
         lastSubmissionId: latestPageResult.lastSubmissionId,
         submissions: limitedSubmissions,
       };
-      const candidateCount = result.submissions.filter((submission) =>
-        getLuoguSubmissionCandidateState(
-          submission,
-          result.submissions,
-          luoguImportRules,
-          result.lastSubmissionId,
-          new Set<string>(),
-        ).canSelect,
-      ).length;
-      const skippedCount = result.submissions.length - candidateCount;
+      const scanCompletionSelection = getLuoguScanCompletionSelection({
+        submissions: result.submissions,
+        rules: luoguImportRules,
+        lastSubmissionId: result.lastSubmissionId,
+        skippedSubmissionIds: new Set<string>(),
+      });
 
       setLuoguPreviewResult(result);
-      setLuoguScanSummary({
+      setLuoguScanSourceState(finishLuoguScanSourceState({
         scannedPages,
         foundCount: result.submissions.length,
-        candidateCount,
-        skippedCount,
+        candidateCount: scanCompletionSelection.candidateCount,
+        skippedCount: scanCompletionSelection.skippedCount,
         rangeLabel,
-      });
-      setSelectedLuoguSubmissionIds(
-        new Set(
-          result.submissions
-            .filter((submission) =>
-              getLuoguSubmissionCandidateState(
-                submission,
-                result.submissions,
-                luoguImportRules,
-                result.lastSubmissionId,
-                new Set<string>(),
-              ).defaultSelected,
-            )
-            .map((submission) => submission.submissionId),
-        ),
-      );
+      }));
+      setSelectedLuoguSubmissionIds(scanCompletionSelection.defaultSelectedSubmissionIds);
       setLuoguConfigAiConfigured(result.aiConfigured);
       setLuoguConfigLastSubmissionId(
         result.lastSubmissionId === null ? "" : String(result.lastSubmissionId),
       );
-      toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${candidateCount} 条`);
+      toast.success(`扫描完成：${rangeLabel}，扫描 ${scannedPages} 页，找到 ${result.submissions.length} 条，可候选 ${scanCompletionSelection.candidateCount} 条`);
     } catch (e) {
       const message = getErrorMessage(e);
-      setLuoguScanError(message);
+      setLuoguScanSourceState(failLuoguScanSourceState(message));
       toast.error(`洛谷扫描失败：${message}`);
     } finally {
       if (!luoguScanPauseFlagRef.current) {
-        setLuoguScanProgress(null);
+        setLuoguScanSourceState((current) => ({
+          ...current,
+          isScanning: false,
+          progress: null,
+        }));
       }
-      setIsScanningLuoguPreview(false);
     }
   };
 
@@ -5240,10 +3255,8 @@ export default function App() {
   const handleRestartLuoguScan = () => {
     luoguScanResumeRef.current = null;
     luoguScanPauseFlagRef.current = false;
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState(createIdleLuoguScanSourceState());
     setLuoguPreviewResult(null);
-    setLuoguScanError(null);
-    setLuoguScanSummary(null);
     handlePreviewLuoguSubmissions();
   };
 
@@ -5642,41 +3655,37 @@ export default function App() {
   };
 
   const refreshLocalIndexStatus = async () => {
-    setIsLoadingLocalIndexStatus(true);
+    setLocalIndexLoadTask(startTaskState());
     setLocalIndexMessage(null);
     try {
       const status = await getLocalNoteIndexStatus();
       setLocalIndexStatus(status);
-      if (!status.exists) {
-        setLocalIndexMessage("本地索引尚未建立，首次搜索或点击重建后会生成。");
-      } else if (status.status === "stale") {
-        setLocalIndexMessage("本地索引版本已更新，建议重建索引。");
-      } else if (status.status === "error") {
-        setLocalIndexMessage("本地索引读取失败，可尝试重建。");
-      }
+      setLocalIndexMessage(buildLocalIndexStatusMessage(status));
+      setLocalIndexLoadTask((task) => finishTaskState(task));
     } catch (e) {
       const message = getErrorMessage(e);
       setLocalIndexMessage(message);
+      setLocalIndexLoadTask((task) => failTaskState(task, message));
       toast.error(`本地索引状态读取失败：${message}`);
     } finally {
-      setIsLoadingLocalIndexStatus(false);
     }
   };
 
   const handleRebuildLocalIndex = async () => {
-    setIsRebuildingLocalIndex(true);
-    setLocalIndexMessage("正在建立本地笔记索引...");
+    setLocalIndexRebuildTask(startTaskState());
+    setLocalIndexMessage(getLocalIndexRebuildRunningMessage());
     try {
       const status = await rebuildLocalNoteIndex();
       setLocalIndexStatus(status);
-      setLocalIndexMessage(`重建完成：${status.noteCount} 篇笔记，${status.chunkCount} 个片段。`);
+      setLocalIndexMessage(buildLocalIndexRebuildSuccessMessage(status));
+      setLocalIndexRebuildTask((task) => finishTaskState(task));
       toast.success("本地笔记索引已重建");
     } catch (e) {
       const message = getErrorMessage(e);
       setLocalIndexMessage(message);
+      setLocalIndexRebuildTask((task) => failTaskState(task, message));
       toast.error(`本地索引重建失败：${message}`);
     } finally {
-      setIsRebuildingLocalIndex(false);
     }
   };
 
@@ -5712,13 +3721,13 @@ export default function App() {
 
   const ActiveSettingsPageEffects = ({ activePageKey, activeTarget }: { activePageKey: SettingsSection; activeTarget: SettingsTarget }) => {
     useEffect(() => {
-      const localNotesVisible = shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget);
+      const localNotesVisible = shouldRenderSettingsPageForTarget("ai-local-notes", activePageKey, activeTarget);
       if (!localNotesVisible || localIndexStatus || isLoadingLocalIndexStatus || isRebuildingLocalIndex) return;
       void refreshLocalIndexStatus();
     }, [activePageKey, activeTarget]);
 
     useEffect(() => {
-      if (!shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
+      if (!shouldRenderSettingsPageForTarget("ai-prompts", activePageKey, activeTarget) || hasRequestedPromptTemplatesRef.current || isLoadingPrompt) return;
       hasRequestedPromptTemplatesRef.current = true;
       void loadPromptTemplates();
     }, [activePageKey, activeTarget]);
@@ -5835,16 +3844,7 @@ export default function App() {
     setIsLoadingLuoguConfig(true);
     try {
       const config = await getLuoguConfig();
-      setLuoguConfigUid(config.luogu.uid);
-      setLuoguConfigClientId(config.luogu.client_id);
-      setLuoguConfigLastSubmissionId(
-        config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-      );
-      setLuoguConfigAiConfigured(
-        config.ai.base_url.trim() !== "" &&
-        config.ai.api_key.trim() !== "" &&
-        config.ai.model.trim() !== "",
-      );
+      applyLuoguConfigFormState(config);
     } catch (e) {
       toast.error(`洛谷配置读取失败：${getErrorMessage(e)}`);
     } finally {
@@ -5853,45 +3853,28 @@ export default function App() {
   };
 
   const closeLuoguDialog = () => {
-    if (isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (isLuoguImportCenterBusyNow) return;
     const returnTarget = luoguDialogReturnTarget;
     setIsLuoguDialogOpen(false);
     setLuoguDialogReturnTarget(null);
-    setIsLuoguScanPaused(false);
+    setLuoguScanSourceState(createIdleLuoguScanSourceState());
     luoguScanResumeRef.current = null;
     luoguScanPauseFlagRef.current = false;
     setLuoguPreviewResult(null);
-    setLuoguScanError(null);
-    setLuoguScanProgress(null);
-    setLuoguScanSummary(null);
     setSelectedLuoguSubmissionIds(new Set<string>());
-    setSkippedLuoguSubmissionIds(new Set<string>());
-    setLuoguPreparedNotesById({});
-    setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById({});
-    setEditedLuoguPreparedMarkdownIds(new Set<string>());
-    setReviewSelectedLuoguSubmissionIds(new Set<string>());
-    setCurrentlyPreparingLuoguId(null);
-    setLuoguPrepareProgress(null);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguWriteResultsById({});
-    setCurrentlyWritingLuoguId(null);
-    setLuoguWriteProgress(null);
-    setActiveLuoguPreparedPreviewId(null);
-    setActiveLuoguPreviewDetailTab("rendered");
+    resetLuoguPreparationWorkspace();
     setLuoguProblemId("");
     setLuoguProblemTitle("");
     setLuoguSubmissionId("");
     setLuoguSourceCode("");
     setLuoguImportCenterTab("scan");
-    setLuoguImportStep("scan");
     if (returnTarget) {
       openSettingsSection(returnTarget.type === "category" ? returnTarget.category : returnTarget.page);
     }
   };
 
   const openLuoguRulesSettingsFromDialog = () => {
-    if (isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (isLuoguImportCenterBusyNow) return;
     closeLuoguDialog();
     openSettingsSection("luogu-rules");
   };
@@ -5910,7 +3893,7 @@ export default function App() {
   });
 
   const updateLuoguImportRules = (patch: Partial<LuoguImportRules>) => {
-    if (isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (luoguImportCenterView.isRulesDisabled) return;
 
     let didSave = false;
     let saveError: unknown = null;
@@ -5926,21 +3909,13 @@ export default function App() {
       }
 
       const submissions = luoguPreviewResult?.submissions ?? [];
-      setSelectedLuoguSubmissionIds(
-        new Set(
-          submissions
-            .filter((submission) =>
-              getLuoguSubmissionCandidateState(
-                submission,
-                submissions,
-                next,
-                luoguPreviewResult?.lastSubmissionId ?? null,
-                new Set<string>(),
-              ).defaultSelected,
-            )
-            .map((submission) => submission.submissionId),
-        ),
-      );
+      const nextSelection = getLuoguScanCompletionSelection({
+        submissions,
+        rules: next,
+        lastSubmissionId: luoguPreviewResult?.lastSubmissionId ?? null,
+        skippedSubmissionIds: new Set<string>(),
+      });
+      setSelectedLuoguSubmissionIds(nextSelection.defaultSelectedSubmissionIds);
       return next;
     });
 
@@ -5952,66 +3927,33 @@ export default function App() {
       toast.success("导入规则已保存");
     }
 
-    setSkippedLuoguSubmissionIds(new Set<string>());
-    setLuoguPreparedNotesById({});
-    setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById({});
-    setEditedLuoguPreparedMarkdownIds(new Set<string>());
-    setReviewSelectedLuoguSubmissionIds(new Set<string>());
-    setCurrentlyPreparingLuoguId(null);
-    setLuoguPrepareProgress(null);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguWriteResultsById({});
-    setCurrentlyWritingLuoguId(null);
-    setLuoguWriteProgress(null);
-    setActiveLuoguPreparedPreviewId(null);
-    setActiveLuoguPreviewDetailTab("rendered");
-    setLuoguImportStep("scan");
+    resetLuoguPreparationWorkspace();
   };
 
   const toggleLuoguSubmissionSelection = (submission: PreviewLuoguSubmission) => {
     const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-    if (!candidateState?.canSelect || isPreparingSelectedLuogu || isWritingPreparedLuogu) return;
-    setSelectedLuoguSubmissionIds((current) => {
-      const next = new Set(current);
-      if (next.has(submission.submissionId)) {
-        next.delete(submission.submissionId);
-      } else {
-        next.add(submission.submissionId);
-      }
-      return next;
-    });
+    if (!candidateState?.canSelect || luoguImportCenterView.isSubmissionSelectionDisabled) return;
+    luoguImportWorkflow.toggleSubmissionSelection(submission.submissionId);
   };
 
   const handleToggleAllLuoguSelectableSubmissions = () => {
-    if (luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu) return;
+    if (luoguImportCenterView.isSelectAllDisabled) return;
 
-    const selectableIds = new Set(luoguSelectableSubmissionIds);
-    setSelectedLuoguSubmissionIds((current) => {
-      if (areAllLuoguSelectableSubmissionsSelected) {
-        const next = new Set(current);
-        selectableIds.forEach((submissionId) => next.delete(submissionId));
-        return next;
-      }
-      const next = new Set(current);
-      selectableIds.forEach((submissionId) => next.add(submissionId));
-      return next;
-    });
+    setSelectedLuoguSubmissionIds((current) =>
+      getNextLuoguSelectableSelection({
+        currentSelection: current,
+        selectableSubmissionIds: luoguSelectableSubmissionIds,
+        areAllSelectableSelected: areAllLuoguSelectableSubmissionsSelected,
+      }),
+    );
   };
 
   const handleStopPreparingLuoguPreviews = () => {
     if (!isPreparingSelectedLuogu) return;
 
     luoguPrepareRunRef.current.cancelled = true;
-    setIsStoppingLuoguPrepare(true);
-    setLuoguPrepareStatusesById((current) =>
-      Object.fromEntries(
-        Object.entries(current).map(([submissionId, status]) => [
-          submissionId,
-          status === "queued" ? "stopped" : status,
-        ]),
-      ) as Record<string, LuoguPrepareItemStatus>,
-    );
+    setLuoguPrepareSourceState(stopLuoguPrepareSourceState);
+    setLuoguPrepareStatusesById(stopQueuedLuoguPrepareStatuses);
     toast.info("已请求停止生成预览；当前请求返回后会停止队列");
   };
 
@@ -6160,20 +4102,15 @@ export default function App() {
         return;
       }
     }
-    const selectedSubmissions = luoguPreviewResult.submissions.filter((submission) => selectedLuoguSubmissionIds.has(submission.submissionId));
-    const queue = selectedSubmissions.filter((submission, index, submissions) => {
-      const candidateState = luoguSubmissionCandidateStates[submission.submissionId];
-      return (
-        submissions.findIndex((item) => item.submissionId === submission.submissionId) === index &&
-        candidateState?.canSelect &&
-        !skippedLuoguSubmissionIds.has(submission.submissionId) &&
-        luoguPrepareStatusesById[submission.submissionId] !== "running" &&
-        luoguPrepareStatusesById[submission.submissionId] !== "queued" &&
-        !hasReusableLuoguPreparedPreview(submission.submissionId)
-      );
+    const prepareSelectionPlan = getLuoguPrepareSelectionPlan({
+      submissions: luoguPreviewResult.submissions,
+      selectedSubmissionIds: selectedLuoguSubmissionIds,
+      candidateStates: luoguSubmissionCandidateStates,
+      skippedSubmissionIds: skippedLuoguSubmissionIds,
+      prepareStatusesById: luoguPrepareStatusesById,
+      hasReusablePreview: hasReusableLuoguPreparedPreview,
     });
-    const reusablePreviewSubmissions = selectedSubmissions.filter((submission) => hasReusableLuoguPreparedPreview(submission.submissionId));
-    const ignoredCount = selectedSubmissions.length - queue.length - reusablePreviewSubmissions.length;
+    const { selectedSubmissions, queue, reusablePreviewSubmissions, ignoredCount } = prepareSelectionPlan;
 
     if (selectedSubmissions.length === 0) {
       toast.error("请选择要生成预览的洛谷提交");
@@ -6182,13 +4119,11 @@ export default function App() {
 
     if (queue.length === 0) {
       luoguPrepareRunRef.current.cancelled = true;
-      setIsPreparingSelectedLuogu(false);
-      setIsStoppingLuoguPrepare(false);
+      setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
       setCurrentlyPreparingLuoguId(null);
-      setLuoguPrepareProgress(null);
       setLuoguPrepareStatusesById({});
       if (reusablePreviewSubmissions.length > 0) {
-        setReviewSelectedLuoguSubmissionIds(new Set(reusablePreviewSubmissions.map((submission) => submission.submissionId)));
+        setReviewSelectedLuoguSubmissionIds(getLuoguSubmissionIdSet(reusablePreviewSubmissions));
         setActiveLuoguPreparedPreviewId(reusablePreviewSubmissions[0].submissionId);
         setActiveLuoguPreviewDetailTab("rendered");
         setLuoguImportStep("preview");
@@ -6206,21 +4141,13 @@ export default function App() {
     const runId = luoguPrepareRunSeqRef.current + 1;
     luoguPrepareRunSeqRef.current = runId;
     luoguPrepareRunRef.current = { id: runId, cancelled: false };
-    setIsPreparingSelectedLuogu(true);
-    setIsStoppingLuoguPrepare(false);
-    setLuoguPrepareProgress({
-      current: 0,
-      total: queue.length,
-      succeeded: reusablePreviewSubmissions.length,
-      failed: 0,
-      skipped: ignoredCount,
-    });
+    setLuoguPrepareSourceState(startLuoguPrepareSourceState(createInitialLuoguPrepareProgress({
+      queueCount: queue.length,
+      reusablePreviewCount: reusablePreviewSubmissions.length,
+      ignoredCount,
+    })));
     setLuoguPrepareErrorsById({});
-    setLuoguPrepareStatusesById(
-      Object.fromEntries(
-        queue.map((submission) => [submission.submissionId, "queued"]),
-      ) as Record<string, LuoguPrepareItemStatus>,
-    );
+    setLuoguPrepareStatusesById(createQueuedLuoguPrepareStatuses(queue));
     setLuoguWriteResultsById({});
     let preparedCount = reusablePreviewSubmissions.length;
     let draftCount = 0;
@@ -6229,16 +4156,16 @@ export default function App() {
     let firstPreparedId: string | null = reusablePreviewSubmissions[0]?.submissionId ?? null;
     let completedCount = 0;
     const runningIds = new Set<string>();
-    const reviewSelectionIds = new Set(reusablePreviewSubmissions.map((submission) => submission.submissionId));
+    const reviewSelectionIds = getLuoguSubmissionIdSet(reusablePreviewSubmissions);
 
     const refreshProgress = () => {
-      setLuoguPrepareProgress({
+      setLuoguPrepareSourceState((current) => updateLuoguPrepareSourceProgress(current, {
         current: completedCount,
         total: queue.length,
         succeeded: preparedCount,
         failed: failedCount,
         skipped: skippedCount + ignoredCount,
-      });
+      }));
     };
 
     const syncCurrentlyPreparingId = () => {
@@ -6323,15 +4250,7 @@ export default function App() {
       );
 
       if (luoguPrepareRunRef.current.cancelled) {
-        setLuoguPrepareStatusesById((current) => {
-          const next = { ...current };
-          queue.forEach((item) => {
-            if (next[item.submissionId] === "queued" || next[item.submissionId] === "running") {
-              next[item.submissionId] = "stopped";
-            }
-          });
-          return next;
-        });
+        setLuoguPrepareStatusesById((current) => finishLuoguPrepareStatuses(current, true));
       }
 
       if (firstPreparedId) {
@@ -6361,9 +4280,7 @@ export default function App() {
           return next;
         });
         setCurrentlyPreparingLuoguId(null);
-        setLuoguPrepareProgress(null);
-        setIsPreparingSelectedLuogu(false);
-        setIsStoppingLuoguPrepare(false);
+        setLuoguPrepareSourceState(createIdleLuoguPrepareSourceState());
       }
     }
   };
@@ -6375,8 +4292,7 @@ export default function App() {
       return;
     }
 
-    setIsWritingPreparedLuogu(true);
-    setLuoguWriteProgress({ current: 0, total: preparedNotesToWrite.length });
+    setLuoguWriteSourceState(startLuoguWriteSourceState(preparedNotesToWrite.length));
     let writtenCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
@@ -6386,7 +4302,15 @@ export default function App() {
       for (let index = 0; index < preparedNotesToWrite.length; index += 1) {
         const prepared = preparedNotesToWrite[index];
         setCurrentlyWritingLuoguId(prepared.submissionId);
-        setLuoguWriteProgress({ current: index + 1, total: preparedNotesToWrite.length });
+        setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
+          createLuoguWriteProgress({
+            total: current.progress?.total ?? preparedNotesToWrite.length,
+            current: index + 1,
+            writtenCount,
+            failedCount,
+            skippedCount,
+          }),
+        ));
 
         try {
           const initialWriteMode: LuoguWriteMode = luoguImportRules.writeStrategy === "overwrite" ? "overwrite" : "createNew";
@@ -6418,6 +4342,15 @@ export default function App() {
             writtenCount += 1;
             if (result.relativePath) lastWrittenPath = result.relativePath;
           }
+          setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
+            createLuoguWriteProgress({
+              total: current.progress?.total ?? preparedNotesToWrite.length,
+              current: current.progress?.current ?? index + 1,
+              writtenCount,
+              failedCount,
+              skippedCount,
+            }),
+          ));
         } catch (e) {
           failedCount += 1;
           setLuoguWriteResultsById((current) => ({
@@ -6432,6 +4365,15 @@ export default function App() {
               commitStatus: "failed",
             },
           }));
+          setLuoguWriteSourceState((current) => updateLuoguWriteSourceProgress(current,
+            createLuoguWriteProgress({
+              total: current.progress?.total ?? preparedNotesToWrite.length,
+              current: current.progress?.current ?? index + 1,
+              writtenCount,
+              failedCount,
+              skippedCount,
+            }),
+          ));
         }
       }
 
@@ -6447,8 +4389,7 @@ export default function App() {
       toast.success(`写入完成：成功 ${writtenCount}，跳过 ${skippedCount}，失败 ${failedCount}`);
     } finally {
       setCurrentlyWritingLuoguId(null);
-      setLuoguWriteProgress(null);
-      setIsWritingPreparedLuogu(false);
+      setLuoguWriteSourceState(createIdleLuoguWriteSourceState());
     }
   };
 
@@ -6456,21 +4397,7 @@ export default function App() {
     const submissionId = activeLuoguPreparedPreview?.submissionId;
     if (!submissionId) return;
 
-    setLuoguPreparedNotesById((current) => {
-      const prepared = current[submissionId];
-      if (!prepared || prepared.markdown === markdown) return current;
-      return {
-        ...current,
-        [submissionId]: {
-          ...prepared,
-          markdown,
-        },
-      };
-    });
-    setEditedLuoguPreparedMarkdownIds((current) => {
-      if (current.has(submissionId)) return current;
-      return new Set([...current, submissionId]);
-    });
+    luoguImportWorkflow.updatePreparedMarkdown(submissionId, markdown);
   };
 
   const toggleLuoguReviewSelection = (submissionId: string) => {
@@ -6478,15 +4405,7 @@ export default function App() {
     const prepared = luoguPreparedNotesById[submissionId];
     if (!prepared || prepared.skipped || prepared.aiStatus === "failed" || !prepared.markdown.trim() || luoguWriteResultsById[submissionId]) return;
 
-    setReviewSelectedLuoguSubmissionIds((current) => {
-      const next = new Set(current);
-      if (next.has(submissionId)) {
-        next.delete(submissionId);
-      } else {
-        next.add(submissionId);
-      }
-      return next;
-    });
+    luoguImportWorkflow.toggleReviewSelection(submissionId);
   };
 
   const handleImportLuogu = async () => {
@@ -6580,22 +4499,6 @@ export default function App() {
       setEditorCursorOffset(cursorOffset);
       setAiContextSelectionRange(range);
     });
-  }, []);
-
-  const handleEditorScroll = useCallback((ratio: number) => {
-    syncEditorPreviewScroll("editor", ratio);
-  }, [syncEditorPreviewScroll]);
-
-  const handlePreviewScroll = useCallback((ratio: number) => {
-    syncEditorPreviewScroll("preview", ratio);
-  }, [syncEditorPreviewScroll]);
-
-  const handleEditorScrollApiChange = useCallback((api: MarkdownEditorScrollApi | null) => {
-    editorScrollApiRef.current = api;
-  }, []);
-
-  const handlePreviewScrollApiChange = useCallback((api: MarkdownPreviewScrollApi | null) => {
-    previewScrollApiRef.current = api;
   }, []);
 
   const applyLoadedMarkdown = useCallback((content: string, path: string | null) => {
@@ -6782,7 +4685,7 @@ export default function App() {
     setIsTagNormalizationDetailsOpen(false);
   }, [frontmatter.canEditTags, frontmatter.canMerge, frontmatterDisplayTags, tagNormalizationPlan, tagNormalizationSuggestions.length, updateFrontmatter]);
   const handleScanLegacyTags = useCallback(async () => {
-    if (isScanningTagNormalization) return;
+    if (tagNormalizationScanTaskView.isBusy) return;
 
     setIsScanningTagNormalization(true);
     setTagNormalizationScanError(null);
@@ -6834,7 +4737,7 @@ export default function App() {
     } finally {
       setIsScanningTagNormalization(false);
     }
-  }, [isScanningTagNormalization, noteFiles, tagTaxonomyUserConfig]);
+  }, [noteFiles, tagNormalizationScanTaskView.isBusy, tagTaxonomyUserConfig]);
   const toggleTagNormalizationScanSelection = useCallback((path: string) => {
     setSelectedTagNormalizationScanPaths((current) => {
       const next = new Set(current);
@@ -6847,13 +4750,13 @@ export default function App() {
     });
   }, []);
   const selectAllTagNormalizationScanResults = useCallback(() => {
-    setSelectedTagNormalizationScanPaths(new Set(tagNormalizationScanResults?.map((result) => result.path) ?? []));
+    setSelectedTagNormalizationScanPaths(getAllTagNormalizationScanSelection(tagNormalizationScanResults));
   }, [tagNormalizationScanResults]);
   const clearTagNormalizationScanSelection = useCallback(() => {
     setSelectedTagNormalizationScanPaths(new Set());
   }, []);
   const applySelectedTagNormalizationScanResults = useCallback(async () => {
-    if (!tagNormalizationScanResults || selectedTagNormalizationScanStats.noteCount === 0 || isApplyingTagNormalizationScan) return;
+    if (!tagNormalizationScanResults || selectedTagNormalizationScanStats.noteCount === 0 || tagNormalizationApplyTaskView.isBusy) return;
 
     const selectedPaths = new Set(selectedTagNormalizationScanPaths);
     const confirmMessage = [
@@ -6875,12 +4778,13 @@ export default function App() {
     });
     if (!confirmed) return;
 
-    setIsApplyingTagNormalizationScan(true);
+    setTagNormalizationApplyTaskState(startTaskState(selectedTagNormalizationScanStats.noteCount));
     const failures: TagNormalizationApplyFailure[] = [];
     let successCount = 0;
     let normalizedTagCount = 0;
     let duplicateTagCount = 0;
     let skippedCount = 0;
+    let processedCount = 0;
 
     for (const result of tagNormalizationScanResults) {
       if (!selectedPaths.has(result.path)) continue;
@@ -6930,6 +4834,14 @@ export default function App() {
           path: result.path,
           error: getErrorMessage(error),
         });
+      } finally {
+        processedCount += 1;
+        setTagNormalizationApplyTaskState((task) => updateTaskProgress(task, {
+          current: processedCount,
+          succeeded: successCount,
+          failed: failures.length,
+          skipped: skippedCount,
+        }));
       }
     }
 
@@ -6941,13 +4853,12 @@ export default function App() {
       failures,
     });
     setSelectedTagNormalizationScanPaths(new Set());
-    setIsApplyingTagNormalizationScan(false);
+    setTagNormalizationApplyTaskState((task) => finishTaskState(task));
     void handleScanLegacyTags();
   }, [
     applyLoadedMarkdown,
     currentFilePath,
     handleScanLegacyTags,
-    isApplyingTagNormalizationScan,
     isDirty,
     requestConfirm,
     selectedTagNormalizationScanPaths,
@@ -6955,6 +4866,7 @@ export default function App() {
     selectedTagNormalizationScanStats.duplicateCount,
     selectedTagNormalizationScanStats.rewriteCount,
     selectedTagNormalizationScanStats.suggestionCount,
+    tagNormalizationApplyTaskView.isBusy,
     tagNormalizationScanResults,
     tagTaxonomyUserConfig,
   ]);
@@ -7155,8 +5067,9 @@ export default function App() {
   };
 
   const handleSelectFile = (path: string, options?: { closeSearchOnSuccess?: boolean }): boolean => {
-    setActiveTreeDirectoryPath(null);
-    setActiveTreeFilePath(path);
+    const selection = getTreeSelectionAfterFileSelect(path);
+    setActiveTreeDirectoryPath(selection.activeTreeDirectoryPath);
+    setActiveTreeFilePath(selection.activeTreeFilePath);
     if (path === currentFilePath) {
       setActiveWorkingCopyId(getNoteWorkingCopyId(path));
       setActiveWorkspaceTabId(getNoteWorkingCopyId(path));
@@ -7232,10 +5145,10 @@ export default function App() {
 
     const noteWorkingCopyId = getNoteWorkingCopyId(path);
     const isClosingActiveTab = currentFilePath === path || activeWorkspaceTabId === noteWorkingCopyId;
-    const visibleNoteTabsAfterClose = openTabs.filter((item) => item.kind === "file" && item.path && item.path !== path);
+    const nextPathAfterClose = getNextOpenTabPathAfterClose(openTabs, path);
 
     const nextTabs = openTabPaths.filter((tabPath) => tabPath !== path);
-    setOpenTabPaths(visibleNoteTabsAfterClose.length === 0 ? [] : nextTabs);
+    setOpenTabPaths(nextPathAfterClose === null ? [] : nextTabs);
     setWorkingCopies((current) => {
       const next = { ...current };
       delete next[noteWorkingCopyId];
@@ -7247,13 +5160,8 @@ export default function App() {
     setPendingFileSelection(null);
     setIsDirty(false);
 
-    const visibleTabIndex = openTabs.findIndex((item) => item.kind === "file" && item.path === path);
-    const nextPath =
-      visibleNoteTabsAfterClose[visibleTabIndex]?.path ??
-      visibleNoteTabsAfterClose[visibleTabIndex - 1]?.path ??
-      null;
-    if (nextPath) {
-      finishFileSelection(nextPath, false);
+    if (nextPathAfterClose) {
+      finishFileSelection(nextPathAfterClose, false);
     } else {
       setActiveWorkingCopyId(null);
       setCurrentFilePath(null);
@@ -7509,119 +5417,39 @@ export default function App() {
   };
 
   const beginSettingsCenterResize = (handle: SettingsResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampSettingsCenterRect(isSettingsCenterMaximized ? getMaximizedSettingsCenterRect() : settingsCenterRect);
     const panel = settingsCenterPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    const cursor = getSettingsCenterResizeCursor(handle);
-    let latestRect = startRect;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = cursor;
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top, width, height";
-    }
     if (isSettingsCenterMaximized) setSettingsCenterRect(startRect);
     setIsSettingsCenterMaximized(false);
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.width = `${rect.width}px`;
-      panel.style.height = `${rect.height}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      const nextRect = getResizedSettingsCenterRect(handle, startRect, moveEvent.clientX - startX, moveEvent.clientY - startY);
-      latestRect = nextRect;
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampSettingsCenterRect(latestRect);
-      latestRect = finalRect;
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setSettingsCenterRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: getSettingsCenterResizeCursor(handle),
+      panel,
+      panelWillChange: "left, top, width, height",
+      getNextRect: ({ startRect, deltaX, deltaY }) => getResizedSettingsCenterRect(handle, startRect, deltaX, deltaY),
+      getFinalRect: clampSettingsCenterRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, true),
+      onCommit: setSettingsCenterRect,
+    });
   };
 
   const beginLuoguDialogResize = (handle: SettingsResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampLuoguDialogRect(isLuoguDialogMaximized ? getMaximizedLuoguDialogRect() : luoguDialogRect);
     const panel = luoguDialogPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    const cursor = getSettingsCenterResizeCursor(handle);
-    let latestRect = startRect;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = cursor;
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top, width, height";
-    }
     if (isLuoguDialogMaximized) setLuoguDialogRect(startRect);
     setIsLuoguDialogMaximized(false);
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.width = `${rect.width}px`;
-      panel.style.height = `${rect.height}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      const nextRect = getResizedLuoguDialogRect(handle, startRect, moveEvent.clientX - startX, moveEvent.clientY - startY);
-      latestRect = nextRect;
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampLuoguDialogRect(latestRect);
-      latestRect = finalRect;
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setLuoguDialogRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: getSettingsCenterResizeCursor(handle),
+      panel,
+      panelWillChange: "left, top, width, height",
+      getNextRect: ({ startRect, deltaX, deltaY }) => getResizedLuoguDialogRect(handle, startRect, deltaX, deltaY),
+      getFinalRect: clampLuoguDialogRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, true),
+      onCommit: setLuoguDialogRect,
+    });
   };
 
   const beginSettingsCenterDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -7630,59 +5458,23 @@ export default function App() {
     if (target.closest("button, input, textarea, select, a, [role='button'], [data-no-window-drag='true']")) return;
     if (isSettingsCenterMaximized) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampSettingsCenterRect(settingsCenterRect);
     const panel = settingsCenterPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    let latestRect = startRect;
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top";
-    }
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      latestRect = clampSettingsCenterRect({
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: "grabbing",
+      panel,
+      panelWillChange: "left, top",
+      getNextRect: ({ startRect, deltaX, deltaY }) => clampSettingsCenterRect({
         ...startRect,
-        left: startRect.left + moveEvent.clientX - startX,
-        top: startRect.top + moveEvent.clientY - startY,
-      });
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampSettingsCenterRect(latestRect);
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setSettingsCenterRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+        left: startRect.left + deltaX,
+        top: startRect.top + deltaY,
+      }),
+      getFinalRect: clampSettingsCenterRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, false),
+      onCommit: setSettingsCenterRect,
+    });
   };
 
   const beginLuoguDialogDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -7691,59 +5483,23 @@ export default function App() {
     if (target.closest("button, input, textarea, select, a, [role='button'], [data-no-window-drag='true']")) return;
     if (isLuoguDialogMaximized) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const startRect = clampLuoguDialogRect(luoguDialogRect);
     const panel = luoguDialogPanelRef.current;
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    const previousPanelWillChange = panel?.style.willChange ?? "";
-    let latestRect = startRect;
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-    if (panel) {
-      panel.style.transition = "none";
-      panel.style.animation = "none";
-      panel.style.willChange = "left, top";
-    }
-
-    const applyRectToPanel = (rect: SettingsCenterRect) => {
-      if (!panel) return;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.transform = "none";
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      latestRect = clampLuoguDialogRect({
+    beginFloatingPanelPointerSession({
+      event,
+      startRect,
+      cursor: "grabbing",
+      panel,
+      panelWillChange: "left, top",
+      getNextRect: ({ startRect, deltaX, deltaY }) => clampLuoguDialogRect({
         ...startRect,
-        left: startRect.left + moveEvent.clientX - startX,
-        top: startRect.top + moveEvent.clientY - startY,
-      });
-      applyRectToPanel(latestRect);
-    };
-
-    const handlePointerUp = () => {
-      const finalRect = clampLuoguDialogRect(latestRect);
-      applyRectToPanel(finalRect);
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      if (panel) {
-        panel.style.willChange = previousPanelWillChange;
-      }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      setLuoguDialogRect(finalRect);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+        left: startRect.left + deltaX,
+        top: startRect.top + deltaY,
+      }),
+      getFinalRect: clampLuoguDialogRect,
+      applyRect: (rect) => applyFloatingPanelRect(panel, rect, false),
+      onCommit: setLuoguDialogRect,
+    });
   };
 
   const handleCloseWindow = async () => {
@@ -7756,14 +5512,14 @@ export default function App() {
 
   const openSettingsSection = (target: SettingsSection | SettingsCategory) => {
     cancelPendingSettingsCenterCloseCleanup();
-    const nextPage =
-      target in SETTINGS_SECTION_FALLBACK
-        ? settingsCenterHostRef.current?.openSection(target as SettingsCategory)
-        : settingsCenterHostRef.current?.openPage(target as SettingsSection);
+    const openTarget = getSettingsOpenTarget(target, SETTINGS_SECTION_FALLBACK);
+    const nextPage = openTarget.type === "category"
+      ? settingsCenterHostRef.current?.openSection(openTarget.category)
+      : settingsCenterHostRef.current?.openPage(openTarget.page);
     if (!nextPage) return;
-    if (nextPage.startsWith("ai-") && !aiConfigDraft && !isLoadingAiConfig) {
+    if (shouldEnsureAiConfigForSettingsPage(nextPage) && !aiConfigDraft && !isLoadingAiConfig) {
       void ensureAiConfigLoadedForSettings();
-    } else if (nextPage === "diagnostics-search" && !aiConfigDraft && !isLoadingAiConfig) {
+    } else if (shouldRefreshAiConfigForSettingsDiagnostics(nextPage) && !aiConfigDraft && !isLoadingAiConfig) {
       setIsLoadingAiConfig(true);
       void refreshAiConfig()
         .catch((e) => toast.error(`AI 配置读取失败：${e}`))
@@ -7879,10 +5635,7 @@ export default function App() {
     void handleOpenBlog();
   };
 
-  const activityButtonClass = (_item: ActivityBarItem) =>
-    cn(
-      "app-activity-button relative h-12 w-12 rounded-md",
-    );
+  const activityButtonClass = (_item: ActivityBarItem) => getActivityButtonClassName();
 
   // Ctrl+S / Cmd+S 保存当前笔记
   useEffect(() => {
@@ -7925,42 +5678,6 @@ export default function App() {
   }, [appZoom]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!mediaQuery) return;
-
-    const updateSystemTheme = () => {
-      setSystemTheme(mediaQuery.matches ? "dark" : "light");
-    };
-
-    updateSystemTheme();
-    mediaQuery.addEventListener?.("change", updateSystemTheme);
-    return () => mediaQuery.removeEventListener?.("change", updateSystemTheme);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.theme = resolvedTheme;
-    root.dataset.themeMode = appTheme;
-    root.classList.toggle("dark", resolvedTheme === "dark");
-    window.localStorage.setItem(THEME_STORAGE_KEY, appTheme);
-  }, [appTheme, resolvedTheme]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const entries = Object.entries(settingsThemeVariables);
-
-    for (const [name, value] of entries) {
-      root.style.setProperty(name, String(value));
-    }
-
-    return () => {
-      for (const [name] of entries) {
-        root.style.removeProperty(name);
-      }
-    };
-  }, [settingsThemeVariables]);
-
-  useEffect(() => {
     window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(uiScale));
   }, [uiScale]);
 
@@ -7969,8 +5686,8 @@ export default function App() {
   }, [contentZoom]);
 
   useLayoutEffect(() => {
-    editorScrollApiRef.current?.requestMeasure();
-  }, [appZoom, contentZoom, editorFontSize, readingDensity]);
+    requestEditorMeasure();
+  }, [appZoom, contentZoom, editorFontSize, readingDensity, requestEditorMeasure]);
 
   useEffect(() => {
     return () => {
@@ -8010,14 +5727,6 @@ export default function App() {
     setAppearanceContrast(activeSettingsTheme.theme.contrast);
     setTranslucentSidebar(activeSettingsTheme.theme.opaqueWindows);
   }, [activeSettingsTheme]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(SETTINGS_THEME_V1_STORAGE_KEY, JSON.stringify(settingsThemeState));
-    } catch {
-      // A storage failure should not prevent Settings Center from opening.
-    }
-  }, [settingsThemeState]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("app-translucent-sidebar", translucentSidebar);
@@ -8061,7 +5770,7 @@ export default function App() {
   }, [isLoadingPrompt, selectedPromptFileName]);
 
   useEffect(() => {
-    window.localStorage.setItem(LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
+    writeStoredLeftSidebarWidth(leftSidebarWidth);
   }, [leftSidebarWidth]);
 
   useEffect(() => {
@@ -8069,7 +5778,7 @@ export default function App() {
       aiSidebarResizePerfRef.current.widthStateCommitCount += 1;
       incrementNoteXAiPerfCounter("appResizeStateCommit");
     }
-    window.localStorage.setItem(AI_SIDEBAR_WIDTH_STORAGE_KEY, String(aiSidebarWidth));
+    writeStoredAiSidebarWidth(aiSidebarWidth);
     if (APP_RESIZE_PERF_DEBUG) {
       aiSidebarResizePerfRef.current.localStorageWriteCount += 1;
       incrementNoteXAiPerfCounter("appResizeLocalStorageWrite");
@@ -8077,7 +5786,7 @@ export default function App() {
   }, [aiSidebarWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(EDITOR_PREVIEW_RATIO_STORAGE_KEY, String(editorPreviewRatio));
+    writeStoredEditorPreviewRatio(editorPreviewRatio);
   }, [editorPreviewRatio]);
 
   useEffect(() => {
@@ -8165,16 +5874,7 @@ export default function App() {
     getLuoguConfig()
       .then((config) => {
         if (cancelled) return;
-        setLuoguConfigUid(config.luogu.uid);
-        setLuoguConfigClientId(config.luogu.client_id);
-        setLuoguConfigLastSubmissionId(
-          config.luogu.last_submission_id === null ? "" : String(config.luogu.last_submission_id),
-        );
-        setLuoguConfigAiConfigured(
-          config.ai.base_url.trim() !== "" &&
-          config.ai.api_key.trim() !== "" &&
-          config.ai.model.trim() !== "",
-        );
+        applyLuoguConfigFormState(config);
       })
       .catch((e: Error) => {
         if (!cancelled) {
@@ -8239,125 +5939,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isSearchOpen) return;
-
-    const timer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [isSearchOpen]);
-
-  useEffect(() => {
-    const query = searchQuery.trim();
-
-    if (!isSearchOpen || query === "") {
-      searchRequestSeqRef.current += 1;
-      setBackendSearchResults([]);
-      setSearchError(null);
-      setIsSearchLoading(false);
-      return;
-    }
-
-    const requestId = searchRequestSeqRef.current + 1;
-    searchRequestSeqRef.current = requestId;
-    setSearchError(null);
-    setBackendSearchResults([]);
-    setIsSearchLoading(true);
-
-    const timer = window.setTimeout(() => {
-      searchNotes(query)
-        .then((results) => {
-          if (searchRequestSeqRef.current !== requestId) return;
-          setBackendSearchResults(results);
-          setSearchError(null);
-        })
-        .catch((e: Error) => {
-          if (searchRequestSeqRef.current !== requestId) return;
-          setBackendSearchResults([]);
-          setSearchError(e.message || "搜索失败");
-        })
-        .finally(() => {
-          if (searchRequestSeqRef.current === requestId) {
-            setIsSearchLoading(false);
-          }
-        });
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [isSearchOpen, searchQuery]);
-
-  // 挂载时从后端加载笔记列表
-  useEffect(() => {
-    listNotes()
-      .then((loaded) => {
-        setFiles(loaded);
-        setHasLoadedNotes(true);
-      })
-      .catch((e: Error) => console.error("加载笔记列表失败：", e.message));
-  }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    listen("notes-changed", () => {
-      debugTagManager("notes.changed", {
-        hasTagManagerSession: Boolean(tagManagerSessionRef.current),
-        currentFilePath: currentFilePathRef.current,
-        refreshList: true,
-      });
-      listNotes()
-        .then((updated) => {
-          if (!cancelled) {
-            setFiles(updated);
-            setHasLoadedNotes(true);
-          }
-        })
-        .catch((e: Error) =>
-          console.error("收到 notes-changed 后刷新列表失败：", e.message),
-        );
-    })
-      .then((fn) => {
-        if (cancelled) {
-          // 组件已卸载，立即取消订阅
-          fn();
-        } else {
-          unlisten = fn;
-        }
-      })
-      .catch((e: Error) =>
-        console.error("注册 notes-changed 监听失败：", e.message),
-      );
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoadedNotes) return;
-
-    const validPaths = new Set(noteFiles.map((file) => file.path));
-    setOpenTabPaths((current) => current.filter((path) => validPaths.has(path)));
-
-    if (currentFilePath && !validPaths.has(currentFilePath)) {
-      setCurrentFilePath(null);
-    }
-  }, [currentFilePath, noteFiles, hasLoadedNotes]);
-
-  useEffect(() => {
-    if (!currentFilePath) return;
-
-    setOpenTabPaths((current) => {
-      if (current.includes(currentFilePath)) return current;
-      return [...current, currentFilePath];
-    });
-  }, [currentFilePath]);
-
-  useEffect(() => {
     if (!currentFilePath) return;
     const isReviewActive = openReviewTabs.some((tab) => tab.id === activeWorkspaceTabId);
     const noteWorkingCopyId = getNoteWorkingCopyId(currentFilePath);
@@ -8365,38 +5946,6 @@ export default function App() {
       setActiveWorkspaceTabId(noteWorkingCopyId);
     }
   }, [activeWorkspaceTabId, currentFilePath, openReviewTabs]);
-
-  useEffect(() => {
-    if (!hasLoadedNotes || hasRestoredOpenTabsRef.current) return;
-
-    const validPaths = new Set(noteFiles.map((file) => file.path));
-    const restoredPaths = openTabPaths.filter((path) => validPaths.has(path));
-    const storedActivePath = initialOpenTabsActivePathRef.current;
-    const activePath =
-      storedActivePath && validPaths.has(storedActivePath)
-        ? storedActivePath
-        : restoredPaths[0] ?? null;
-
-    hasRestoredOpenTabsRef.current = true;
-    if (restoredPaths.length !== openTabPaths.length) {
-      setOpenTabPaths(restoredPaths);
-    }
-    if (!currentFilePath && activePath) {
-      setCurrentFilePath(activePath);
-    }
-  }, [currentFilePath, noteFiles, hasLoadedNotes, openTabPaths]);
-
-  useEffect(() => {
-    window.localStorage.setItem(OPEN_TABS_STORAGE_KEY, JSON.stringify(openTabPaths));
-  }, [openTabPaths]);
-
-  useEffect(() => {
-    if (currentFilePath) {
-      window.localStorage.setItem(OPEN_TABS_ACTIVE_STORAGE_KEY, currentFilePath);
-    } else {
-      window.localStorage.removeItem(OPEN_TABS_ACTIVE_STORAGE_KEY);
-    }
-  }, [currentFilePath]);
 
   // 当选中文件变化时，从后端读取内容
   // 使用 cancelled flag 防御 race condition：
@@ -8463,23 +6012,11 @@ export default function App() {
     };
   }, [activeWorkingCopyId, applyLoadedMarkdown, currentFilePath, displayFiles, replaceEditorDocument]);
 
-  const folderNameValidationMessage =
-    dialogMode === "create-folder" && dialogValue.trim()
-      ? validateNamePart(dialogValue, "folder")
-      : null;
-  const folderParentValidationMessage =
-    dialogMode === "create-folder" && folderParentDirectory.trim()
-      ? validateDirectoryPathInput(folderParentDirectory)
-      : null;
-  const folderDialogHelpText =
-    folderNameValidationMessage ??
-    folderParentValidationMessage ??
-    "名称不能包含路径穿越或 Windows 非法字符";
-  const canConfirmFolderDialog =
-    dialogMode === "create-folder" &&
-    Boolean(dialogValue.trim()) &&
-    !folderNameValidationMessage &&
-    !folderParentValidationMessage;
+  const folderDialogState = getFolderDialogState(dialogMode, dialogValue, folderParentDirectory);
+  const folderNameValidationMessage = folderDialogState.nameValidationMessage;
+  const folderParentValidationMessage = folderDialogState.parentValidationMessage;
+  const folderDialogHelpText = folderDialogState.helpText;
+  const canConfirmFolderDialog = folderDialogState.canConfirm;
 
   void luoguSettingsStatusTone;
 
@@ -8988,7 +6525,7 @@ export default function App() {
                       type="button"
                       className="text-foreground underline-offset-4 hover:underline disabled:pointer-events-none disabled:opacity-50"
                       onClick={openLuoguRulesSettingsFromDialog}
-                      disabled={isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                      disabled={isLuoguImportCenterBusyNow}
                       data-no-window-drag="true"
                     >
                       规则设置
@@ -9014,7 +6551,7 @@ export default function App() {
                           : "border-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                       )}
                       onClick={() => setLuoguImportCenterTab(tab.id)}
-                      disabled={isImportingLuogu || isPreparingSelectedLuogu || isWritingPreparedLuogu || isScanningLuoguPreview || isSyncingLuogu}
+                      disabled={isLuoguImportCenterBusyNow}
                       title={tab.label}
                       aria-label={tab.label}
                     >
@@ -9035,7 +6572,7 @@ export default function App() {
                   type="button"
                   className="flex h-8 w-8 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50"
                     onClick={closeLuoguDialog}
-                    disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}
+                    disabled={isLuoguImportCenterBusyNow}
                   title={luoguDialogReturnTarget ? "返回设置中心" : "关闭洛谷导入中心"}
                     aria-label="关闭洛谷导入中心"
                   >
@@ -9081,13 +6618,13 @@ export default function App() {
                                   setLuoguScanMode(option.mode);
                                   setLuoguScanCountLimit(option.count);
                                 }}
-                                disabled={isScanningLuoguPreview}
+                                disabled={luoguImportCenterView.isScanRangeDisabled}
                               >
                                 {option.label}
                               </button>
                             ))}
                           </div>
-                          {isScanningLuoguPreview ? (
+                          {luoguImportCenterView.isScanRunning ? (
                             <Button
                               size="sm"
                               variant="secondary"
@@ -9097,7 +6634,7 @@ export default function App() {
                               <Pause className="mr-1.5 h-4 w-4" />
                               暂停扫描
                             </Button>
-                          ) : isLuoguScanPaused ? (
+                          ) : luoguImportCenterView.isScanPaused ? (
                             <div className="mt-1 grid gap-1.5">
                               <Button
                                 size="sm"
@@ -9121,7 +6658,7 @@ export default function App() {
                               size="sm"
                               className="mt-1 h-10 w-full text-base font-semibold"
                               onClick={handlePreviewLuoguSubmissions}
-                              disabled={!luoguConfigured || isLoadingLuoguConfig || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+                              disabled={luoguImportCenterView.isStartScanDisabled}
                             >
                               开始扫描
                             </Button>
@@ -9137,7 +6674,7 @@ export default function App() {
                                     setLuoguScanMode("count");
                                     setLuoguScanCountLimit(200);
                                   }}
-                                  disabled={isScanningLuoguPreview}
+                                  disabled={luoguImportCenterView.isScanRangeDisabled}
                                 >
                                   最近 200 条
                                 </button>
@@ -9150,7 +6687,7 @@ export default function App() {
                                       setLuoguScanMode("days");
                                       setLuoguScanDaysLimit(option);
                                     }}
-                                    disabled={isScanningLuoguPreview}
+                                    disabled={luoguImportCenterView.isScanRangeDisabled}
                                   >
                                     {option} 天
                                   </button>
@@ -9168,16 +6705,8 @@ export default function App() {
                           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                             <div className="shrink-0 text-base font-medium text-foreground">扫描结果</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
-                              {isLuoguScanPaused
-                                ? `扫描已暂停 — ${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
-                                : luoguScanProgress
-                                  ? `正在扫描，已发现 ${luoguScanProgress.foundCount} 条`
-                                  : luoguScanSummary
-                                    ? `${luoguScanSummary.foundCount} 条 / 可导入 ${luoguScanSummary.candidateCount} / 跳过 ${luoguScanSummary.skippedCount}`
-                                    : luoguPreviewResult
-                                      ? `${luoguScanResultStats.total} 条 / 可导入 ${luoguScanResultStats.candidateCount} / 跳过 ${luoguScanResultStats.skippedCount}`
-                                      : "还没有扫描结果。"}
-                              {!isLuoguScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
+                              {luoguScanResultSummaryLabel}
+                              {!luoguImportCenterView.isScanPaused && luoguScanProgress?.waiting && <span className="ml-2 text-foreground">等待下一页...</span>}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center justify-end gap-2">
@@ -9191,30 +6720,20 @@ export default function App() {
                                 size="sm"
                                 className="h-8 px-3 text-xs"
                                 onClick={handlePrepareSelectedLuoguSubmissions}
-                                disabled={
-                                  selectedLuoguImportCount === 0 ||
-                                  (luoguPrepareQueueSubmissions.length === 0 && luoguReusablePreviewCount === 0) ||
-                                  isPreparingSelectedLuogu ||
-                                  isWritingPreparedLuogu ||
-                                  isSyncingLuogu
-                                }
+                                disabled={luoguImportCenterView.isPrepareDisabled}
                               >
-                                {isPreparingSelectedLuogu
-                                  ? `生成中 ${luoguPrepareProgress?.current ?? 0}/${luoguPrepareProgress?.total ?? luoguPrepareQueueSubmissions.length}`
-                                  : luoguPrepareQueueSubmissions.length > 0
-                                    ? `生成预览（${luoguPrepareQueueSubmissions.length}）`
-                                    : `查看预览（${luoguReusablePreviewCount}）`}
+                                {luoguImportCenterView.prepareButtonLabel}
                               </Button>
-                              {isPreparingSelectedLuogu && (
+                              {luoguImportCenterView.showPrepareStopButton && (
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
                                   className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                                   onClick={handleStopPreparingLuoguPreviews}
-                                  disabled={isStoppingLuoguPrepare}
+                                  disabled={luoguImportCenterView.isPrepareStopDisabled}
                                 >
-                                  {isStoppingLuoguPrepare ? "停止中..." : "停止生成"}
+                                  {luoguImportCenterView.prepareStopButtonLabel}
                                 </Button>
                               )}
                               </>
@@ -9232,7 +6751,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {isScanningLuoguPreview && !luoguPreviewResult ? (
+                      {luoguImportCenterView.isScanRunning && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
@@ -9240,7 +6759,7 @@ export default function App() {
                             <div className="mt-1 text-xs text-muted-foreground">请稍候，结果会自动出现在右侧表格。</div>
                           </div>
                         </div>
-                      ) : isLuoguScanPaused && !luoguPreviewResult ? (
+                      ) : luoguImportCenterView.isScanPaused && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <Pause className="mx-auto h-7 w-7 text-muted-foreground" />
@@ -9250,7 +6769,7 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                      ) : luoguScanError && !luoguPreviewResult ? (
+                      ) : luoguImportCenterView.isScanFailed && !luoguPreviewResult ? (
                         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                           <div>
                             <div className="text-sm font-medium text-destructive">扫描失败，请检查洛谷连接或稍后重试。</div>
@@ -9290,7 +6809,7 @@ export default function App() {
                                     ref={luoguSelectAllCheckboxRef}
                                     type="checkbox"
                                     checked={areAllLuoguSelectableSubmissionsSelected}
-                                    disabled={luoguSelectableSubmissionIds.length === 0 || isPreparingSelectedLuogu || isWritingPreparedLuogu || isSyncingLuogu}
+                                    disabled={luoguImportCenterView.isSelectAllDisabled}
                                     className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label={areAllLuoguSelectableSubmissionsSelected ? "取消选择当前可选提交" : "选择当前可选提交"}
                                     onChange={handleToggleAllLuoguSelectableSubmissions}
@@ -9323,7 +6842,7 @@ export default function App() {
                                 });
                                 const submitTime = formatLuoguSubmissionTime(submission.submitTime);
                                 const canOpenPreview = Boolean(prepared && !prepared.skipped && prepared.markdown.trim());
-                                const suggestionTitle = [displayState.detail, displayState.output !== "—" ? displayState.output : ""].filter(Boolean).join(" 路 ");
+                                const suggestionTitle = formatLuoguCandidateSuggestionTitle(displayState);
                                 return (
                                   <div
                                     key={submission.submissionId}
@@ -9342,7 +6861,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={selectedLuoguSubmissionIds.has(submission.submissionId)}
-                                        disabled={!canSelect || (isPreparingSelectedLuogu || isWritingPreparedLuogu)}
+                                        disabled={!canSelect || luoguImportCenterView.isSubmissionSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         aria-label={`选择提交 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguSubmissionSelection(submission)}
@@ -9398,11 +6917,7 @@ export default function App() {
                           <div className="flex min-w-0 items-baseline gap-2">
                             <div className="shrink-0 text-base font-medium text-foreground">审阅预览</div>
                             <div className="min-w-0 truncate text-sm text-muted-foreground">
-                            {luoguPrepareProgress
-                              ? `生成中 ${luoguPrepareProgress.current}/${luoguPrepareProgress.total} 路 成功 ${luoguPrepareProgress.succeeded} 路 失败 ${luoguPrepareProgress.failed}`
-                              : luoguWriteProgress
-                                ? `写入中 ${luoguWriteProgress.current}/${luoguWriteProgress.total}`
-                                : `已生成 ${preparedLuoguNotes.length} 个 路 已选 ${writableLuoguPreparedNotes.length} 个`}
+                            {luoguPreviewReviewSummaryLabel}
                             </div>
                           </div>
                         </div>
@@ -9412,7 +6927,7 @@ export default function App() {
                             size="sm"
                             className="h-8 px-3 text-sm"
                             onClick={() => setLuoguImportStep("scan")}
-                            disabled={isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                            disabled={luoguImportCenterView.isBackToSelectionDisabled}
                           >
                             返回选择
                           </Button>
@@ -9420,17 +6935,10 @@ export default function App() {
                             size="sm"
                             className="h-8 px-3 text-sm"
                             onClick={handleWritePreparedLuoguNotes}
-                            disabled={
-                              writableLuoguPreparedNotes.length === 0 ||
-                              isLoadingLuoguConfig ||
-                              isScanningLuoguPreview ||
-                              isPreparingSelectedLuogu ||
-                              isWritingPreparedLuogu ||
-                              isSyncingLuogu
-                            }
+                            disabled={luoguImportCenterView.isWriteDisabled}
                             title="写入时仅新建文件，不覆盖已有文件"
                           >
-                            {isWritingPreparedLuogu ? "写入中..." : `写入选中 ${writableLuoguPreparedNotes.length}`}
+                            {luoguImportCenterView.writeButtonLabel}
                           </Button>
                         </div>
                       </section>
@@ -9472,7 +6980,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={isReviewSelected}
-                                        disabled={!canReviewSelect || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                                        disabled={!canReviewSelect || luoguImportCenterView.isReviewSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         aria-label={`选择写入 ${submission.submissionId}`}
                                         onChange={() => toggleLuoguReviewSelection(submission.submissionId)}
@@ -9533,7 +7041,7 @@ export default function App() {
                                       <input
                                         type="checkbox"
                                         checked={reviewSelectedLuoguSubmissionIds.has(activeLuoguPreparedPreview.submissionId)}
-                                        disabled={Boolean(luoguWriteResultsById[activeLuoguPreparedPreview.submissionId]) || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                                        disabled={Boolean(luoguWriteResultsById[activeLuoguPreparedPreview.submissionId]) || luoguImportCenterView.isReviewSelectionDisabled}
                                         className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                         onChange={() => toggleLuoguReviewSelection(activeLuoguPreparedPreview.submissionId)}
                                       />
@@ -9609,8 +7117,8 @@ export default function App() {
                         <div className="font-medium text-foreground">手动粘贴源码导入</div>
                         <div>填写题号、提交 ID 和源码后生成单篇笔记。</div>
                       </div>
-                      <Button onClick={handleImportLuogu} disabled={isImportingLuogu || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isScanningLuoguPreview || isSyncingLuogu}>
-                        {isImportingLuogu ? "导入中..." : "手动导入"}
+                      <Button onClick={handleImportLuogu} disabled={luoguImportCenterView.isManualImportDisabled}>
+                        {luoguImportCenterView.manualImportButtonLabel}
                       </Button>
                     </section>
                     <section className="grid shrink-0 grid-cols-3 gap-3">
@@ -9620,7 +7128,7 @@ export default function App() {
                           id="luogu-problem-id"
                           value={luoguProblemId}
                           placeholder="P1234 或 1234"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguProblemId(e.target.value)}
                         />
                       </div>
@@ -9630,7 +7138,7 @@ export default function App() {
                           id="luogu-submission-id"
                           value={luoguSubmissionId}
                           placeholder="12345678"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguSubmissionId(e.target.value)}
                         />
                       </div>
@@ -9640,7 +7148,7 @@ export default function App() {
                           id="luogu-problem-title"
                           value={luoguProblemTitle}
                           placeholder="题目标题"
-                          disabled={isImportingLuogu}
+                          disabled={luoguImportCenterView.isManualImportFormDisabled}
                           onChange={(e) => setLuoguProblemTitle(e.target.value)}
                         />
                       </div>
@@ -9650,7 +7158,7 @@ export default function App() {
                       <textarea
                         id="luogu-source-code"
                         value={luoguSourceCode}
-                        disabled={isImportingLuogu}
+                        disabled={luoguImportCenterView.isManualImportFormDisabled}
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="none"
@@ -9911,13 +7419,13 @@ export default function App() {
       renderActivePage={(activePageKey, activeTarget) => (
         <>
                   <ActiveSettingsPageEffects activePageKey={activePageKey} activeTarget={activeTarget} />
-                  {shouldRenderSettingsPage("general-basics", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("general-basics", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="general-basics">
                       <GeneralSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("appearance-theme", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("appearance-theme", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="appearance-theme">
                       <AppearanceSettingsPage
                         appTheme={appTheme}
@@ -9943,9 +7451,9 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsGroup("ai", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("ai", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="AI">
-                  {shouldRenderSettingsPage("ai-api", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-api", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-api">
                         <SettingsV2Section title="模型与 API">
                           <SettingsV2Card>
@@ -9973,32 +7481,26 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-local-notes", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-local-notes", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-local-notes">
                         <SettingsV2Section title="索引">
                           <SettingsV2Card>
                             <SettingsV2Row title="状态" description="本地笔记索引当前是否可用。">
                               <span className={cn(
                                 "settings-v2-status-badge",
-                                isRebuildingLocalIndex
-                                  ? "settings-v2-status-badge-info"
-                                  : localIndexStatus?.status === "ready"
-                                    ? "settings-v2-status-badge-success"
-                                    : localIndexStatus?.status === "error"
-                                      ? "settings-v2-status-badge-danger"
-                                      : "settings-v2-status-badge-warning",
+                                getLocalIndexStatusBadgeClassName(localIndexTaskView.statusBadgeTone),
                               )}>
-                                {getLocalIndexStatusLabel(localIndexStatus, isRebuildingLocalIndex)}
+                                {localIndexTaskView.statusLabel}
                               </span>
                             </SettingsV2Row>
                             <SettingsV2Row title="笔记数量" description="已纳入索引的 Markdown 笔记数量。">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.noteCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.noteCountLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             <SettingsV2Row title="片段数量" description="可供检索的文本片段数量。">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? localIndexStatus.chunkCount.toLocaleString() : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.chunkCountLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             <SettingsV2Row title="上次更新" description="索引最近一次刷新时间。">
-                              <SettingsV2ReadonlyPill>{getLocalIndexUpdatedLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.updatedLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                           </SettingsV2Card>
                         </SettingsV2Section>
@@ -10006,24 +7508,24 @@ export default function App() {
                         <SettingsV2Section title="高级信息">
                           <SettingsV2Card>
                             <SettingsV2Row title="索引版本">
-                              <SettingsV2ReadonlyPill>{localIndexStatus ? `${localIndexStatus.version ?? "尚未建立"} / 当前 ${localIndexStatus.currentVersion ?? 3}` : "未获取"}</SettingsV2ReadonlyPill>
+                              <SettingsV2ReadonlyPill>{localIndexDetailsView.versionLabel}</SettingsV2ReadonlyPill>
                             </SettingsV2Row>
                             {localIndexStatus && (
                               <>
                                 <SettingsV2Row title="存储位置">
-                                  <SettingsV2ReadonlyPill title={localIndexStatus.pathLabel}>{localIndexStatus.pathLabel}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill title={localIndexDetailsView.pathLabel ?? undefined}>{localIndexDetailsView.pathLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                                 <SettingsV2Row title="索引大小">
-                                  <SettingsV2ReadonlyPill>{formatLocalIndexSize(localIndexStatus.approxSizeBytes)}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill>{localIndexDetailsView.sizeLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                                 <SettingsV2Row title="权限">
-                                  <SettingsV2ReadonlyPill>{getLocalIndexAccessLabel(localIndexStatus)}</SettingsV2ReadonlyPill>
+                                  <SettingsV2ReadonlyPill>{localIndexDetailsView.accessLabel}</SettingsV2ReadonlyPill>
                                 </SettingsV2Row>
                               </>
                             )}
-                            {localIndexMessage && (
+                            {localIndexDisplayMessage && (
                               <SettingsV2Row title="消息">
-                                <span className="settings-v2-readonly-value">{localIndexMessage}</span>
+                                <span className="settings-v2-readonly-value">{localIndexDisplayMessage}</span>
                               </SettingsV2Row>
                             )}
                           </SettingsV2Card>
@@ -10032,15 +7534,15 @@ export default function App() {
                         <SettingsV2Section title="维护">
                           <SettingsV2Card>
                             <SettingsV2Row title="刷新状态" description="重新读取当前本地索引状态。">
-                              <Button type="button" variant="secondary" size="compact" onClick={() => void refreshLocalIndexStatus()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void refreshLocalIndexStatus()} disabled={localIndexActionDisabled}>
                                 {isLoadingLocalIndexStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                                 刷新状态
                               </Button>
                             </SettingsV2Row>
                             <SettingsV2Row title="重建本地笔记索引" description="当搜索不准确或索引版本更新时重建。不会修改笔记正文。">
-                              <Button type="button" variant="secondary" size="compact" onClick={() => void handleRebuildLocalIndex()} disabled={isLoadingLocalIndexStatus || isRebuildingLocalIndex}>
+                              <Button type="button" variant="secondary" size="compact" onClick={() => void handleRebuildLocalIndex()} disabled={localIndexActionDisabled}>
                                 {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                                {isRebuildingLocalIndex ? "正在建立..." : "重建索引"}
+                                {localIndexRebuildButtonLabel}
                               </Button>
                             </SettingsV2Row>
                           </SettingsV2Card>
@@ -10048,7 +7550,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-web-search", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-web-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-web-search">
                     <section className={settingsPageSectionClass}>
                       <div className="settings-v2-legacy-section-header">
@@ -10146,7 +7648,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("ai-prompts", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("ai-prompts", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="ai-prompts">
                     <section className={settingsPageSectionClass}>
                       <div className="settings-v2-legacy-section-header">
@@ -10219,9 +7721,9 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsGroup("luogu", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("luogu", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="洛谷">
-                  {shouldRenderSettingsPage("luogu-account", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-account", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-account">
                     <LuoguAccountSettingsPage
                       className={settingsPageSectionClass}
@@ -10232,15 +7734,13 @@ export default function App() {
                       uid={luoguConfigUid}
                       lastSubmissionId={luoguConfigLastSubmissionId}
                       aiConfigured={luoguConfigAiConfigured}
-                      isLoadingConfig={isLoadingLuoguConfig}
-                      isSavingConfig={isSavingLuoguConfig}
-                      isTestingConnection={isTestingLuoguConnection}
+                      accountSettingsView={luoguAccountSettingsView}
                       onOpenSettings={() => void openLuoguAccountManager()}
                     />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("luogu-rules", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-rules", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-rules">
                     <LuoguRulesSettingsPage
                       className={settingsPageSectionClass}
@@ -10256,7 +7756,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("luogu-import-center", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("luogu-import-center", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="luogu-import-center">
                     <LuoguImportCenterSettingsPage
                       className={settingsPageSectionClass}
@@ -10264,7 +7764,7 @@ export default function App() {
                       accountLabel={luoguImportCenterAccountLabel}
                       aiLabel={luoguImportCenterAiLabel}
                       rangeLabel={luoguImportCenterRangeLabel}
-                      disabled={isLoadingLuoguConfig || isScanningLuoguPreview || isPreparingSelectedLuogu || isWritingPreparedLuogu}
+                      disabled={luoguImportCenterView.isOpenImportCenterDisabled}
                       onOpenImportCenter={() => void openLuoguDialog({ returnTarget: { type: "page", page: "luogu-import-center" } })}
                     />
                     </SettingsSectionAnchor>
@@ -10272,41 +7772,38 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsGroup("blog", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("blog", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="博客">
-                  {(shouldRenderSettingsPage("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPage("blog-preview", activePageKey, activeTarget)) && (
+                  {(shouldRenderSettingsPageForTarget("blog-info", activePageKey, activeTarget) || shouldRenderSettingsPageForTarget("blog-preview", activePageKey, activeTarget)) && (
                     <BlogPreviewSettingsPage
                       className={settingsPageSectionClass}
                       embedded
                       blogTitle={blogInfoDraft.title}
                       blogSubtitle={blogInfoDraft.subtitle}
                       blogConfigError={blogConfigError}
-                      isLoadingBlogConfig={isLoadingBlogConfig}
-                      isSavingBlogConfig={isSavingBlogConfig}
+                      blogSettingsView={blogSettingsView}
                       onBlogTitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, title: value }))}
                       onBlogSubtitleChange={(value) => setBlogInfoDraft((current) => ({ ...current, subtitle: value }))}
                       onSaveBlogInfo={() => void handleSaveBlogInfo()}
-                      isRestartingBlog={isRestartingBlog}
                       onOpenBlog={handleOpenBlog}
                       onRestartBlog={handleRestartBlog}
                     />
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-taxonomy", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("blog-tag-taxonomy", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="blog-tag-taxonomy">
                     <BlogTaxonomySettingsPage
                       className={settingsPageSectionClass}
                       embedded
-                      isLoadingTagTaxonomyConfig={isLoadingTagTaxonomyConfig}
                       tagTaxonomyConfigError={tagTaxonomyConfigError}
                       tagTaxonomyStats={tagTaxonomyStats}
+                      tagTaxonomySettingsView={tagTaxonomySettingsView}
                       tagTaxonomyStatItems={tagTaxonomyStatItems}
                       tagTaxonomyImportFileInputRef={tagTaxonomyImportFileInputRef}
                       tagTaxonomyImportMessage={tagTaxonomyImportMessage}
                       tagTaxonomyImportJsonInput={tagTaxonomyImportJsonInput}
                       tagTaxonomyImportPreview={tagTaxonomyImportPreview}
                       tagTaxonomyImportError={tagTaxonomyImportError}
-                      isSavingTagTaxonomyConfig={isSavingTagTaxonomyConfig}
                       tagTaxonomyUserEntries={tagTaxonomyUserEntries}
                       displayedTagTaxonomyUserEntries={displayedTagTaxonomyUserEntries}
                       isTagTaxonomyEntryListExpanded={isTagTaxonomyEntryListExpanded}
@@ -10320,13 +7817,12 @@ export default function App() {
                       tagTaxonomyAliasTargetInput={tagTaxonomyAliasTargetInput}
                       tagTaxonomyAliasListQuery={tagTaxonomyAliasListQuery}
                       tagTaxonomySaveError={tagTaxonomySaveError}
-                      isScanningTagNormalization={isScanningTagNormalization}
                       tagNormalizationScanError={tagNormalizationScanError}
                       tagNormalizationApplyResult={tagNormalizationApplyResult}
                       tagNormalizationScanResults={tagNormalizationScanResults}
                       tagNormalizationScanIssueCount={tagNormalizationScanIssueCount}
                       tagNormalizationScanStats={tagNormalizationScanStats}
-                      isApplyingTagNormalizationScan={isApplyingTagNormalizationScan}
+                      tagNormalizationPanelView={tagNormalizationPanelView}
                       selectedTagNormalizationScanStats={selectedTagNormalizationScanStats}
                       selectedTagNormalizationScanPaths={selectedTagNormalizationScanPaths}
                       loadTagTaxonomyConfig={loadTagTaxonomyConfig}
@@ -10358,7 +7854,7 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("blog-tag-manager", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("blog-tag-manager", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="blog-tag-manager">
                     <BlogTagManagerSettingsPage
                       className={settingsPageSectionClass}
@@ -10374,7 +7870,7 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsPage("data-storage", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("data-storage", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="data-storage">
                     <DataStorageSettingsPage
                       className={settingsPageSectionClass}
@@ -10385,15 +7881,15 @@ export default function App() {
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsPage("keyboard-shortcuts", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("keyboard-shortcuts", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="keyboard-shortcuts">
                       <KeyboardSettingsPage />
                     </SettingsSectionAnchor>
                   )}
 
-                  {shouldRenderSettingsGroup("advanced", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsGroupForTarget("advanced", activePageKey, activeTarget) && (
                     <SettingsV2PageLayout title="高级 / 开发者">
-                  {shouldRenderSettingsPage("advanced-developer", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("advanced-developer", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="advanced-developer">
                       <AdvancedSettingsPage
                         embedded
@@ -10403,7 +7899,7 @@ export default function App() {
                       />
                     </SettingsSectionAnchor>
                   )}
-                  {shouldRenderSettingsPage("diagnostics-search", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("diagnostics-search", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="diagnostics-search">
                     <section className={settingsPageSectionClass}>
                       <SearchDiagnosticsPanel aiConfigDraft={aiConfigDraft} />
@@ -10413,7 +7909,7 @@ export default function App() {
                     </SettingsV2PageLayout>
                   )}
 
-                  {shouldRenderSettingsPage("about-version", activePageKey, activeTarget) && (
+                  {shouldRenderSettingsPageForTarget("about-version", activePageKey, activeTarget) && (
                     <SettingsSectionAnchor id="about-version">
                       <AboutSettingsPage capabilities={MARKDOWN_CAPABILITIES} />
                     </SettingsSectionAnchor>
@@ -10495,8 +7991,8 @@ export default function App() {
               type="button"
               className={activityButtonClass("notes")}
               onClick={handleActivityNotes}
-              title={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
-              aria-label={isNotesSidebarOpen ? "收起笔记侧栏" : "展开笔记侧栏"}
+              title={notesActivityToggleLabel}
+              aria-label={notesActivityToggleLabel}
               selected={activeActivityItem === "notes"}
             >
               <FileText size={24} strokeWidth={2.18} />
@@ -10518,7 +8014,7 @@ export default function App() {
               title="洛谷导入中心"
               aria-label="洛谷导入中心"
               selected={activeActivityItem === "luogu"}
-              disabled={isLoadingLuoguConfig || isTestingLuoguConnection || isScanningLuoguPreview || (isPreparingSelectedLuogu || isWritingPreparedLuogu) || isSyncingLuogu}
+              disabled={luoguImportCenterView.isActivityButtonDisabled}
             >
               <RefreshCw size={24} strokeWidth={2.18} />
             </ToolbarButton>
@@ -10526,8 +8022,8 @@ export default function App() {
               type="button"
               className={activityButtonClass("ai")}
               onClick={handleActivityAi}
-              title={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
-              aria-label={isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"}
+              title={aiActivityToggleLabel}
+              aria-label={aiActivityToggleLabel}
               selected={isAiActivityActive}
             >
               <Bot size={24} strokeWidth={2.18} />
@@ -10572,11 +8068,7 @@ export default function App() {
                   data-active={activeTreeDirectoryPath === "" ? "true" : "false"}
                   data-app-context-menu="file-tree-folder"
                   data-app-context-path=""
-                  onClick={() => {
-                    setActiveTreeDirectoryPath("");
-                    setActiveTreeFilePath(null);
-                    setIsTreeRootCollapsed((current) => !current);
-                  }}
+                  onClick={handleSelectTreeRoot}
                   aria-expanded={!isTreeRootCollapsed}
                   title="notes"
                 >
@@ -11032,8 +8524,8 @@ export default function App() {
               )}
               onClick={handleSaveCurrentNote}
               disabled={!hasActiveEditorDocument || isSavingNote}
-              title={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
-              aria-label={activeEditorDirty || activeWorkingCopy?.kind === "untitled" ? "保存当前笔记" : saveStatusLabel}
+              title={saveStatusActionLabel}
+              aria-label={saveStatusActionLabel}
             >
               <Save className="h-3 w-3" aria-hidden="true" />
               保存：{saveStatusLabel}

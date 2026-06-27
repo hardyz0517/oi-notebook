@@ -10,12 +10,12 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::Serialize;
-use serde_yaml::{Mapping, Value};
 use walkdir::WalkDir;
 
-use crate::{frontmatter, paths};
+use crate::{frontmatter, path_safety, paths};
+mod search;
 
 /// 单个笔记文件的元信息。
 /// `Serialize` 使其可以被 Tauri 自动序列化为 JSON 发给前端。
@@ -64,7 +64,7 @@ struct ResolvedNoteAsset {
 }
 
 #[derive(Debug, Default)]
-struct SearchFrontmatter {
+pub(crate) struct SearchFrontmatter {
     title: String,
     tags: Vec<String>,
     source: String,
@@ -74,19 +74,11 @@ struct SearchFrontmatter {
 }
 
 #[derive(Debug)]
-struct SearchNote {
+pub(crate) struct SearchNote {
     path: String,
     body: String,
     modified: DateTime<Utc>,
     frontmatter: SearchFrontmatter,
-}
-
-#[derive(Debug, Default)]
-struct ParsedSearchQuery {
-    terms: Vec<String>,
-    tags: Vec<String>,
-    sources: Vec<String>,
-    recent: bool,
 }
 
 fn get_notes_dir() -> Result<PathBuf, String> {
@@ -109,56 +101,23 @@ const ERR_ABSOLUTE_OR_TRAVERSAL: &str = "包含路径遍历字符或绝对路径
 /// `starts_with` 按路径组件比较，不会被 "notes_extra/" 这种共前缀目录欺骗。
 ///
 /// 调用前提：`notes_dir` 必须已存在，否则 `canonicalize` 会失败。
-fn safe_note_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    // 标准化：统一用正斜杠，防止 Windows 反斜杠绕过后续字符串过滤
-    let normalized = relative_path.replace('\\', "/");
-
-    // 第一层防御 ⓪：拒绝空路径（target 会变成 notes 目录本身，导致上层命令行为异常）
-    if normalized.is_empty() {
-        return Err("非法路径：相对路径不能为空".to_string());
-    }
-
-    // 第一层防御 ①：拒绝绝对路径（正斜杠形式，含标准化后的反斜杠绝对路径）
-    if normalized.starts_with('/') {
-        return Err(format!(
-            "非法路径：'{relative_path}' {ERR_ABSOLUTE_OR_TRAVERSAL}"
-        ));
-    }
-
-    // 第一层防御 ①（深度防御）：对原始字符串保留反斜杠绝对路径检查。
-    // 标准化后反斜杠已被替换为正斜杠，上面的 starts_with('/') 理论上已能覆盖。
-    // 此处保留是为了防止未来标准化逻辑被修改后产生遗漏——双保险，不要删。
-    if relative_path.starts_with('\\') {
-        return Err(format!(
-            "非法路径：'{relative_path}' {ERR_ABSOLUTE_OR_TRAVERSAL}"
-        ));
-    }
-
-    // 第一层防御 ②：按路径段拒绝路径遍历。
-    // 注意：不用 contains("..") —— 那会误伤 "note..md" 这类合法文件名。
-    // 按段检查只拒绝 ".." 整段（真正的向上跳目录语义）和 "." 当前目录引用。
-    for segment in normalized.split('/') {
-        if segment == ".." || segment == "." {
-            return Err(format!("非法路径：'{relative_path}' 包含路径遍历段"));
+fn map_relative_path_issue(relative_path: &str, issue: path_safety::RelativePathIssue) -> String {
+    match issue {
+        path_safety::RelativePathIssue::Empty => "非法路径：相对路径不能为空".to_string(),
+        path_safety::RelativePathIssue::Absolute => {
+            format!("非法路径：'{relative_path}' {ERR_ABSOLUTE_OR_TRAVERSAL}")
+        }
+        path_safety::RelativePathIssue::Traversal => {
+            format!("非法路径：'{relative_path}' 包含路径遍历段")
         }
     }
+}
 
-    // 规范化 notes_dir，得到真实绝对路径（解析符号链接）
-    let canonical_notes = notes_dir
-        .canonicalize()
-        .map_err(|e| format!("无法解析 notes 目录路径：{e}"))?;
-
-    // 从规范化基础路径出发构造目标路径（使用标准化后的正斜杠路径）
-    let target = canonical_notes.join(&normalized);
-
-    // 第二层防御：即使第一层字符串过滤全部通过，
-    // 这里仍按路径组件（不是字符串前缀）确认目标在 notes/ 之内。
-    // 两层防御缺一不可——字符串过滤防快速注入，此层防符号链接等 OS 层绕过。
-    if !target.starts_with(&canonical_notes) {
-        return Err(format!("路径 '{relative_path}' 越界到 notes 目录之外"));
-    }
-
-    Ok(target)
+fn safe_note_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let normalized = path_safety::normalize_relative_path(relative_path)
+        .map_err(|issue| map_relative_path_issue(relative_path, issue))?;
+    path_safety::resolve_relative_path_within_base(notes_dir, &normalized)
+        .map_err(|e| format!("{e}"))
 }
 
 fn has_windows_invalid_char(value: &str) -> bool {
@@ -182,13 +141,17 @@ fn validate_note_relative_path(relative_path: &str, expect_file: bool) -> Result
     let mut segments = Vec::new();
     for segment in normalized.split('/') {
         if segment.trim().is_empty() {
-            return Err(format!("Invalid path: {relative_path} contains an empty segment"));
+            return Err(format!(
+                "Invalid path: {relative_path} contains an empty segment"
+            ));
         }
         if segment == "." || segment == ".." || segment.contains("..") {
             return Err(format!("Invalid path: {relative_path} contains traversal"));
         }
         if has_windows_invalid_char(segment) {
-            return Err(format!("Invalid name: {segment} contains Windows-invalid characters"));
+            return Err(format!(
+                "Invalid name: {segment} contains Windows-invalid characters"
+            ));
         }
         segments.push(segment);
     }
@@ -269,7 +232,9 @@ fn ensure_case_insensitive_available(
                 return Ok(());
             }
         }
-        return Err(format!("A same-name item already exists in this directory: {name}"));
+        return Err(format!(
+            "A same-name item already exists in this directory: {name}"
+        ));
     }
 
     Ok(())
@@ -300,28 +265,22 @@ fn rename_path_case_safe(old_path: &Path, new_path: &Path) -> Result<(), String>
 }
 
 fn validate_note_reference_path(notes_dir: &Path, relative_path: &str) -> Result<String, String> {
-    let normalized = relative_path.replace('\\', "/");
+    let normalized =
+        path_safety::normalize_relative_path(relative_path).map_err(|issue| match issue {
+            path_safety::RelativePathIssue::Empty => {
+                "图片保存失败：当前笔记路径不能为空".to_string()
+            }
+            path_safety::RelativePathIssue::Absolute
+            | path_safety::RelativePathIssue::Traversal => {
+                format!("图片保存失败：非法笔记路径 '{relative_path}'")
+            }
+        })?;
 
-    if normalized.is_empty() {
-        return Err("图片保存失败：当前笔记路径不能为空".to_string());
-    }
-    if Path::new(&normalized).is_absolute()
-        || normalized.starts_with('/')
-        || relative_path.starts_with('\\')
-    {
-        return Err(format!("图片保存失败：非法笔记路径 '{relative_path}'"));
-    }
-    for segment in normalized.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return Err(format!("图片保存失败：非法笔记路径 '{relative_path}'"));
-        }
-    }
-
-    let canonical_notes = notes_dir
-        .canonicalize()
-        .map_err(|e| format!("无法解析 notes 目录路径：{e}"))?;
-    let target = canonical_notes.join(&normalized);
-    if !target.starts_with(&canonical_notes) {
+    let target = path_safety::resolve_relative_path_within_base(notes_dir, &normalized)
+        .map_err(|e| format!("图片保存失败：{e}"))?;
+    let canonical_notes =
+        path_safety::canonicalize_base_dir(notes_dir).map_err(|e| format!("图片保存失败：{e}"))?;
+    if !path_safety::path_is_within_base(&target, &canonical_notes) {
         return Err(format!(
             "图片保存失败：笔记路径 '{relative_path}' 越界到 notes 目录之外"
         ));
@@ -467,322 +426,6 @@ fn base64_encode(bytes: &[u8]) -> String {
     encoded
 }
 
-fn yaml_string(mapping: &Mapping, key: &str) -> String {
-    mapping
-        .get(Value::String(key.to_string()))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
-
-fn yaml_tags(mapping: &Mapping) -> Vec<String> {
-    mapping
-        .get(Value::String("tags".to_string()))
-        .and_then(Value::as_sequence)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|tag| !tag.is_empty())
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_yaml_datetime(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|datetime| datetime.with_timezone(&Utc))
-}
-
-fn parse_search_frontmatter(yaml: &str) -> SearchFrontmatter {
-    let Ok(Value::Mapping(mapping)) = serde_yaml::from_str::<Value>(yaml) else {
-        return SearchFrontmatter::default();
-    };
-
-    let created = parse_yaml_datetime(&yaml_string(&mapping, "created"));
-    let updated = parse_yaml_datetime(&yaml_string(&mapping, "updated"));
-
-    SearchFrontmatter {
-        title: yaml_string(&mapping, "title"),
-        tags: yaml_tags(&mapping),
-        source: yaml_string(&mapping, "source"),
-        summary: yaml_string(&mapping, "summary"),
-        created,
-        updated,
-    }
-}
-
-fn split_search_frontmatter(content: &str) -> (SearchFrontmatter, String) {
-    let after_open = if content.starts_with("---\r\n") {
-        &content[5..]
-    } else if content.starts_with("---\n") {
-        &content[4..]
-    } else {
-        return (SearchFrontmatter::default(), content.to_string());
-    };
-
-    let bytes = after_open.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\n' {
-            let rest = &bytes[i + 1..];
-            if rest.starts_with(b"---\r\n") {
-                return (
-                    parse_search_frontmatter(&after_open[..i]),
-                    after_open[i + 6..].to_string(),
-                );
-            }
-            if rest.starts_with(b"---\n") {
-                return (
-                    parse_search_frontmatter(&after_open[..i]),
-                    after_open[i + 5..].to_string(),
-                );
-            }
-            if rest == b"---" || rest == b"---\r" {
-                return (parse_search_frontmatter(&after_open[..i]), String::new());
-            }
-        }
-        i += 1;
-    }
-
-    (SearchFrontmatter::default(), content.to_string())
-}
-
-fn parse_search_query(query: &str) -> ParsedSearchQuery {
-    let mut parsed = ParsedSearchQuery::default();
-
-    for raw in query.split_whitespace() {
-        let token = raw.trim();
-        if token.is_empty() {
-            continue;
-        }
-
-        if token.eq_ignore_ascii_case("@recent") {
-            parsed.recent = true;
-        } else if let Some(tag) = token.strip_prefix("tag:") {
-            if !tag.trim().is_empty() {
-                parsed.tags.push(tag.trim().to_lowercase());
-            }
-        } else if let Some(source) = token.strip_prefix("source:") {
-            if !source.trim().is_empty() {
-                parsed.sources.push(source.trim().to_lowercase());
-            }
-        } else {
-            parsed.terms.push(token.to_lowercase());
-        }
-    }
-
-    parsed
-}
-
-fn best_note_date(note: &SearchNote) -> DateTime<Utc> {
-    note.frontmatter
-        .updated
-        .or(note.frontmatter.created)
-        .unwrap_or(note.modified)
-}
-
-fn is_recent(note: &SearchNote, now: DateTime<Utc>) -> bool {
-    best_note_date(note) >= now - Duration::days(7)
-}
-
-fn fallback_title(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .strip_suffix(".md")
-        .unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path))
-        .to_string()
-}
-
-fn contains_lower(haystack: &str, needle: &str) -> bool {
-    haystack.to_lowercase().contains(needle)
-}
-
-fn score_search_note(
-    note: &SearchNote,
-    query: &ParsedSearchQuery,
-    now: DateTime<Utc>,
-) -> Option<i64> {
-    if query.recent && !is_recent(note, now) {
-        return None;
-    }
-
-    for tag in &query.tags {
-        if !note
-            .frontmatter
-            .tags
-            .iter()
-            .any(|candidate| candidate.to_lowercase().contains(tag))
-        {
-            return None;
-        }
-    }
-
-    for source in &query.sources {
-        if !note.frontmatter.source.to_lowercase().contains(source) {
-            return None;
-        }
-    }
-
-    let title = if note.frontmatter.title.is_empty() {
-        fallback_title(&note.path)
-    } else {
-        note.frontmatter.title.clone()
-    };
-
-    let mut score = 0_i64;
-
-    for term in &query.terms {
-        let mut matched = false;
-
-        if contains_lower(&title, term) {
-            score += 100;
-            matched = true;
-        }
-        if note
-            .frontmatter
-            .tags
-            .iter()
-            .any(|tag| contains_lower(tag, term))
-            || contains_lower(&note.frontmatter.source, term)
-        {
-            score += 60;
-            matched = true;
-        }
-        if contains_lower(&note.frontmatter.summary, term) || contains_lower(&note.path, term) {
-            score += 40;
-            matched = true;
-        }
-        if contains_lower(&note.body, term) {
-            score += 10;
-            matched = true;
-        }
-
-        if !matched {
-            return None;
-        }
-    }
-
-    if query.terms.is_empty() && query.tags.is_empty() && query.sources.is_empty() && !query.recent
-    {
-        score += 1;
-    }
-
-    let age_hours = (now - best_note_date(note)).num_hours().max(0);
-    score += (168 - age_hours).clamp(0, 168) / 24;
-
-    Some(score)
-}
-
-fn make_excerpt(note: &SearchNote, query: &ParsedSearchQuery) -> String {
-    let body = note
-        .body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let source = query
-        .terms
-        .iter()
-        .find_map(|term| {
-            body.lines()
-                .find(|line| line.to_lowercase().contains(term))
-                .map(ToString::to_string)
-        })
-        .unwrap_or(body);
-
-    source.chars().take(120).collect()
-}
-
-fn search_notes_in_dir(notes_dir: &Path, query: &str) -> Result<Vec<NoteSearchResult>, String> {
-    fs::create_dir_all(notes_dir).map_err(|e| format!("创建 notes 目录失败: {e}"))?;
-
-    let canonical_notes_dir = notes_dir
-        .canonicalize()
-        .map_err(|e| format!("无法解析 notes 目录路径: {e}"))?;
-
-    let parsed_query = parse_search_query(query);
-    let now = Utc::now();
-    let mut scored = Vec::new();
-
-    for entry in WalkDir::new(&canonical_notes_dir)
-        .min_depth(1)
-        .into_iter()
-        .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
-    {
-        let entry = entry.map_err(|e| format!("遍历 notes 目录失败: {e}"))?;
-        let path = entry.path();
-
-        let relative = path
-            .strip_prefix(&canonical_notes_dir)
-            .map_err(|_| format!("无法计算相对路径: {path:?}"))?;
-        let path_str = relative
-            .to_str()
-            .ok_or_else(|| format!("路径包含非 UTF-8 字符: {path:?}"))?
-            .replace('\\', "/");
-
-        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
-            continue;
-        }
-
-        let content =
-            fs::read_to_string(path).map_err(|e| format!("读取笔记失败 ({path_str}): {e}"))?;
-        let metadata =
-            fs::metadata(path).map_err(|e| format!("读取文件元数据失败 ({path_str}): {e}"))?;
-        let modified_time = metadata
-            .modified()
-            .map_err(|e| format!("读取文件修改时间失败 ({path_str}): {e}"))?;
-        let modified: DateTime<Utc> = modified_time.into();
-        let (frontmatter, body) = split_search_frontmatter(&content);
-        let note = SearchNote {
-            path: path_str,
-            body,
-            modified,
-            frontmatter,
-        };
-
-        if let Some(score) = score_search_note(&note, &parsed_query, now) {
-            scored.push((score, best_note_date(&note), note));
-        }
-    }
-
-    scored.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| b.1.cmp(&a.1))
-            .then_with(|| a.2.path.cmp(&b.2.path))
-    });
-
-    Ok(scored
-        .into_iter()
-        .take(20)
-        .map(|(_, date, note)| {
-            let excerpt = make_excerpt(&note, &parsed_query);
-            let title = if note.frontmatter.title.is_empty() {
-                fallback_title(&note.path)
-            } else {
-                note.frontmatter.title
-            };
-            let summary = note.frontmatter.summary;
-
-            NoteSearchResult {
-                path: note.path,
-                title,
-                date: date.to_rfc3339(),
-                tags: note.frontmatter.tags,
-                summary,
-                excerpt,
-            }
-        })
-        .collect())
-}
-
 /// 递归列出 notes/ 目录下所有 .md 文件（含子目录），
 /// 跳过隐藏目录和隐藏文件（以 '.' 开头），
 /// 按最后修改时间降序返回（最近修改的排在最前面）。
@@ -815,7 +458,9 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
 
         // 只处理普通 .md 文件，跳过子目录和其它扩展名的文件
         let is_directory = path.is_dir();
-        if !is_directory && (!path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md")) {
+        if !is_directory
+            && (!path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md"))
+        {
             continue;
         }
         if is_directory && path.file_name().and_then(|n| n.to_str()) == Some("assets") {
@@ -865,7 +510,7 @@ pub fn list_notes() -> Result<Vec<NoteFileInfo>, String> {
 #[tauri::command]
 pub fn search_notes(query: String) -> Result<Vec<NoteSearchResult>, String> {
     let notes_dir = get_notes_dir()?;
-    search_notes_in_dir(&notes_dir, &query)
+    search::search_notes_in_dir(&notes_dir, &query)
 }
 
 /// 读取指定笔记的完整 UTF-8 内容。
@@ -1135,11 +780,13 @@ pub fn rename_note(old_relative_path: String, new_relative_path: String) -> Resu
     ensure_case_insensitive_available(&new_path, Some(&old_path))?;
 
     if let Some(parent) = new_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create note parent directory: {e}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create note parent directory: {e}"))?;
     }
 
-    rename_path_case_safe(&old_path, &new_path)
-        .map_err(|e| format!("Rename note failed ({old_relative_path} -> {new_relative_path}): {e}"))
+    rename_path_case_safe(&old_path, &new_path).map_err(|e| {
+        format!("Rename note failed ({old_relative_path} -> {new_relative_path}): {e}")
+    })
 }
 
 #[tauri::command]
@@ -1151,12 +798,14 @@ pub fn create_note_folder(relative_path: String) -> Result<(), String> {
     let path = safe_note_path(&notes_dir, &relative_path)?;
     ensure_case_insensitive_available(&path, None)?;
 
-    fs::create_dir_all(&path)
-        .map_err(|e| format!("Create folder failed ({relative_path}): {e}"))
+    fs::create_dir_all(&path).map_err(|e| format!("Create folder failed ({relative_path}): {e}"))
 }
 
 #[tauri::command]
-pub fn rename_note_folder(old_relative_path: String, new_relative_path: String) -> Result<(), String> {
+pub fn rename_note_folder(
+    old_relative_path: String,
+    new_relative_path: String,
+) -> Result<(), String> {
     let notes_dir = get_notes_dir()?;
     fs::create_dir_all(&notes_dir).map_err(|e| format!("Failed to create notes directory: {e}"))?;
 
@@ -1169,16 +818,20 @@ pub fn rename_note_folder(old_relative_path: String, new_relative_path: String) 
         return Ok(());
     }
     if !old_path.is_dir() {
-        return Err(format!("Original folder does not exist: {old_relative_path}"));
+        return Err(format!(
+            "Original folder does not exist: {old_relative_path}"
+        ));
     }
     ensure_case_insensitive_available(&new_path, Some(&old_path))?;
 
     if let Some(parent) = new_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create target parent folder: {e}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create target parent folder: {e}"))?;
     }
 
-    rename_path_case_safe(&old_path, &new_path)
-        .map_err(|e| format!("Rename folder failed ({old_relative_path} -> {new_relative_path}): {e}"))
+    rename_path_case_safe(&old_path, &new_path).map_err(|e| {
+        format!("Rename folder failed ({old_relative_path} -> {new_relative_path}): {e}")
+    })
 }
 
 #[tauri::command]
@@ -1193,8 +846,7 @@ pub fn delete_note_folder(relative_path: String) -> Result<(), String> {
         return Err(format!("Folder does not exist: {relative_path}"));
     }
 
-    fs::remove_dir_all(&path)
-        .map_err(|e| format!("Delete folder failed ({relative_path}): {e}"))
+    fs::remove_dir_all(&path).map_err(|e| format!("Delete folder failed ({relative_path}): {e}"))
 }
 
 #[cfg(test)]
@@ -1314,15 +966,30 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(search_notes_in_dir(dir.path(), "区间").unwrap().len(), 1);
-        assert_eq!(search_notes_in_dir(dir.path(), "tag:DP").unwrap().len(), 1);
         assert_eq!(
-            search_notes_in_dir(dir.path(), "source:P1000")
+            search::search_notes_in_dir(dir.path(), "区间")
                 .unwrap()
                 .len(),
             1
         );
-        assert_eq!(search_notes_in_dir(dir.path(), "四边形").unwrap().len(), 1);
+        assert_eq!(
+            search::search_notes_in_dir(dir.path(), "tag:DP")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            search::search_notes_in_dir(dir.path(), "source:P1000")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            search::search_notes_in_dir(dir.path(), "四边形")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -1336,7 +1003,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            search_notes_in_dir(dir.path(), "tag:DP Dijkstra")
+            search::search_notes_in_dir(dir.path(), "tag:DP Dijkstra")
                 .unwrap()
                 .len(),
             0
