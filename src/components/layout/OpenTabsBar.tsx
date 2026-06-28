@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import { FileText, GitCompare, X } from "lucide-react";
 
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
 export interface OpenFileTab {
@@ -123,25 +124,26 @@ export default function OpenTabsBar({
             const label = tab.title?.trim() || tab.displayName;
             const tooltip = tab.kind === "file" ? (tab.path ?? tab.externalPath ?? tab.displayName) : `${tab.title}: ${tab.sourcePath}`;
             const Icon = tab.kind === "file" ? FileText : GitCompare;
+            const tabClassName = cn(
+              "open-tab group relative inline-flex min-w-28 max-w-56 shrink-0 items-center gap-2 border-b-2 border-r px-3 text-xs transition-colors",
+              isActive
+                ? "open-tab-active border-b-primary border-r-border/70 bg-background text-foreground"
+                : "border-b-transparent border-r-border/70 bg-muted/10 text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+              tab.kind === "review" && "open-tab-review",
+            );
 
             return (
               <div
                 key={tabId}
                 ref={isActive ? activeTabRef : undefined}
-                className={cn(
-                  "open-tab group relative flex min-w-28 max-w-56 shrink-0 items-center border-r border-border/70 text-xs transition-colors",
-                  isActive
-                    ? "open-tab-active border-t border-t-primary/45 bg-background text-foreground"
-                    : "bg-muted/10 text-muted-foreground hover:bg-accent/35 hover:text-foreground",
-                  tab.kind === "review" && "open-tab-review",
-                )}
+                className={tabClassName}
                 data-active={isActive ? "true" : "false"}
                 data-kind={tab.kind}
                 title={tooltip}
               >
                 <button
                   type="button"
-                  className="open-tab-button flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-left"
+                  className="open-tab-button flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
                   onClick={() => onSelect(tab)}
                   aria-current={isActive ? "page" : undefined}
                 >
@@ -166,10 +168,11 @@ export default function OpenTabsBar({
                     />
                   )}
                 </button>
-                <button
+                <IconButton
                   type="button"
+                  size="icon-xs"
                   className={cn(
-                    "open-tab-close mr-1 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                    "open-tab-close shrink-0",
                     !isActive && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
                     tab.kind === "file" && tab.dirty && "opacity-100",
                   )}
@@ -181,7 +184,7 @@ export default function OpenTabsBar({
                   aria-label={`Close ${label}`}
                 >
                   <X className="h-3 w-3" aria-hidden="true" />
-                </button>
+                </IconButton>
               </div>
             );
           })}
