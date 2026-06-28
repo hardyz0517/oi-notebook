@@ -408,6 +408,30 @@ export interface LocalNoteIndexStatusResult {
   lastError?: string;
 }
 
+export interface KnowledgeGraphNode {
+  id: string;
+  type: string;
+  title: string;
+  refs: string[];
+}
+
+export interface KnowledgeGraphEdge {
+  from: string;
+  to: string;
+  type: string;
+  source: string;
+  confidence: number;
+  refs: string[];
+}
+
+export interface KnowledgeGraphResult {
+  graph: {
+    nodes: KnowledgeGraphNode[];
+    edges: KnowledgeGraphEdge[];
+  };
+  rebuilt: boolean;
+}
+
 export interface PromptCitationContractStatusResult {
   webAvailableIds: boolean;
   webMarkerInstruction: boolean;
@@ -984,6 +1008,22 @@ export async function getLocalNoteIndexStatus(): Promise<LocalNoteIndexStatusRes
 export async function rebuildLocalNoteIndex(): Promise<LocalNoteIndexStatusResult> {
   try {
     return await invoke<LocalNoteIndexStatusResult>("rebuild_local_note_index");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeGraph(): Promise<KnowledgeGraphResult> {
+  try {
+    return await invoke<KnowledgeGraphResult>("get_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphResult> {
+  try {
+    return await invoke<KnowledgeGraphResult>("rebuild_knowledge_graph");
   } catch (e) {
     throw toApiError(e);
   }

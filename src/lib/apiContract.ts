@@ -52,6 +52,8 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "getWebCacheStatus", commandName: "get_web_cache_status", argKeys: [] },
   { functionName: "getLocalNoteIndexStatus", commandName: "get_local_note_index_status", argKeys: [] },
   { functionName: "rebuildLocalNoteIndex", commandName: "rebuild_local_note_index", argKeys: [] },
+  { functionName: "getKnowledgeGraph", commandName: "get_knowledge_graph", argKeys: [] },
+  { functionName: "rebuildKnowledgeGraph", commandName: "rebuild_knowledge_graph", argKeys: [] },
   { functionName: "getPromptCitationContractStatus", commandName: "get_prompt_citation_contract_status", argKeys: [] },
   { functionName: "runNotexSearchSelfCheck", commandName: "run_notex_search_self_check", argKeys: [] },
   { functionName: "generateNoteMetadata", commandName: "generate_note_metadata", argKeys: ["relativePath", "markdownContent", "tagTaxonomyContext"] },

@@ -4,6 +4,7 @@ mod blog_service;
 mod blog_server;
 mod frontmatter;
 mod git;
+mod knowledge;
 mod local_search;
 mod luogu;
 mod luogu_reader;
@@ -81,6 +82,8 @@ pub fn run() {
             notes::write_external_markdown_file,
             notes::save_note_asset,
             notes::resolve_note_asset_url,
+            knowledge::get_knowledge_graph,
+            knowledge::rebuild_knowledge_graph,
             notes::delete_note,
             notes::rename_note,
             notes::create_note_folder,
