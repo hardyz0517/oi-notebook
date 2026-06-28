@@ -1,6 +1,6 @@
 import type { SettingsCategory, SettingsSection } from "@/components/settings/settingsTypes";
 
-export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
+export type ActivityBarItem = "notes" | "search" | "training" | "knowledge" | "luogu" | "ai" | "blog" | "settings";
 export type EditorViewMode = "split" | "editor" | "preview";
 
 export const EDITOR_VIEW_MODE_OPTIONS: Array<{ id: EditorViewMode; label: string }> = [
@@ -45,6 +45,7 @@ export const MARKDOWN_CAPABILITIES = [
 
 export interface ActiveActivityItemInput {
   isSettingsCenterOpen: boolean;
+  activeMainWorkspace: "editor" | "training" | "knowledge";
   isLuoguDialogOpen: boolean;
   isRestartingBlog: boolean;
   isSearchOpen: boolean;
@@ -53,6 +54,8 @@ export interface ActiveActivityItemInput {
 
 export function getActiveActivityItem(input: ActiveActivityItemInput): ActivityBarItem | null {
   if (input.isSettingsCenterOpen) return "settings";
+  if (input.activeMainWorkspace === "training") return "training";
+  if (input.activeMainWorkspace === "knowledge") return "knowledge";
   if (input.isLuoguDialogOpen) return "luogu";
   if (input.isRestartingBlog) return "blog";
   if (input.isSearchOpen) return "search";
@@ -80,6 +83,14 @@ export function getNotesActivityToggleLabel(isNotesSidebarOpen: boolean): string
 
 export function getAiActivityToggleLabel(isAiSidebarOpen: boolean): string {
   return isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手";
+}
+
+export function getTrainingActivityToggleLabel(isTrainingWorkspaceOpen: boolean): string {
+  return isTrainingWorkspaceOpen ? "关闭训练沉淀中心" : "打开训练沉淀中心";
+}
+
+export function getKnowledgeActivityToggleLabel(isKnowledgeWorkspaceOpen: boolean): string {
+  return isKnowledgeWorkspaceOpen ? "关闭知识库" : "打开知识库";
 }
 
 export type SettingsOpenTarget =
