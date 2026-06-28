@@ -6,6 +6,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { SortableItem } from "./SortableItem";
 import type { RootGroup, SortEndHandler, SortStartHandler } from "./types";
+import { Panel, PanelBody, PanelHeader, PanelTitle } from "@/components/common/Panel";
 
 export function TagManagerRootColumn({
   rootGroups,
@@ -27,9 +28,11 @@ export function TagManagerRootColumn({
   onSortEnd: SortEndHandler;
 }) {
   return (
-    <aside className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-r border-border/70 bg-muted/5">
-      <div className="border-b border-border/70 px-3 py-2 text-xs font-medium text-muted-foreground">一级标签</div>
-      <div className="tag-manager-scrollbar min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none p-2 [contain:paint]" onScroll={(event) => {
+    <Panel tone="muted" className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none border-b-0 border-l-0 border-t-0 border-r border-[var(--ui-border-subtle)]">
+      <PanelHeader className="px-3 py-2">
+        <PanelTitle className="text-xs font-medium text-muted-foreground">一级标签</PanelTitle>
+      </PanelHeader>
+      <PanelBody className="tag-manager-scrollbar min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none p-2 [contain:paint]" onScroll={(event) => {
         if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0;
       }}>
         {rootGroups.length === 0 ? (
@@ -60,7 +63,7 @@ export function TagManagerRootColumn({
             </SortableContext>
           </DndContext>
         )}
-      </div>
-    </aside>
+      </PanelBody>
+    </Panel>
   );
 }

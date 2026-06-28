@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import type { TagSuggestion } from "@/lib/tagTaxonomy";
 import type { CustomTagCreateDraft, CustomTagEditDraft } from "./tagManagerConfig";
 import type { MergePreviewInfo } from "./types";
+import { Panel, PanelBody, PanelHeader, PanelTitle } from "@/components/common/Panel";
 
 export function TagManagerDetailsPanel({
   selectedSuggestion,
@@ -99,11 +100,11 @@ export function TagManagerDetailsPanel({
     : "";
 
   return (
-    <aside className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2">
-        <div className="text-xs font-medium text-muted-foreground">标签详情</div>
-      </div>
-      <div className="tag-manager-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-4">
+    <Panel tone="muted" className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none border-b-0 border-l-0 border-t-0">
+      <PanelHeader className="px-4 py-2">
+        <PanelTitle className="text-xs font-medium text-muted-foreground">标签详情</PanelTitle>
+      </PanelHeader>
+      <PanelBody className="tag-manager-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-4">
         {customTagCreateDraft ? (
           <div data-tag-manager-interactive="true" className="grid gap-4">
             <div className="grid gap-1">
@@ -411,7 +412,7 @@ export function TagManagerDetailsPanel({
         ) : (
           <div className="flex h-full min-h-[320px] items-center justify-center rounded-sm border border-dashed border-border/70 text-sm text-muted-foreground">请选择左侧标签。</div>
         )}
-      </div>
-    </aside>
+      </PanelBody>
+    </Panel>
   );
 }

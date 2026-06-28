@@ -1,6 +1,7 @@
 ﻿import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useState } from "react";
 
+import { Panel, PanelHeader, PanelTitle } from "@/components/common/Panel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -231,16 +232,17 @@ export function TagManagerShell({
         .tag-manager-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
         .tag-manager-scrollbar::-webkit-scrollbar-corner { background: transparent; }
       `}</style>
-      <section
-        className="absolute flex min-h-[560px] min-w-[900px] flex-col overflow-hidden rounded-[10px] border border-[var(--ui-border-subtle)] bg-background/96 shadow-[0_24px_80px_rgb(0_0_0/45%)] backdrop-blur-xl"
+      <Panel
+        tone="floating"
+        className="absolute flex min-h-[560px] min-w-[900px] flex-col overflow-hidden rounded-[10px]"
         style={{ left: dialogRect.left, top: dialogRect.top, width: dialogRect.width, height: dialogRect.height }}
       >
-        <header data-tag-manager-no-clear="true" className="flex h-12 shrink-0 cursor-grab items-center justify-between gap-4 border-b border-border/70 px-5 active:cursor-grabbing" onPointerDown={beginDrag}>
-          <div className="text-base font-semibold text-foreground">Tag Manager</div>
+        <PanelHeader data-tag-manager-no-clear="true" className="h-12 shrink-0 cursor-grab px-5 py-0 active:cursor-grabbing" onPointerDown={beginDrag}>
+          <PanelTitle className="text-base">Tag Manager</PanelTitle>
           <IconButton data-tag-manager-interactive="true" type="button" aria-label="Close tag manager" onClick={onClose}>
             <X className="h-4 w-4" aria-hidden="true" />
           </IconButton>
-        </header>
+        </PanelHeader>
 
         <div data-tag-manager-clear-scope="true" className="flex min-h-0 flex-1 flex-col overflow-hidden" onPointerDownCapture={handleClearScopePointerDown}>
         <div className="relative z-20 flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 px-5 py-3">
@@ -269,7 +271,7 @@ export function TagManagerShell({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 w-44 justify-between gap-2 border-border/80 bg-muted/10 px-2 text-xs text-foreground hover:bg-muted/25"
+                    className="w-44 justify-between text-xs"
                   >
                     <span className="truncate">{activeFilterOption.label}</span>
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -293,7 +295,7 @@ export function TagManagerShell({
                   })}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button data-tag-manager-interactive="true" type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={onCreateCustomTag}>
+              <Button data-tag-manager-interactive="true" type="button" variant="outline" size="sm" className="shrink-0 text-xs" onClick={onCreateCustomTag}>
                 <Plus className="h-3.5 w-3.5" />
                 {"\u65b0\u5efa\u81ea\u5b9a\u4e49\u6807\u7b7e"}
               </Button>
@@ -343,7 +345,7 @@ export function TagManagerShell({
             onPointerDown={(event) => beginResize(handle, event)}
           />
         ))}
-      </section>
+      </Panel>
     </div>
   );
 }
