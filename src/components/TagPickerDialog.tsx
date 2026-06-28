@@ -12,6 +12,7 @@ import { Plus, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getTagSuggestionList, normalizeTagPath, type TagSuggestion, type UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
@@ -739,16 +740,15 @@ const TagPickerDialog = memo(function TagPickerDialog({
           >
             <div className="flex min-w-0 items-center justify-between gap-3">
               <DialogTitle className="text-base">选择标签</DialogTitle>
-              <button
+              <IconButton
                 type="button"
                 data-no-window-drag="true"
-                className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                 onClick={close}
                 aria-label="关闭标签选择"
                 title="关闭标签选择"
               >
-                <X className="h-3.5 w-3.5" />
-              </button>
+                <X aria-hidden="true" />
+              </IconButton>
             </div>
           </DialogHeader>
           <div className="shrink-0 border-b border-border/80 bg-background px-5 py-3">
@@ -881,7 +881,7 @@ const TagPickerDialog = memo(function TagPickerDialog({
                           </div>
                           {canAddCustomCollection && (
                             <div className="rounded-sm border border-dashed border-emerald-500/40 bg-emerald-500/[0.06] px-3 py-2 text-sm">
-                              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200" onClick={addCustomCollection}>
+                              <Button type="button" variant="ghost" size="compact" className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200" onClick={addCustomCollection}>
                                 <Plus className="h-3.5 w-3.5" />
                                 新建文集：{normalizeCollectionValue(searchQuery)}
                               </Button>
@@ -893,7 +893,7 @@ const TagPickerDialog = memo(function TagPickerDialog({
                   )}
                   {canAddCustomTag && (
                     <div className="rounded-sm border border-dashed border-border/80 bg-muted/10 px-3 py-2 text-sm">
-                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[#146BB7]" onClick={addCustomTag}>
+                      <Button type="button" variant="ghost" size="compact" className="text-[#146BB7]" onClick={addCustomTag}>
                         <Plus className="h-3.5 w-3.5" />
                         添加自定义标签：“{normalizeTagValue(searchQuery)}”
                       </Button>
