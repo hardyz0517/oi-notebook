@@ -11,10 +11,11 @@ describe("knowledgeTemplates", () => {
       problemTitle: "多项式乘法",
     });
 
-    const markdown = buildFragmentMarkdown(item);
+    const markdown = buildFragmentMarkdown(item, "knowledge/collections/batch-2026-06-28.md");
 
     expect(markdown).toContain("type: fragment");
     expect(markdown).toContain("problem_id: \"P3803\"");
+    expect(markdown).toContain("collection_id: \"knowledge/collections/batch-2026-06-28.md\"");
     expect(markdown).toContain("## 一句话题意");
   });
 
@@ -34,10 +35,10 @@ describe("knowledgeTemplates", () => {
       problemTitle: "多项式乘法",
     });
 
-    const markdown = buildCollectionMarkdown(batch, [item]);
+    const markdown = buildCollectionMarkdown(batch, [item], ["knowledge/fragments/batch-2026-06-28/P3803.md"]);
 
     expect(markdown).toContain("type: collection");
     expect(markdown).toContain("P3803");
-    expect(markdown).toContain("[[P3803 多项式乘法]]");
+    expect(markdown).toContain("knowledge/fragments/batch-2026-06-28/P3803.md");
   });
 });

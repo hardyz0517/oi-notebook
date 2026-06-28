@@ -28,6 +28,7 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "syncLuoguInsights", commandName: "sync_luogu_insights", argKeys: [] },
   { functionName: "getKnowledgeGraph", commandName: "get_knowledge_graph", argKeys: [] },
   { functionName: "rebuildKnowledgeGraph", commandName: "rebuild_knowledge_graph", argKeys: [] },
+  { functionName: "writeKnowledgeAsset", commandName: "write_knowledge_asset", argKeys: ["relativePath", "markdown", "overwrite"] },
   { functionName: "getTagTaxonomyConfig", commandName: "get_tag_taxonomy_config", argKeys: [] },
   { functionName: "saveTagTaxonomyConfig", commandName: "save_tag_taxonomy_config", argKeys: ["config"] },
   { functionName: "getBlogConfig", commandName: "get_blog_config", argKeys: [] },

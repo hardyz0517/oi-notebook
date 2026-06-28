@@ -84,6 +84,7 @@ pub fn run() {
             notes::resolve_note_asset_url,
             knowledge::get_knowledge_graph,
             knowledge::rebuild_knowledge_graph,
+            knowledge::write_knowledge_asset,
             notes::delete_note,
             notes::rename_note,
             notes::create_note_folder,

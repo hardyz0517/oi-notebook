@@ -51,6 +51,8 @@ export interface TrainingItemDraft {
   fields: TrainingItemDraftFields;
 }
 
+export type TrainingItemOutputSelection = TrainingItemDraft["output"];
+
 export interface TrainingBatchDraft {
   id: string;
   title: string;
@@ -125,4 +127,67 @@ export interface KnowledgeAssetRow {
   kind: string;
   refs: string[];
   relationCount: number;
+}
+
+export interface TrainingBatchWriteCollectionPlan {
+  relativePath: string;
+  markdown: string;
+}
+
+export interface TrainingBatchWriteFragmentPlan {
+  itemId: string;
+  relativePath: string;
+  markdown: string;
+}
+
+export interface TrainingBatchWriteSkippedItem {
+  itemId: string;
+  reason: string;
+}
+
+export interface TrainingBatchWritePlan {
+  collection: TrainingBatchWriteCollectionPlan;
+  fragments: TrainingBatchWriteFragmentPlan[];
+  skippedItems: TrainingBatchWriteSkippedItem[];
+}
+
+export function normalizeKnowledgeText(value: string, fallback = ""): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed || fallback;
+}
+
+export function normalizeKnowledgeList(values: string[]): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawValue of values) {
+    const value = normalizeKnowledgeText(rawValue);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(value);
+  }
+
+  return normalized;
+}
+
+export function normalizeKnowledgePathSegment(value: string, fallback: string): string {
+  const trimmed = normalizeKnowledgeText(value, fallback);
+  const sanitized = trimmed
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/, "")
+    .replace(/^-+|-+$/g, "");
+
+  return sanitized || fallback;
+}
+
+export function createTrainingBatchSlug(batch: TrainingBatchDraft): string {
+  return normalizeKnowledgePathSegment(batch.id, "batch");
+}
+
+export function createTrainingItemSlug(item: TrainingItemDraft): string {
+  return normalizeKnowledgePathSegment(item.problemId || item.id, item.id);
 }

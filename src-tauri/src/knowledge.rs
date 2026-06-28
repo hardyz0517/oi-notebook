@@ -7,7 +7,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-use crate::paths;
+use crate::{path_safety, paths};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +43,23 @@ pub struct KnowledgeGraphIndex {
     pub generated_at: String,
     pub nodes: Vec<KnowledgeGraphNode>,
     pub edges: Vec<KnowledgeGraphEdge>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteKnowledgeAssetRequest {
+    pub relative_path: String,
+    pub markdown: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteKnowledgeAssetResult {
+    pub relative_path: String,
+    pub written: bool,
+    pub skipped: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -98,6 +115,23 @@ fn graph_summary_path() -> Result<PathBuf, String> {
 
 fn graph_batches_path() -> Result<PathBuf, String> {
     Ok(graph_root()?.join("batches.json"))
+}
+
+fn normalize_relative_asset_path(relative_path: &str) -> Result<String, String> {
+    path_safety::normalize_relative_path(relative_path).map_err(|issue| match issue {
+        path_safety::RelativePathIssue::Empty => "knowledge path cannot be empty".to_string(),
+        path_safety::RelativePathIssue::Absolute => {
+            format!("knowledge path cannot be absolute: {relative_path}")
+        }
+        path_safety::RelativePathIssue::Traversal => {
+            format!("knowledge path contains traversal: {relative_path}")
+        }
+    })
+}
+
+fn safe_knowledge_path(notes_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_asset_path(relative_path)?;
+    path_safety::resolve_relative_path_within_base(notes_dir, &normalized)
 }
 
 fn normalize_relative_path(path: &Path, base: &Path) -> Result<String, String> {
@@ -548,6 +582,37 @@ pub fn rebuild_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
     Ok(index)
 }
 
+#[tauri::command]
+pub fn write_knowledge_asset(request: WriteKnowledgeAssetRequest) -> Result<WriteKnowledgeAssetResult, String> {
+    let notes_dir = paths::notes_dir()?;
+    fs::create_dir_all(&notes_dir).map_err(|e| format!("create notes dir failed: {e}"))?;
+
+    let relative_path = normalize_relative_asset_path(&request.relative_path)?;
+    let path = safe_knowledge_path(&notes_dir, &relative_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create knowledge parent failed: {e}"))?;
+    }
+
+    if path.exists() && !request.overwrite {
+        return Ok(WriteKnowledgeAssetResult {
+            relative_path,
+            written: false,
+            skipped: true,
+            error: None,
+        });
+    }
+
+    fs::write(&path, request.markdown.as_bytes())
+        .map_err(|e| format!("write knowledge asset failed ({relative_path}): {e}"))?;
+
+    Ok(WriteKnowledgeAssetResult {
+        relative_path,
+        written: true,
+        skipped: false,
+        error: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,5 +672,24 @@ mod tests {
         let index = collect_graph(&notes).unwrap();
         assert!(index.nodes.iter().any(|node| node.id == "problem:P3803"));
         assert!(!index.nodes.iter().any(|node| node.id == "problem:P9999"));
+    }
+
+    #[test]
+    fn knowledge_asset_path_rejects_traversal() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(&notes).unwrap();
+
+        assert!(safe_knowledge_path(&notes, "../escape.md").is_err());
+    }
+
+    #[test]
+    fn knowledge_asset_path_stays_inside_notes_root() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(&notes).unwrap();
+
+        let path = safe_knowledge_path(&notes, "knowledge/fragments/p3803.md").unwrap();
+        assert!(path.starts_with(notes.canonicalize().unwrap()));
     }
 }

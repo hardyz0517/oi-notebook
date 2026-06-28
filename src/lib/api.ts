@@ -530,6 +530,13 @@ export interface KnowledgeGraphIndexResult {
   edges: KnowledgeGraphEdge[];
 }
 
+export interface WriteKnowledgeAssetResult {
+  relativePath: string;
+  written: boolean;
+  skipped: boolean;
+  error: string | null;
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -815,6 +822,22 @@ export async function getKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
 export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
   try {
     return await invoke<KnowledgeGraphIndexResult>("rebuild_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function writeKnowledgeAsset(
+  relativePath: string,
+  markdown: string,
+  overwrite = false,
+): Promise<WriteKnowledgeAssetResult> {
+  try {
+    return await invoke<WriteKnowledgeAssetResult>("write_knowledge_asset", {
+      relativePath,
+      markdown,
+      overwrite,
+    });
   } catch (e) {
     throw toApiError(e);
   }
