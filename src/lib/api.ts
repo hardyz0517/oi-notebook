@@ -408,30 +408,6 @@ export interface LocalNoteIndexStatusResult {
   lastError?: string;
 }
 
-export interface KnowledgeGraphNode {
-  id: string;
-  type: string;
-  title: string;
-  refs: string[];
-}
-
-export interface KnowledgeGraphEdge {
-  from: string;
-  to: string;
-  type: string;
-  source: string;
-  confidence: number;
-  refs: string[];
-}
-
-export interface KnowledgeGraphResult {
-  graph: {
-    nodes: KnowledgeGraphNode[];
-    edges: KnowledgeGraphEdge[];
-  };
-  rebuilt: boolean;
-}
-
 export interface PromptCitationContractStatusResult {
   webAvailableIds: boolean;
   webMarkerInstruction: boolean;
@@ -527,6 +503,31 @@ export interface SyncLuoguInsightsResult {
   importedPaths: string[];
   message: string;
   warnings: string[];
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  type: "asset" | "problem" | "topic";
+  title: string;
+  refs: string[];
+  assetType?: "fragment" | "collection" | "article" | "legacy-note";
+  kind?: string;
+  source?: string;
+}
+
+export interface KnowledgeGraphEdge {
+  from: string;
+  to: string;
+  type: "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
+  source: string;
+  confidence: number;
+  refs: string[];
+}
+
+export interface KnowledgeGraphIndexResult {
+  generatedAt: string;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
 }
 
 /**
@@ -803,6 +804,22 @@ export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
   }
 }
 
+export async function getKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("get_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("rebuild_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
 export async function getTagTaxonomyConfig(): Promise<UserTagTaxonomyConfig> {
   try {
     return await invoke<UserTagTaxonomyConfig>("get_tag_taxonomy_config");
@@ -1008,22 +1025,6 @@ export async function getLocalNoteIndexStatus(): Promise<LocalNoteIndexStatusRes
 export async function rebuildLocalNoteIndex(): Promise<LocalNoteIndexStatusResult> {
   try {
     return await invoke<LocalNoteIndexStatusResult>("rebuild_local_note_index");
-  } catch (e) {
-    throw toApiError(e);
-  }
-}
-
-export async function getKnowledgeGraph(): Promise<KnowledgeGraphResult> {
-  try {
-    return await invoke<KnowledgeGraphResult>("get_knowledge_graph");
-  } catch (e) {
-    throw toApiError(e);
-  }
-}
-
-export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphResult> {
-  try {
-    return await invoke<KnowledgeGraphResult>("rebuild_knowledge_graph");
   } catch (e) {
     throw toApiError(e);
   }

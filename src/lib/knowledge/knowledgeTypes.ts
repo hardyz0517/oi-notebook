@@ -61,18 +61,68 @@ export interface TrainingBatchDraft {
   itemIds: string[];
 }
 
+export type KnowledgeGraphNodeType = "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection";
+
+export type KnowledgeGraphEdgeType = "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
+
+export type KnowledgeGraphEdgeSource =
+  | "frontmatter"
+  | "wikilink"
+  | "problem_id_match"
+  | "term_match"
+  | "import_rule"
+  | "manual"
+  | "ai_extract_future"
+  | "embedding_future";
+
 export interface KnowledgeGraphNode {
   id: string;
-  type: "asset" | "problem" | "topic" | "training" | "kind";
+  type: KnowledgeGraphNodeType;
   title: string;
   refs: string[];
+  assetType?: KnowledgeAssetType;
+  kind?: string;
+  source?: string;
 }
 
 export interface KnowledgeGraphEdge {
   from: string;
   to: string;
-  type: "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
-  source: "frontmatter" | "wikilink" | "problem_id_match" | "term_match" | "import_rule" | "manual" | "ai_extract_future" | "embedding_future";
+  type: KnowledgeGraphEdgeType;
+  source: KnowledgeGraphEdgeSource;
   confidence: number;
   refs: string[];
+}
+
+export interface KnowledgeGraphIndex {
+  generatedAt: string;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+}
+
+export type KnowledgeWorkspaceTabId =
+  | "overview"
+  | "graph"
+  | "fragments"
+  | "collections"
+  | "articles"
+  | "review"
+  | "mistakes"
+  | "relationships";
+
+export interface KnowledgeGraphSummary {
+  nodeCount: number;
+  edgeCount: number;
+  assetCount: number;
+  problemCount: number;
+  topicCount: number;
+}
+
+export interface KnowledgeAssetRow {
+  id: string;
+  title: string;
+  assetType: KnowledgeAssetType;
+  kind: string;
+  refs: string[];
+  relationCount: number;
 }

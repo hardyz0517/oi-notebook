@@ -1,24 +1,28 @@
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
-
-use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::{path_safety, paths};
+use crate::paths;
 
-const GRAPH_DIR: &str = ".oinb/graph";
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeGraphNode {
     pub id: String,
     #[serde(rename = "type")]
-    pub kind: String,
+    pub node_type: String,
     pub title: String,
     pub refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -27,124 +31,105 @@ pub struct KnowledgeGraphEdge {
     pub from: String,
     pub to: String,
     #[serde(rename = "type")]
-    pub kind: String,
+    pub edge_type: String,
     pub source: String,
     pub confidence: f64,
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct KnowledgeGraphFrontmatterFields {
-    pub title: Option<String>,
-    pub asset_type: Option<String>,
-    pub kind: Option<String>,
-    pub topics: Vec<String>,
-    pub related_problems: Vec<String>,
-    pub problem_id: Option<String>,
-    pub collection_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct KnowledgeGraphCache {
+pub struct KnowledgeGraphIndex {
+    pub generated_at: String,
     pub nodes: Vec<KnowledgeGraphNode>,
     pub edges: Vec<KnowledgeGraphEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct KnowledgeGraphResult {
-    pub graph: KnowledgeGraphCache,
-    pub rebuilt: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-struct KnowledgeGraphCacheFile {
-    nodes: Vec<KnowledgeGraphNode>,
+#[derive(Debug, Default)]
+struct GraphBuildState {
+    nodes: BTreeMap<String, KnowledgeGraphNode>,
+    edge_keys: BTreeSet<(String, String, String, String)>,
     edges: Vec<KnowledgeGraphEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-struct KnowledgeGraphFileEntry {
-    relative_path: String,
+#[derive(Debug, Clone, Default, Deserialize)]
+struct KnowledgeFrontmatter {
+    #[serde(default)]
+    r#type: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
     title: String,
+    #[serde(default)]
+    topics: Vec<String>,
+    #[serde(default, rename = "related_problems")]
+    related_problems: Vec<String>,
+    #[serde(default)]
+    source: String,
+    #[serde(default, rename = "created_from")]
+    _created_from: String,
+    #[serde(default)]
+    problem_id: String,
+    #[serde(default)]
+    collection_id: String,
+    #[serde(default)]
+    problems: Vec<String>,
+    #[serde(default)]
+    fragments: Vec<String>,
+    #[serde(default)]
+    articles: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-struct KnowledgeGraphFrontmatterFile {
-    #[serde(rename = "type")]
-    asset_type: Option<String>,
-    kind: Option<String>,
-    title: Option<String>,
-    topics: Option<Vec<String>>,
-    related_problems: Option<Vec<String>>,
-    problem_id: Option<String>,
-    collection_id: Option<String>,
+fn graph_root() -> Result<PathBuf, String> {
+    Ok(paths::oinb_dir()?.join("graph"))
 }
 
-fn normalize_relative_path(relative_path: &str) -> Result<String, String> {
-    path_safety::normalize_relative_path(relative_path)
-        .map_err(|issue| match issue {
-            path_safety::RelativePathIssue::Empty => "路径不能为空".to_string(),
-            path_safety::RelativePathIssue::Absolute => "路径不能是绝对路径".to_string(),
-            path_safety::RelativePathIssue::Traversal => "路径不能包含 . 或 .. 段".to_string(),
+fn graph_nodes_path() -> Result<PathBuf, String> {
+    Ok(graph_root()?.join("nodes.json"))
+}
+
+fn graph_edges_path() -> Result<PathBuf, String> {
+    Ok(graph_root()?.join("edges.json"))
+}
+
+fn graph_summary_path() -> Result<PathBuf, String> {
+    Ok(graph_root()?.join("summary.json"))
+}
+
+fn graph_batches_path() -> Result<PathBuf, String> {
+    Ok(graph_root()?.join("batches.json"))
+}
+
+fn normalize_relative_path(path: &Path, base: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(base)
+        .map_err(|_| format!("Failed to make path relative: {}", path.display()))?;
+    Ok(relative
+        .to_str()
+        .ok_or_else(|| format!("Path contains non-UTF-8 characters: {}", path.display()))?
+        .replace('\\', "/"))
+}
+
+fn should_skip_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            name.starts_with('.')
+                || name.eq_ignore_ascii_case("node_modules")
+                || name.eq_ignore_ascii_case("target")
+                || name.eq_ignore_ascii_case("dist")
+                || name.eq_ignore_ascii_case("build")
         })
+        .unwrap_or(false)
 }
 
-fn notes_root_dir() -> Result<PathBuf, String> {
-    paths::notes_dir()
-}
-
-fn graph_dir(notes_root: &Path) -> PathBuf {
-    notes_root.join(GRAPH_DIR)
-}
-
-fn graph_nodes_path(notes_root: &Path) -> PathBuf {
-    graph_dir(notes_root).join("nodes.json")
-}
-
-fn graph_edges_path(notes_root: &Path) -> PathBuf {
-    graph_dir(notes_root).join("edges.json")
-}
-
-fn graph_batches_path(notes_root: &Path) -> PathBuf {
-    graph_dir(notes_root).join("batches.json")
-}
-
-fn should_skip_dir(entry: &walkdir::DirEntry) -> bool {
-    if !entry.file_type().is_dir() {
-        return false;
-    }
-
-    let name = entry.file_name().to_string_lossy();
-    name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" || name == "build"
-}
-
-fn normalize_list(values: Option<Vec<String>>) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut result = Vec::new();
-    for value in values.unwrap_or_default() {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if seen.insert(trimmed.to_string()) {
-            result.push(trimmed.to_string());
-        }
-    }
-    result
-}
-
-fn parse_frontmatter_block(markdown: &str) -> Option<(KnowledgeGraphFrontmatterFields, &str)> {
-    let after_open = if let Some(rest) = markdown.strip_prefix("---\r\n") {
+fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
+    let after_open = if let Some(rest) = content.strip_prefix("---\r\n") {
         rest
-    } else if let Some(rest) = markdown.strip_prefix("---\n") {
+    } else if let Some(rest) = content.strip_prefix("---\n") {
         rest
     } else {
-        return None;
+        return (None, content);
     };
 
     let bytes = after_open.as_bytes();
@@ -153,395 +138,414 @@ fn parse_frontmatter_block(markdown: &str) -> Option<(KnowledgeGraphFrontmatterF
         if bytes[index] == b'\n' {
             let rest = &after_open[index + 1..];
             if let Some(body) = rest.strip_prefix("---\r\n") {
-                let yaml = &after_open[..index];
-                let parsed = serde_yaml::from_str::<KnowledgeGraphFrontmatterFile>(yaml).ok()?;
-                return Some((into_frontmatter_fields(parsed), body));
+                return (Some(&after_open[..index]), body);
             }
             if let Some(body) = rest.strip_prefix("---\n") {
-                let yaml = &after_open[..index];
-                let parsed = serde_yaml::from_str::<KnowledgeGraphFrontmatterFile>(yaml).ok()?;
-                return Some((into_frontmatter_fields(parsed), body));
+                return (Some(&after_open[..index]), body);
             }
             if rest == "---" || rest == "---\r" {
-                let yaml = &after_open[..index];
-                let parsed = serde_yaml::from_str::<KnowledgeGraphFrontmatterFile>(yaml).ok()?;
-                return Some((into_frontmatter_fields(parsed), ""));
+                return (Some(&after_open[..index]), "");
             }
         }
         index += 1;
     }
 
-    None
+    (None, content)
 }
 
-fn into_frontmatter_fields(file: KnowledgeGraphFrontmatterFile) -> KnowledgeGraphFrontmatterFields {
-    KnowledgeGraphFrontmatterFields {
-        title: file.title.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
-        asset_type: file.asset_type.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
-        kind: file.kind.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
-        topics: normalize_list(file.topics),
-        related_problems: normalize_list(file.related_problems),
-        problem_id: file.problem_id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
-        collection_id: file.collection_id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+fn parse_frontmatter(content: &str) -> KnowledgeFrontmatter {
+    let (yaml, _) = split_frontmatter(content);
+    yaml.and_then(|frontmatter| serde_yaml::from_str(frontmatter).ok())
+        .unwrap_or_default()
+}
+
+fn node_id_for_asset(relative_path: &str) -> String {
+    format!("asset:{relative_path}")
+}
+
+fn node_id_for_problem(problem_id: &str) -> String {
+    format!("problem:{problem_id}")
+}
+
+fn node_id_for_topic(topic: &str) -> String {
+    format!("topic:{topic}")
+}
+
+fn add_node(state: &mut GraphBuildState, node: KnowledgeGraphNode) {
+    state.nodes.entry(node.id.clone()).or_insert(node);
+}
+
+fn add_edge(state: &mut GraphBuildState, edge: KnowledgeGraphEdge) {
+    let key = (
+        edge.from.clone(),
+        edge.to.clone(),
+        edge.edge_type.clone(),
+        edge.source.clone(),
+    );
+    if state.edge_keys.insert(key) {
+        state.edges.push(edge);
     }
 }
 
-pub fn extract_problem_ids(markdown: &str) -> Vec<String> {
-    let mut ids = BTreeSet::new();
-    let bytes = markdown.as_bytes();
-    let mut index = 0;
-
-    while index < bytes.len() {
-        if bytes[index] == b'P' {
-            let mut cursor = index + 1;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                cursor += 1;
-            }
-            if cursor > index + 1 {
-                let candidate = &markdown[index..cursor];
-                ids.insert(candidate.to_string());
-            }
-        }
-        index += 1;
-    }
-
-    ids.into_iter().collect()
-}
-
-pub fn extract_wikilinks(markdown: &str) -> Vec<String> {
-    let mut links = BTreeSet::new();
-    let bytes = markdown.as_bytes();
-    let mut index = 0;
-    while index + 3 < bytes.len() {
-        if &bytes[index..index + 2] == b"[[" {
-            if let Some(close) = markdown[index + 2..].find("]]") {
-                let target = markdown[index + 2..index + 2 + close]
-                    .split('|')
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                if !target.is_empty() {
-                    links.insert(target.to_string());
-                }
-                index += close + 4;
-                continue;
-            }
-        }
-        index += 1;
-    }
-
-    links.into_iter().collect()
-}
-
-pub fn extract_graph_frontmatter(markdown: &str) -> Option<KnowledgeGraphFrontmatterFields> {
-    parse_frontmatter_block(markdown).map(|(fields, _)| fields)
-}
-
-fn problem_node(problem_id: &str, relative_path: &str) -> KnowledgeGraphNode {
-    KnowledgeGraphNode {
-        id: format!("problem:{problem_id}"),
-        kind: "problem".to_string(),
-        title: problem_id.to_string(),
-        refs: vec![relative_path.to_string()],
-    }
-}
-
-fn topic_node(topic: &str, relative_path: &str) -> KnowledgeGraphNode {
-    KnowledgeGraphNode {
-        id: format!("topic:{topic}"),
-        kind: "topic".to_string(),
-        title: topic.to_string(),
-        refs: vec![relative_path.to_string()],
-    }
-}
-
-fn asset_node(relative_path: &str, title: &str) -> KnowledgeGraphNode {
-    KnowledgeGraphNode {
-        id: format!("asset:{relative_path}"),
-        kind: "asset".to_string(),
-        title: if title.trim().is_empty() {
-            relative_path.to_string()
-        } else {
-            title.trim().to_string()
-        },
-        refs: vec![relative_path.to_string()],
-    }
-}
-
-fn edge(
-    from: String,
-    to: String,
-    kind: &str,
+fn graph_edge(
+    from: &str,
+    to: &str,
+    edge_type: &str,
     source: &str,
     confidence: f64,
     relative_path: &str,
 ) -> KnowledgeGraphEdge {
     KnowledgeGraphEdge {
-        from,
-        to,
-        kind: kind.to_string(),
+        from: from.to_string(),
+        to: to.to_string(),
+        edge_type: edge_type.to_string(),
         source: source.to_string(),
         confidence,
         refs: vec![relative_path.to_string()],
     }
 }
 
-fn build_graph_for_markdown(relative_path: &str, markdown: &str) -> (Vec<KnowledgeGraphNode>, Vec<KnowledgeGraphEdge>) {
-    let frontmatter = extract_graph_frontmatter(markdown).unwrap_or_default();
-    let title = frontmatter
-        .title
-        .clone()
-        .or_else(|| frontmatter.collection_id.clone())
-        .or_else(|| frontmatter.problem_id.clone())
-        .or_else(|| frontmatter.kind.clone())
-        .or_else(|| frontmatter.asset_type.clone())
-        .unwrap_or_else(|| relative_path.to_string());
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    let asset_id = format!("asset:{relative_path}");
-
-    nodes.push(asset_node(relative_path, &title));
-
-    if let Some(asset_type) = frontmatter.asset_type.clone() {
-        let node_id = format!("type:{asset_type}");
-        nodes.push(KnowledgeGraphNode {
-            id: node_id.clone(),
-            kind: "type".to_string(),
-            title: asset_type,
+fn add_asset_node(state: &mut GraphBuildState, relative_path: &str, frontmatter: &KnowledgeFrontmatter) -> String {
+    let asset_id = node_id_for_asset(relative_path);
+    let asset_type = if frontmatter.r#type.trim().is_empty() {
+        "legacy-note".to_string()
+    } else {
+        frontmatter.r#type.trim().to_string()
+    };
+    add_node(
+        state,
+        KnowledgeGraphNode {
+            id: asset_id.clone(),
+            node_type: "asset".to_string(),
+            title: if frontmatter.title.trim().is_empty() {
+                relative_path.to_string()
+            } else {
+                frontmatter.title.trim().to_string()
+            },
             refs: vec![relative_path.to_string()],
-        });
-        edges.push(edge(
-            asset_id.clone(),
-            node_id,
-            "related_to",
-            "frontmatter",
-            1.0,
-            relative_path,
-        ));
-    }
-
-    if let Some(kind) = frontmatter.kind.clone() {
-        let node_id = format!("kind:{kind}");
-        nodes.push(KnowledgeGraphNode {
-            id: node_id.clone(),
-            kind: "kind".to_string(),
-            title: kind,
-            refs: vec![relative_path.to_string()],
-        });
-        edges.push(edge(
-            asset_id.clone(),
-            node_id,
-            "related_to",
-            "frontmatter",
-            1.0,
-            relative_path,
-        ));
-    }
-
-    let mut problem_ids = BTreeSet::new();
-    for problem_id in frontmatter.related_problems.clone() {
-        problem_ids.insert(problem_id);
-    }
-    if let Some(problem_id) = frontmatter.problem_id.clone() {
-        problem_ids.insert(problem_id);
-    }
-
-    for problem_id in problem_ids.clone() {
-        let node = problem_node(&problem_id, relative_path);
-        let node_id = node.id.clone();
-        nodes.push(node);
-        edges.push(edge(
-            asset_id.clone(),
-            node_id.clone(),
-            "mentions",
-            "frontmatter",
-            1.0,
-            relative_path,
-        ));
-    }
-
-    for problem_id in extract_problem_ids(markdown) {
-        if problem_ids.contains(&problem_id) {
-            continue;
-        }
-        let node = problem_node(&problem_id, relative_path);
-        let node_id = node.id.clone();
-        nodes.push(node);
-        edges.push(edge(
-            asset_id.clone(),
-            node_id.clone(),
-            "mentions",
-            "problem_id_match",
-            1.0,
-            relative_path,
-        ));
-    }
-
-    let mut topics = BTreeSet::new();
-    for topic in frontmatter.topics.clone() {
-        topics.insert(topic);
-    }
-
-    for topic in frontmatter.topics {
-        let node = topic_node(&topic, relative_path);
-        let node_id = node.id.clone();
-        nodes.push(node);
-        edges.push(edge(
-            asset_id.clone(),
-            node_id,
-            "related_to",
-            "frontmatter",
-            1.0,
-            relative_path,
-        ));
-    }
-
-    for topic in extract_wikilinks(markdown) {
-        if topics.contains(&topic) {
-            continue;
-        }
-        let node = topic_node(&topic, relative_path);
-        let node_id = node.id.clone();
-        nodes.push(node);
-        edges.push(edge(
-            asset_id.clone(),
-            node_id,
-            "related_to",
-            "wikilink",
-            0.9,
-            relative_path,
-        ));
-    }
-
-    if let Some(collection_id) = frontmatter.collection_id {
-        let collection_node = KnowledgeGraphNode {
-            id: format!("collection:{collection_id}"),
-            kind: "collection".to_string(),
-            title: collection_id.clone(),
-            refs: vec![relative_path.to_string()],
-        };
-        edges.push(edge(
-            asset_id.clone(),
-            collection_node.id.clone(),
-            "related_to",
-            "frontmatter",
-            1.0,
-            relative_path,
-        ));
-        nodes.push(collection_node);
-    }
-
-    (nodes, edges)
+            asset_type: Some(asset_type),
+            kind: if frontmatter.kind.trim().is_empty() {
+                None
+            } else {
+                Some(frontmatter.kind.trim().to_string())
+            },
+            source: if frontmatter.source.trim().is_empty() {
+                None
+            } else {
+                Some(frontmatter.source.trim().to_string())
+            },
+        },
+    );
+    asset_id
 }
 
-fn scan_markdown_files(notes_root: &Path) -> Result<Vec<(String, String)>, String> {
-    let mut files = Vec::new();
-    for entry in WalkDir::new(notes_root).into_iter().filter_entry(|entry| !should_skip_dir(entry)) {
-        let entry = entry.map_err(|e| format!("扫描知识库失败：{e}"))?;
-        if !entry.file_type().is_file() {
+fn add_problem_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: &str, ids: &[String], source: &str) {
+    for problem_id in ids {
+        let problem_id = problem_id.trim();
+        if problem_id.is_empty() {
             continue;
         }
-        if entry.path().extension().and_then(|value| value.to_str()) != Some("md") {
+        let node_id = node_id_for_problem(problem_id);
+        add_node(
+            state,
+            KnowledgeGraphNode {
+                id: node_id.clone(),
+                node_type: "problem".to_string(),
+                title: problem_id.to_string(),
+                refs: vec![relative_path.to_string()],
+                asset_type: None,
+                kind: None,
+                source: None,
+            },
+        );
+        add_edge(
+            state,
+            graph_edge(asset_id, &node_id, "mentions", source, 1.0, relative_path),
+        );
+    }
+}
+
+fn add_topic_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: &str, topics: &[String]) {
+    for topic in topics {
+        let topic = topic.trim();
+        if topic.is_empty() {
             continue;
         }
-        let relative = entry
-            .path()
-            .strip_prefix(notes_root)
-            .map_err(|e| format!("计算相对路径失败：{e}"))?
-            .to_string_lossy()
-            .replace('\\', "/");
-        let markdown = fs::read_to_string(entry.path())
-            .map_err(|e| format!("读取 Markdown 失败：{}: {e}", entry.path().display()))?;
-        files.push((relative, markdown));
+        let node_id = node_id_for_topic(topic);
+        add_node(
+            state,
+            KnowledgeGraphNode {
+                id: node_id.clone(),
+                node_type: "topic".to_string(),
+                title: topic.to_string(),
+                refs: vec![relative_path.to_string()],
+                asset_type: None,
+                kind: None,
+                source: None,
+            },
+        );
+        add_edge(
+            state,
+            graph_edge(asset_id, &node_id, "related_to", "frontmatter", 1.0, relative_path),
+        );
     }
-    Ok(files)
 }
 
-fn read_cache<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let text = fs::read_to_string(path).map_err(|e| format!("读取缓存失败：{}: {e}", path.display()))?;
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|e| format!("解析缓存失败：{}: {e}", path.display()))
-}
+pub fn extract_problem_ids(markdown: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut current = String::new();
 
-fn write_cache<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建图谱缓存目录失败：{}: {e}", parent.display()))?;
-    }
-    let text = serde_json::to_string_pretty(value).map_err(|e| format!("序列化缓存失败：{e}"))?;
-    fs::write(path, text).map_err(|e| format!("写入缓存失败：{}: {e}", path.display()))
-}
-
-fn rebuild_graph(notes_root: &Path) -> Result<KnowledgeGraphResult, String> {
-    fs::create_dir_all(notes_root)
-        .map_err(|e| format!("创建知识库根目录失败：{}: {e}", notes_root.display()))?;
-    let mut node_map: BTreeMap<String, KnowledgeGraphNode> = BTreeMap::new();
-    let mut edge_map: BTreeSet<(String, String, String, String)> = BTreeSet::new();
-    let mut edges = Vec::new();
-
-    for (relative_path, markdown) in scan_markdown_files(notes_root)? {
-        let (file_nodes, file_edges) = build_graph_for_markdown(&relative_path, &markdown);
-        for node in file_nodes {
-            node_map.entry(node.id.clone()).or_insert(node);
+    for ch in markdown.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch);
+            continue;
         }
-        for edge in file_edges {
-            let dedupe_key = (
-                edge.from.clone(),
-                edge.to.clone(),
-                edge.kind.clone(),
-                edge.source.clone(),
-            );
-            if edge_map.insert(dedupe_key) {
-                edges.push(edge);
+        if let Some(problem) = normalize_problem_token(&current) {
+            if !ids.contains(&problem) {
+                ids.push(problem);
             }
         }
+        current.clear();
     }
 
-    let graph = KnowledgeGraphCache {
-        nodes: node_map.into_values().collect(),
-        edges,
-    };
+    if let Some(problem) = normalize_problem_token(&current) {
+        if !ids.contains(&problem) {
+            ids.push(problem);
+        }
+    }
 
-    write_cache(&graph_nodes_path(notes_root), &graph.nodes)?;
-    write_cache(&graph_edges_path(notes_root), &graph.edges)?;
-    write_cache(
-        &graph_batches_path(notes_root),
-        &Vec::<KnowledgeGraphFileEntry>::new(),
-    )?;
-
-    Ok(KnowledgeGraphResult { graph, rebuilt: true })
+    ids
 }
 
-fn load_graph(notes_root: &Path) -> Result<KnowledgeGraphResult, String> {
-    let nodes = read_cache::<Vec<KnowledgeGraphNode>>(&graph_nodes_path(notes_root))?.unwrap_or_default();
-    let edges = read_cache::<Vec<KnowledgeGraphEdge>>(&graph_edges_path(notes_root))?.unwrap_or_default();
-    Ok(KnowledgeGraphResult {
-        graph: KnowledgeGraphCache { nodes, edges },
-        rebuilt: false,
+fn normalize_problem_token(token: &str) -> Option<String> {
+    let token = token.trim();
+    if token.len() < 2 || !token.starts_with('P') {
+        return None;
+    }
+    let digits = &token[1..];
+    if digits.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn extract_wikilinks(markdown: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let bytes = markdown.as_bytes();
+    let mut index = 0;
+    while index + 3 < bytes.len() {
+        if &bytes[index..index + 2] == b"[[" {
+            if let Some(end) = markdown[index + 2..].find("]]") {
+                let target = markdown[index + 2..index + 2 + end]
+                    .split('|')
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if !target.is_empty() && !links.iter().any(|existing| existing == target) {
+                    links.push(target.to_string());
+                }
+                index += end + 4;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    links
+}
+
+fn build_graph_for_markdown(relative_path: &str, markdown: &str, state: &mut GraphBuildState) {
+    let frontmatter = parse_frontmatter(markdown);
+    let asset_id = add_asset_node(state, relative_path, &frontmatter);
+
+    let type_id = format!(
+        "type:{}",
+        if frontmatter.r#type.trim().is_empty() {
+            "legacy-note"
+        } else {
+            frontmatter.r#type.trim()
+        }
+    );
+    add_node(
+        state,
+        KnowledgeGraphNode {
+            id: type_id.clone(),
+            node_type: "type".to_string(),
+            title: type_id.trim_start_matches("type:").to_string(),
+            refs: vec![relative_path.to_string()],
+            asset_type: None,
+            kind: None,
+            source: None,
+        },
+    );
+    add_edge(
+        state,
+        graph_edge(&asset_id, &type_id, "related_to", "frontmatter", 1.0, relative_path),
+    );
+
+    if !frontmatter.kind.trim().is_empty() {
+        let kind_id = format!("kind:{}", frontmatter.kind.trim());
+        add_node(
+            state,
+            KnowledgeGraphNode {
+                id: kind_id.clone(),
+                node_type: "kind".to_string(),
+                title: frontmatter.kind.trim().to_string(),
+                refs: vec![relative_path.to_string()],
+                asset_type: None,
+                kind: None,
+                source: None,
+            },
+        );
+        add_edge(
+            state,
+            graph_edge(&asset_id, &kind_id, "related_to", "frontmatter", 1.0, relative_path),
+        );
+    }
+
+    let mut frontmatter_problem_ids = Vec::new();
+    if !frontmatter.problem_id.trim().is_empty() {
+        frontmatter_problem_ids.push(frontmatter.problem_id.clone());
+    }
+    frontmatter_problem_ids.extend(frontmatter.related_problems.clone());
+    frontmatter_problem_ids.extend(frontmatter.problems.clone());
+    frontmatter_problem_ids.sort();
+    frontmatter_problem_ids.dedup();
+    add_problem_refs(
+        state,
+        &asset_id,
+        relative_path,
+        &frontmatter_problem_ids,
+        "frontmatter",
+    );
+
+    let mut body_problem_ids = extract_problem_ids(markdown);
+    body_problem_ids.retain(|problem_id| !frontmatter_problem_ids.contains(problem_id));
+    add_problem_refs(
+        state,
+        &asset_id,
+        relative_path,
+        &body_problem_ids,
+        "problem_id_match",
+    );
+
+    add_topic_refs(state, &asset_id, relative_path, &frontmatter.topics);
+
+    if !frontmatter.collection_id.trim().is_empty() {
+        let collection_id = format!("collection:{}", frontmatter.collection_id.trim());
+        add_node(
+            state,
+            KnowledgeGraphNode {
+                id: collection_id.clone(),
+                node_type: "collection".to_string(),
+                title: frontmatter.collection_id.trim().to_string(),
+                refs: vec![relative_path.to_string()],
+                asset_type: None,
+                kind: None,
+                source: None,
+            },
+        );
+        add_edge(
+            state,
+            graph_edge(&asset_id, &collection_id, "derived_from", "frontmatter", 1.0, relative_path),
+        );
+    }
+
+    for fragment in &frontmatter.fragments {
+        let target = format!("asset:{}", fragment.trim());
+        add_edge(
+            state,
+            graph_edge(&asset_id, &target, "contains", "frontmatter", 1.0, relative_path),
+        );
+    }
+
+    for article in &frontmatter.articles {
+        let target = format!("asset:{}", article.trim());
+        add_edge(
+            state,
+            graph_edge(&asset_id, &target, "contains", "frontmatter", 1.0, relative_path),
+        );
+    }
+
+    for link in extract_wikilinks(markdown) {
+        let target = format!("asset:{link}");
+        add_edge(
+            state,
+            graph_edge(&asset_id, &target, "links_to", "wikilink", 0.8, relative_path),
+        );
+    }
+}
+
+fn collect_graph(notes_root: &Path) -> Result<KnowledgeGraphIndex, String> {
+    fs::create_dir_all(notes_root)
+        .map_err(|e| format!("Failed to create notes directory: {e}"))?;
+    let canonical_notes_root = notes_root
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve notes root: {e}"))?;
+    let mut state = GraphBuildState::default();
+
+    for entry in WalkDir::new(&canonical_notes_root)
+        .into_iter()
+        .filter_entry(|entry| !should_skip_dir(entry.path()))
+    {
+        let entry = entry.map_err(|e| format!("Failed to scan notes directory: {e}"))?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
+
+        let relative_path = normalize_relative_path(path, &canonical_notes_root)?;
+        let markdown = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read markdown file {}: {e}", path.display()))?;
+        build_graph_for_markdown(&relative_path, &markdown, &mut state);
+    }
+
+    Ok(KnowledgeGraphIndex {
+        generated_at: Utc::now().to_rfc3339(),
+        nodes: state.nodes.into_values().collect(),
+        edges: state.edges,
     })
 }
 
-pub fn rebuild_knowledge_graph_in(notes_root: &Path) -> Result<KnowledgeGraphResult, String> {
-    rebuild_graph(notes_root)
+fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create graph cache directory {}: {e}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("Failed to encode graph cache: {e}"))?;
+    fs::write(path, bytes).map_err(|e| format!("Failed to write graph cache {}: {e}", path.display()))
 }
 
-pub fn get_knowledge_graph_in(notes_root: &Path) -> Result<KnowledgeGraphResult, String> {
-    load_graph(notes_root)
+fn write_graph_cache(index: &KnowledgeGraphIndex) -> Result<(), String> {
+    write_json_file(&graph_nodes_path()?, &index.nodes)?;
+    write_json_file(&graph_edges_path()?, &index.edges)?;
+    write_json_file(&graph_batches_path()?, &Vec::<String>::new())?;
+    write_json_file(&graph_summary_path()?, index)?;
+    Ok(())
+}
+
+fn read_graph_cache() -> Result<Option<KnowledgeGraphIndex>, String> {
+    let path = graph_summary_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read graph cache: {e}"))?;
+    serde_json::from_slice::<KnowledgeGraphIndex>(&bytes)
+        .map(Some)
+        .map_err(|e| format!("Failed to decode graph cache: {e}"))
 }
 
 #[tauri::command]
-pub fn rebuild_knowledge_graph() -> Result<KnowledgeGraphResult, String> {
-    let notes_root = notes_root_dir()?;
-    rebuild_graph(&notes_root)
+pub fn get_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
+    Ok(read_graph_cache()?.unwrap_or_default())
 }
 
 #[tauri::command]
-pub fn get_knowledge_graph() -> Result<KnowledgeGraphResult, String> {
-    let notes_root = notes_root_dir()?;
-    load_graph(&notes_root)
+pub fn rebuild_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
+    let index = collect_graph(&paths::notes_dir()?)?;
+    write_graph_cache(&index)?;
+    Ok(index)
 }
 
 #[cfg(test)]
@@ -550,125 +554,58 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn problem_id_scan_deduplicates_and_handles_prefixes() {
-        let markdown = "P3803 P3803 [[FFT]] P1001A P1001";
-        let ids = extract_problem_ids(markdown);
-        assert_eq!(ids, vec!["P1001".to_string(), "P3803".to_string()]);
+    fn extract_problem_ids_deduplicates_problem_mentions() {
+        let ids = extract_problem_ids("P3803 and P3803, plus P3383.");
+        assert_eq!(ids, vec!["P3803", "P3383"]);
     }
 
     #[test]
-    fn wikilink_scan_keeps_unique_targets() {
-        let markdown = "[[FFT]] [[FFT]] [[P3803]]";
-        let links = extract_wikilinks(markdown);
-        assert_eq!(links, vec!["FFT".to_string(), "P3803".to_string()]);
+    fn extract_wikilinks_deduplicates_targets_and_strips_aliases() {
+        let links = extract_wikilinks("[[FFT]] [[FFT|fast transform]] [[P3803]]");
+        assert_eq!(links, vec!["FFT", "P3803"]);
     }
 
     #[test]
-    fn frontmatter_scanner_extracts_core_knowledge_fields() {
-        let markdown = concat!(
-            "---\n",
-            "type: fragment\n",
-            "kind: problem-note\n",
-            "topics:\n",
-            "  - FFT\n",
-            "related_problems:\n",
-            "  - P3803\n",
-            "problem_id: P3803\n",
-            "collection_id: collection/2026-06-28\n",
-            "---\n",
-            "正文"
-        );
-        let fields = extract_graph_frontmatter(markdown).expect("frontmatter should parse");
-        assert_eq!(fields.asset_type.as_deref(), Some("fragment"));
-        assert_eq!(fields.kind.as_deref(), Some("problem-note"));
-        assert_eq!(fields.topics, vec!["FFT".to_string()]);
-        assert_eq!(fields.related_problems, vec!["P3803".to_string()]);
-        assert_eq!(fields.problem_id.as_deref(), Some("P3803"));
-        assert_eq!(fields.collection_id.as_deref(), Some("collection/2026-06-28"));
-    }
-
-    #[test]
-    fn graph_builder_emits_type_and_kind_nodes_from_frontmatter() {
-        let markdown = concat!(
-            "---\n",
-            "type: fragment\n",
-            "kind: problem-note\n",
-            "title: P3803 FFT 复习\n",
-            "---\n",
-            "正文"
-        );
-        let (nodes, edges) = build_graph_for_markdown("fragments/p3803.md", markdown);
-        assert!(nodes.iter().any(|node| node.id == "type:fragment"));
-        assert!(nodes.iter().any(|node| node.id == "kind:problem-note"));
-        assert!(edges.iter().any(|edge| edge.source == "frontmatter"));
-    }
-
-    #[test]
-    fn rebuild_graph_writes_cache_files() {
-        let dir = tempdir().unwrap();
-        let notes_root = dir.path().join("notes");
-        fs::create_dir_all(notes_root.join("fragments")).unwrap();
-        fs::write(
-            notes_root.join("fragments").join("p3803.md"),
+    fn graph_scans_fragment_frontmatter_problem_topic_and_wikilink() {
+        let mut state = GraphBuildState::default();
+        build_graph_for_markdown(
+            "knowledge/fragments/p3803.md",
             concat!(
                 "---\n",
                 "type: fragment\n",
                 "kind: problem-note\n",
-                "title: P3803 FFT 复习\n",
-                "topics:\n",
-                "  - FFT\n",
-                "related_problems:\n",
-                "  - P3803\n",
+                "title: P3803 FFT\n",
+                "topics: [FFT]\n",
+                "related_problems: [P3803]\n",
+                "source: luogu\n",
+                "created_from: training-center\n",
                 "problem_id: P3803\n",
-                "collection_id: collection/2026-06-28\n",
+                "collection_id: knowledge/collections/batch.md\n",
                 "---\n",
-                "P3803 [[FFT]]"
+                "See [[knowledge/collections/batch.md]] and P3803.\n",
             ),
-        )
-        .unwrap();
+            &mut state,
+        );
 
-        let result = rebuild_graph(&notes_root).unwrap();
-        assert!(result.graph.nodes.iter().any(|node| node.id == "problem:P3803"));
-        assert!(result.graph.nodes.iter().any(|node| node.id == "topic:FFT"));
-        assert!(result.graph.edges.iter().any(|edge| edge.source == "frontmatter"));
-        assert!(result.graph.edges.iter().any(|edge| edge.source == "wikilink"));
-        assert!(notes_root.join(".oinb/graph/nodes.json").exists());
-        assert!(notes_root.join(".oinb/graph/edges.json").exists());
-        assert!(notes_root.join(".oinb/graph/batches.json").exists());
+        assert!(state.nodes.contains_key("asset:knowledge/fragments/p3803.md"));
+        assert!(state.nodes.contains_key("problem:P3803"));
+        assert!(state.nodes.contains_key("topic:FFT"));
+        assert!(state.nodes.contains_key("type:fragment"));
+        assert!(state.nodes.contains_key("kind:problem-note"));
+        assert!(state.edges.iter().any(|edge| edge.edge_type == "links_to"));
     }
 
     #[test]
-    fn get_graph_reads_cache_when_present() {
+    fn collect_graph_skips_oinb_directory() {
         let dir = tempdir().unwrap();
-        let notes_root = dir.path().join("notes");
-        fs::create_dir_all(notes_root.join(".oinb/graph")).unwrap();
-        fs::write(
-            notes_root.join(".oinb/graph/nodes.json"),
-            serde_json::to_string_pretty(&Vec::<KnowledgeGraphNode>::new()).unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            notes_root.join(".oinb/graph/edges.json"),
-            serde_json::to_string_pretty(&Vec::<KnowledgeGraphEdge>::new()).unwrap(),
-        )
-        .unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(notes.join(".oinb")).unwrap();
+        fs::write(notes.join(".oinb/cache.md"), "P9999").unwrap();
+        fs::create_dir_all(notes.join("knowledge/fragments")).unwrap();
+        fs::write(notes.join("knowledge/fragments/p3803.md"), "P3803").unwrap();
 
-        let result = load_graph(&notes_root).unwrap();
-        assert!(result.graph.nodes.is_empty());
-        assert!(result.graph.edges.is_empty());
-    }
-
-    #[test]
-    fn scan_skips_oinb_directory() {
-        let dir = tempdir().unwrap();
-        let notes_root = dir.path().join("notes");
-        fs::create_dir_all(notes_root.join(".oinb/graph")).unwrap();
-        fs::write(notes_root.join(".oinb/graph").join("hidden.md"), "P9999 [[Hidden]]").unwrap();
-        fs::create_dir_all(notes_root.join("visible")).unwrap();
-        fs::write(notes_root.join("visible").join("visible.md"), "P3803").unwrap();
-
-        let result = rebuild_graph(&notes_root).unwrap();
-        assert!(result.graph.nodes.iter().any(|node| node.id == "problem:P3803"));
-        assert!(!result.graph.nodes.iter().any(|node| node.id == "problem:P9999"));
+        let index = collect_graph(&notes).unwrap();
+        assert!(index.nodes.iter().any(|node| node.id == "problem:P3803"));
+        assert!(!index.nodes.iter().any(|node| node.id == "problem:P9999"));
     }
 }

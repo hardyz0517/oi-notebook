@@ -1,141 +1,266 @@
-import { useMemo, useState } from "react";
-import { BookOpenText, Brain, ChevronRight, GraduationCap, LibraryBig, Network, SquareLibrary, BookText, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { RefreshCcw, Sparkles } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { IconButton } from "@/components/ui/icon-button";
+import { Separator } from "@/components/ui/separator";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
+import { getKnowledgeGraph, rebuildKnowledgeGraph, type KnowledgeGraphIndexResult } from "@/lib/api";
+import type { KnowledgeWorkspaceTabId } from "@/lib/knowledge/knowledgeTypes";
 
-type KnowledgeView = "overview" | "graph" | "fragments" | "collections" | "articles" | "review" | "mistakes" | "relationships";
-
-const KNOWLEDGE_VIEWS: Array<{ id: KnowledgeView; label: string; icon: typeof LibraryBig }> = [
-  { id: "overview", label: "Overview", icon: BookOpenText },
-  { id: "graph", label: "Graph", icon: Network },
-  { id: "fragments", label: "Fragments", icon: BookText },
-  { id: "collections", label: "Collections", icon: SquareLibrary },
-  { id: "articles", label: "Articles", icon: GraduationCap },
-  { id: "review", label: "Review", icon: Sparkles },
-  { id: "mistakes", label: "Mistakes", icon: Brain },
-  { id: "relationships", label: "Relationship Suggestions", icon: LibraryBig },
+const WORKSPACE_TABS: Array<{ value: KnowledgeWorkspaceTabId; label: string }> = [
+  { value: "overview", label: "总览" },
+  { value: "graph", label: "图谱" },
+  { value: "fragments", label: "片段" },
+  { value: "collections", label: "集合" },
+  { value: "articles", label: "文章" },
+  { value: "review", label: "复习" },
+  { value: "mistakes", label: "错题" },
+  { value: "relationships", label: "关系建议" },
 ];
 
-const STUB_COUNTS = {
-  assets: 12,
-  fragments: 7,
-  collections: 3,
-  articles: 2,
-  edges: 18,
-};
+function emptyGraph(): KnowledgeGraphIndexResult {
+  return { generatedAt: "", nodes: [], edges: [] };
+}
 
-export function KnowledgeBaseWorkspace() {
-  const [activeView, setActiveView] = useState<KnowledgeView>("overview");
-  const currentView = useMemo(() => KNOWLEDGE_VIEWS.find((view) => view.id === activeView) ?? KNOWLEDGE_VIEWS[0], [activeView]);
+function buildCounts(graph: KnowledgeGraphIndexResult) {
+  const assetCount = graph.nodes.filter((node) => node.type === "asset").length;
+  const problemCount = graph.nodes.filter((node) => node.type === "problem").length;
+  const topicCount = graph.nodes.filter((node) => node.type === "topic").length;
+  return {
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+    assetCount,
+    problemCount,
+    topicCount,
+  };
+}
+
+export function KnowledgeBaseWorkspace({
+  activeTab = "overview",
+  onTabChange,
+  onOpenAsset,
+}: {
+  activeTab?: KnowledgeWorkspaceTabId;
+  onTabChange?: (tab: KnowledgeWorkspaceTabId) => void;
+  onOpenAsset?: (path: string) => void;
+}) {
+  const [workspaceTab, setWorkspaceTab] = useState<KnowledgeWorkspaceTabId>(activeTab);
+  const [graph, setGraph] = useState<KnowledgeGraphIndexResult>(emptyGraph);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const counts = useMemo(() => buildCounts(graph), [graph]);
+
+  const loadGraph = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setGraph(await getKnowledgeGraph());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRebuild = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setGraph(await rebuildKnowledgeGraph());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadGraph();
+  }, []);
+
+  const filteredAssets = useMemo(() => {
+    const type =
+      workspaceTab === "fragments" ? "fragment" :
+      workspaceTab === "collections" ? "collection" :
+      workspaceTab === "articles" ? "article" :
+      null;
+    if (!type) return [];
+    return graph.nodes.filter((node) => node.type === "asset" && node.assetType === type);
+  }, [graph.nodes, workspaceTab]);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 items-center justify-between border-b border-border/70 px-4 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <LibraryBig className="h-4 w-4 text-muted-foreground" />
-            Knowledge Base
+      <header className="flex shrink-0 flex-col gap-3 border-b border-border/70 px-4 py-3">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-base font-semibold">知识库</h1>
+              <Badge variant="secondary">Phase 1</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">浏览、筛选、图谱和复习壳层。</p>
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">Shell only for P4, with local stub data and no Rust/API write path.</p>
+          <div className="flex items-center gap-2">
+            <IconButton aria-label="重新构建知识图" onClick={() => void handleRebuild()} disabled={loading}>
+              <RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />
+            </IconButton>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">{currentView.label}</Badge>
-          <Button type="button" size="compact" variant="outline">
-            Rebuild graph
-          </Button>
-        </div>
+        <SegmentedControl
+          value={workspaceTab}
+          options={WORKSPACE_TABS}
+          ariaLabel="知识库二级导航"
+          onValueChange={(tab) => {
+            setWorkspaceTab(tab);
+            onTabChange?.(tab);
+          }}
+          className="w-fit"
+        />
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] overflow-hidden">
-        <aside className="border-r border-border/70 bg-muted/10 p-3">
-          <div className="space-y-2">
-            {KNOWLEDGE_VIEWS.map((view) => {
-              const Icon = view.icon;
-              const selected = view.id === activeView;
-              return (
-                <button
-                  key={view.id}
-                  type="button"
-                  className={cn(
-                    "grid w-full gap-1 rounded-[var(--ui-radius-item)] border px-3 py-2 text-left transition-colors",
-                    selected ? "border-primary/40 bg-primary/10 text-foreground" : "border-border/60 bg-background/70 text-foreground/90 hover:bg-muted/50",
+      <div className="grid min-h-0 min-w-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <main className="min-h-0 min-w-0 overflow-auto px-4 py-4">
+          {workspaceTab === "overview" && (
+            <div className="grid gap-3">
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <div className="text-sm font-medium">图谱概览</div>
+                  <IconButton aria-label="刷新图谱" onClick={() => void loadGraph()} disabled={loading}>
+                    <RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />
+                  </IconButton>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <Stat label="节点" value={counts.nodeCount} />
+                    <Stat label="边" value={counts.edgeCount} />
+                    <Stat label="资产" value={counts.assetCount} />
+                    <Stat label="题目" value={counts.problemCount + counts.topicCount} />
+                  </div>
+                  <Separator />
+                  {graph.nodes.length === 0 ? (
+                    <div className="grid gap-2">
+                      <p className="text-sm text-muted-foreground">还没有知识图数据，先执行一次重建。</p>
+                      <Button className="w-fit" onClick={() => void handleRebuild()}>
+                        <Sparkles className="h-4 w-4" />
+                        重建知识图
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 text-sm text-muted-foreground">
+                      <p>最近生成：{graph.generatedAt || "未知"}</p>
+                      <p>当前数据来自 Markdown 扫描与 frontmatter 解析。</p>
+                    </div>
                   )}
-                  onClick={() => setActiveView(view.id)}
-                >
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <span className="truncate">{view.label}</span>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {workspaceTab === "graph" && (
+            <Card className="min-h-[420px]">
+              <CardHeader className="px-4 py-3">
+                <div className="text-sm font-medium">知识图</div>
+                <span className="text-xs text-muted-foreground">基础占位图层</span>
+              </CardHeader>
+              <CardContent className="flex min-h-[360px] items-center justify-center">
+                <div className="grid gap-2 text-center text-sm text-muted-foreground">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-muted/40">
+                    <Sparkles className="h-6 w-6" />
                   </div>
-                  <div className="text-xs text-muted-foreground">View shell</div>
-                </button>
-              );
-            })}
-          </div>
+                  <p>这里会展示全局图与局部图。</p>
+                  <p>当前先依赖 Rust 返回的节点和边数据。</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-          <div className="mt-4 rounded-[var(--ui-radius-panel)] border border-dashed border-border/70 bg-background/60 p-3 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2 text-foreground">
-              <ChevronRight className="h-4 w-4" />
-              Quick stats
+          {["fragments", "collections", "articles"].includes(workspaceTab) && (
+            <div className="grid gap-3">
+              {filteredAssets.length === 0 ? (
+                <Card>
+                  <CardContent className="py-10 text-sm text-muted-foreground">
+                    暂无匹配的资产。
+                  </CardContent>
+                </Card>
+              ) : filteredAssets.map((asset) => (
+                <Card key={asset.id}>
+                  <CardHeader className="px-4 py-3">
+                    <button
+                      type="button"
+                      className="min-w-0 text-left"
+                      onClick={() => onOpenAsset?.(asset.refs[0] ?? "")}
+                    >
+                      <div className="truncate text-sm font-medium">{asset.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">{asset.id}</div>
+                    </button>
+                    <Badge variant="secondary">{asset.assetType ?? "legacy-note"}</Badge>
+                  </CardHeader>
+                  <CardContent className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>{asset.kind || "legacy-note"}</span>
+                    <span>{asset.refs.length} refs</span>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-            <div className="mt-2 space-y-1">
-              <div>Assets: {STUB_COUNTS.assets}</div>
-              <div>Edges: {STUB_COUNTS.edges}</div>
-            </div>
-          </div>
-        </aside>
+          )}
 
-        <main className="min-h-0 overflow-hidden p-3">
-          <Card className="h-full overflow-hidden">
-            <CardHeader>
-              <div>
-                <div className="text-sm font-semibold text-foreground">{currentView.label}</div>
-                <div className="text-xs text-muted-foreground">Overview, graph, lists, review, and relationship shells all live here.</div>
-              </div>
+          {workspaceTab === "review" && (
+            <Card>
+              <CardContent className="grid gap-2 py-6 text-sm text-muted-foreground">
+                <p>复习视图会从片段资产和关系数据开始。</p>
+                <p>当前先显示最近扫描结果和重建入口。</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {workspaceTab === "mistakes" && (
+            <Card>
+              <CardContent className="grid gap-2 py-6 text-sm text-muted-foreground">
+                <p>错题视图暂时依赖图谱数据。</p>
+                <p>后续会接入题目与主题聚类。</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {workspaceTab === "relationships" && (
+            <Card>
+              <CardContent className="grid gap-2 py-6 text-sm text-muted-foreground">
+                <p>关系建议先显示规则驱动的基础结果。</p>
+                <p>当前版本预留后续 AI 建议位。</p>
+              </CardContent>
+            </Card>
+          )}
+        </main>
+
+        <aside className="min-h-0 min-w-0 overflow-auto border-l border-border/70 px-4 py-4">
+          <Card>
+            <CardHeader className="px-4 py-3">
+              <div className="text-sm font-medium">侧栏</div>
             </CardHeader>
-            <CardContent className="grid min-h-0 gap-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-3">
-                  <div className="text-xs text-muted-foreground">Assets</div>
-                  <div className="mt-1 text-2xl font-semibold text-foreground">{STUB_COUNTS.assets}</div>
-                </div>
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-3">
-                  <div className="text-xs text-muted-foreground">Fragments</div>
-                  <div className="mt-1 text-2xl font-semibold text-foreground">{STUB_COUNTS.fragments}</div>
-                </div>
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-3">
-                  <div className="text-xs text-muted-foreground">Collections</div>
-                  <div className="mt-1 text-2xl font-semibold text-foreground">{STUB_COUNTS.collections}</div>
-                </div>
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-3">
-                  <div className="text-xs text-muted-foreground">Articles</div>
-                  <div className="mt-1 text-2xl font-semibold text-foreground">{STUB_COUNTS.articles}</div>
-                </div>
-              </div>
-
-              <div className="grid min-h-0 gap-3 lg:grid-cols-[1.2fr_0.8fr]">
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-foreground">Overview / List / Graph shell</div>
-                    <Badge variant="info">Local data only</Badge>
-                  </div>
-                  <div className="mt-3 grid min-h-40 place-items-center rounded-[var(--ui-radius-panel)] border border-dashed border-border/60 bg-muted/20 text-sm text-muted-foreground">
-                    {currentView.id === "graph" ? "Graph canvas placeholder" : "Knowledge content placeholder"}
-                  </div>
-                </div>
-                <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/70 p-4">
-                  <div className="text-sm font-medium text-foreground">Review shell</div>
-                  <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                    <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/60 p-3">Recent fragments list placeholder</div>
-                    <div className="rounded-[var(--ui-radius-panel)] border border-border/60 bg-background/60 p-3">Mistake and relationship sections are reserved for later phases</div>
-                  </div>
-                </div>
-              </div>
+            <CardContent className="grid gap-3 text-sm">
+              <Stat label="资产节点" value={counts.assetCount} />
+              <Stat label="问题节点" value={counts.problemCount} />
+              <Stat label="主题节点" value={counts.topicCount} />
+              <Separator />
+              <p className="text-xs text-muted-foreground">右侧区域先作为图谱摘要和后续筛选入口。</p>
             </CardContent>
           </Card>
-        </main>
+        </aside>
       </div>
     </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[var(--ui-radius-item)] border border-border/70 bg-muted/25 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-base font-semibold">{value}</div>
+    </div>
   );
 }
