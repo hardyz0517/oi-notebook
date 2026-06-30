@@ -507,12 +507,14 @@ export interface SyncLuoguInsightsResult {
 
 export interface KnowledgeGraphNode {
   id: string;
-  type: "asset" | "problem" | "topic";
+  type: "asset" | "problem" | "topic" | "kind" | "type" | "collection" | "batch";
   title: string;
   refs: string[];
-  assetType?: "fragment" | "collection" | "article" | "legacy-note";
+  assetType?: "fragment" | "collection" | "article" | "legacy-note" | "legacy-luogu-solution" | "legacy-problem-note";
   kind?: string;
   source?: string;
+  classificationReason?: string;
+  classificationConfidence?: number;
 }
 
 export interface KnowledgeGraphEdge {
@@ -528,6 +530,62 @@ export interface KnowledgeGraphIndexResult {
   generatedAt: string;
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
+  assets: KnowledgeAssetRowResult[];
+  suggestions: KnowledgeRelationshipSuggestionResult[];
+  reviewSlices: KnowledgeReviewSliceResult[];
+}
+
+export interface KnowledgeAssetRowResult {
+  id: string;
+  type: "asset";
+  assetType: "fragment" | "collection" | "article" | "legacy-note" | "legacy-luogu-solution" | "legacy-problem-note";
+  kind: string;
+  title: string;
+  date: string;
+  topics: string[];
+  relatedProblems: string[];
+  source: string;
+  createdFrom: string;
+  reviewPriority: "low" | "medium" | "high" | string;
+  status: "draft" | "active" | "archived" | string;
+  path: string;
+  refs: string[];
+  lastModified: string;
+  relationCount: number;
+  missingMetadataFlags: string[];
+  classificationReason: string;
+  classificationConfidence: number;
+  inDegree: number;
+  outDegree: number;
+  degree: number;
+  isolated: boolean;
+  componentId: number;
+  lastReviewedAt: string | null;
+}
+
+export interface KnowledgeRelationshipSuggestionResult {
+  id: string;
+  kind: string;
+  source: string;
+  target: string;
+  reason: string;
+  refs: string[];
+  preview: string;
+  score: number;
+}
+
+export interface KnowledgeReviewSliceResult {
+  assetId: string;
+  title: string;
+  path: string;
+  reviewPriority: string;
+  status: string;
+  kind: string;
+  topics: string[];
+  relatedProblems: string[];
+  lastReviewedAt: string | null;
+  score: number;
+  reasons: string[];
 }
 
 export interface WriteKnowledgeAssetResult {
@@ -822,6 +880,46 @@ export async function getKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
 export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
   try {
     return await invoke<KnowledgeGraphIndexResult>("rebuild_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeAssets(): Promise<KnowledgeAssetRowResult[]> {
+  try {
+    return await invoke<KnowledgeAssetRowResult[]>("get_knowledge_assets");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeLocalGraph(
+  nodeId: string,
+  hops = 1,
+  limit = 80,
+): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("get_knowledge_local_graph", {
+      nodeId,
+      hops,
+      limit,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeRelationshipSuggestions(): Promise<KnowledgeRelationshipSuggestionResult[]> {
+  try {
+    return await invoke<KnowledgeRelationshipSuggestionResult[]>("get_knowledge_relationship_suggestions");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeReviewSlices(): Promise<KnowledgeReviewSliceResult[]> {
+  try {
+    return await invoke<KnowledgeReviewSliceResult[]>("get_knowledge_review_slices");
   } catch (e) {
     throw toApiError(e);
   }

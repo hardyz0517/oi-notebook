@@ -23,7 +23,7 @@ const WORKSPACE_TABS: Array<{ value: KnowledgeWorkspaceTabId; label: string }> =
 ];
 
 function emptyGraph(): KnowledgeGraphIndexResult {
-  return { generatedAt: "", nodes: [], edges: [] };
+  return { generatedAt: "", nodes: [], edges: [], assets: [], suggestions: [], reviewSlices: [] };
 }
 
 function buildCounts(graph: KnowledgeGraphIndexResult) {

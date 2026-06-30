@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeGraphIndex, KnowledgeGraphNode, TrainingItemDraft } from "./knowledgeTypes";
+import type {
+  KnowledgeAssetRow,
+  KnowledgeGraphIndex,
+  KnowledgeGraphNode,
+  KnowledgeRelationshipSuggestion,
+  KnowledgeReviewSlice,
+  TrainingItemDraft,
+} from "./knowledgeTypes";
 
 describe("knowledgeTypes", () => {
   it("allows a fragment-producing training item draft", () => {
@@ -50,10 +57,74 @@ describe("knowledgeTypes", () => {
           refs: ["knowledge/fragments/P3803-fft.md"],
         },
       ],
+      assets: [],
+      suggestions: [],
+      reviewSlices: [],
     };
 
     const node: KnowledgeGraphNode = graph.nodes[0];
     expect(node.assetType).toBe("fragment");
     expect(graph.edges[0].source).toBe("problem_id_match");
+  });
+
+  it("allows a P2-A asset read model row with derived metadata", () => {
+    const row: KnowledgeAssetRow = {
+      id: "asset:knowledge/fragments/P3803-fft.md",
+      type: "asset",
+      assetType: "fragment",
+      kind: "problem-note",
+      title: "P3803 FFT 复习",
+      date: "2026-06-30",
+      topics: ["FFT"],
+      relatedProblems: ["P3803"],
+      source: "luogu",
+      createdFrom: "training-center",
+      reviewPriority: "high",
+      status: "active",
+      path: "knowledge/fragments/P3803-fft.md",
+      refs: ["knowledge/fragments/P3803-fft.md"],
+      lastModified: "2026-06-30T00:00:00.000Z",
+      relationCount: 3,
+      missingMetadataFlags: [],
+      classificationReason: "explicit_type",
+      classificationConfidence: 1,
+      inDegree: 1,
+      outDegree: 2,
+      degree: 3,
+      isolated: false,
+      componentId: 0,
+    };
+
+    expect(row.missingMetadataFlags).toEqual([]);
+    expect(row.componentId).toBe(0);
+  });
+
+  it("allows deterministic relationship suggestions and review slices", () => {
+    const suggestion: KnowledgeRelationshipSuggestion = {
+      id: "missing-related-problem:asset:a.md:problem:P3803",
+      kind: "missing_related_problem",
+      source: "asset:a.md",
+      target: "problem:P3803",
+      reason: "正文提到 P3803，但 related_problems 未声明。",
+      refs: ["a.md"],
+      preview: "P3803 appears in body",
+      score: 2.4,
+    };
+    const reviewSlice: KnowledgeReviewSlice = {
+      assetId: "asset:a.md",
+      title: "A",
+      path: "a.md",
+      reviewPriority: "high",
+      status: "active",
+      kind: "mistake",
+      topics: ["FFT"],
+      relatedProblems: ["P3803"],
+      lastReviewedAt: null,
+      score: 4,
+      reasons: ["high_priority", "mistake_or_template"],
+    };
+
+    expect(suggestion.kind).toBe("missing_related_problem");
+    expect(reviewSlice.reasons).toContain("high_priority");
   });
 });
