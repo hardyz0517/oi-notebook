@@ -8,7 +8,7 @@ import {
 } from "./trainingDrafts";
 
 describe("trainingDrafts", () => {
-  it("creates a pending problem draft with fragment output defaults", () => {
+  it("creates a draft problem item with fragment output defaults", () => {
     const draft = createProblemTrainingItemDraft({
       id: "item:P3803",
       batchId: "batch:2026-06-28",
@@ -16,7 +16,7 @@ describe("trainingDrafts", () => {
       problemTitle: "多项式乘法",
     });
 
-    expect(draft.status).toBe("pending");
+    expect(draft.status).toBe("draft");
     expect(draft.output).toEqual({ fragment: true, article: false });
     expect(draft.fields.relatedProblems).toEqual(["P3803"]);
     expect(draft.fields.title).toBe("P3803 多项式乘法");

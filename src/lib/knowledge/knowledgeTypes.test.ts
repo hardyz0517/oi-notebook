@@ -8,7 +8,7 @@ describe("knowledgeTypes", () => {
       batchId: "batch:2026-06-28",
       problemId: "P3803",
       problemTitle: "多项式乘法",
-      status: "pending",
+      status: "draft",
       output: { fragment: true, article: false },
       fields: {
         title: "P3803 FFT 复习点",

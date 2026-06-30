@@ -3,6 +3,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
 import { toApiError } from "@/lib/apiError";
+import type { KnowledgeGraphEdgeSource } from "@/lib/knowledge/knowledgeTypes";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -507,19 +508,26 @@ export interface SyncLuoguInsightsResult {
 
 export interface KnowledgeGraphNode {
   id: string;
-  type: "asset" | "problem" | "topic";
+  type: "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection";
   title: string;
   refs: string[];
   assetType?: "fragment" | "collection" | "article" | "legacy-note";
   kind?: string;
   source?: string;
+  topics?: string[];
+  status?: "draft" | "active" | "archived";
+  reviewPriority?: "low" | "medium" | "high";
+  masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
+  createdAt?: string;
+  updatedAt?: string;
+  lastReviewedAt?: string;
 }
 
 export interface KnowledgeGraphEdge {
   from: string;
   to: string;
   type: "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
-  source: string;
+  source: KnowledgeGraphEdgeSource;
   confidence: number;
   refs: string[];
 }
