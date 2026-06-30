@@ -23,6 +23,8 @@ export interface KnowledgeAssetFrontmatter {
   status: KnowledgeAssetStatus;
 }
 
+export type TrainingItemStatus = "draft" | "ready" | "written" | "skipped" | "failed";
+
 export type TrainingSourceType =
   | "luogu-today"
   | "luogu-range"
@@ -49,7 +51,7 @@ export interface TrainingItemDraft {
   submissionId?: string;
   submitTime?: string;
   difficulty?: string;
-  status: "pending" | "confirmed" | "skipped" | "written" | "failed";
+  status: TrainingItemStatus;
   output: {
     fragment: boolean;
     article: boolean;
@@ -93,6 +95,13 @@ export interface KnowledgeGraphNode {
   source?: string;
   classificationReason?: string;
   classificationConfidence?: number;
+  topics?: string[];
+  status?: KnowledgeAssetStatus;
+  reviewPriority?: ReviewPriority;
+  masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
+  createdAt?: string;
+  updatedAt?: string;
+  lastReviewedAt?: string;
 }
 
 export interface KnowledgeGraphEdge {
@@ -156,6 +165,10 @@ export interface KnowledgeAssetRow {
   degree: number;
   isolated: boolean;
   componentId: number;
+  openPath?: string;
+  masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
+  createdAt?: string;
+  updatedAt?: string;
   lastReviewedAt?: string | null;
 }
 

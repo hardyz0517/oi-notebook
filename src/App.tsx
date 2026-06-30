@@ -197,6 +197,7 @@ import {
 } from "@/lib/appShell";
 import { KnowledgeBaseWorkspace } from "@/components/knowledge/KnowledgeBaseWorkspace";
 import { TrainingCenterWorkspace } from "@/components/training/TrainingCenterWorkspace";
+import type { KnowledgeWorkspaceTabId } from "@/lib/knowledge/knowledgeTypes";
 import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
@@ -1096,6 +1097,7 @@ export default function App() {
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
   const [activeMainWorkspace, setActiveMainWorkspace] = useState<"editor" | "training" | "knowledge">("editor");
+  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgeWorkspaceTabId>("overview");
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
   const [aiSidebarWidth, setAiSidebarWidth] = useState(() => getInitialAiSidebarWidth(clampAiSidebarWidth));
   const [editorPreviewRatio, setEditorPreviewRatio] = useState(getInitialEditorPreviewRatio);
@@ -5627,6 +5629,11 @@ export default function App() {
     setActiveMainWorkspace((current) => (current === "knowledge" ? "editor" : "knowledge"));
   };
 
+  const handleOpenKnowledgeTab = (tab: KnowledgeWorkspaceTabId) => {
+    setActiveKnowledgeTab(tab);
+    setActiveMainWorkspace("knowledge");
+  };
+
   const handleActivityAi = () => {
     if (APP_RESIZE_PERF_DEBUG) {
       const opening = !isAiSidebarOpen;
@@ -8175,11 +8182,27 @@ export default function App() {
         <div className="relative flex min-w-0 flex-1 overflow-hidden">
           {activeMainWorkspace === "training" ? (
             <div className="absolute inset-0 z-10">
-              <TrainingCenterWorkspace currentNoteTitle={currentFilePath ?? undefined} />
+              <TrainingCenterWorkspace
+                currentNoteTitle={currentFilePath ?? undefined}
+                onOpenAsset={(path) => {
+                  if (handleOpenLocalNoteFromAi(path)) {
+                    setActiveMainWorkspace("editor");
+                  }
+                }}
+                onOpenKnowledgeTab={handleOpenKnowledgeTab}
+              />
             </div>
           ) : activeMainWorkspace === "knowledge" ? (
             <div className="absolute inset-0 z-10">
-              <KnowledgeBaseWorkspace />
+              <KnowledgeBaseWorkspace
+                activeTab={activeKnowledgeTab}
+                onTabChange={setActiveKnowledgeTab}
+                onOpenAsset={(path) => {
+                  if (handleOpenLocalNoteFromAi(path)) {
+                    setActiveMainWorkspace("editor");
+                  }
+                }}
+              />
             </div>
           ) : null}
           <section className={cn("app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden", activeMainWorkspace !== "editor" && "hidden")} aria-hidden={activeMainWorkspace !== "editor"}>

@@ -45,7 +45,7 @@ export function createTrainingItemDraft(input: {
     submissionId: input.submissionId,
     submitTime: input.submitTime,
     difficulty: input.difficulty,
-    status: "pending",
+    status: "draft",
     output: { fragment: true, article: false },
     fields: {
       title: normalizeKnowledgeText(problemTitle ? `${problemId} ${problemTitle}` : problemId, problemId),
@@ -83,7 +83,7 @@ export function toggleTrainingItemOutput(
   };
 
   return nextOutput.fragment || nextOutput.article
-    ? { ...item, output: nextOutput }
+    ? { ...item, output: nextOutput, status: item.status === "skipped" ? "draft" : item.status }
     : { ...item, output: nextOutput, status: item.status === "written" ? item.status : "skipped" };
 }
 
