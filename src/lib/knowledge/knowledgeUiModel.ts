@@ -60,6 +60,10 @@ function normalizeDate(value: string | undefined): string {
   return value?.slice(0, 10) ?? "";
 }
 
+function assetOpenPath(row: KnowledgeAssetRow): string {
+  return row.openPath || row.path || row.refs[0] || "";
+}
+
 function daysBetween(from: string, to: string): number | null {
   if (!from || !to) return null;
   const start = Date.parse(`${from.slice(0, 10)}T00:00:00.000Z`);
@@ -69,25 +73,56 @@ function daysBetween(from: string, to: string): number | null {
 }
 
 export function mapGraphToAssetRows(graph: KnowledgeGraphIndex): KnowledgeAssetRow[] {
+  if (graph.assets.length > 0) {
+    return graph.assets
+      .map((row) => ({
+        ...row,
+        openPath: assetOpenPath(row),
+        masteryStatus: row.masteryStatus ?? "unknown",
+        createdAt: normalizeDate(row.createdAt ?? row.date),
+        updatedAt: normalizeDate(row.updatedAt ?? row.lastModified),
+        lastReviewedAt: row.lastReviewedAt ?? null,
+      }))
+      .sort((left, right) => right.relationCount - left.relationCount || left.title.localeCompare(right.title, "zh-CN"));
+  }
+
   return graph.nodes
     .filter((node) => node.type === "asset")
-    .map((node) => ({
-      id: node.id,
-      title: node.title,
-      assetType: node.assetType ?? "legacy-note",
-      kind: node.kind ?? "legacy-note",
-      refs: node.refs,
-      relationCount: countRelations(graph, node.id),
-      openPath: node.refs[0] ?? "",
-      topics: node.topics ?? [],
-      source: node.source ?? "unknown",
-      status: node.status ?? "active",
-      reviewPriority: node.reviewPriority ?? "medium",
-      masteryStatus: node.masteryStatus ?? "unknown",
-      createdAt: normalizeDate(node.createdAt),
-      updatedAt: normalizeDate(node.updatedAt),
-      lastReviewedAt: normalizeDate(node.lastReviewedAt),
-    }))
+    .map((node) => {
+      const relationCount = countRelations(graph, node.id);
+      const openPath = node.refs[0] ?? "";
+      return ({
+        id: node.id,
+        type: "asset",
+        title: node.title,
+        assetType: node.assetType ?? "legacy-note",
+        kind: node.kind ?? "legacy-note",
+        date: normalizeDate(node.createdAt),
+        topics: node.topics ?? [],
+        relatedProblems: [],
+        source: node.source ?? "unknown",
+        createdFrom: "unknown",
+        reviewPriority: node.reviewPriority ?? "medium",
+        status: node.status ?? "active",
+        path: openPath,
+        refs: node.refs,
+        lastModified: normalizeDate(node.updatedAt),
+        relationCount,
+        missingMetadataFlags: [],
+        classificationReason: node.classificationReason ?? "node_fallback",
+        classificationConfidence: node.classificationConfidence ?? 0,
+        inDegree: graph.edges.filter((edge) => edge.to === node.id).length,
+        outDegree: graph.edges.filter((edge) => edge.from === node.id).length,
+        degree: relationCount,
+        isolated: relationCount === 0,
+        componentId: 0,
+        openPath,
+        masteryStatus: node.masteryStatus ?? "unknown",
+        createdAt: normalizeDate(node.createdAt),
+        updatedAt: normalizeDate(node.updatedAt),
+        lastReviewedAt: node.lastReviewedAt ? normalizeDate(node.lastReviewedAt) : null,
+      } satisfies KnowledgeAssetRow);
+    })
     .sort((left, right) => right.relationCount - left.relationCount || left.title.localeCompare(right.title, "zh-CN"));
 }
 
@@ -145,7 +180,7 @@ export function buildReviewRows(rows: KnowledgeAssetRow[], today: string): Knowl
         reasons.push("高优先级");
         reviewScore += 30;
       }
-      const staleDays = daysBetween(row.lastReviewedAt || row.createdAt, today);
+      const staleDays = daysBetween(row.lastReviewedAt || row.createdAt || "", today);
       if (staleDays !== null && staleDays >= 14) {
         reasons.push(`${staleDays} 天未复习`);
         reviewScore += staleDays;
@@ -167,22 +202,51 @@ export function buildReviewRows(rows: KnowledgeAssetRow[], today: string): Knowl
 }
 
 export function buildSuggestionRows(graph: KnowledgeGraphIndex): KnowledgeSuggestionRow[] {
+  if (graph.suggestions.length > 0) {
+    return graph.suggestions.map((suggestion) => {
+      const path = suggestion.refs[0] ?? suggestion.target;
+      return {
+        id: suggestion.id,
+        kind: suggestion.kind.includes("missing_topic")
+          ? "missing-topic"
+          : suggestion.kind.includes("missing_related_problem")
+            ? "unlinked-problem"
+            : "isolated-asset",
+        targetTitle: suggestion.target,
+        targetPath: path,
+        reason: suggestion.reason,
+        refs: suggestion.refs,
+        preview: suggestion.preview,
+        score: suggestion.score,
+        action: {
+          kind: "open-markdown",
+          enabled: Boolean(path),
+          path,
+          label: "打开 Markdown 手动编辑",
+        },
+      };
+    });
+  }
+
   return mapGraphToAssetRows(graph)
-    .filter((row) => row.openPath && row.relationCount === 0)
-    .map((row) => ({
-      id: `suggestion:${row.id}:isolated`,
-      kind: "isolated-asset",
-      targetTitle: row.title,
-      targetPath: row.openPath,
-      reason: "没有检测到 topic、题号或显式链接关系",
-      refs: row.refs,
-      preview: "建议手动补充 frontmatter topics / related_problems，或在正文加入显式链接。",
-      score: 0.72,
-      action: {
-        kind: "open-markdown",
-        enabled: true,
-        path: row.openPath,
-        label: "打开 Markdown 手动编辑",
-      },
-    }));
+    .filter((row) => assetOpenPath(row) && row.relationCount === 0)
+    .map((row) => {
+      const path = assetOpenPath(row);
+      return {
+        id: `suggestion:${row.id}:isolated`,
+        kind: "isolated-asset",
+        targetTitle: row.title,
+        targetPath: path,
+        reason: "没有检测到 topic、题号或显式链接关系",
+        refs: row.refs,
+        preview: "建议手动补充 frontmatter topics / related_problems，或在正文加入显式链接。",
+        score: 0.72,
+        action: {
+          kind: "open-markdown",
+          enabled: true,
+          path,
+          label: "打开 Markdown 手动编辑",
+        },
+      };
+    });
 }

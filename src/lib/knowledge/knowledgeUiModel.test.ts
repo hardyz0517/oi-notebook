@@ -82,6 +82,9 @@ const graph: KnowledgeGraphIndex = {
       refs: ["knowledge/fragments/P3803.md"],
     },
   ],
+  assets: [],
+  suggestions: [],
+  reviewSlices: [],
 };
 
 describe("knowledgeUiModel", () => {

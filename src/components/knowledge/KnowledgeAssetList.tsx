@@ -12,6 +12,10 @@ import {
 } from "@/lib/knowledge/knowledgeUiModel";
 import type { KnowledgeAssetRow, KnowledgeAssetType } from "@/lib/knowledge/knowledgeTypes";
 
+function getAssetOpenPath(asset: KnowledgeAssetRow): string {
+  return asset.openPath || asset.path || asset.refs[0] || "";
+}
+
 export function KnowledgeAssetList({
   rows,
   assetType,
@@ -71,13 +75,13 @@ export function KnowledgeAssetList({
       ) : filtered.map((asset) => (
         <Card key={asset.id}>
           <CardHeader className="px-4 py-3">
-            <button type="button" className="min-w-0 cursor-pointer text-left" onClick={() => onOpenAsset?.(asset.openPath)}>
+            <button type="button" className="min-w-0 cursor-pointer text-left" onClick={() => onOpenAsset?.(getAssetOpenPath(asset))}>
               <div className="truncate text-sm font-medium">{asset.title}</div>
-              <div className="truncate text-xs text-muted-foreground">{asset.openPath}</div>
+              <div className="truncate text-xs text-muted-foreground">{getAssetOpenPath(asset)}</div>
             </button>
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{asset.assetType}</Badge>
-              <Button type="button" size="icon-xs" variant="ghost" aria-label="打开资产" onClick={() => onOpenAsset?.(asset.openPath)}>
+              <Button type="button" size="icon-xs" variant="ghost" aria-label="打开资产" onClick={() => onOpenAsset?.(getAssetOpenPath(asset))}>
                 <ExternalLink className="h-3.5 w-3.5" />
               </Button>
             </div>

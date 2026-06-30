@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { KnowledgeReviewRow } from "@/lib/knowledge/knowledgeUiModel";
 
+function getReviewOpenPath(row: KnowledgeReviewRow): string {
+  return row.openPath || row.path || row.refs[0] || "";
+}
+
 export function KnowledgeReviewView({
   rows,
   onOpenAsset,
@@ -27,7 +31,7 @@ export function KnowledgeReviewView({
                 {row.reasons.map((reason) => <Badge key={reason} variant="info">{reason}</Badge>)}
               </div>
             </div>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="打开复习资产" onClick={() => onOpenAsset?.(row.openPath)}>
+            <Button type="button" size="icon-xs" variant="ghost" aria-label="打开复习资产" onClick={() => onOpenAsset?.(getReviewOpenPath(row))}>
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
           </CardHeader>
