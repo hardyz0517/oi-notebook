@@ -1,4 +1,10 @@
-export type KnowledgeAssetType = "fragment" | "collection" | "article" | "legacy-note";
+export type KnowledgeAssetType =
+  | "fragment"
+  | "collection"
+  | "article"
+  | "legacy-note"
+  | "legacy-luogu-solution"
+  | "legacy-problem-note";
 
 export type KnowledgeAssetStatus = "draft" | "active" | "archived";
 
@@ -63,7 +69,7 @@ export interface TrainingBatchDraft {
   itemIds: string[];
 }
 
-export type KnowledgeGraphNodeType = "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection";
+export type KnowledgeGraphNodeType = "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection" | "batch";
 
 export type KnowledgeGraphEdgeType = "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
 
@@ -85,6 +91,8 @@ export interface KnowledgeGraphNode {
   assetType?: KnowledgeAssetType;
   kind?: string;
   source?: string;
+  classificationReason?: string;
+  classificationConfidence?: number;
 }
 
 export interface KnowledgeGraphEdge {
@@ -100,6 +108,9 @@ export interface KnowledgeGraphIndex {
   generatedAt: string;
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
+  assets: KnowledgeAssetRow[];
+  suggestions: KnowledgeRelationshipSuggestion[];
+  reviewSlices: KnowledgeReviewSlice[];
 }
 
 export type KnowledgeWorkspaceTabId =
@@ -122,11 +133,61 @@ export interface KnowledgeGraphSummary {
 
 export interface KnowledgeAssetRow {
   id: string;
-  title: string;
+  type: "asset";
   assetType: KnowledgeAssetType;
+  title: string;
   kind: string;
+  date: string;
+  topics: string[];
+  relatedProblems: string[];
+  source: string;
+  createdFrom: string;
+  reviewPriority: ReviewPriority | string;
+  status: KnowledgeAssetStatus | string;
+  path: string;
   refs: string[];
+  lastModified: string;
   relationCount: number;
+  missingMetadataFlags: string[];
+  classificationReason: string;
+  classificationConfidence: number;
+  inDegree: number;
+  outDegree: number;
+  degree: number;
+  isolated: boolean;
+  componentId: number;
+  lastReviewedAt?: string | null;
+}
+
+export interface KnowledgeRelationshipSuggestion {
+  id: string;
+  kind:
+    | "missing_related_problem"
+    | "missing_topic"
+    | "missing_backlink"
+    | "isolated_asset"
+    | "upgrade_legacy_luogu_solution"
+    | string;
+  source: string;
+  target: string;
+  reason: string;
+  refs: string[];
+  preview: string;
+  score: number;
+}
+
+export interface KnowledgeReviewSlice {
+  assetId: string;
+  title: string;
+  path: string;
+  reviewPriority: ReviewPriority | string;
+  status: KnowledgeAssetStatus | string;
+  kind: string;
+  topics: string[];
+  relatedProblems: string[];
+  lastReviewedAt: string | null;
+  score: number;
+  reasons: string[];
 }
 
 export interface TrainingBatchWriteCollectionPlan {
