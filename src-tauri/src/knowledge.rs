@@ -1221,6 +1221,38 @@ fn read_graph_cache() -> Result<Option<KnowledgeGraphIndex>, String> {
         .map_err(|e| format!("Failed to decode graph cache: {e}"))
 }
 
+fn write_knowledge_asset_to_notes_dir(
+    notes_dir: &Path,
+    request: WriteKnowledgeAssetRequest,
+) -> Result<WriteKnowledgeAssetResult, String> {
+    fs::create_dir_all(notes_dir).map_err(|e| format!("create notes dir failed: {e}"))?;
+
+    let relative_path = normalize_relative_asset_path(&request.relative_path)?;
+    let path = safe_knowledge_path(notes_dir, &relative_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create knowledge parent failed: {e}"))?;
+    }
+
+    if path.exists() && !request.overwrite {
+        return Ok(WriteKnowledgeAssetResult {
+            relative_path,
+            written: false,
+            skipped: true,
+            error: None,
+        });
+    }
+
+    fs::write(&path, request.markdown.as_bytes())
+        .map_err(|e| format!("write knowledge asset failed ({relative_path}): {e}"))?;
+
+    Ok(WriteKnowledgeAssetResult {
+        relative_path,
+        written: true,
+        skipped: false,
+        error: None,
+    })
+}
+
 #[tauri::command]
 pub fn get_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
     Ok(read_graph_cache()?.unwrap_or_default())
@@ -1266,32 +1298,7 @@ pub fn rebuild_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
 #[tauri::command]
 pub fn write_knowledge_asset(request: WriteKnowledgeAssetRequest) -> Result<WriteKnowledgeAssetResult, String> {
     let notes_dir = paths::notes_dir()?;
-    fs::create_dir_all(&notes_dir).map_err(|e| format!("create notes dir failed: {e}"))?;
-
-    let relative_path = normalize_relative_asset_path(&request.relative_path)?;
-    let path = safe_knowledge_path(&notes_dir, &relative_path)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("create knowledge parent failed: {e}"))?;
-    }
-
-    if path.exists() && !request.overwrite {
-        return Ok(WriteKnowledgeAssetResult {
-            relative_path,
-            written: false,
-            skipped: true,
-            error: None,
-        });
-    }
-
-    fs::write(&path, request.markdown.as_bytes())
-        .map_err(|e| format!("write knowledge asset failed ({relative_path}): {e}"))?;
-
-    Ok(WriteKnowledgeAssetResult {
-        relative_path,
-        written: true,
-        skipped: false,
-        error: None,
-    })
+    write_knowledge_asset_to_notes_dir(&notes_dir, request)
 }
 
 #[cfg(test)]
@@ -1495,6 +1502,175 @@ mod tests {
         let index = collect_graph(&notes).unwrap();
         assert!(index.nodes.iter().any(|node| node.id == "problem:P3803"));
         assert!(!index.nodes.iter().any(|node| node.id == "problem:P9999"));
+    }
+
+    fn smoke_yaml_list(values: &[&str]) -> String {
+        if values.is_empty() {
+            "[]".to_string()
+        } else {
+            format!("[{}]", values.join(", "))
+        }
+    }
+
+    fn smoke_fragment_markdown(title: &str, problem: &str, topics: &[&str], collection_path: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "type: fragment\n",
+                "kind: problem-note\n",
+                "title: \"{title}\"\n",
+                "date: \"2026-07-01\"\n",
+                "topics: {topics}\n",
+                "related_problems: [{problem}]\n",
+                "source: luogu\n",
+                "created_from: training-center\n",
+                "review_priority: medium\n",
+                "status: active\n",
+                "problem_id: {problem}\n",
+                "collection_id: \"{collection_path}\"\n",
+                "---\n\n",
+                "## 一句话题意\n\n",
+                "{problem} smoke 题意。\n\n",
+                "## 核心考点\n\n",
+                "{topics}\n\n",
+                "## 坑点 / 错因\n\n",
+                "保留最小验收数据。\n\n",
+                "## 复习提示\n\n",
+                "从临时 notes root 读回。\n",
+            ),
+            title = title,
+            problem = problem,
+            topics = smoke_yaml_list(topics),
+            collection_path = collection_path,
+        )
+    }
+
+    fn smoke_collection_markdown(fragment_paths: &[&str]) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "type: collection\n",
+                "kind: daily-log\n",
+                "title: \"P2-D 临时 notes smoke\"\n",
+                "date: \"2026-07-01\"\n",
+                "topics: [FFT, 数论, 图论]\n",
+                "related_problems: [P3803, P3383, P3379]\n",
+                "source: luogu\n",
+                "created_from: training-center\n",
+                "review_priority: medium\n",
+                "status: active\n",
+                "problems: [P3803, P3383, P3379]\n",
+                "fragments: {fragments}\n",
+                "articles: []\n",
+                "---\n\n",
+                "## 训练概览\n\n",
+                "P2-D smoke collection writes one collection and five fragments.\n\n",
+                "## 新增片段\n\n",
+                "{fragment_lines}\n\n",
+                "## 跳过项\n\n",
+                "- skipped:item-without-comment\n",
+            ),
+            fragments = smoke_yaml_list(fragment_paths),
+            fragment_lines = fragment_paths
+                .iter()
+                .map(|path| format!("- {path}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
+    #[test]
+    fn p2_temp_notes_smoke_writes_rebuilds_and_reads_minimal_dataset() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(&notes).unwrap();
+
+        let collection_path = "knowledge/collections/p2-d-temp-smoke.md";
+        let fragment_paths = [
+            "knowledge/fragments/p2-d-temp-smoke/P3803.md",
+            "knowledge/fragments/p2-d-temp-smoke/P3383.md",
+            "knowledge/fragments/p2-d-temp-smoke/P3379.md",
+            "knowledge/fragments/p2-d-temp-smoke/P1001.md",
+            "knowledge/fragments/p2-d-temp-smoke/P1002.md",
+        ];
+        let fragments = [
+            smoke_fragment_markdown("P3803 FFT smoke", "P3803", &["FFT"], collection_path),
+            smoke_fragment_markdown("P3383 数论 smoke", "P3383", &["数论"], collection_path),
+            smoke_fragment_markdown("P3379 图论 smoke", "P3379", &["图论"], collection_path),
+            smoke_fragment_markdown("P1001 FFT trick smoke", "P1001", &["FFT"], collection_path),
+            smoke_fragment_markdown("P1002 图论复习 smoke", "P1002", &["图论"], collection_path),
+        ];
+
+        let collection_result = write_knowledge_asset_to_notes_dir(
+            &notes,
+            WriteKnowledgeAssetRequest {
+                relative_path: collection_path.to_string(),
+                markdown: smoke_collection_markdown(&fragment_paths),
+                overwrite: true,
+            },
+        )
+        .unwrap();
+        assert!(collection_result.written);
+
+        for (path, markdown) in fragment_paths.iter().zip(fragments) {
+            let result = write_knowledge_asset_to_notes_dir(
+                &notes,
+                WriteKnowledgeAssetRequest {
+                    relative_path: (*path).to_string(),
+                    markdown,
+                    overwrite: true,
+                },
+            )
+            .unwrap();
+            assert!(result.written);
+        }
+
+        let duplicate_result = write_knowledge_asset_to_notes_dir(
+            &notes,
+            WriteKnowledgeAssetRequest {
+                relative_path: fragment_paths[0].to_string(),
+                markdown: "duplicate smoke".to_string(),
+                overwrite: false,
+            },
+        )
+        .unwrap();
+        assert!(duplicate_result.skipped);
+
+        let failure = write_knowledge_asset_to_notes_dir(
+            &notes,
+            WriteKnowledgeAssetRequest {
+                relative_path: "../escape.md".to_string(),
+                markdown: "escape".to_string(),
+                overwrite: true,
+            },
+        );
+        assert!(failure.is_err());
+
+        let index = collect_graph(&notes).unwrap();
+        let local_graph = build_local_graph(&index, &node_id_for_asset(collection_path), 1, 80);
+
+        assert_eq!(index.assets.iter().filter(|asset| asset.asset_type == "collection").count(), 1);
+        assert_eq!(index.assets.iter().filter(|asset| asset.asset_type == "fragment").count(), 5);
+        for topic in ["FFT", "数论", "图论"] {
+            assert!(index.nodes.iter().any(|node| node.id == node_id_for_topic(topic)));
+        }
+        for problem in ["P3803", "P3383", "P3379"] {
+            assert!(index.nodes.iter().any(|node| node.id == node_id_for_problem(problem)));
+        }
+        assert!(index
+            .edges
+            .iter()
+            .any(|edge| edge.from == node_id_for_asset(collection_path)
+                && edge.to == node_id_for_asset(fragment_paths[0])
+                && edge.edge_type == "contains"));
+        assert!(local_graph
+            .nodes
+            .iter()
+            .any(|node| node.id == node_id_for_asset(fragment_paths[0])));
+        assert!(index
+            .review_slices
+            .iter()
+            .any(|slice| slice.path == fragment_paths[0]));
     }
 
     #[test]
