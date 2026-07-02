@@ -461,6 +461,13 @@ export interface NotexSearchSelfCheckResult {
   cases: NotexSearchSelfCheckCaseResult[];
 }
 
+export interface AgentWorkbenchPreviewResult {
+  runtimeReady: boolean;
+  workspaceReady: boolean;
+  researchBoundaryReady: boolean;
+  legacySidebarIsolated: boolean;
+}
+
 export interface NoteChatStreamChunkEvent {
   streamId: string;
   delta: string;
@@ -1000,6 +1007,14 @@ export async function getPromptCitationContractStatus(): Promise<PromptCitationC
 export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckResult> {
   try {
     return await invoke<NotexSearchSelfCheckResult>("run_notex_search_self_check");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getAgentWorkbenchPreview(): Promise<AgentWorkbenchPreviewResult> {
+  try {
+    return await invoke<AgentWorkbenchPreviewResult>("get_agent_workbench_preview");
   } catch (e) {
     throw toApiError(e);
   }

@@ -134,4 +134,12 @@ describe("api boundary", () => {
     const commandNames = API_COMMAND_CONTRACTS.map((contract) => contract.commandName);
     expect(new Set(commandNames).size).toBe(commandNames.length);
   });
+
+  it("registers the agent workbench preview command in the API contract", () => {
+    expect(API_COMMAND_CONTRACTS).toContainEqual({
+      functionName: "getAgentWorkbenchPreview",
+      commandName: "get_agent_workbench_preview",
+      argKeys: [],
+    });
+  });
 });

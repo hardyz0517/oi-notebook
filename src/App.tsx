@@ -18,6 +18,7 @@ import type { TagManagerFilterMode } from "@/components/tag-manager/types";
 import { mergeConfigWithStoredCustomCollections, writeStoredCustomCollections, type TagTaxonomyConfigImportResult } from "@/components/tag-manager/tagManagerConfig";
 import { useCollectionCandidatesFromNotes } from "@/components/tag-manager/useCollectionCandidatesFromNotes";
 import TagPickerDialog from "@/components/TagPickerDialog";
+import { AgentWorkbenchShell } from "@/components/agent-workbench/AgentWorkbenchShell";
 import AiSidebar from "@/components/ai/AiSidebar";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
@@ -146,7 +147,7 @@ import {
   type SettingsCenterRect,
 } from "@/components/settings/settingsGeometry";
 import { cn } from "@/lib/utils";
-import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, getAgentWorkbenchPreview, type AgentWorkbenchPreviewResult, type BlogConfig } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -182,6 +183,7 @@ import {
   getAiActivityToggleLabel,
   getActivityButtonClassName,
   getNotesActivityToggleLabel,
+  getWorkbenchActivityToggleLabel,
   getSettingsOpenTarget,
   deriveEditorViewLayout,
   getSaveStatusActionLabel,
@@ -1089,6 +1091,8 @@ export default function App() {
   const [isFrontmatterOpen, setIsFrontmatterOpen] = useState(false);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
+  const [isAgentWorkbenchOpen, setIsAgentWorkbenchOpen] = useState(false);
+  const [agentWorkbenchPreview, setAgentWorkbenchPreview] = useState<AgentWorkbenchPreviewResult | null>(null);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
@@ -1286,6 +1290,20 @@ export default function App() {
   useEffect(() => {
     void loadBlogConfig();
   }, [loadBlogConfig]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAgentWorkbenchPreview()
+      .then((preview) => {
+        if (!cancelled) setAgentWorkbenchPreview(preview);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentWorkbenchPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setEditorSelectedText("");
@@ -1983,6 +2001,7 @@ export default function App() {
   });
   const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
   const aiActivityToggleLabel = getAiActivityToggleLabel(isAiSidebarOpen);
+  const workbenchActivityToggleLabel = getWorkbenchActivityToggleLabel(isAgentWorkbenchOpen);
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
     isSavingBlogConfig,
@@ -2330,6 +2349,7 @@ export default function App() {
     isLuoguDialogOpen,
     isRestartingBlog,
     isSearchOpen,
+    isAgentWorkbenchOpen,
     isNotesSidebarOpen,
   });
   const isAiActivityActive = isAiActivitySelected({
@@ -5631,6 +5651,10 @@ export default function App() {
     });
   };
 
+  const handleActivityWorkbench = () => {
+    setIsAgentWorkbenchOpen((open) => !open);
+  };
+
   const handleActivityBlog = () => {
     void handleOpenBlog();
   };
@@ -8030,6 +8054,16 @@ export default function App() {
             </ToolbarButton>
             <ToolbarButton
               type="button"
+              className={activityButtonClass("workbench")}
+              onClick={handleActivityWorkbench}
+              title={workbenchActivityToggleLabel}
+              aria-label={workbenchActivityToggleLabel}
+              selected={activeActivityItem === "workbench"}
+            >
+              <PlugZap size={24} strokeWidth={2.18} />
+            </ToolbarButton>
+            <ToolbarButton
+              type="button"
               className={activityButtonClass("blog")}
               onClick={handleActivityBlog}
               title="打开博客"
@@ -8137,7 +8171,12 @@ export default function App() {
         )}
 
         <div className="relative flex min-w-0 flex-1 overflow-hidden">
-        <section className="app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden">
+        <section
+          className={cn(
+            "app-editor-workspace min-w-0 flex-1 flex-col overflow-hidden",
+            isAgentWorkbenchOpen ? "hidden" : "flex",
+          )}
+        >
           <OpenTabsBar
             tabs={workspaceTabs}
             activeTabId={activeWorkspaceTabId ?? currentFilePath}
@@ -8481,6 +8520,15 @@ export default function App() {
               </div>
             </>
           )}
+        </section>
+        <section
+          className={cn(
+            "min-h-0 min-w-0 flex-1 overflow-hidden bg-background/60",
+            isAgentWorkbenchOpen ? "flex" : "hidden",
+          )}
+          aria-label="Agent Workbench"
+        >
+          <AgentWorkbenchShell preview={agentWorkbenchPreview} />
         </section>
         <AiSidebar
           context={aiSidebarContext}
