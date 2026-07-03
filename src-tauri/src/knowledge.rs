@@ -68,6 +68,7 @@ pub struct KnowledgeAssetRow {
     pub source: String,
     pub created_from: String,
     pub review_priority: String,
+    pub mastery: String,
     pub status: String,
     pub path: String,
     pub refs: Vec<String>,
@@ -206,6 +207,24 @@ pub struct WriteKnowledgeAssetResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateKnowledgeReviewStateRequest {
+    pub relative_path: String,
+    pub review_priority: String,
+    pub mastery: String,
+    pub last_reviewed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateKnowledgeReviewStateResult {
+    pub relative_path: String,
+    pub review_priority: String,
+    pub mastery: String,
+    pub last_reviewed_at: String,
+}
+
 #[derive(Debug, Default)]
 struct GraphBuildState {
     nodes: BTreeMap<String, KnowledgeGraphNode>,
@@ -252,6 +271,8 @@ struct KnowledgeFrontmatter {
     date: String,
     #[serde(default, rename = "review_priority")]
     review_priority: String,
+    #[serde(default)]
+    mastery: String,
     #[serde(default)]
     status: String,
     #[serde(default, rename = "last_reviewed_at")]
@@ -370,10 +391,88 @@ fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     (None, content)
 }
 
+fn starts_frontmatter(content: &str) -> bool {
+    content.starts_with("---\n") || content.starts_with("---\r\n")
+}
+
 fn parse_frontmatter(content: &str) -> KnowledgeFrontmatter {
     let (yaml, _) = split_frontmatter(content);
     yaml.and_then(|frontmatter| serde_yaml::from_str(frontmatter).ok())
         .unwrap_or_default()
+}
+
+fn validate_review_priority(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if matches!(value, "low" | "medium" | "high" | "none") {
+        Ok(value.to_string())
+    } else {
+        Err(format!("unsupported review_priority: {value}"))
+    }
+}
+
+fn validate_review_mastery(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if matches!(value, "new" | "learning" | "familiar" | "mastered") {
+        Ok(value.to_string())
+    } else {
+        Err(format!("unsupported mastery: {value}"))
+    }
+}
+
+fn validate_last_reviewed_at(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("last_reviewed_at cannot be empty".to_string());
+    }
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map_err(|e| format!("last_reviewed_at must be RFC3339: {e}"))?;
+    Ok(value.to_string())
+}
+
+fn validate_knowledge_markdown_path(relative_path: &str) -> Result<String, String> {
+    let normalized = normalize_relative_asset_path(relative_path)?;
+    if normalized
+        .rsplit('/')
+        .next()
+        .map(|name| name.to_ascii_lowercase().ends_with(".md"))
+        != Some(true)
+    {
+        return Err("knowledge review state path must be a Markdown file".to_string());
+    }
+    Ok(normalized)
+}
+
+fn yaml_key(key: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(key.to_string())
+}
+
+fn yaml_text(value: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(value.to_string())
+}
+
+fn update_review_state_markdown(
+    markdown: &str,
+    review_priority: &str,
+    mastery: &str,
+    last_reviewed_at: &str,
+) -> Result<String, String> {
+    let (yaml, body) = split_frontmatter(markdown);
+    if yaml.is_none() && starts_frontmatter(markdown) {
+        return Err("frontmatter is not closed".to_string());
+    }
+
+    let mut mapping = match yaml {
+        Some(raw_yaml) => serde_yaml::from_str::<serde_yaml::Mapping>(raw_yaml)
+            .map_err(|e| format!("frontmatter YAML parse failed: {e}"))?,
+        None => serde_yaml::Mapping::new(),
+    };
+    mapping.insert(yaml_key("review_priority"), yaml_text(review_priority));
+    mapping.insert(yaml_key("mastery"), yaml_text(mastery));
+    mapping.insert(yaml_key("last_reviewed_at"), yaml_text(last_reviewed_at));
+
+    let yaml = serde_yaml::to_string(&mapping)
+        .map_err(|e| format!("frontmatter YAML encode failed: {e}"))?;
+    Ok(format!("---\n{}---\n{}", yaml.trim_end(), body))
 }
 
 fn node_id_for_asset(relative_path: &str) -> String {
@@ -1044,6 +1143,7 @@ fn build_asset_rows(
                 source: normalize_field(&record.frontmatter.source, "unknown"),
                 created_from: normalize_field(&record.frontmatter.created_from, "unknown"),
                 review_priority: normalize_field(&record.frontmatter.review_priority, "medium"),
+                mastery: normalize_field(&record.frontmatter.mastery, "new"),
                 status: normalize_field(&record.frontmatter.status, "active"),
                 path: record.relative_path.clone(),
                 refs: vec![record.relative_path.clone()],
@@ -1766,6 +1866,38 @@ fn write_knowledge_asset_to_notes_dir(
     })
 }
 
+fn update_knowledge_review_state_in_notes_dir(
+    notes_dir: &Path,
+    request: UpdateKnowledgeReviewStateRequest,
+) -> Result<UpdateKnowledgeReviewStateResult, String> {
+    fs::create_dir_all(notes_dir).map_err(|e| format!("create notes dir failed: {e}"))?;
+
+    let relative_path = validate_knowledge_markdown_path(&request.relative_path)?;
+    let review_priority = validate_review_priority(&request.review_priority)?;
+    let mastery = validate_review_mastery(&request.mastery)?;
+    let last_reviewed_at = validate_last_reviewed_at(&request.last_reviewed_at)?;
+    let path = safe_knowledge_path(notes_dir, &relative_path)?;
+    if !path.is_file() {
+        return Err(format!(
+            "knowledge review state target not found: {relative_path}"
+        ));
+    }
+
+    let markdown = fs::read_to_string(&path)
+        .map_err(|e| format!("read knowledge review state target failed ({relative_path}): {e}"))?;
+    let updated =
+        update_review_state_markdown(&markdown, &review_priority, &mastery, &last_reviewed_at)?;
+    fs::write(&path, updated.as_bytes())
+        .map_err(|e| format!("write knowledge review state failed ({relative_path}): {e}"))?;
+
+    Ok(UpdateKnowledgeReviewStateResult {
+        relative_path,
+        review_priority,
+        mastery,
+        last_reviewed_at,
+    })
+}
+
 #[tauri::command]
 pub fn get_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
     Ok(read_graph_cache()?.unwrap_or_default())
@@ -1837,6 +1969,14 @@ pub fn write_knowledge_asset(
 ) -> Result<WriteKnowledgeAssetResult, String> {
     let notes_dir = paths::notes_dir()?;
     write_knowledge_asset_to_notes_dir(&notes_dir, request)
+}
+
+#[tauri::command]
+pub fn update_knowledge_review_state(
+    request: UpdateKnowledgeReviewStateRequest,
+) -> Result<UpdateKnowledgeReviewStateResult, String> {
+    let notes_dir = paths::notes_dir()?;
+    update_knowledge_review_state_in_notes_dir(&notes_dir, request)
 }
 
 #[tauri::command]
@@ -2077,6 +2217,109 @@ mod tests {
         let index = collect_graph(&notes).unwrap();
         assert!(index.nodes.iter().any(|node| node.id == "problem:P3803"));
         assert!(!index.nodes.iter().any(|node| node.id == "problem:P9999"));
+    }
+
+    fn review_state_request(path: &str) -> UpdateKnowledgeReviewStateRequest {
+        UpdateKnowledgeReviewStateRequest {
+            relative_path: path.to_string(),
+            review_priority: "high".to_string(),
+            mastery: "familiar".to_string(),
+            last_reviewed_at: "2026-07-03T12:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn update_review_state_updates_only_allowed_frontmatter_fields_and_keeps_body() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(notes.join("knowledge/fragments")).unwrap();
+        let path = notes.join("knowledge/fragments/p3803.md");
+        fs::write(
+            &path,
+            concat!(
+                "---\n",
+                "type: fragment\n",
+                "title: FFT\n",
+                "topics: [FFT]\n",
+                "review_priority: low\n",
+                "mastery: new\n",
+                "last_reviewed_at: 2026-06-01T00:00:00Z\n",
+                "---\n\n",
+                "正文保持。\n",
+            ),
+        )
+        .unwrap();
+
+        let result = update_knowledge_review_state_in_notes_dir(
+            &notes,
+            review_state_request("knowledge/fragments/p3803.md"),
+        )
+        .unwrap();
+        let updated = fs::read_to_string(&path).unwrap();
+
+        assert_eq!(result.review_priority, "high");
+        assert!(updated.contains("type: fragment"));
+        assert!(updated.contains("title: FFT"));
+        assert!(updated.contains("review_priority: high"));
+        assert!(updated.contains("mastery: familiar"));
+        assert!(updated.contains("last_reviewed_at: 2026-07-03T12:00:00Z"));
+        assert!(updated.ends_with("\n\n正文保持。\n"));
+    }
+
+    #[test]
+    fn update_review_state_adds_frontmatter_to_legacy_markdown_without_changing_body() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(notes.join("legacy")).unwrap();
+        let path = notes.join("legacy/plain.md");
+        fs::write(&path, "# Plain\n\nBody only.\n").unwrap();
+
+        update_knowledge_review_state_in_notes_dir(&notes, review_state_request("legacy/plain.md"))
+            .unwrap();
+        let updated = fs::read_to_string(&path).unwrap();
+
+        assert!(updated.starts_with("---\n"));
+        assert!(updated.contains("review_priority: high"));
+        assert!(updated.contains("mastery: familiar"));
+        assert!(updated.contains("last_reviewed_at: 2026-07-03T12:00:00Z"));
+        assert!(updated.ends_with("# Plain\n\nBody only.\n"));
+    }
+
+    #[test]
+    fn update_review_state_rejects_invalid_path_and_non_markdown() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(&notes).unwrap();
+
+        assert!(update_knowledge_review_state_in_notes_dir(
+            &notes,
+            review_state_request("../escape.md"),
+        )
+        .is_err());
+        assert!(update_knowledge_review_state_in_notes_dir(
+            &notes,
+            review_state_request("knowledge/fragments/p3803.txt"),
+        )
+        .is_err());
+        assert!(
+            update_knowledge_review_state_in_notes_dir(&notes, review_state_request("")).is_err()
+        );
+    }
+
+    #[test]
+    fn update_review_state_rejects_unknown_enum_values() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(notes.join("knowledge/fragments")).unwrap();
+        fs::write(notes.join("knowledge/fragments/p3803.md"), "Body.\n").unwrap();
+
+        let mut bad_priority = review_state_request("knowledge/fragments/p3803.md");
+        bad_priority.review_priority = "urgent".to_string();
+        assert!(update_knowledge_review_state_in_notes_dir(&notes, bad_priority).is_err());
+
+        let mut bad_mastery = review_state_request("knowledge/fragments/p3803.md");
+        bad_mastery.mastery = "expert".to_string();
+        assert!(update_knowledge_review_state_in_notes_dir(&notes, bad_mastery).is_err());
     }
 
     fn smoke_yaml_list(values: &[&str]) -> String {

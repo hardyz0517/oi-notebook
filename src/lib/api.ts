@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
 import { toApiError } from "@/lib/apiError";
 import type { KnowledgeGraphEdgeSource } from "@/lib/knowledge/knowledgeTypes";
+import type { KnowledgeReviewStateRequest } from "@/lib/knowledge/knowledgeReviewState";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -681,6 +682,13 @@ export interface WriteKnowledgeAssetResult {
   error: string | null;
 }
 
+export interface UpdateKnowledgeReviewStateResult {
+  relativePath: string;
+  reviewPriority: "low" | "medium" | "high" | "none" | string;
+  mastery: "new" | "learning" | "familiar" | "mastered" | string;
+  lastReviewedAt: string;
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -1059,6 +1067,18 @@ export async function writeKnowledgeAsset(
       relativePath,
       markdown,
       overwrite,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function updateKnowledgeReviewState(
+  request: KnowledgeReviewStateRequest,
+): Promise<UpdateKnowledgeReviewStateResult> {
+  try {
+    return await invoke<UpdateKnowledgeReviewStateResult>("update_knowledge_review_state", {
+      request,
     });
   } catch (e) {
     throw toApiError(e);

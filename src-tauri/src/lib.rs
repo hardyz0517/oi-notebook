@@ -89,6 +89,7 @@ pub fn run() {
             knowledge::get_knowledge_batches,
             knowledge::duplicate_knowledge_batch_as_draft,
             knowledge::write_knowledge_asset,
+            knowledge::update_knowledge_review_state,
             knowledge::build_legacy_migration_draft,
             notes::delete_note,
             notes::rename_note,

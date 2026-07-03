@@ -10,6 +10,7 @@ import {
   duplicateKnowledgeBatchAsDraft,
   getKnowledgeGraph,
   rebuildKnowledgeGraph,
+  updateKnowledgeReviewState,
   type KnowledgeGraphIndexResult,
 } from "@/lib/api";
 import { mapBatchHistoryRows } from "@/lib/knowledge/batchHistory";
@@ -20,6 +21,7 @@ import {
   mapGraphToAssetRows,
 } from "@/lib/knowledge/knowledgeUiModel";
 import type { KnowledgeWorkspaceTabId } from "@/lib/knowledge/knowledgeTypes";
+import type { KnowledgeReviewStateRequest } from "@/lib/knowledge/knowledgeReviewState";
 import { KnowledgeAssetList } from "./KnowledgeAssetList";
 import { KnowledgeGraphView } from "./KnowledgeGraphView";
 import { KnowledgeOverview } from "./KnowledgeOverview";
@@ -110,6 +112,11 @@ export function KnowledgeBaseWorkspace({
     }
   };
 
+  const handleSaveReviewState = async (request: KnowledgeReviewStateRequest) => {
+    await updateKnowledgeReviewState(request);
+    setGraph(await rebuildKnowledgeGraph());
+  };
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <header className="flex shrink-0 flex-col gap-3 border-b border-border/70 px-4 py-3">
@@ -141,7 +148,7 @@ export function KnowledgeBaseWorkspace({
           {workspaceTab === "fragments" ? <KnowledgeAssetList rows={assetRows} assetType="fragment" onOpenAsset={onOpenAsset} /> : null}
           {workspaceTab === "collections" ? <KnowledgeAssetList rows={assetRows} assetType="collection" onOpenAsset={onOpenAsset} /> : null}
           {workspaceTab === "articles" ? <KnowledgeAssetList rows={assetRows} assetType="article" onOpenAsset={onOpenAsset} /> : null}
-          {workspaceTab === "review" ? <KnowledgeReviewView rows={reviewRows} onOpenAsset={onOpenAsset} /> : null}
+          {workspaceTab === "review" ? <KnowledgeReviewView rows={reviewRows} onOpenAsset={onOpenAsset} onSaveReviewState={handleSaveReviewState} /> : null}
           {workspaceTab === "mistakes" ? <KnowledgeAssetList rows={assetRows.filter((row) => row.kind === "mistake")} onOpenAsset={onOpenAsset} /> : null}
           {workspaceTab === "relationships" ? <KnowledgeRelationshipView suggestions={suggestions} onOpenAsset={onOpenAsset} /> : null}
         </main>

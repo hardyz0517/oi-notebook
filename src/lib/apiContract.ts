@@ -37,6 +37,7 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "getKnowledgeBatches", commandName: "get_knowledge_batches", argKeys: [] },
   { functionName: "duplicateKnowledgeBatchAsDraft", commandName: "duplicate_knowledge_batch_as_draft", argKeys: ["batchId", "createdAt"] },
   { functionName: "writeKnowledgeAsset", commandName: "write_knowledge_asset", argKeys: ["relativePath", "markdown", "overwrite"] },
+  { functionName: "updateKnowledgeReviewState", commandName: "update_knowledge_review_state", argKeys: ["request"] },
   { functionName: "buildLegacyMigrationDraft", commandName: "build_legacy_migration_draft", argKeys: ["sourcePath", "markdown", "targetType"] },
   { functionName: "getTagTaxonomyConfig", commandName: "get_tag_taxonomy_config", argKeys: [] },
   { functionName: "saveTagTaxonomyConfig", commandName: "save_tag_taxonomy_config", argKeys: ["config"] },
