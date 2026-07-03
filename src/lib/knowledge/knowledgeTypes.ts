@@ -8,7 +8,9 @@ export type KnowledgeAssetType =
 
 export type KnowledgeAssetStatus = "draft" | "active" | "archived";
 
-export type ReviewPriority = "low" | "medium" | "high";
+export type ReviewPriority = "low" | "medium" | "high" | "none";
+
+export type ReviewMastery = "new" | "learning" | "familiar" | "mastered";
 
 export interface KnowledgeAssetFrontmatter {
   type: KnowledgeAssetType;
@@ -20,6 +22,7 @@ export interface KnowledgeAssetFrontmatter {
   source: "luogu" | "manual" | "import" | "unknown";
   createdFrom: "training-center" | "manual" | "luogu-import-legacy" | "unknown";
   reviewPriority: ReviewPriority;
+  mastery: ReviewMastery;
   status: KnowledgeAssetStatus;
 }
 
@@ -136,6 +139,7 @@ export interface KnowledgeGraphNode {
   topics?: string[];
   status?: KnowledgeAssetStatus;
   reviewPriority?: ReviewPriority;
+  mastery?: ReviewMastery;
   masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
   createdAt?: string;
   updatedAt?: string;
@@ -191,6 +195,7 @@ export interface KnowledgeAssetRow {
   source: string;
   createdFrom: string;
   reviewPriority: ReviewPriority | string;
+  mastery?: ReviewMastery | string;
   status: KnowledgeAssetStatus | string;
   path: string;
   refs: string[];

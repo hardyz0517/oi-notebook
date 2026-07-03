@@ -21,6 +21,7 @@ describe("normalizeKnowledgeFrontmatter", () => {
         source: "luogu",
         created_from: "training-center",
         review_priority: "high",
+        mastery: "learning",
       }),
     ).toMatchObject({
       type: "fragment",
@@ -30,6 +31,13 @@ describe("normalizeKnowledgeFrontmatter", () => {
       source: "luogu",
       createdFrom: "training-center",
       reviewPriority: "high",
+      mastery: "learning",
+    });
+  });
+
+  it("keeps mastery optional for legacy markdown", () => {
+    expect(normalizeKnowledgeFrontmatter({ title: "Old note" })).toMatchObject({
+      mastery: "new",
     });
   });
 });

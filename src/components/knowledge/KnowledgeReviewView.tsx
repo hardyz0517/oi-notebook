@@ -18,6 +18,7 @@ export function KnowledgeReviewView({
 }) {
   return (
     <div className="grid gap-3">
+      <div className="text-xs text-muted-foreground">复习候选来自确定性规则：最近沉淀、优先级、掌握状态、关联稀疏度。状态写回仍需人工确认。</div>
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-sm text-muted-foreground">暂无复习候选。重建图谱后会从 fragment/mistake 资产生成。</CardContent>
@@ -37,7 +38,7 @@ export function KnowledgeReviewView({
           </CardHeader>
           <CardContent className="grid gap-2 text-xs text-muted-foreground">
             <div>review_priority：{row.reviewPriority}</div>
-            <div>mastery_status：{row.masteryStatus}</div>
+            <div>mastery：{row.mastery ?? row.masteryStatus ?? "new"}</div>
             <div>last_reviewed_at：{row.lastReviewedAt || "未记录"}</div>
             <Button type="button" size="xs" variant="subtle" disabled className="w-fit">等待安全 API 后写回长期状态</Button>
           </CardContent>

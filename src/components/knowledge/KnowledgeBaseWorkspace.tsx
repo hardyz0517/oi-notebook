@@ -62,7 +62,8 @@ export function KnowledgeBaseWorkspace({
 
   const assetRows = useMemo(() => mapGraphToAssetRows(graph), [graph]);
   const stats = useMemo(() => buildKnowledgeOverviewStats(graph), [graph]);
-  const reviewRows = useMemo(() => buildReviewRows(assetRows, "2026-06-30"), [assetRows]);
+  const reviewToday = useMemo(() => graph.generatedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10), [graph.generatedAt]);
+  const reviewRows = useMemo(() => buildReviewRows(assetRows, reviewToday), [assetRows, reviewToday]);
   const suggestions = useMemo(() => buildSuggestionRows(graph), [graph]);
   const batchRows = useMemo(() => mapBatchHistoryRows(graph.batches), [graph.batches]);
 

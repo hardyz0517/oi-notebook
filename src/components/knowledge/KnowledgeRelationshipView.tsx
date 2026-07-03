@@ -49,6 +49,7 @@ export function KnowledgeRelationshipView({
 
   return (
     <div className="grid gap-3">
+      <div className="text-xs text-muted-foreground">以下为规则提示 / 待人工确认，不包含 AI 分析或模型调用。</div>
       {draft ? (
         <Card>
           <CardHeader className="px-4 py-3">

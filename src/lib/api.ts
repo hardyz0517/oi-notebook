@@ -537,7 +537,8 @@ export interface KnowledgeGraphNode {
   classificationConfidence?: number;
   topics?: string[];
   status?: "draft" | "active" | "archived";
-  reviewPriority?: "low" | "medium" | "high";
+  reviewPriority?: "low" | "medium" | "high" | "none";
+  mastery?: "new" | "learning" | "familiar" | "mastered";
   masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
   createdAt?: string;
   updatedAt?: string;
@@ -574,7 +575,8 @@ export interface KnowledgeAssetRowResult {
   relatedProblems: string[];
   source: string;
   createdFrom: string;
-  reviewPriority: "low" | "medium" | "high" | string;
+  reviewPriority: "low" | "medium" | "high" | "none" | string;
+  mastery?: "new" | "learning" | "familiar" | "mastered" | string;
   status: "draft" | "active" | "archived" | string;
   path: string;
   refs: string[];

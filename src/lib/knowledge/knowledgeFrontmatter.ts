@@ -1,11 +1,13 @@
 import type {
   KnowledgeAssetFrontmatter,
   KnowledgeAssetType,
+  ReviewMastery,
   ReviewPriority,
 } from "./knowledgeTypes";
 
 const ASSET_TYPES = new Set<KnowledgeAssetType>(["fragment", "collection", "article", "legacy-note"]);
-const PRIORITIES = new Set<ReviewPriority>(["low", "medium", "high"]);
+const PRIORITIES = new Set<ReviewPriority>(["low", "medium", "high", "none"]);
+const MASTERY_VALUES = new Set<ReviewMastery>(["new", "learning", "familiar", "mastered"]);
 const SOURCES = new Set<KnowledgeAssetFrontmatter["source"]>(["luogu", "manual", "import", "unknown"]);
 const CREATED_FROM = new Set<KnowledgeAssetFrontmatter["createdFrom"]>([
   "training-center",
@@ -34,6 +36,15 @@ function normalizePriority(value: unknown): ReviewPriority {
   return typeof value === "string" && PRIORITIES.has(value as ReviewPriority)
     ? (value as ReviewPriority)
     : "medium";
+}
+
+function normalizeMastery(value: unknown): ReviewMastery {
+  if (typeof value !== "string") return "new";
+  if (MASTERY_VALUES.has(value as ReviewMastery)) return value as ReviewMastery;
+  if (value === "unknown") return "new";
+  if (value === "stable") return "familiar";
+  if (value === "needs-review") return "learning";
+  return "new";
 }
 
 function normalizeSource(value: unknown): KnowledgeAssetFrontmatter["source"] {
@@ -71,6 +82,7 @@ export function normalizeKnowledgeFrontmatter(input: Record<string, unknown>): K
     source: normalizeSource(input.source),
     createdFrom,
     reviewPriority: normalizePriority(input.review_priority ?? input.reviewPriority),
+    mastery: normalizeMastery(input.mastery ?? input.mastery_status ?? input.masteryStatus),
     status: normalizeStatus(input.status),
   };
 }

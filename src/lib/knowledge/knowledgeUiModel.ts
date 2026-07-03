@@ -3,8 +3,13 @@ import type {
   KnowledgeAssetStatus,
   KnowledgeAssetType,
   KnowledgeGraphIndex,
+  ReviewMastery,
   ReviewPriority,
 } from "./knowledgeTypes";
+import {
+  buildP5RelationshipSuggestions,
+  selectIsolatedReviewAssets,
+} from "./knowledgeReviewSignals";
 
 export interface KnowledgeAssetFilterState {
   assetType?: KnowledgeAssetType | "all";
@@ -37,7 +42,7 @@ export interface KnowledgeReviewRow extends KnowledgeAssetRow {
 
 export interface KnowledgeSuggestionRow {
   id: string;
-  kind: "isolated-asset" | "missing-topic" | "unlinked-problem" | "legacy-upgrade";
+  kind: "isolated-asset" | "missing-topic" | "unlinked-problem" | "legacy-upgrade" | "related-asset";
   targetTitle: string;
   targetPath: string;
   reason: string;
@@ -72,12 +77,20 @@ function daysBetween(from: string, to: string): number | null {
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
+function normalizeMastery(value: string | undefined): ReviewMastery {
+  if (value === "new" || value === "learning" || value === "familiar" || value === "mastered") return value;
+  if (value === "stable") return "familiar";
+  if (value === "needs-review") return "learning";
+  return "new";
+}
+
 export function mapGraphToAssetRows(graph: KnowledgeGraphIndex): KnowledgeAssetRow[] {
   if (graph.assets.length > 0) {
     return graph.assets
       .map((row) => ({
         ...row,
         openPath: assetOpenPath(row),
+        mastery: normalizeMastery(row.mastery ?? row.masteryStatus),
         masteryStatus: row.masteryStatus ?? "unknown",
         createdAt: normalizeDate(row.createdAt ?? row.date),
         updatedAt: normalizeDate(row.updatedAt ?? row.lastModified),
@@ -103,6 +116,7 @@ export function mapGraphToAssetRows(graph: KnowledgeGraphIndex): KnowledgeAssetR
         source: node.source ?? "unknown",
         createdFrom: "unknown",
         reviewPriority: node.reviewPriority ?? "medium",
+        mastery: normalizeMastery(node.mastery ?? node.masteryStatus),
         status: node.status ?? "active",
         path: openPath,
         refs: node.refs,
@@ -171,6 +185,17 @@ export function buildKnowledgeOverviewStats(graph: KnowledgeGraphIndex): Knowled
 }
 
 export function buildReviewRows(rows: KnowledgeAssetRow[], today: string): KnowledgeReviewRow[] {
+  const isolationGraph: KnowledgeGraphIndex = {
+    generatedAt: today,
+    nodes: [],
+    edges: [],
+    assets: rows,
+    suggestions: [],
+    reviewSlices: [],
+    batches: [],
+  };
+  const isolatedIds = new Set(selectIsolatedReviewAssets(rows, isolationGraph).map((row) => row.id));
+
   return rows
     .filter((row) => row.assetType === "fragment" || row.kind === "mistake")
     .map((row) => {
@@ -189,6 +214,14 @@ export function buildReviewRows(rows: KnowledgeAssetRow[], today: string): Knowl
         reasons.push(`最近训练重复出现 ${row.relationCount} 次`);
         reviewScore += row.relationCount * 2;
       }
+      if (row.mastery === "new" || row.masteryStatus === "needs-review") {
+        reasons.push("掌握状态待复习");
+        reviewScore += 8;
+      }
+      if (isolatedIds.has(row.id)) {
+        reasons.push("规则提示：缺少关联");
+        reviewScore += 4;
+      }
       if (reasons.length === 0) reasons.push("最近新增");
 
       return {
@@ -198,58 +231,71 @@ export function buildReviewRows(rows: KnowledgeAssetRow[], today: string): Knowl
         canEditLongTermState: false,
       };
     })
-    .sort((left, right) => right.reviewScore - left.reviewScore);
+    .sort((left, right) => right.reviewScore - left.reviewScore || left.title.localeCompare(right.title, "zh-CN"));
 }
 
 export function buildSuggestionRows(graph: KnowledgeGraphIndex): KnowledgeSuggestionRow[] {
-  if (graph.suggestions.length > 0) {
-    return graph.suggestions.map((suggestion) => {
-      const path = suggestion.refs[0] ?? suggestion.target;
-      const isLegacyUpgrade = suggestion.kind.includes("upgrade_legacy_luogu_solution");
-      return {
-        id: suggestion.id,
-        kind: isLegacyUpgrade
-          ? "legacy-upgrade"
-          : suggestion.kind.includes("missing_topic")
+  const graphSuggestions: KnowledgeSuggestionRow[] = graph.suggestions.map((suggestion) => {
+    const path = suggestion.refs[0] ?? suggestion.target;
+    const isLegacyUpgrade = suggestion.kind.includes("upgrade_legacy_luogu_solution");
+    return {
+      id: suggestion.id,
+      kind: isLegacyUpgrade
+        ? "legacy-upgrade"
+        : suggestion.kind.includes("missing_topic")
           ? "missing-topic"
           : suggestion.kind.includes("missing_related_problem")
             ? "unlinked-problem"
             : "isolated-asset",
-        targetTitle: suggestion.target,
-        targetPath: path,
-        reason: suggestion.reason,
-        refs: suggestion.refs,
-        preview: suggestion.preview,
-        score: suggestion.score,
-        action: {
-          kind: "open-markdown",
-          enabled: Boolean(path),
-          path,
-          label: isLegacyUpgrade ? "预览升级草稿" : "打开 Markdown 手动编辑",
-        },
-      };
-    });
+      targetTitle: suggestion.target,
+      targetPath: path,
+      reason: suggestion.reason,
+      refs: suggestion.refs,
+      preview: suggestion.preview,
+      score: suggestion.score,
+      action: {
+        kind: "open-markdown",
+        enabled: Boolean(path),
+        path,
+        label: isLegacyUpgrade ? "预览升级草稿" : "打开 Markdown 手动编辑",
+      },
+    };
+  });
+
+  const assets = mapGraphToAssetRows(graph);
+  const p5Suggestions: KnowledgeSuggestionRow[] = buildP5RelationshipSuggestions({ graph, assets }).map((suggestion) => {
+    const source = assets.find((row) => row.id === suggestion.source);
+    const target = assets.find((row) => row.id === suggestion.target);
+    const path = source ? assetOpenPath(source) : suggestion.refs[0] ?? suggestion.source;
+    return {
+      id: suggestion.id,
+      kind: suggestion.kind === "related_asset"
+        ? "related-asset"
+        : suggestion.kind === "missing_topic"
+          ? "missing-topic"
+          : suggestion.kind === "missing_related_problem"
+            ? "unlinked-problem"
+            : "isolated-asset",
+      targetTitle: target?.title ?? source?.title ?? suggestion.target,
+      targetPath: path,
+      reason: suggestion.reason,
+      refs: suggestion.refs,
+      preview: `${suggestion.preview}（规则提示，待人工确认）`,
+      score: suggestion.score,
+      action: {
+        kind: "open-markdown",
+        enabled: Boolean(path),
+        path,
+        label: "打开 Markdown 手动确认",
+      },
+    };
+  });
+
+  const byId = new Map<string, KnowledgeSuggestionRow>();
+  for (const suggestion of [...graphSuggestions, ...p5Suggestions]) {
+    byId.set(suggestion.id, suggestion);
   }
 
-  return mapGraphToAssetRows(graph)
-    .filter((row) => assetOpenPath(row) && row.relationCount === 0)
-    .map((row) => {
-      const path = assetOpenPath(row);
-      return {
-        id: `suggestion:${row.id}:isolated`,
-        kind: "isolated-asset",
-        targetTitle: row.title,
-        targetPath: path,
-        reason: "没有检测到 topic、题号或显式链接关系",
-        refs: row.refs,
-        preview: "建议手动补充 frontmatter topics / related_problems，或在正文加入显式链接。",
-        score: 0.72,
-        action: {
-          kind: "open-markdown",
-          enabled: true,
-          path,
-          label: "打开 Markdown 手动编辑",
-        },
-      };
-    });
+  return Array.from(byId.values())
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
 }
