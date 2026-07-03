@@ -24,6 +24,12 @@ import { rebuildKnowledgeGraph, writeKnowledgeAsset } from "@/lib/api";
 import { createLuoguSourceApiTransport } from "@/lib/knowledge/luoguSourceApiTransport";
 import { createLuoguTrainingBatchDraft, type LuoguSourceAdapterInput } from "@/lib/knowledge/luoguSourceAdapters";
 import {
+  buildTrainingAiContext,
+  type PatchIntent,
+  type PatchTarget,
+} from "@/lib/knowledge/aiReservationContracts";
+import { buildMockKnowledgeProposals } from "@/lib/knowledge/aiReservationMockProposals";
+import {
   buildTrainingBatchWritePlan,
   createProblemTrainingItemDraft,
   createTrainingBatchDraft,
@@ -137,6 +143,34 @@ function statusBadgeVariant(status: TrainingItemStatus): "default" | "secondary"
   return "secondary";
 }
 
+function describePatchTarget(target: PatchTarget): string {
+  if (target.kind === "knowledge-asset") return `${target.assetType}: ${target.path}`;
+  if (target.kind === "knowledge-relationship") return `${target.fromId} -> ${target.toId} (${target.relationshipType})`;
+  if (target.kind === "review-state") return `review-state: ${target.assetId}`;
+  if (target.kind === "draft-fragment") return `draft-fragment: ${target.draftId}`;
+  return `NoteX note: ${target.path}`;
+}
+
+function describePatchIntent(intent: PatchIntent): string {
+  if (intent.kind === "update-frontmatter") return "frontmatter 更新";
+  if (intent.kind === "append-markdown-section") return `追加 Markdown：${intent.heading}`;
+  if (intent.kind === "link-knowledge") return `建立关联：${intent.relationshipType}`;
+  if (intent.kind === "adjust-review-state") return "复习状态调整";
+  return "创建 fragment 草稿";
+}
+
+function renderPatchIntentPreview(intent: PatchIntent): string {
+  if (intent.kind === "update-frontmatter") return JSON.stringify(intent.fields, null, 2);
+  if (intent.kind === "append-markdown-section") return `## ${intent.heading}\n\n${intent.markdown}`;
+  if (intent.kind === "link-knowledge") return `${intent.sourceId} -> ${intent.targetId}`;
+  if (intent.kind === "adjust-review-state") return JSON.stringify({
+    reviewPriority: intent.reviewPriority,
+    masteryStatus: intent.masteryStatus,
+    lastReviewedAt: intent.lastReviewedAt,
+  }, null, 2);
+  return `# ${intent.title}\n\n${intent.markdown}`;
+}
+
 export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenKnowledgeTab }: TrainingCenterWorkspaceProps) {
   const [activeMode, setActiveMode] = useState<TrainingMode>("today");
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
@@ -170,6 +204,11 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
     : null;
   const statusSummary = useMemo(() => buildTrainingBatchStatusSummary(batch, items), [batch, items]);
   const canWrite = isTrainingWriteEnabled(items) && writePlan.fragments.length > 0;
+  const aiContext = useMemo(
+    () => buildTrainingAiContext({ batch, items, selectedItemId }),
+    [batch, items, selectedItemId],
+  );
+  const mockProposals = useMemo(() => buildMockKnowledgeProposals(aiContext), [aiContext]);
 
   const updateSelectedItem = (update: (item: TrainingItemDraft) => TrainingItemDraft) => {
     if (!selectedItem) return;
@@ -582,9 +621,59 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
               <div className="rounded-[var(--ui-radius-panel)] border border-dashed border-border/60 bg-background/50 p-3">
                 <div className="flex items-center gap-2 text-foreground">
                   <Brain className="h-4 w-4 text-muted-foreground" />
-                  Future AI slot
+                  AI 提炼 / 关联 / NoteX 修改建议
                 </div>
-                <div className="mt-1">P2-B 不调用 AI；这里仅保留未来 field-level patch 位置。</div>
+                <div className="mt-1">
+                  P4-B mock：未接入 AI、未调用模型、不可执行，也不会写入 notes。
+                </div>
+                <div className="mt-3 rounded-[var(--ui-radius-item)] border border-border/50 bg-background/70 p-2 text-[11px] leading-5">
+                  <div>上下文：{aiContext.batch.title}</div>
+                  <div>选中：{aiContext.selectedTrainingItem ? `${aiContext.selectedTrainingItem.problemId} ${aiContext.selectedTrainingItem.problemTitle}` : "未选中训练条目"}</div>
+                  <div>批次状态：ready {aiContext.reviewState.ready} / draft {aiContext.reviewState.draft} / written {aiContext.reviewState.written}</div>
+                  <div>AI 状态：reserved · modelConnected false</div>
+                </div>
+                {mockProposals.length === 0 ? (
+                  <div className="mt-3 rounded-[var(--ui-radius-item)] border border-border/50 bg-background/70 p-2 text-[11px]">
+                    选择一个训练条目后才展示 mock proposal；当前没有可预览的 patch。
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {mockProposals.map((proposal) => (
+                      <div key={proposal.id} className="rounded-[var(--ui-radius-item)] border border-border/60 bg-background/80 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 truncate text-xs font-medium text-foreground">{proposal.title}</div>
+                          <Badge variant="secondary">{proposal.status}</Badge>
+                        </div>
+                        <div className="mt-1 text-[11px] leading-5">{proposal.summary}</div>
+                        <div className="mt-2 space-y-2">
+                          {proposal.previews.map((preview) => (
+                            <div key={preview.id} className="rounded-[var(--ui-radius-item)] border border-border/50 bg-muted/20 p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 truncate text-[11px] font-medium text-foreground">{preview.title}</div>
+                                <Badge variant={preview.valid ? "info" : "warning"}>
+                                  {preview.valid ? "valid mock" : "invalid target"}
+                                </Badge>
+                              </div>
+                              <div className="mt-1 text-[11px] leading-5">
+                                <div>目标：{describePatchTarget(preview.target)}</div>
+                                <div>意图：{describePatchIntent(preview.intent)}</div>
+                                {preview.validationReason ? <div>校验：{preview.validationReason}</div> : null}
+                                {preview.summary ? <div>{preview.summary}</div> : null}
+                              </div>
+                              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-[var(--ui-radius-item)] bg-background/80 p-2 text-[11px] leading-5 text-muted-foreground">
+                                {renderPatchIntentPreview(preview.intent)}
+                              </pre>
+                            </div>
+                          ))}
+                        </div>
+                        <Button type="button" size="xs" variant="outline" className="mt-2" disabled>
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          应用建议（未接入）
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
