@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -210,6 +211,31 @@ pub struct PreviewLuoguSubmissionPageResult {
     pub ai_configured: bool,
     pub last_submission_id: Option<u64>,
     pub submissions: Vec<PreviewLuoguSubmission>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LuoguSourceProblem {
+    pub problem_id: String,
+    pub problem_title: String,
+    pub difficulty: Option<String>,
+    pub topics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadLuoguProblemSetResult {
+    pub problem_set_id: String,
+    pub title: Option<String>,
+    pub problems: Vec<LuoguSourceProblem>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadLuoguContestResult {
+    pub contest_id: String,
+    pub title: Option<String>,
+    pub problems: Vec<LuoguSourceProblem>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -695,6 +721,273 @@ fn json_string_at<'a>(value: &'a JsonValue, pointers: &[&str]) -> Option<&'a str
     pointers
         .iter()
         .find_map(|pointer| value.pointer(pointer).and_then(JsonValue::as_str))
+}
+
+fn normalize_luogu_problem_set_id(input: &str) -> Result<String, String> {
+    let trimmed = input.trim().to_ascii_uppercase();
+    if trimmed.is_empty() || trimmed.len() > 16 {
+        return Err("Luogu source reader failed: problem_set_id is invalid".to_string());
+    }
+    if trimmed.chars().all(|ch| ch.is_ascii_digit())
+        || (trimmed.starts_with('B') && trimmed[1..].chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Ok(trimmed);
+    }
+    Err("Luogu source reader failed: problem_set_id is invalid".to_string())
+}
+
+fn normalize_luogu_contest_id(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if !trimmed.is_empty() && trimmed.len() <= 16 && trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return Ok(trimmed.to_string());
+    }
+    Err("Luogu source reader failed: contest_id is invalid".to_string())
+}
+
+fn normalize_luogu_source_problem_id(input: &str) -> Option<String> {
+    let trimmed = input.trim().to_ascii_uppercase();
+    if trimmed.len() < 2 || trimmed.len() > 16 {
+        return None;
+    }
+    let has_letter = trimmed.chars().any(|ch| ch.is_ascii_alphabetic());
+    let has_digit = trimmed.chars().any(|ch| ch.is_ascii_digit());
+    let valid = trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    if has_letter && has_digit && valid {
+        Some(trimmed)
+    } else {
+        None
+    }
+}
+
+fn luogu_source_title(value: &JsonValue, source: &str) -> Option<String> {
+    let contest_pointers = [
+        "/currentData/contest/title",
+        "/currentData/contest/name",
+        "/currentData/title",
+        "/data/contest/title",
+        "/data/contest/name",
+        "/data/title",
+    ];
+    let problemset_pointers = [
+        "/currentData/training/title",
+        "/currentData/training/name",
+        "/currentData/problemSet/title",
+        "/currentData/problemset/title",
+        "/currentData/title",
+        "/data/training/title",
+        "/data/training/name",
+        "/data/problemSet/title",
+        "/data/problemset/title",
+        "/data/title",
+    ];
+    let pointers = if source == "contest" {
+        &contest_pointers[..]
+    } else {
+        &problemset_pointers[..]
+    };
+    json_string_at(value, pointers)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn luogu_source_problem_title(problem: &JsonValue, problem_id: &str) -> String {
+    json_string_at(
+        problem,
+        &[
+            "/title",
+            "/name",
+            "/problemTitle",
+            "/problem_title",
+            "/contenu/name",
+        ],
+    )
+    .map(str::trim)
+    .filter(|title| !title.is_empty())
+    .unwrap_or(problem_id)
+    .to_string()
+}
+
+fn luogu_source_problem_topics(problem: &JsonValue) -> Vec<String> {
+    let mut topics = Vec::new();
+    for pointer in ["/tags", "/topics", "/labels"] {
+        if let Some(items) = problem.pointer(pointer).and_then(JsonValue::as_array) {
+            for item in items {
+                let topic = item.as_str().or_else(|| {
+                    item.get("name")
+                        .or_else(|| item.get("title"))
+                        .and_then(JsonValue::as_str)
+                });
+                if let Some(topic) = topic.map(str::trim).filter(|topic| !topic.is_empty()) {
+                    let topic = topic.to_string();
+                    if !topics.contains(&topic) {
+                        topics.push(topic);
+                    }
+                }
+            }
+        }
+    }
+    topics
+}
+
+fn luogu_problem_from_json(value: &JsonValue) -> Option<LuoguSourceProblem> {
+    let problem = value.get("problem").unwrap_or(value);
+    let problem_id = problem
+        .get("pid")
+        .or_else(|| problem.get("problemId"))
+        .or_else(|| problem.get("problem_id"))
+        .or_else(|| problem.get("id"))
+        .and_then(value_to_string)
+        .and_then(|id| normalize_luogu_source_problem_id(&id))?;
+    Some(LuoguSourceProblem {
+        problem_title: luogu_source_problem_title(problem, &problem_id),
+        difficulty: Some(extract_luogu_problem_difficulty(problem))
+            .filter(|difficulty| difficulty != "未获取"),
+        topics: luogu_source_problem_topics(problem),
+        problem_id,
+    })
+}
+
+fn collect_luogu_source_problems(
+    value: &JsonValue,
+    seen: &mut HashSet<String>,
+    output: &mut Vec<LuoguSourceProblem>,
+) {
+    if let Some(problem) = luogu_problem_from_json(value) {
+        if seen.insert(problem.problem_id.clone()) {
+            output.push(problem);
+        }
+    }
+
+    match value {
+        JsonValue::Array(items) => {
+            for item in items {
+                collect_luogu_source_problems(item, seen, output);
+            }
+        }
+        JsonValue::Object(map) => {
+            for item in map.values() {
+                collect_luogu_source_problems(item, seen, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn html_entity_decode_minimal(value: &str) -> String {
+    value
+        .replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&#x22;", "\"")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&#39;", "'")
+}
+
+fn extract_luogu_lentille_json(html: &str) -> Option<JsonValue> {
+    let marker = r#"<script id="lentille-context" type="application/json">"#;
+    let start = html.find(marker)? + marker.len();
+    let rest = &html[start..];
+    let end = rest.find("</script>")?;
+    let raw = html_entity_decode_minimal(rest[..end].trim());
+    serde_json::from_str::<JsonValue>(&raw).ok()
+}
+
+fn parse_luogu_source_json(body: &str) -> Result<JsonValue, String> {
+    if body.trim_start().starts_with('{') {
+        return serde_json::from_str::<JsonValue>(body)
+            .map_err(|_| "Luogu source reader failed: response JSON is unreadable".to_string());
+    }
+    extract_luogu_lentille_json(body).ok_or_else(|| {
+        "Luogu source reader failed: response did not contain readable JSON data".to_string()
+    })
+}
+
+fn parse_luogu_source_problems(
+    body: &str,
+    source: &str,
+) -> Result<(Option<String>, Vec<LuoguSourceProblem>), String> {
+    let json = parse_luogu_source_json(body)?;
+    let mut seen = HashSet::new();
+    let mut problems = Vec::new();
+    collect_luogu_source_problems(&json, &mut seen, &mut problems);
+    if problems.is_empty() {
+        return Err("Luogu source reader failed: no problem refs found".to_string());
+    }
+    Ok((luogu_source_title(&json, source), problems))
+}
+
+fn fetch_luogu_source_body(
+    path: &str,
+    cookie_config: Option<(&str, &str)>,
+) -> Result<String, String> {
+    let client = luogu_http_client()?;
+    let url = format!("https://www.luogu.com.cn/{path}?_contentOnly=1");
+    let send = |cookie: Option<String>| -> Result<(StatusCode, String), String> {
+        let mut request = client
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "application/json, text/html")
+            .header(reqwest::header::REFERER, "https://www.luogu.com.cn/")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.7");
+        if let Some(cookie) = cookie {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let response = request
+            .send()
+            .map_err(|e| luogu_request_error("Luogu source reader failed", e))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|_| "Luogu source reader failed: response body is unreadable".to_string())?;
+        Ok((status, body))
+    };
+
+    let (status, body) = send(None)?;
+    let (status, body) = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        if let Some((uid, client_id)) = cookie_config {
+            send(Some(luogu_cookie(uid, client_id)))?
+        } else {
+            (status, body)
+        }
+    } else {
+        (status, body)
+    };
+
+    if !status.is_success() {
+        return Err(luogu_status_error("Luogu source reader failed", status));
+    }
+    Ok(body)
+}
+
+fn read_luogu_problem_set_blocking(
+    problem_set_id: String,
+    cookie_config: Option<(&str, &str)>,
+) -> Result<ReadLuoguProblemSetResult, String> {
+    let problem_set_id = normalize_luogu_problem_set_id(&problem_set_id)?;
+    let body = fetch_luogu_source_body(&format!("training/{problem_set_id}"), cookie_config)?;
+    let (title, problems) = parse_luogu_source_problems(&body, "problemset")?;
+    Ok(ReadLuoguProblemSetResult {
+        problem_set_id,
+        title,
+        problems,
+    })
+}
+
+fn read_luogu_contest_blocking(
+    contest_id: String,
+    cookie_config: Option<(&str, &str)>,
+) -> Result<ReadLuoguContestResult, String> {
+    let contest_id = normalize_luogu_contest_id(&contest_id)?;
+    let body = fetch_luogu_source_body(&format!("contest/{contest_id}"), cookie_config)?;
+    let (title, problems) = parse_luogu_source_problems(&body, "contest")?;
+    Ok(ReadLuoguContestResult {
+        contest_id,
+        title,
+        problems,
+    })
 }
 
 fn extract_source_code_from_detail(value: &JsonValue) -> Result<String, String> {
@@ -2148,6 +2441,42 @@ pub async fn read_luogu_problem_content(
 }
 
 #[tauri::command]
+pub async fn read_luogu_problem_set(
+    problem_set_id: String,
+) -> Result<ReadLuoguProblemSetResult, String> {
+    let config = read_config().unwrap_or_default();
+    let cookie_config = require_luogu_config(&config)
+        .ok()
+        .map(|(uid, client_id)| (uid.to_string(), client_id.to_string()));
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let cookie_config = cookie_config
+            .as_ref()
+            .map(|(uid, client_id)| (uid.as_str(), client_id.as_str()));
+        read_luogu_problem_set_blocking(problem_set_id, cookie_config)
+    })
+    .await
+    .map_err(|e| format!("Luogu source reader task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn read_luogu_contest(contest_id: String) -> Result<ReadLuoguContestResult, String> {
+    let config = read_config().unwrap_or_default();
+    let cookie_config = require_luogu_config(&config)
+        .ok()
+        .map(|(uid, client_id)| (uid.to_string(), client_id.to_string()));
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let cookie_config = cookie_config
+            .as_ref()
+            .map(|(uid, client_id)| (uid.as_str(), client_id.as_str()));
+        read_luogu_contest_blocking(contest_id, cookie_config)
+    })
+    .await
+    .map_err(|e| format!("Luogu source reader task failed: {e}"))?
+}
+
+#[tauri::command]
 pub fn preview_luogu_submissions(
     limit: Option<usize>,
 ) -> Result<PreviewLuoguSubmissionsResult, String> {
@@ -2832,6 +3161,75 @@ Keep one sentinel item to avoid special casing.
         assert_eq!(records[0].submission_id, 123456);
         assert_eq!(records[0].problem_id, "P1000");
         assert!(is_ac_status(&records[0].status));
+    }
+
+    #[test]
+    fn parses_luogu_source_problem_refs_from_json_and_deduplicates() {
+        let body = serde_json::json!({
+            "currentData": {
+                "training": { "title": "图论题单" },
+                "problems": [
+                    {
+                        "problem": {
+                            "pid": "P3379",
+                            "title": "最近公共祖先",
+                            "difficulty": 4,
+                            "tags": [{ "name": "LCA" }]
+                        }
+                    },
+                    {
+                        "problem": {
+                            "pid": "P3379",
+                            "title": "最近公共祖先 duplicate"
+                        }
+                    },
+                    {
+                        "pid": "P1001",
+                        "title": "A+B Problem",
+                        "difficulty": 1
+                    }
+                ]
+            }
+        })
+        .to_string();
+
+        let (title, problems) = parse_luogu_source_problems(&body, "problemset").unwrap();
+
+        assert_eq!(title.as_deref(), Some("图论题单"));
+        assert_eq!(problems.len(), 2);
+        assert_eq!(problems[0].problem_id, "P3379");
+        assert_eq!(problems[0].problem_title, "最近公共祖先");
+        assert_eq!(problems[0].difficulty.as_deref(), Some("普及+/提高"));
+        assert_eq!(problems[0].topics, vec!["LCA".to_string()]);
+        assert_eq!(problems[1].problem_id, "P1001");
+    }
+
+    #[test]
+    fn parses_luogu_source_problem_refs_from_lentille_html() {
+        let json = serde_json::json!({
+            "currentData": {
+                "contest": { "name": "七月模拟赛" },
+                "problems": [
+                    {
+                        "pid": "P1002",
+                        "name": "过河卒",
+                        "difficulty": "普及-"
+                    }
+                ]
+            }
+        })
+        .to_string()
+        .replace('"', "&quot;");
+        let body = format!(
+            r#"<html><script id="lentille-context" type="application/json">{json}</script></html>"#
+        );
+
+        let (title, problems) = parse_luogu_source_problems(&body, "contest").unwrap();
+
+        assert_eq!(title.as_deref(), Some("七月模拟赛"));
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].problem_id, "P1002");
+        assert_eq!(problems[0].problem_title, "过河卒");
     }
 
     #[test]

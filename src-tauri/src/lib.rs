@@ -109,6 +109,8 @@ pub fn run() {
             luogu::update_luogu_last_submission_id,
             luogu::test_luogu_connection,
             luogu::read_luogu_problem_content,
+            luogu::read_luogu_problem_set,
+            luogu::read_luogu_contest,
             luogu::preview_luogu_submissions,
             luogu::preview_luogu_submission_page,
             luogu::sync_luogu_insights,

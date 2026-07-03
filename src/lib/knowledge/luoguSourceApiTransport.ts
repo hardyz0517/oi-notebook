@@ -1,12 +1,16 @@
 import {
   getKnowledgeAssets,
   previewLuoguSubmissionPage,
+  readLuoguContest,
   readLuoguProblemContent,
+  readLuoguProblemSet,
   type KnowledgeAssetRowResult,
   type PreviewLuoguSubmission,
 } from "@/lib/api";
 import type {
   LuoguProblemContentRecord,
+  LuoguContestRecord,
+  LuoguProblemSetRecord,
   LuoguSourceAdapterInput,
   LuoguSourceAdapterTransport,
   LuoguSubmissionSourceRecord,
@@ -16,6 +20,8 @@ import type { KnowledgeAssetRow } from "./knowledgeTypes";
 export interface LuoguSourceApiTransportDeps {
   previewLuoguSubmissionPage: typeof previewLuoguSubmissionPage;
   readLuoguProblemContent: typeof readLuoguProblemContent;
+  readLuoguProblemSet?: typeof readLuoguProblemSet;
+  readLuoguContest?: typeof readLuoguContest;
   getKnowledgeAssets: typeof getKnowledgeAssets;
 }
 
@@ -45,6 +51,8 @@ export function createLuoguSourceApiTransport(
   deps: LuoguSourceApiTransportDeps = {
     previewLuoguSubmissionPage,
     readLuoguProblemContent,
+    readLuoguProblemSet,
+    readLuoguContest,
     getKnowledgeAssets,
   },
 ): LuoguSourceAdapterTransport {
@@ -72,12 +80,38 @@ export function createLuoguSourceApiTransport(
       };
     },
 
-    async readProblemSet({ problemSetId }: { problemSetId: string }) {
-      throw new Error(`Luogu problem set reader is not available yet: ${problemSetId}`);
+    async readProblemSet({ problemSetId }: { problemSetId: string }): Promise<LuoguProblemSetRecord> {
+      if (!deps.readLuoguProblemSet) {
+        throw new Error(`Luogu problem set reader is not available yet: ${problemSetId}`);
+      }
+      const result = await deps.readLuoguProblemSet(problemSetId);
+      return {
+        problemSetId: result.problemSetId,
+        title: result.title ?? undefined,
+        problems: result.problems.map((problem) => ({
+          problemId: problem.problemId,
+          problemTitle: problem.problemTitle,
+          difficulty: problem.difficulty ?? undefined,
+          topics: problem.topics,
+        })),
+      };
     },
 
-    async readContest({ contestId }: { contestId: string }) {
-      throw new Error(`Luogu contest reader is not available yet: ${contestId}`);
+    async readContest({ contestId }: { contestId: string }): Promise<LuoguContestRecord> {
+      if (!deps.readLuoguContest) {
+        throw new Error(`Luogu contest reader is not available yet: ${contestId}`);
+      }
+      const result = await deps.readLuoguContest(contestId);
+      return {
+        contestId: result.contestId,
+        title: result.title ?? undefined,
+        problems: result.problems.map((problem) => ({
+          problemId: problem.problemId,
+          problemTitle: problem.problemTitle,
+          difficulty: problem.difficulty ?? undefined,
+          topics: problem.topics,
+        })),
+      };
     },
 
     async listExistingAssets() {

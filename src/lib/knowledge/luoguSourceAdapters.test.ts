@@ -112,6 +112,83 @@ describe("luogu source adapters", () => {
     });
   });
 
+  it("normalizes range submissions by date window", async () => {
+    const result = await createLuoguTrainingBatchDraft(
+      {
+        sourceType: "luogu-range",
+        now: "2026-07-03T12:00:00.000Z",
+        startDate: "2026-07-01",
+        endDate: "2026-07-02",
+        requireAccepted: false,
+      },
+      {
+        listSubmissions: async () => ({
+          submissions: [
+            {
+              submissionId: "201",
+              problemId: "P1001",
+              problemTitle: "A+B Problem",
+              status: "Accepted",
+              isAc: true,
+              submitTime: "2026-07-01T09:00:00.000Z",
+            },
+            {
+              submissionId: "202",
+              problemId: "P1002",
+              problemTitle: "过河卒",
+              status: "Accepted",
+              isAc: true,
+              submitTime: "2026-07-03T09:00:00.000Z",
+            },
+          ],
+        }),
+        listExistingAssets: async () => [],
+      },
+    );
+
+    expect(result.batch).toMatchObject({
+      sourceType: "luogu-range",
+      collectionKind: "range-review",
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      problemId: "P1001",
+      submissionRefs: ["201"],
+    });
+  });
+
+  it("keeps single problem as a retryable source item when no submission exists", async () => {
+    const result = await createLuoguTrainingBatchDraft(
+      {
+        sourceType: "luogu-single",
+        problemId: "p3379",
+      },
+      {
+        listSubmissions: async () => ({ submissions: [] }),
+        readProblemContent: async ({ problemId }) => ({
+          problemId,
+          title: "最近公共祖先",
+          topics: ["LCA"],
+          difficulty: "普及+/提高",
+        }),
+        listExistingAssets: async () => [],
+      },
+    );
+
+    expect(result.batch).toMatchObject({
+      sourceType: "luogu-single",
+      collectionKind: "problem-review",
+    });
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        problemId: "P3379",
+        problemTitle: "最近公共祖先",
+        suggestedTopics: ["LCA"],
+        status: "draft",
+      }),
+    ]);
+  });
+
   it("keeps problem set input as candidate refs when detail reading fails", async () => {
     const result = await createLuoguTrainingBatchDraft(
       {

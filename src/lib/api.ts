@@ -75,6 +75,25 @@ export interface ReadLuoguProblemContentResult {
   error: string | null;
 }
 
+export interface LuoguSourceProblemResult {
+  problemId: string;
+  problemTitle: string;
+  difficulty: string | null;
+  topics: string[];
+}
+
+export interface ReadLuoguProblemSetResult {
+  problemSetId: string;
+  title: string | null;
+  problems: LuoguSourceProblemResult[];
+}
+
+export interface ReadLuoguContestResult {
+  contestId: string;
+  title: string | null;
+  problems: LuoguSourceProblemResult[];
+}
+
 export interface LuoguConfig {
   luogu: {
     uid: string;
@@ -855,6 +874,22 @@ export async function readLuoguProblemContent(
 ): Promise<ReadLuoguProblemContentResult> {
   try {
     return await invoke<ReadLuoguProblemContentResult>("read_luogu_problem_content", { input });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function readLuoguProblemSet(problemSetId: string): Promise<ReadLuoguProblemSetResult> {
+  try {
+    return await invoke<ReadLuoguProblemSetResult>("read_luogu_problem_set", { problemSetId });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function readLuoguContest(contestId: string): Promise<ReadLuoguContestResult> {
+  try {
+    return await invoke<ReadLuoguContestResult>("read_luogu_contest", { contestId });
   } catch (e) {
     throw toApiError(e);
   }

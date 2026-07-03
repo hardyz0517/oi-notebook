@@ -20,6 +20,8 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "updateLuoguLastSubmissionId", commandName: "update_luogu_last_submission_id", argKeys: ["lastSubmissionId"] },
   { functionName: "testLuoguConnection", commandName: "test_luogu_connection", argKeys: [] },
   { functionName: "readLuoguProblemContent", commandName: "read_luogu_problem_content", argKeys: ["input"] },
+  { functionName: "readLuoguProblemSet", commandName: "read_luogu_problem_set", argKeys: ["problemSetId"] },
+  { functionName: "readLuoguContest", commandName: "read_luogu_contest", argKeys: ["contestId"] },
   { functionName: "previewLuoguSubmissions", commandName: "preview_luogu_submissions", argKeys: ["limit"] },
   { functionName: "previewLuoguSubmissionPage", commandName: "preview_luogu_submission_page", argKeys: ["page"] },
   { functionName: "importLuoguSubmission", commandName: "import_luogu_submission", argKeys: ["submissionId", "autoCommit"] },

@@ -71,4 +71,44 @@ describe("luoguSourceApiTransport", () => {
       expect.objectContaining({ problemId: "problemset:54321", status: "failed" }),
     ]);
   });
+
+  it("maps Luogu problem set and contest API readers into source records", async () => {
+    const transport = createLuoguSourceApiTransport({
+      previewLuoguSubmissionPage: vi.fn().mockResolvedValue({
+        hasMore: false,
+        submissions: [],
+      }),
+      readLuoguProblemContent: vi.fn(),
+      readLuoguProblemSet: vi.fn().mockResolvedValue({
+        problemSetId: "54321",
+        title: "图论题单",
+        problems: [
+          { problemId: "P3379", problemTitle: "最近公共祖先", difficulty: "普及+/提高", topics: ["LCA"] },
+        ],
+      }),
+      readLuoguContest: vi.fn().mockResolvedValue({
+        contestId: "987654",
+        title: "模拟赛",
+        problems: [
+          { problemId: "P1001", problemTitle: "A+B Problem", difficulty: "入门", topics: [] },
+        ],
+      }),
+      getKnowledgeAssets: vi.fn().mockResolvedValue([]),
+    });
+
+    await expect(transport.readProblemSet?.({ problemSetId: "54321" })).resolves.toEqual({
+      problemSetId: "54321",
+      title: "图论题单",
+      problems: [
+        { problemId: "P3379", problemTitle: "最近公共祖先", difficulty: "普及+/提高", topics: ["LCA"] },
+      ],
+    });
+    await expect(transport.readContest?.({ contestId: "987654" })).resolves.toEqual({
+      contestId: "987654",
+      title: "模拟赛",
+      problems: [
+        { problemId: "P1001", problemTitle: "A+B Problem", difficulty: "入门", topics: [] },
+      ],
+    });
+  });
 });
