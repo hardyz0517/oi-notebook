@@ -60,6 +60,7 @@ describe("knowledgeTypes", () => {
       assets: [],
       suggestions: [],
       reviewSlices: [],
+      batches: [],
     };
 
     const node: KnowledgeGraphNode = graph.nodes[0];

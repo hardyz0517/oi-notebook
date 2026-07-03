@@ -158,6 +158,7 @@ export interface KnowledgeGraphIndex {
   assets: KnowledgeAssetRow[];
   suggestions: KnowledgeRelationshipSuggestion[];
   reviewSlices: KnowledgeReviewSlice[];
+  batches: KnowledgeBatchHistoryEntry[];
 }
 
 export type KnowledgeWorkspaceTabId =
@@ -239,6 +240,63 @@ export interface KnowledgeReviewSlice {
   lastReviewedAt: string | null;
   score: number;
   reasons: string[];
+}
+
+export interface KnowledgeBatchAssetRef {
+  kind: "collection" | "fragment" | "article" | "unknown" | string;
+  path: string;
+  title?: string | null;
+  problemId?: string | null;
+}
+
+export interface KnowledgeBatchHistoryEntry {
+  batchId: string;
+  sourceType: TrainingSourceType | string;
+  sourceLabel: string;
+  createdAt: string;
+  collectionPath: string;
+  writtenAssets: KnowledgeBatchAssetRef[];
+  skippedItems: string[];
+  failedItems: string[];
+  graphRefresh: {
+    nodeCount: number;
+    edgeCount: number;
+    refreshedAt: string;
+  };
+}
+
+export interface TrainingBatchDuplicateDraft {
+  batch: TrainingBatchDraft;
+  items: TrainingItemDraft[];
+  sourceBatchId: string;
+  sourceCollectionPath: string;
+}
+
+export type LegacyMigrationTarget = "fragment" | "collection";
+
+export interface LegacyMigrationDraft {
+  sourcePath: string;
+  sourceTitle: string;
+  targetType: LegacyMigrationTarget;
+  targetPath: string;
+  markdown: string;
+  originalLink: string;
+  requiresConfirmation: boolean;
+  writesOriginal: boolean;
+  complexity: "summary-only" | "simple";
+}
+
+export interface KnowledgeBatchHistoryRow {
+  batchId: string;
+  title: string;
+  sourceLabel: string;
+  sourceType: TrainingSourceType | string;
+  createdAt: string;
+  collectionPath: string;
+  writtenCount: number;
+  skippedCount: number;
+  failedCount: number;
+  graphSummary: string;
 }
 
 export interface TrainingBatchWriteCollectionPlan {

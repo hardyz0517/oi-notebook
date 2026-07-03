@@ -50,6 +50,7 @@ pub struct KnowledgeGraphIndex {
     pub assets: Vec<KnowledgeAssetRow>,
     pub suggestions: Vec<KnowledgeRelationshipSuggestion>,
     pub review_slices: Vec<KnowledgeReviewSlice>,
+    pub batches: Vec<KnowledgeBatchHistoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,6 +111,82 @@ pub struct KnowledgeReviewSlice {
     pub last_reviewed_at: Option<String>,
     pub score: f64,
     pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBatchAssetRef {
+    pub kind: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub problem_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBatchGraphRefresh {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub refreshed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBatchHistoryEntry {
+    pub batch_id: String,
+    pub source_type: String,
+    pub source_label: String,
+    pub created_at: String,
+    pub collection_path: String,
+    pub written_assets: Vec<KnowledgeBatchAssetRef>,
+    pub skipped_items: Vec<String>,
+    pub failed_items: Vec<String>,
+    pub graph_refresh: KnowledgeBatchGraphRefresh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainingBatchReplayDraft {
+    pub source_batch_id: String,
+    pub source_collection_path: String,
+    pub batch: TrainingBatchReplayBatch,
+    pub items: Vec<TrainingBatchReplayItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainingBatchReplayBatch {
+    pub id: String,
+    pub title: String,
+    pub source_type: String,
+    pub source_label: String,
+    pub created_at: String,
+    pub status: String,
+    pub item_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainingBatchReplayItem {
+    pub id: String,
+    pub batch_id: String,
+    pub problem_id: String,
+    pub problem_title: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyMigrationDraft {
+    pub source_path: String,
+    pub source_title: String,
+    pub target_type: String,
+    pub target_path: String,
+    pub markdown: String,
+    pub original_link: String,
+    pub requires_confirmation: bool,
+    pub writes_original: bool,
+    pub complexity: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -189,6 +266,18 @@ struct KnowledgeFrontmatter {
     fragments: Vec<String>,
     #[serde(default)]
     articles: Vec<String>,
+    #[serde(default)]
+    batch_id: String,
+    #[serde(default)]
+    source_type: String,
+    #[serde(default)]
+    source_label: String,
+    #[serde(default)]
+    written_assets: Vec<String>,
+    #[serde(default)]
+    skipped_items: Vec<String>,
+    #[serde(default)]
+    failed_items: Vec<String>,
 }
 
 fn graph_root() -> Result<PathBuf, String> {
@@ -374,7 +463,11 @@ fn normalize_field(value: &str, fallback: &str) -> String {
     }
 }
 
-fn classify_asset(relative_path: &str, markdown: &str, frontmatter: &KnowledgeFrontmatter) -> AssetClassification {
+fn classify_asset(
+    relative_path: &str,
+    markdown: &str,
+    frontmatter: &KnowledgeFrontmatter,
+) -> AssetClassification {
     let explicit_type = frontmatter.r#type.trim();
     if matches!(explicit_type, "fragment" | "collection" | "article") {
         return AssetClassification {
@@ -444,7 +537,9 @@ fn extract_term_matches(markdown: &str, declared_topics: &[String]) -> Vec<Strin
         if declared.contains(&term.to_lowercase()) {
             continue;
         }
-        if markdown_lower.contains(&term.to_lowercase()) && !terms.iter().any(|existing| existing == term) {
+        if markdown_lower.contains(&term.to_lowercase())
+            && !terms.iter().any(|existing| existing == term)
+        {
             terms.push(term.to_string());
         }
     }
@@ -487,7 +582,13 @@ fn add_asset_node(
     asset_id
 }
 
-fn add_problem_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: &str, ids: &[String], source: &str) {
+fn add_problem_refs(
+    state: &mut GraphBuildState,
+    asset_id: &str,
+    relative_path: &str,
+    ids: &[String],
+    source: &str,
+) {
     for problem_id in ids {
         let problem_id = problem_id.trim();
         if problem_id.is_empty() {
@@ -515,7 +616,12 @@ fn add_problem_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: 
     }
 }
 
-fn add_topic_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: &str, topics: &[String]) {
+fn add_topic_refs(
+    state: &mut GraphBuildState,
+    asset_id: &str,
+    relative_path: &str,
+    topics: &[String],
+) {
     for topic in topics {
         let topic = topic.trim();
         if topic.is_empty() {
@@ -538,7 +644,14 @@ fn add_topic_refs(state: &mut GraphBuildState, asset_id: &str, relative_path: &s
         );
         add_edge(
             state,
-            graph_edge(asset_id, &node_id, "related_to", "frontmatter", 1.0, relative_path),
+            graph_edge(
+                asset_id,
+                &node_id,
+                "related_to",
+                "frontmatter",
+                1.0,
+                relative_path,
+            ),
         );
     }
 }
@@ -623,7 +736,10 @@ fn build_graph_for_markdown_with_modified(
 
     let type_id = format!(
         "type:{}",
-        if matches!(frontmatter.r#type.trim(), "fragment" | "collection" | "article") {
+        if matches!(
+            frontmatter.r#type.trim(),
+            "fragment" | "collection" | "article"
+        ) {
             frontmatter.r#type.trim()
         } else {
             classification.asset_type.as_str()
@@ -645,7 +761,14 @@ fn build_graph_for_markdown_with_modified(
     );
     add_edge(
         state,
-        graph_edge(&asset_id, &type_id, "related_to", "frontmatter", 1.0, relative_path),
+        graph_edge(
+            &asset_id,
+            &type_id,
+            "related_to",
+            "frontmatter",
+            1.0,
+            relative_path,
+        ),
     );
 
     if !frontmatter.kind.trim().is_empty() {
@@ -666,7 +789,14 @@ fn build_graph_for_markdown_with_modified(
         );
         add_edge(
             state,
-            graph_edge(&asset_id, &kind_id, "related_to", "frontmatter", 1.0, relative_path),
+            graph_edge(
+                &asset_id,
+                &kind_id,
+                "related_to",
+                "frontmatter",
+                1.0,
+                relative_path,
+            ),
         );
     }
 
@@ -732,7 +862,14 @@ fn build_graph_for_markdown_with_modified(
         );
         add_edge(
             state,
-            graph_edge(&asset_id, &collection_id, "derived_from", "frontmatter", 1.0, relative_path),
+            graph_edge(
+                &asset_id,
+                &collection_id,
+                "derived_from",
+                "frontmatter",
+                1.0,
+                relative_path,
+            ),
         );
     }
 
@@ -740,7 +877,14 @@ fn build_graph_for_markdown_with_modified(
         let target = format!("asset:{}", fragment.trim());
         add_edge(
             state,
-            graph_edge(&asset_id, &target, "contains", "frontmatter", 1.0, relative_path),
+            graph_edge(
+                &asset_id,
+                &target,
+                "contains",
+                "frontmatter",
+                1.0,
+                relative_path,
+            ),
         );
     }
 
@@ -748,7 +892,14 @@ fn build_graph_for_markdown_with_modified(
         let target = format!("asset:{}", article.trim());
         add_edge(
             state,
-            graph_edge(&asset_id, &target, "contains", "frontmatter", 1.0, relative_path),
+            graph_edge(
+                &asset_id,
+                &target,
+                "contains",
+                "frontmatter",
+                1.0,
+                relative_path,
+            ),
         );
     }
 
@@ -756,7 +907,14 @@ fn build_graph_for_markdown_with_modified(
         let target = format!("asset:{link}");
         add_edge(
             state,
-            graph_edge(&asset_id, &target, "links_to", "wikilink", 0.8, relative_path),
+            graph_edge(
+                &asset_id,
+                &target,
+                "links_to",
+                "wikilink",
+                0.8,
+                relative_path,
+            ),
         );
     }
 
@@ -798,14 +956,23 @@ fn compute_degrees(edges: &[KnowledgeGraphEdge]) -> BTreeMap<String, (usize, usi
     degrees
 }
 
-fn compute_components(nodes: &[KnowledgeGraphNode], edges: &[KnowledgeGraphEdge]) -> BTreeMap<String, usize> {
+fn compute_components(
+    nodes: &[KnowledgeGraphNode],
+    edges: &[KnowledgeGraphEdge],
+) -> BTreeMap<String, usize> {
     let mut adjacency: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for node in nodes {
         adjacency.entry(node.id.clone()).or_default();
     }
     for edge in edges {
-        adjacency.entry(edge.from.clone()).or_default().push(edge.to.clone());
-        adjacency.entry(edge.to.clone()).or_default().push(edge.from.clone());
+        adjacency
+            .entry(edge.from.clone())
+            .or_default()
+            .push(edge.to.clone());
+        adjacency
+            .entry(edge.to.clone())
+            .or_default()
+            .push(edge.from.clone());
     }
 
     let mut components = BTreeMap::new();
@@ -840,7 +1007,9 @@ fn missing_metadata_flags(record: &AssetBuildRecord) -> Vec<String> {
     if record.frontmatter.topics.is_empty() {
         flags.push("missing_topics".to_string());
     }
-    if record.frontmatter.related_problems.is_empty() && record.frontmatter.problem_id.trim().is_empty() {
+    if record.frontmatter.related_problems.is_empty()
+        && record.frontmatter.problem_id.trim().is_empty()
+    {
         flags.push("missing_related_problems".to_string());
     }
     if record.frontmatter.review_priority.trim().is_empty() {
@@ -894,7 +1063,12 @@ fn build_asset_rows(
         .collect()
 }
 
-fn suggestion_score(source: &str, frequency: usize, missing_bonus: f64, ambiguity_penalty: f64) -> f64 {
+fn suggestion_score(
+    source: &str,
+    frequency: usize,
+    missing_bonus: f64,
+    ambiguity_penalty: f64,
+) -> f64 {
     let source_weight = match source {
         "frontmatter" => 2.0,
         "wikilink" => 1.7,
@@ -978,7 +1152,8 @@ fn build_suggestions(
                 kind: "isolated_asset".to_string(),
                 source: row.id.clone(),
                 target: row.id.clone(),
-                reason: "该资产当前没有图谱关系，建议补充 topic、related_problems 或 wikilink。".to_string(),
+                reason: "该资产当前没有图谱关系，建议补充 topic、related_problems 或 wikilink。"
+                    .to_string(),
                 refs: vec![record.relative_path.clone()],
                 preview: asset_title(record),
                 score: suggestion_score("manual", 1, 0.6, 0.0),
@@ -1063,28 +1238,153 @@ fn build_review_slices(asset_rows: &[KnowledgeAssetRow]) -> Vec<KnowledgeReviewS
             }
         })
         .collect();
-    slices.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.title.cmp(&b.title)));
+    slices.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.title.cmp(&b.title))
+    });
     slices
 }
 
+fn infer_written_asset_kind(
+    path: &str,
+    rows_by_path: &BTreeMap<String, &KnowledgeAssetRow>,
+) -> String {
+    if let Some(row) = rows_by_path.get(path) {
+        return row.asset_type.clone();
+    }
+    if path.contains("/collections/") {
+        "collection".to_string()
+    } else if path.contains("/fragments/") {
+        "fragment".to_string()
+    } else if path.contains("/articles/") {
+        "article".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn build_batch_asset_ref(
+    path: &str,
+    rows_by_path: &BTreeMap<String, &KnowledgeAssetRow>,
+    records_by_path: &BTreeMap<String, &AssetBuildRecord>,
+) -> KnowledgeBatchAssetRef {
+    let row = rows_by_path.get(path);
+    let record = records_by_path.get(path);
+    KnowledgeBatchAssetRef {
+        kind: infer_written_asset_kind(path, rows_by_path),
+        path: path.to_string(),
+        title: row.map(|row| row.title.clone()),
+        problem_id: record.and_then(|record| {
+            if !record.frontmatter.problem_id.trim().is_empty() {
+                Some(record.frontmatter.problem_id.trim().to_string())
+            } else {
+                clean_list(&record.frontmatter.related_problems)
+                    .into_iter()
+                    .next()
+            }
+        }),
+    }
+}
+
+fn build_batch_history(
+    records: &BTreeMap<String, AssetBuildRecord>,
+    asset_rows: &[KnowledgeAssetRow],
+    node_count: usize,
+    edge_count: usize,
+    refreshed_at: &str,
+) -> Vec<KnowledgeBatchHistoryEntry> {
+    let rows_by_path: BTreeMap<String, &KnowledgeAssetRow> = asset_rows
+        .iter()
+        .map(|row| (row.path.clone(), row))
+        .collect();
+    let records_by_path: BTreeMap<String, &AssetBuildRecord> = records
+        .values()
+        .map(|record| (record.relative_path.clone(), record))
+        .collect();
+    let mut batches = Vec::new();
+
+    for record in records.values() {
+        if record.classification.asset_type != "collection"
+            || record.frontmatter.batch_id.trim().is_empty()
+        {
+            continue;
+        }
+
+        let mut written_paths = clean_list(&record.frontmatter.written_assets);
+        if written_paths.is_empty() {
+            written_paths.push(record.relative_path.clone());
+            written_paths.extend(clean_list(&record.frontmatter.fragments));
+            written_paths.extend(clean_list(&record.frontmatter.articles));
+        } else if !written_paths
+            .iter()
+            .any(|path| path == &record.relative_path)
+        {
+            written_paths.insert(0, record.relative_path.clone());
+        }
+
+        let written_assets = written_paths
+            .iter()
+            .map(|path| build_batch_asset_ref(path, &rows_by_path, &records_by_path))
+            .collect();
+
+        batches.push(KnowledgeBatchHistoryEntry {
+            batch_id: record.frontmatter.batch_id.trim().to_string(),
+            source_type: normalize_field(&record.frontmatter.source_type, "unknown"),
+            source_label: normalize_field(&record.frontmatter.source_label, "Unknown source"),
+            created_at: normalize_field(&record.frontmatter.date, &record.last_modified),
+            collection_path: record.relative_path.clone(),
+            written_assets,
+            skipped_items: clean_list(&record.frontmatter.skipped_items),
+            failed_items: clean_list(&record.frontmatter.failed_items),
+            graph_refresh: KnowledgeBatchGraphRefresh {
+                node_count,
+                edge_count,
+                refreshed_at: refreshed_at.to_string(),
+            },
+        });
+    }
+
+    batches.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.batch_id.cmp(&b.batch_id))
+    });
+    batches
+}
+
 fn finalize_graph_state(state: GraphBuildState) -> KnowledgeGraphIndex {
+    let generated_at = Utc::now().to_rfc3339();
     let nodes: Vec<KnowledgeGraphNode> = state.nodes.into_values().collect();
     let degrees = compute_degrees(&state.edges);
     let components = compute_components(&nodes, &state.edges);
     let asset_rows = build_asset_rows(&state.assets, &degrees, &components);
     let suggestions = build_suggestions(&state.assets, &asset_rows);
     let review_slices = build_review_slices(&asset_rows);
+    let batches = build_batch_history(
+        &state.assets,
+        &asset_rows,
+        nodes.len(),
+        state.edges.len(),
+        &generated_at,
+    );
     KnowledgeGraphIndex {
-        generated_at: Utc::now().to_rfc3339(),
+        generated_at,
         nodes,
         edges: state.edges,
         assets: asset_rows,
         suggestions,
         review_slices,
+        batches,
     }
 }
 
-fn build_local_graph(index: &KnowledgeGraphIndex, node_id: &str, hops: usize, limit: usize) -> KnowledgeGraphIndex {
+fn build_local_graph(
+    index: &KnowledgeGraphIndex,
+    node_id: &str,
+    hops: usize,
+    limit: usize,
+) -> KnowledgeGraphIndex {
     let hard_limit = limit.clamp(1, 120);
     let max_hops = hops.clamp(1, 2);
     let nodes_by_id: BTreeMap<String, KnowledgeGraphNode> = index
@@ -1117,7 +1417,11 @@ fn build_local_graph(index: &KnowledgeGraphIndex, node_id: &str, hops: usize, li
         }
         if let Some(edges) = adjacency.get(&current) {
             for edge in edges {
-                let neighbor = if edge.from == current { &edge.to } else { &edge.from };
+                let neighbor = if edge.from == current {
+                    &edge.to
+                } else {
+                    &edge.from
+                };
                 if selected.contains(neighbor) || !nodes_by_id.contains_key(neighbor) {
                     continue;
                 }
@@ -1155,12 +1459,12 @@ fn build_local_graph(index: &KnowledgeGraphIndex, node_id: &str, hops: usize, li
         assets,
         suggestions: Vec::new(),
         review_slices: Vec::new(),
+        batches: Vec::new(),
     }
 }
 
 fn collect_graph(notes_root: &Path) -> Result<KnowledgeGraphIndex, String> {
-    fs::create_dir_all(notes_root)
-        .map_err(|e| format!("Failed to create notes directory: {e}"))?;
+    fs::create_dir_all(notes_root).map_err(|e| format!("Failed to create notes directory: {e}"))?;
     let canonical_notes_root = notes_root
         .canonicalize()
         .map_err(|e| format!("Failed to resolve notes root: {e}"))?;
@@ -1186,7 +1490,12 @@ fn collect_graph(notes_root: &Path) -> Result<KnowledgeGraphIndex, String> {
             .map(chrono::DateTime::<Utc>::from)
             .map(|modified| modified.to_rfc3339())
             .unwrap_or_default();
-        build_graph_for_markdown_with_modified(&relative_path, &markdown, &last_modified, &mut state);
+        build_graph_for_markdown_with_modified(
+            &relative_path,
+            &markdown,
+            &last_modified,
+            &mut state,
+        );
     }
 
     Ok(finalize_graph_state(state))
@@ -1194,19 +1503,223 @@ fn collect_graph(notes_root: &Path) -> Result<KnowledgeGraphIndex, String> {
 
 fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create graph cache directory {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create graph cache directory {}: {e}",
+                parent.display()
+            )
+        })?;
     }
-    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("Failed to encode graph cache: {e}"))?;
-    fs::write(path, bytes).map_err(|e| format!("Failed to write graph cache {}: {e}", path.display()))
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|e| format!("Failed to encode graph cache: {e}"))?;
+    fs::write(path, bytes)
+        .map_err(|e| format!("Failed to write graph cache {}: {e}", path.display()))
 }
 
 fn write_graph_cache(index: &KnowledgeGraphIndex) -> Result<(), String> {
     write_json_file(&graph_nodes_path()?, &index.nodes)?;
     write_json_file(&graph_edges_path()?, &index.edges)?;
-    write_json_file(&graph_batches_path()?, &Vec::<String>::new())?;
+    write_json_file(&graph_batches_path()?, &index.batches)?;
     write_json_file(&graph_summary_path()?, index)?;
     Ok(())
+}
+
+fn replay_slug_from_timestamp(created_at: &str) -> String {
+    created_at
+        .trim()
+        .replace(':', "-")
+        .replace('.', "-")
+        .replace('/', "-")
+}
+
+fn problem_title_from_asset_ref(asset: &KnowledgeBatchAssetRef) -> String {
+    let title = asset.title.as_deref().unwrap_or("").trim();
+    let problem_id = asset.problem_id.as_deref().unwrap_or("").trim();
+    if !title.is_empty() && !problem_id.is_empty() {
+        title
+            .strip_prefix(problem_id)
+            .map(|rest| rest.trim().to_string())
+            .filter(|rest| !rest.is_empty())
+            .unwrap_or_else(|| title.to_string())
+    } else {
+        title.to_string()
+    }
+}
+
+fn duplicate_batch_entry_as_new(
+    entry: &KnowledgeBatchHistoryEntry,
+    created_at: &str,
+) -> TrainingBatchReplayDraft {
+    let batch_id = format!("batch:{}-replay", replay_slug_from_timestamp(created_at));
+    let items: Vec<TrainingBatchReplayItem> = entry
+        .written_assets
+        .iter()
+        .filter(|asset| asset.kind == "fragment")
+        .enumerate()
+        .map(|(index, asset)| {
+            let problem_id = asset
+                .problem_id
+                .clone()
+                .unwrap_or_else(|| format!("legacy-{}", index + 1));
+            TrainingBatchReplayItem {
+                id: format!("item:{problem_id}"),
+                batch_id: batch_id.clone(),
+                problem_title: problem_title_from_asset_ref(asset),
+                problem_id,
+                status: "draft".to_string(),
+            }
+        })
+        .collect();
+    TrainingBatchReplayDraft {
+        source_batch_id: entry.batch_id.clone(),
+        source_collection_path: entry.collection_path.clone(),
+        batch: TrainingBatchReplayBatch {
+            id: batch_id,
+            title: format!("{} replay", entry.source_label),
+            source_type: entry.source_type.clone(),
+            source_label: format!("{} replay", entry.source_label),
+            created_at: created_at.to_string(),
+            status: "draft".to_string(),
+            item_ids: items.iter().map(|item| item.id.clone()).collect(),
+        },
+        items,
+    }
+}
+
+fn first_heading(markdown: &str) -> String {
+    markdown
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("# ")
+                .map(|title| title.trim().to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn migration_target_slug(source_path: &str, markdown: &str) -> String {
+    extract_problem_ids(markdown)
+        .into_iter()
+        .next()
+        .or_else(|| {
+            Path::new(source_path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| stem.to_string())
+        })
+        .unwrap_or_else(|| "legacy-note".to_string())
+}
+
+fn yaml_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn build_legacy_migration_draft_for_markdown(
+    source_path: &str,
+    markdown: &str,
+    target_type: &str,
+) -> Result<LegacyMigrationDraft, String> {
+    let normalized_source = normalize_relative_asset_path(source_path)?;
+    let target_type = match target_type {
+        "fragment" | "collection" => target_type,
+        other => return Err(format!("unsupported legacy migration target: {other}")),
+    };
+    let frontmatter = parse_frontmatter(markdown);
+    let title = normalize_field(&frontmatter.title, &first_heading(markdown));
+    let title = normalize_field(&title, &normalized_source);
+    let slug = migration_target_slug(&normalized_source, markdown);
+    let problems = clean_list(&if frontmatter.related_problems.is_empty() {
+        extract_problem_ids(markdown)
+    } else {
+        frontmatter.related_problems.clone()
+    });
+    let original_link = format!("[[{normalized_source}]]");
+    let target_path = if target_type == "fragment" {
+        format!("knowledge/fragments/legacy/{slug}.md")
+    } else {
+        format!("knowledge/collections/legacy/{slug}.md")
+    };
+    let body = if target_type == "fragment" {
+        format!(
+            concat!(
+                "---\n",
+                "type: fragment\n",
+                "kind: problem-note\n",
+                "title: {title}\n",
+                "topics: []\n",
+                "related_problems: {problems}\n",
+                "source: luogu\n",
+                "created_from: luogu-import-legacy\n",
+                "review_priority: medium\n",
+                "status: draft\n",
+                "original_note: {original}\n",
+                "---\n\n",
+                "## 摘要草稿\n\n",
+                "从旧洛谷题解生成的摘要 fragment 草稿。复杂旧文第一版只做摘要，不自动结构化全文。\n\n",
+                "## 原文链接\n\n",
+                "- {original_link}\n",
+            ),
+            title = yaml_string(&title),
+            problems = smoke_yaml_like_list(&problems),
+            original = yaml_string(&normalized_source),
+            original_link = original_link,
+        )
+    } else {
+        format!(
+            concat!(
+                "---\n",
+                "type: collection\n",
+                "kind: topic-review\n",
+                "title: {title}\n",
+                "topics: []\n",
+                "related_problems: {problems}\n",
+                "source: luogu\n",
+                "created_from: luogu-import-legacy\n",
+                "review_priority: medium\n",
+                "status: draft\n",
+                "original_note: {original}\n",
+                "fragments: []\n",
+                "articles: [{original_link_yaml}]\n",
+                "---\n\n",
+                "## 旧文升级集合草稿\n\n",
+                "该集合保留原洛谷题解入口，不拆毁原题解。\n\n",
+                "## 原文链接\n\n",
+                "- {original_link}\n",
+            ),
+            title = yaml_string(&title),
+            problems = smoke_yaml_like_list(&problems),
+            original = yaml_string(&normalized_source),
+            original_link_yaml = yaml_string(&original_link),
+            original_link = original_link,
+        )
+    };
+
+    Ok(LegacyMigrationDraft {
+        source_path: normalized_source,
+        source_title: title,
+        target_type: target_type.to_string(),
+        target_path,
+        markdown: body,
+        original_link,
+        requires_confirmation: true,
+        writes_original: false,
+        complexity: "summary-only".to_string(),
+    })
+}
+
+fn smoke_yaml_like_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "[]".to_string()
+    } else {
+        format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| yaml_string(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 fn read_graph_cache() -> Result<Option<KnowledgeGraphIndex>, String> {
@@ -1279,13 +1792,36 @@ pub fn get_knowledge_local_graph(
 }
 
 #[tauri::command]
-pub fn get_knowledge_relationship_suggestions() -> Result<Vec<KnowledgeRelationshipSuggestion>, String> {
+pub fn get_knowledge_relationship_suggestions(
+) -> Result<Vec<KnowledgeRelationshipSuggestion>, String> {
     Ok(get_knowledge_graph()?.suggestions)
 }
 
 #[tauri::command]
 pub fn get_knowledge_review_slices() -> Result<Vec<KnowledgeReviewSlice>, String> {
     Ok(get_knowledge_graph()?.review_slices)
+}
+
+#[tauri::command]
+pub fn get_knowledge_batches() -> Result<Vec<KnowledgeBatchHistoryEntry>, String> {
+    Ok(get_knowledge_graph()?.batches)
+}
+
+#[tauri::command]
+pub fn duplicate_knowledge_batch_as_draft(
+    batch_id: String,
+    created_at: Option<String>,
+) -> Result<TrainingBatchReplayDraft, String> {
+    let index = get_knowledge_graph()?;
+    let entry = index
+        .batches
+        .iter()
+        .find(|entry| entry.batch_id == batch_id)
+        .ok_or_else(|| format!("knowledge batch not found: {batch_id}"))?;
+    Ok(duplicate_batch_entry_as_new(
+        entry,
+        created_at.as_deref().unwrap_or(&Utc::now().to_rfc3339()),
+    ))
 }
 
 #[tauri::command]
@@ -1296,9 +1832,20 @@ pub fn rebuild_knowledge_graph() -> Result<KnowledgeGraphIndex, String> {
 }
 
 #[tauri::command]
-pub fn write_knowledge_asset(request: WriteKnowledgeAssetRequest) -> Result<WriteKnowledgeAssetResult, String> {
+pub fn write_knowledge_asset(
+    request: WriteKnowledgeAssetRequest,
+) -> Result<WriteKnowledgeAssetResult, String> {
     let notes_dir = paths::notes_dir()?;
     write_knowledge_asset_to_notes_dir(&notes_dir, request)
+}
+
+#[tauri::command]
+pub fn build_legacy_migration_draft(
+    source_path: String,
+    markdown: String,
+    target_type: String,
+) -> Result<LegacyMigrationDraft, String> {
+    build_legacy_migration_draft_for_markdown(&source_path, &markdown, &target_type)
 }
 
 #[cfg(test)]
@@ -1365,7 +1912,9 @@ mod tests {
             &mut state,
         );
 
-        assert!(state.nodes.contains_key("asset:knowledge/fragments/p3803.md"));
+        assert!(state
+            .nodes
+            .contains_key("asset:knowledge/fragments/p3803.md"));
         assert!(state.nodes.contains_key("problem:P3803"));
         assert!(state.nodes.contains_key("topic:FFT"));
         assert!(state.nodes.contains_key("type:fragment"));
@@ -1389,12 +1938,18 @@ mod tests {
 
         let luogu = state.nodes.get("asset:luogu/P3803.md").unwrap();
         assert_eq!(luogu.asset_type.as_deref(), Some("legacy-luogu-solution"));
-        assert_eq!(luogu.classification_reason.as_deref(), Some("legacy_luogu_import"));
+        assert_eq!(
+            luogu.classification_reason.as_deref(),
+            Some("legacy_luogu_import")
+        );
         assert!(luogu.classification_confidence.unwrap() >= 0.9);
 
         let plain = state.nodes.get("asset:daily/random.md").unwrap();
         assert_eq!(plain.asset_type.as_deref(), Some("legacy-note"));
-        assert_eq!(plain.classification_reason.as_deref(), Some("fallback_legacy_note"));
+        assert_eq!(
+            plain.classification_reason.as_deref(),
+            Some("fallback_legacy_note")
+        );
     }
 
     #[test]
@@ -1402,11 +1957,25 @@ mod tests {
         let mut state = GraphBuildState::default();
         add_edge(
             &mut state,
-            graph_edge("asset:a.md", "problem:P1000", "mentions", "problem_id_match", 1.0, "a.md"),
+            graph_edge(
+                "asset:a.md",
+                "problem:P1000",
+                "mentions",
+                "problem_id_match",
+                1.0,
+                "a.md",
+            ),
         );
         add_edge(
             &mut state,
-            graph_edge("asset:a.md", "problem:P1000", "mentions", "problem_id_match", 1.0, "b.md"),
+            graph_edge(
+                "asset:a.md",
+                "problem:P1000",
+                "mentions",
+                "problem_id_match",
+                1.0,
+                "b.md",
+            ),
         );
 
         assert_eq!(state.edges.len(), 1);
@@ -1426,11 +1995,17 @@ mod tests {
             edges: vec![
                 test_edge("asset:a.md", "topic:FFT", "related_to", "frontmatter"),
                 test_edge("topic:FFT", "asset:b.md", "mentions", "term_match"),
-                test_edge("asset:a.md", "problem:P3803", "mentions", "problem_id_match"),
+                test_edge(
+                    "asset:a.md",
+                    "problem:P3803",
+                    "mentions",
+                    "problem_id_match",
+                ),
             ],
             assets: Vec::new(),
             suggestions: Vec::new(),
             review_slices: Vec::new(),
+            batches: Vec::new(),
         };
 
         let one_hop = build_local_graph(&index, "asset:a.md", 1, 80);
@@ -1512,7 +2087,12 @@ mod tests {
         }
     }
 
-    fn smoke_fragment_markdown(title: &str, problem: &str, topics: &[&str], collection_path: &str) -> String {
+    fn smoke_fragment_markdown(
+        title: &str,
+        problem: &str,
+        topics: &[&str],
+        collection_path: &str,
+    ) -> String {
         format!(
             concat!(
                 "---\n",
@@ -1649,13 +2229,33 @@ mod tests {
         let index = collect_graph(&notes).unwrap();
         let local_graph = build_local_graph(&index, &node_id_for_asset(collection_path), 1, 80);
 
-        assert_eq!(index.assets.iter().filter(|asset| asset.asset_type == "collection").count(), 1);
-        assert_eq!(index.assets.iter().filter(|asset| asset.asset_type == "fragment").count(), 5);
+        assert_eq!(
+            index
+                .assets
+                .iter()
+                .filter(|asset| asset.asset_type == "collection")
+                .count(),
+            1
+        );
+        assert_eq!(
+            index
+                .assets
+                .iter()
+                .filter(|asset| asset.asset_type == "fragment")
+                .count(),
+            5
+        );
         for topic in ["FFT", "数论", "图论"] {
-            assert!(index.nodes.iter().any(|node| node.id == node_id_for_topic(topic)));
+            assert!(index
+                .nodes
+                .iter()
+                .any(|node| node.id == node_id_for_topic(topic)));
         }
         for problem in ["P3803", "P3383", "P3379"] {
-            assert!(index.nodes.iter().any(|node| node.id == node_id_for_problem(problem)));
+            assert!(index
+                .nodes
+                .iter()
+                .any(|node| node.id == node_id_for_problem(problem)));
         }
         assert!(index
             .edges
@@ -1671,6 +2271,122 @@ mod tests {
             .review_slices
             .iter()
             .any(|slice| slice.path == fragment_paths[0]));
+    }
+
+    #[test]
+    fn rebuilds_batch_history_from_collection_frontmatter_and_written_assets() {
+        let dir = tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        fs::create_dir_all(notes.join("knowledge/collections")).unwrap();
+        fs::create_dir_all(notes.join("knowledge/fragments/batch-p3")).unwrap();
+        fs::write(
+            notes.join("knowledge/collections/batch-p3.md"),
+            concat!(
+                "---\n",
+                "type: collection\n",
+                "kind: daily-log\n",
+                "title: \"P3 batch\"\n",
+                "date: \"2026-07-03\"\n",
+                "source: luogu\n",
+                "created_from: training-center\n",
+                "batch_id: batch:p3\n",
+                "source_type: luogu-today\n",
+                "source_label: 今日训练\n",
+                "written_assets:\n",
+                "  - knowledge/collections/batch-p3.md\n",
+                "  - knowledge/fragments/batch-p3/P3803.md\n",
+                "skipped_items: [item:P1001:no-comment]\n",
+                "failed_items: [item:P3383:write-denied]\n",
+                "fragments: [knowledge/fragments/batch-p3/P3803.md]\n",
+                "---\n",
+                "Batch body.\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            notes.join("knowledge/fragments/batch-p3/P3803.md"),
+            concat!(
+                "---\n",
+                "type: fragment\n",
+                "kind: problem-note\n",
+                "title: \"P3803 FFT\"\n",
+                "problem_id: P3803\n",
+                "collection_id: knowledge/collections/batch-p3.md\n",
+                "---\n",
+                "P3803 fragment.\n",
+            ),
+        )
+        .unwrap();
+
+        let index = collect_graph(&notes).unwrap();
+
+        assert_eq!(index.batches.len(), 1);
+        let batch = &index.batches[0];
+        assert_eq!(batch.batch_id, "batch:p3");
+        assert_eq!(batch.source_type, "luogu-today");
+        assert_eq!(batch.source_label, "今日训练");
+        assert_eq!(batch.collection_path, "knowledge/collections/batch-p3.md");
+        assert_eq!(batch.skipped_items, vec!["item:P1001:no-comment"]);
+        assert_eq!(batch.failed_items, vec!["item:P3383:write-denied"]);
+        assert!(batch
+            .written_assets
+            .iter()
+            .any(|asset| asset.kind == "fragment"
+                && asset.path == "knowledge/fragments/batch-p3/P3803.md"));
+        assert_eq!(batch.graph_refresh.node_count, index.nodes.len());
+        assert_eq!(batch.graph_refresh.edge_count, index.edges.len());
+    }
+
+    #[test]
+    fn duplicate_batch_history_entry_generates_new_draft_without_written_state() {
+        let entry = KnowledgeBatchHistoryEntry {
+            batch_id: "batch:p3".to_string(),
+            source_type: "luogu-today".to_string(),
+            source_label: "今日训练".to_string(),
+            created_at: "2026-07-03T00:00:00Z".to_string(),
+            collection_path: "knowledge/collections/batch-p3.md".to_string(),
+            written_assets: vec![KnowledgeBatchAssetRef {
+                kind: "fragment".to_string(),
+                path: "knowledge/fragments/batch-p3/P3803.md".to_string(),
+                title: Some("P3803 FFT".to_string()),
+                problem_id: Some("P3803".to_string()),
+            }],
+            skipped_items: vec!["item:P1001:no-comment".to_string()],
+            failed_items: vec!["item:P3383:write-denied".to_string()],
+            graph_refresh: KnowledgeBatchGraphRefresh {
+                node_count: 4,
+                edge_count: 3,
+                refreshed_at: "2026-07-03T00:01:00Z".to_string(),
+            },
+        };
+
+        let draft = duplicate_batch_entry_as_new(&entry, "2026-07-04T09:00:00Z");
+
+        assert_eq!(draft.source_batch_id, "batch:p3");
+        assert_eq!(draft.batch.id, "batch:2026-07-04T09-00-00Z-replay");
+        assert_eq!(draft.batch.status, "draft");
+        assert_eq!(draft.items.len(), 1);
+        assert_eq!(draft.items[0].problem_id, "P3803");
+        assert_eq!(draft.items[0].status, "draft");
+    }
+
+    #[test]
+    fn legacy_luogu_migration_draft_is_preview_only_and_preserves_original_link() {
+        let draft = build_legacy_migration_draft_for_markdown(
+            "luogu/P3803.md",
+            "# P3803 多项式乘法\n\n## 题解\n\nFFT 旧题解正文。",
+            "fragment",
+        )
+        .unwrap();
+
+        assert_eq!(draft.source_path, "luogu/P3803.md");
+        assert_eq!(draft.target_type, "fragment");
+        assert_eq!(draft.target_path, "knowledge/fragments/legacy/P3803.md");
+        assert!(draft.requires_confirmation);
+        assert!(!draft.writes_original);
+        assert!(draft.markdown.contains("created_from: luogu-import-legacy"));
+        assert!(draft.markdown.contains("original_note: \"luogu/P3803.md\""));
+        assert!(draft.markdown.contains("[[luogu/P3803.md]]"));
     }
 
     #[test]

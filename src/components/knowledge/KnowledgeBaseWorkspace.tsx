@@ -6,7 +6,13 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Separator } from "@/components/ui/separator";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
-import { getKnowledgeGraph, rebuildKnowledgeGraph, type KnowledgeGraphIndexResult } from "@/lib/api";
+import {
+  duplicateKnowledgeBatchAsDraft,
+  getKnowledgeGraph,
+  rebuildKnowledgeGraph,
+  type KnowledgeGraphIndexResult,
+} from "@/lib/api";
+import { mapBatchHistoryRows } from "@/lib/knowledge/batchHistory";
 import {
   buildKnowledgeOverviewStats,
   buildReviewRows,
@@ -32,7 +38,7 @@ const WORKSPACE_TABS: Array<{ value: KnowledgeWorkspaceTabId; label: string }> =
 ];
 
 function emptyGraph(): KnowledgeGraphIndexResult {
-  return { generatedAt: "", nodes: [], edges: [], assets: [], suggestions: [], reviewSlices: [] };
+  return { generatedAt: "", nodes: [], edges: [], assets: [], suggestions: [], reviewSlices: [], batches: [] };
 }
 
 export function KnowledgeBaseWorkspace({
@@ -48,6 +54,7 @@ export function KnowledgeBaseWorkspace({
   const [graph, setGraph] = useState<KnowledgeGraphIndexResult>(emptyGraph);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [batchStatus, setBatchStatus] = useState("");
 
   useEffect(() => {
     setWorkspaceTab(activeTab);
@@ -57,6 +64,7 @@ export function KnowledgeBaseWorkspace({
   const stats = useMemo(() => buildKnowledgeOverviewStats(graph), [graph]);
   const reviewRows = useMemo(() => buildReviewRows(assetRows, "2026-06-30"), [assetRows]);
   const suggestions = useMemo(() => buildSuggestionRows(graph), [graph]);
+  const batchRows = useMemo(() => mapBatchHistoryRows(graph.batches), [graph.batches]);
 
   const loadGraph = async () => {
     setLoading(true);
@@ -89,6 +97,16 @@ export function KnowledgeBaseWorkspace({
   const setTab = (tab: KnowledgeWorkspaceTabId) => {
     setWorkspaceTab(tab);
     onTabChange?.(tab);
+  };
+
+  const handleDuplicateBatch = async (batchId: string) => {
+    setBatchStatus("生成 replay 草稿...");
+    try {
+      const replay = await duplicateKnowledgeBatchAsDraft(batchId, new Date().toISOString());
+      setBatchStatus(`已生成 ${replay.items.length} 条草稿：${replay.batch.id}`);
+    } catch (e) {
+      setBatchStatus(`生成失败：${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   return (
@@ -136,6 +154,28 @@ export function KnowledgeBaseWorkspace({
               <Stat label="资产节点" value={stats.assetCount} />
               <Stat label="问题节点" value={stats.problemCount} />
               <Stat label="主题节点" value={stats.topicCount} />
+              <Separator />
+              <div className="grid gap-2">
+                <div className="text-xs font-medium text-foreground">批次历史</div>
+                {batchRows.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">暂无可重建批次记录。</p>
+                ) : batchRows.slice(0, 4).map((batch) => (
+                  <div key={batch.batchId} className="grid gap-1 rounded-[var(--ui-radius-item)] border border-border/70 bg-muted/25 px-3 py-2">
+                    <div className="truncate text-xs font-medium text-foreground">{batch.title}</div>
+                    <div className="text-[11px] text-muted-foreground">{batch.sourceType} · {batch.writtenCount} written · {batch.failedCount} failed · {batch.skippedCount} skipped</div>
+                    <div className="text-[11px] text-muted-foreground">{batch.graphSummary}</div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => onOpenAsset?.(batch.collectionPath)}>
+                        回看集合
+                      </button>
+                      <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => void handleDuplicateBatch(batch.batchId)}>
+                        duplicate-as-new
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {batchStatus ? <p className="text-[11px] text-muted-foreground">{batchStatus}</p> : null}
+              </div>
               <Separator />
               <p className="text-xs text-muted-foreground">图谱默认展示精选子图；列表筛选来自当前 read model，缺失字段等待 P2-A 接口补齐。</p>
             </CardContent>

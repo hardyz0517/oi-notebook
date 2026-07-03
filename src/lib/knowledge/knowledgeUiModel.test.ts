@@ -85,6 +85,7 @@ const graph: KnowledgeGraphIndex = {
   assets: [],
   suggestions: [],
   reviewSlices: [],
+  batches: [],
 };
 
 describe("knowledgeUiModel", () => {
