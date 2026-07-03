@@ -29,8 +29,34 @@ export type TrainingSourceType =
   | "luogu-today"
   | "luogu-range"
   | "luogu-single"
+  | "luogu-problemset"
+  | "luogu-contest"
   | "luogu-problemset-future"
   | "luogu-contest-future";
+
+export type TrainingCollectionKind = "daily-log" | "range-review" | "problem-review" | "problemset-review" | "contest-review";
+
+export type TrainingSourceErrorCode =
+  | "auth-expired"
+  | "network-error"
+  | "permission-denied"
+  | "empty-result"
+  | "partial-result"
+  | "parse-error";
+
+export interface TrainingSourceIssue {
+  code: TrainingSourceErrorCode;
+  message: string;
+  recoverable: boolean;
+  problemId?: string;
+  sourceRef?: string;
+}
+
+export interface TrainingDuplicateCandidate {
+  problemId: string;
+  refs: string[];
+  reason: string;
+}
 
 export interface TrainingItemDraftFields {
   title: string;
@@ -52,6 +78,13 @@ export interface TrainingItemDraft {
   submitTime?: string;
   difficulty?: string;
   status: TrainingItemStatus;
+  sourceType?: TrainingSourceType;
+  sourceRefs?: string[];
+  submissionRefs?: string[];
+  suggestedTopics?: string[];
+  existingAssetRefs?: string[];
+  draftFields?: Partial<TrainingItemDraftFields>;
+  error?: TrainingSourceIssue;
   output: {
     fragment: boolean;
     article: boolean;
@@ -69,6 +102,11 @@ export interface TrainingBatchDraft {
   createdAt: string;
   status: "draft" | "ready" | "writing" | "written" | "partial" | "failed";
   itemIds: string[];
+  collectionKind?: TrainingCollectionKind;
+  sourceInput?: string;
+  warnings?: TrainingSourceIssue[];
+  errors?: TrainingSourceIssue[];
+  duplicateCandidates?: TrainingDuplicateCandidate[];
 }
 
 export type KnowledgeGraphNodeType = "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection" | "batch";

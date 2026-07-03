@@ -21,6 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { rebuildKnowledgeGraph, writeKnowledgeAsset } from "@/lib/api";
+import { createLuoguSourceApiTransport } from "@/lib/knowledge/luoguSourceApiTransport";
+import { createLuoguTrainingBatchDraft, type LuoguSourceAdapterInput } from "@/lib/knowledge/luoguSourceAdapters";
 import {
   buildTrainingBatchWritePlan,
   createProblemTrainingItemDraft,
@@ -48,14 +50,13 @@ const MODE_OPTIONS: Array<{
   sourceType: TrainingSourceType;
   label: string;
   description: string;
-  reserved?: boolean;
   icon: typeof Dumbbell;
 }> = [
   { id: "today", sourceType: "luogu-today", label: "今日", description: "扫描今日 Luogu 提交", icon: Dumbbell },
   { id: "range", sourceType: "luogu-range", label: "范围", description: "按日期窗口沉淀训练", icon: GraduationCap },
   { id: "single", sourceType: "luogu-single", label: "单题", description: "围绕单题补录片段", icon: FileText },
-  { id: "problemset", sourceType: "luogu-problemset-future", label: "题单", description: "等待 P2-A/P3 数据入口", reserved: true, icon: LibraryBig },
-  { id: "contest", sourceType: "luogu-contest-future", label: "比赛", description: "等待 P2-A/P3 数据入口", reserved: true, icon: Network },
+  { id: "problemset", sourceType: "luogu-problemset", label: "题单", description: "题单 ID / 链接候选批次", icon: LibraryBig },
+  { id: "contest", sourceType: "luogu-contest", label: "比赛", description: "比赛 ID / 链接复盘批次", icon: Network },
 ];
 
 const STATUS_LABELS: Record<TrainingItemStatus, string> = {
@@ -70,6 +71,15 @@ export interface TrainingCenterWorkspaceProps {
   currentNoteTitle?: string | null;
   onOpenAsset?: (path: string) => void;
   onOpenKnowledgeTab?: (tab: KnowledgeWorkspaceTabId) => void;
+}
+
+interface SourceConfigState {
+  startDate: string;
+  endDate: string;
+  problemId: string;
+  problemSetInput: string;
+  contestInput: string;
+  requireAccepted: boolean;
 }
 
 function createInitialBatch(): TrainingBatchDraft {
@@ -135,6 +145,15 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
   const [selectedItemId, setSelectedItemId] = useState("item:P3803");
   const [writeStatus, setWriteStatus] = useState("等待确认写入");
   const [graphStatus, setGraphStatus] = useState("图谱未刷新");
+  const [scanStatus, setScanStatus] = useState("等待扫描");
+  const [sourceConfig, setSourceConfig] = useState<SourceConfigState>({
+    startDate: "",
+    endDate: "",
+    problemId: "",
+    problemSetInput: "",
+    contestInput: "",
+    requireAccepted: true,
+  });
   const [lastWrittenMarkdown, setLastWrittenMarkdown] = useState("");
   const [feedback, setFeedback] = useState<TrainingWriteFeedback | null>(null);
 
@@ -165,6 +184,73 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
       sourceType: nextMode.sourceType,
       sourceLabel: nextMode.label,
     }));
+  };
+
+  const updateSourceConfig = (patch: Partial<SourceConfigState>) => {
+    setSourceConfig((current) => ({ ...current, ...patch }));
+  };
+
+  const buildSourceAdapterInput = (): LuoguSourceAdapterInput => {
+    const now = new Date().toISOString();
+    if (activeMode === "range") {
+      return {
+        sourceType: "luogu-range",
+        now,
+        startDate: sourceConfig.startDate || undefined,
+        endDate: sourceConfig.endDate || undefined,
+        requireAccepted: sourceConfig.requireAccepted,
+      };
+    }
+    if (activeMode === "single") {
+      return {
+        sourceType: "luogu-single",
+        now,
+        problemId: sourceConfig.problemId,
+        requireAccepted: sourceConfig.requireAccepted,
+      };
+    }
+    if (activeMode === "problemset") {
+      return {
+        sourceType: "luogu-problemset",
+        now,
+        problemSetInput: sourceConfig.problemSetInput,
+        requireAccepted: sourceConfig.requireAccepted,
+        includeCandidates: true,
+      };
+    }
+    if (activeMode === "contest") {
+      return {
+        sourceType: "luogu-contest",
+        now,
+        contestInput: sourceConfig.contestInput,
+        requireAccepted: sourceConfig.requireAccepted,
+        includeCandidates: true,
+      };
+    }
+    return {
+      sourceType: "luogu-today",
+      now,
+      requireAccepted: sourceConfig.requireAccepted,
+    };
+  };
+
+  const handleScanSource = async () => {
+    setScanStatus("扫描中...");
+    setFeedback(null);
+    try {
+      const result = await createLuoguTrainingBatchDraft(
+        buildSourceAdapterInput(),
+        createLuoguSourceApiTransport(),
+      );
+      setBatch(result.batch);
+      setItems(result.items);
+      setSelectedItemId(result.items[0]?.id ?? "");
+      const warningCount = result.batch.warnings?.length ?? 0;
+      const errorCount = result.batch.errors?.length ?? 0;
+      setScanStatus(`扫描完成：${result.items.length} items · warnings ${warningCount} · errors ${errorCount}`);
+    } catch (error) {
+      setScanStatus(`扫描失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const handleFieldChange = (field: keyof TrainingItemDraft["fields"], value: string | string[]) => {
@@ -230,7 +316,7 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{selectedMode.label}</Badge>
-          <Button type="button" size="compact" variant="outline">
+          <Button type="button" size="compact" variant="outline" onClick={() => void handleScanSource()}>
             扫描当前来源
           </Button>
         </div>
@@ -252,15 +338,12 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
                   className={cn(
                     "grid w-full cursor-pointer gap-1 rounded-[var(--ui-radius-item)] border px-3 py-2 text-left transition-colors",
                     selected ? "border-primary/40 bg-primary/10 text-foreground" : "border-border/60 bg-background/70 text-foreground/90 hover:bg-muted/50",
-                    mode.reserved && "cursor-not-allowed opacity-70",
                   )}
-                  disabled={mode.reserved}
                   onClick={() => handleModeSelect(mode.id)}
                 >
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Icon className="h-4 w-4 text-muted-foreground" />
                     <span>{mode.label}</span>
-                    {mode.reserved ? <Badge variant="default" className="ml-auto">Reserved</Badge> : null}
                   </div>
                   <div className="text-xs text-muted-foreground">{mode.description}</div>
                 </button>
@@ -277,7 +360,30 @@ export function TrainingCenterWorkspace({ currentNoteTitle, onOpenAsset, onOpenK
               <div>来源：{selectedMode.label}</div>
               <div>当前批次：{batch.title}</div>
               <div>最近状态：ready {statusSummary.ready} / written {statusSummary.written} / skipped {statusSummary.skipped}</div>
-              <Button type="button" size="compact" variant="outline" className="mt-1 justify-start">
+              {activeMode === "range" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input className="h-8 text-xs" type="date" value={sourceConfig.startDate} onChange={(event) => updateSourceConfig({ startDate: event.target.value })} />
+                  <Input className="h-8 text-xs" type="date" value={sourceConfig.endDate} onChange={(event) => updateSourceConfig({ endDate: event.target.value })} />
+                </div>
+              ) : null}
+              {activeMode === "single" ? (
+                <Input className="h-8 text-xs" placeholder="P1001" value={sourceConfig.problemId} onChange={(event) => updateSourceConfig({ problemId: event.target.value })} />
+              ) : null}
+              {activeMode === "problemset" ? (
+                <Input className="h-8 text-xs" placeholder="题单 ID 或 https://www.luogu.com.cn/training/..." value={sourceConfig.problemSetInput} onChange={(event) => updateSourceConfig({ problemSetInput: event.target.value })} />
+              ) : null}
+              {activeMode === "contest" ? (
+                <Input className="h-8 text-xs" placeholder="比赛 ID 或 https://www.luogu.com.cn/contest/..." value={sourceConfig.contestInput} onChange={(event) => updateSourceConfig({ contestInput: event.target.value })} />
+              ) : null}
+              <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={sourceConfig.requireAccepted}
+                  onChange={(event) => updateSourceConfig({ requireAccepted: event.currentTarget.checked })}
+                />
+                只沉淀 AC
+              </Label>
+              <div>{scanStatus}</div>
+              <Button type="button" size="compact" variant="outline" className="mt-1 justify-start" onClick={() => void handleScanSource()}>
                 扫描{selectedMode.label}
               </Button>
             </div>
