@@ -1,7 +1,7 @@
 mod ai;
 mod blog_content;
-mod blog_service;
 mod blog_server;
+mod blog_service;
 mod frontmatter;
 mod git;
 mod knowledge;
@@ -61,9 +61,7 @@ fn open_notes_folder() -> Result<(), String> {
 
 #[tauri::command]
 fn hide_main_window(window: tauri::Window) -> Result<(), String> {
-    window
-        .hide()
-        .map_err(|e| format!("隐藏主窗口失败：{e}"))
+    window.hide().map_err(|e| format!("隐藏主窗口失败：{e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -88,7 +86,10 @@ pub fn run() {
             knowledge::get_knowledge_local_graph,
             knowledge::get_knowledge_relationship_suggestions,
             knowledge::get_knowledge_review_slices,
+            knowledge::get_knowledge_batches,
+            knowledge::duplicate_knowledge_batch_as_draft,
             knowledge::write_knowledge_asset,
+            knowledge::build_legacy_migration_draft,
             notes::delete_note,
             notes::rename_note,
             notes::create_note_folder,

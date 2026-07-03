@@ -37,7 +37,7 @@ export interface KnowledgeReviewRow extends KnowledgeAssetRow {
 
 export interface KnowledgeSuggestionRow {
   id: string;
-  kind: "isolated-asset" | "missing-topic" | "unlinked-problem";
+  kind: "isolated-asset" | "missing-topic" | "unlinked-problem" | "legacy-upgrade";
   targetTitle: string;
   targetPath: string;
   reason: string;
@@ -205,9 +205,12 @@ export function buildSuggestionRows(graph: KnowledgeGraphIndex): KnowledgeSugges
   if (graph.suggestions.length > 0) {
     return graph.suggestions.map((suggestion) => {
       const path = suggestion.refs[0] ?? suggestion.target;
+      const isLegacyUpgrade = suggestion.kind.includes("upgrade_legacy_luogu_solution");
       return {
         id: suggestion.id,
-        kind: suggestion.kind.includes("missing_topic")
+        kind: isLegacyUpgrade
+          ? "legacy-upgrade"
+          : suggestion.kind.includes("missing_topic")
           ? "missing-topic"
           : suggestion.kind.includes("missing_related_problem")
             ? "unlinked-problem"
@@ -222,7 +225,7 @@ export function buildSuggestionRows(graph: KnowledgeGraphIndex): KnowledgeSugges
           kind: "open-markdown",
           enabled: Boolean(path),
           path,
-          label: "打开 Markdown 手动编辑",
+          label: isLegacyUpgrade ? "预览升级草稿" : "打开 Markdown 手动编辑",
         },
       };
     });

@@ -541,6 +541,7 @@ export interface KnowledgeGraphIndexResult {
   assets: KnowledgeAssetRowResult[];
   suggestions: KnowledgeRelationshipSuggestionResult[];
   reviewSlices: KnowledgeReviewSliceResult[];
+  batches: KnowledgeBatchHistoryEntryResult[];
 }
 
 export interface KnowledgeAssetRowResult {
@@ -594,6 +595,62 @@ export interface KnowledgeReviewSliceResult {
   lastReviewedAt: string | null;
   score: number;
   reasons: string[];
+}
+
+export interface KnowledgeBatchAssetRefResult {
+  kind: "collection" | "fragment" | "article" | "unknown" | string;
+  path: string;
+  title: string | null;
+  problemId: string | null;
+}
+
+export interface KnowledgeBatchHistoryEntryResult {
+  batchId: string;
+  sourceType: string;
+  sourceLabel: string;
+  createdAt: string;
+  collectionPath: string;
+  writtenAssets: KnowledgeBatchAssetRefResult[];
+  skippedItems: string[];
+  failedItems: string[];
+  graphRefresh: {
+    nodeCount: number;
+    edgeCount: number;
+    refreshedAt: string;
+  };
+}
+
+export interface TrainingBatchReplayDraftResult {
+  sourceBatchId: string;
+  sourceCollectionPath: string;
+  batch: {
+    id: string;
+    title: string;
+    sourceType: string;
+    sourceLabel: string;
+    createdAt: string;
+    status: string;
+    itemIds: string[];
+  };
+  items: Array<{
+    id: string;
+    batchId: string;
+    problemId: string;
+    problemTitle: string;
+    status: string;
+  }>;
+}
+
+export interface LegacyMigrationDraftResult {
+  sourcePath: string;
+  sourceTitle: string;
+  targetType: "fragment" | "collection" | string;
+  targetPath: string;
+  markdown: string;
+  originalLink: string;
+  requiresConfirmation: boolean;
+  writesOriginal: boolean;
+  complexity: "summary-only" | "simple" | string;
 }
 
 export interface WriteKnowledgeAssetResult {
@@ -933,6 +990,28 @@ export async function getKnowledgeReviewSlices(): Promise<KnowledgeReviewSliceRe
   }
 }
 
+export async function getKnowledgeBatches(): Promise<KnowledgeBatchHistoryEntryResult[]> {
+  try {
+    return await invoke<KnowledgeBatchHistoryEntryResult[]>("get_knowledge_batches");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function duplicateKnowledgeBatchAsDraft(
+  batchId: string,
+  createdAt?: string,
+): Promise<TrainingBatchReplayDraftResult> {
+  try {
+    return await invoke<TrainingBatchReplayDraftResult>("duplicate_knowledge_batch_as_draft", {
+      batchId,
+      createdAt,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
 export async function writeKnowledgeAsset(
   relativePath: string,
   markdown: string,
@@ -943,6 +1022,22 @@ export async function writeKnowledgeAsset(
       relativePath,
       markdown,
       overwrite,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function buildLegacyMigrationDraft(
+  sourcePath: string,
+  markdown: string,
+  targetType: "fragment" | "collection",
+): Promise<LegacyMigrationDraftResult> {
+  try {
+    return await invoke<LegacyMigrationDraftResult>("build_legacy_migration_draft", {
+      sourcePath,
+      markdown,
+      targetType,
     });
   } catch (e) {
     throw toApiError(e);
