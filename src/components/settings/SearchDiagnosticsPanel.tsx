@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { CheckCircle2, Clipboard, Loader2, Play, PlugZap, Search, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { Panel, PanelBody, PanelHeader, PanelTitle } from "@/components/common/Panel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -2017,87 +2018,94 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
       </div>
 
       <div className="grid min-w-0 gap-5 border-t border-border/80 pt-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
-          {isRunningCore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-          运行核心自检
-        </Button>
-        <Button variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck || !webSearchConfig}>
-          {isTestingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-          测试当前搜索服务
-        </Button>
-        <Button variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
-          {isCheckingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          检查本地索引
-        </Button>
-        <Button variant="outline" onClick={() => void rebuildLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
-          {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          重建本地索引
-        </Button>
-        <Button variant="outline" onClick={() => void runNotexSelfCheck()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
-          {isRunningNotexSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          运行 NoteX 搜索自检
-        </Button>
-        <Button variant="outline" onClick={() => void copyReport()}>
-          <Clipboard className="h-3.5 w-3.5" />
-          复制诊断报告
-        </Button>
-        {copyMessage && <span className="text-xs text-muted-foreground">{copyMessage}</span>}
-      </div>
+        <Panel tone="muted">
+          <PanelBody className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => void runCoreDiagnostics()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
+                {isRunningCore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                运行核心自检
+              </Button>
+              <Button size="sm" variant="outline" onClick={runProviderTest} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck || !webSearchConfig}>
+                {isTestingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                测试当前搜索服务
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void checkLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
+                {isCheckingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                检查本地索引
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void rebuildLocalIndex()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
+                {isRebuildingLocalIndex ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                重建本地索引
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void runNotexSelfCheck()} disabled={isRunningCore || isTestingProvider || isCheckingLocalIndex || isRebuildingLocalIndex || isRunningNotexSelfCheck}>
+                {isRunningNotexSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                运行 NoteX 搜索自检
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void copyReport()}>
+                <Clipboard className="h-3.5 w-3.5" />
+                复制诊断报告
+              </Button>
+              {copyMessage && <span className="text-xs text-muted-foreground">{copyMessage}</span>}
+            </div>
 
-      <div className="grid gap-2 border-y border-border/70 py-3 sm:grid-cols-5">
-        {STATUS_ORDER.map((status) => (
-          <div key={status} className="flex items-center justify-between gap-3 px-1 text-sm">
-            <span className="text-muted-foreground">{STATUS_LABELS[status]}</span>
-            <span className={cn("rounded-sm border px-2 py-0.5 text-xs", statusTone(status))}>{counts[status]}</span>
-          </div>
-        ))}
-        <div className="px-1 text-xs leading-5 text-muted-foreground sm:col-span-5">
-          上次运行：{lastRunAt ?? "尚未运行"}。在线搜索服务测试只会在手动点击时发起外部请求。
-        </div>
-      </div>
-
-      <section className="grid min-w-0 max-w-full gap-4 overflow-hidden border-b border-border/70 pb-4">
-        <div className="grid min-w-0 gap-1">
-          <div className="text-sm font-semibold text-foreground">Research Engine 核心</div>
-          <div className="max-w-full break-words text-xs leading-5 text-muted-foreground lg:max-w-4xl">
-            离线诊断区，只运行确定性的 mock discovery、mock reader、证据合约、生成后校验和诊断导出；不会触发真实搜索、真实 provider 或旧搜索链路。
-          </div>
-        </div>
-        <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]">
-          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSelfCheck} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
-            {isRunningResearchEngineSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-            运行自检
-          </Button>
-          <Select
-            value={researchEngineSampleId}
-            onValueChange={(value) => setResearchEngineSampleId(value as ResearchEngineDeveloperSampleId)}
-            disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
-          >
-            <SelectTrigger className="h-9 w-full min-w-0 text-sm lg:min-w-80" aria-label="Research Engine 离线样例">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="max-w-[min(32rem,var(--radix-select-content-available-width))]">
-              {researchEngineSamples.map((sample) => (
-                <SelectItem key={sample.id} value={sample.id} className="py-2 text-sm">
-                  <span className="grid min-w-0">
-                    <span className="min-w-0 truncate font-medium">{sample.labelZh}</span>
-                    <span className="mt-0.5 min-w-0 truncate text-xs leading-5 text-muted-foreground">{sample.displayQuestion}</span>
-                  </span>
-                </SelectItem>
+            <div className="grid gap-2 border-t border-border/70 pt-3 sm:grid-cols-5">
+              {STATUS_ORDER.map((status) => (
+                <div key={status} className="flex items-center justify-between gap-3 px-1 text-sm">
+                  <span className="text-muted-foreground">{STATUS_LABELS[status]}</span>
+                  <span className={cn("rounded-sm border px-2 py-0.5 text-xs", statusTone(status))}>{counts[status]}</span>
+                </div>
               ))}
-            </SelectContent>
-          </Select>
-          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
-            {isRunningResearchEngineSample ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            运行离线样例
-          </Button>
-          <Button className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={() => void copyResearchEngineReport()}>
-            <Clipboard className="h-3.5 w-3.5" />
-            复制 Markdown 报告
-          </Button>
-          {researchEngineCopyMessage && <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground lg:self-center">{researchEngineCopyMessage}</span>}
-        </div>
+              <div className="px-1 text-xs leading-5 text-muted-foreground sm:col-span-5">
+                上次运行：{lastRunAt ?? "尚未运行"}。在线搜索服务测试只会在手动点击时发起外部请求。
+              </div>
+            </div>
+          </PanelBody>
+        </Panel>
+
+        <Panel tone="muted" className="overflow-hidden">
+          <PanelHeader className="items-start">
+            <div className="grid min-w-0 gap-1">
+              <PanelTitle>Research Engine 核心</PanelTitle>
+              <div className="max-w-full break-words text-xs leading-5 text-muted-foreground lg:max-w-4xl">
+                离线诊断区，只运行确定性的 mock discovery、mock reader、证据合约、生成后校验和诊断导出；不会触发真实搜索、真实 provider 或旧搜索链路。
+              </div>
+            </div>
+          </PanelHeader>
+          <PanelBody className="grid min-w-0 max-w-full gap-4 overflow-hidden">
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]">
+              <Button size="sm" className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSelfCheck} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+                {isRunningResearchEngineSelfCheck ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                运行自检
+              </Button>
+              <Select
+                value={researchEngineSampleId}
+                onValueChange={(value) => setResearchEngineSampleId(value as ResearchEngineDeveloperSampleId)}
+                disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}
+              >
+                <SelectTrigger className="h-9 w-full min-w-0 text-sm lg:min-w-80" aria-label="Research Engine 离线样例">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-w-[min(32rem,var(--radix-select-content-available-width))]">
+                  {researchEngineSamples.map((sample) => (
+                    <SelectItem key={sample.id} value={sample.id} className="py-2 text-sm">
+                      <span className="grid min-w-0">
+                        <span className="min-w-0 truncate font-medium">{sample.labelZh}</span>
+                        <span className="mt-0.5 min-w-0 truncate text-xs leading-5 text-muted-foreground">{sample.displayQuestion}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button size="sm" className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={runResearchEngineSample} disabled={isRunningResearchEngineSelfCheck || isRunningResearchEngineSample}>
+                {isRunningResearchEngineSample ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                运行离线样例
+              </Button>
+              <Button size="sm" className="w-full justify-center whitespace-normal sm:w-auto" variant="outline" onClick={() => void copyResearchEngineReport()}>
+                <Clipboard className="h-3.5 w-3.5" />
+                复制 Markdown 报告
+              </Button>
+              {researchEngineCopyMessage && <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground lg:self-center">{researchEngineCopyMessage}</span>}
+            </div>
         <div className="grid min-w-0 max-w-full gap-2 rounded-sm border border-border/70 bg-muted/10 p-3">
           <div className="grid min-w-0 gap-1">
             <div className="text-sm font-medium text-foreground">真实 Provider Smoke</div>
@@ -2817,42 +2825,45 @@ export default function SearchDiagnosticsPanel({ aiConfigDraft }: SearchDiagnost
             </details>
           </div>
         )}
-      </section>
+        </PanelBody>
+      </Panel>
 
       <div className="grid min-w-0 gap-3">
         {categories.map((category) => (
-          <details key={category.id} className="group border-b border-border/70 pb-3" open>
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-2">
-              <span className="text-sm font-semibold text-foreground">{category.title}</span>
-              <span className="text-xs text-muted-foreground">{category.items.length || 0} 项</span>
-            </summary>
-            <div className="grid gap-2">
-              {category.items.length === 0 ? (
-                <div className="text-sm text-muted-foreground">尚未运行。</div>
-              ) : category.items.map((item) => (
-                <div key={item.id} className="grid gap-1 border-l border-border/80 pl-3">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className={cn("inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs", statusTone(item.status))}>
-                      {statusIcon(item.status)}
-                      {STATUS_LABELS[item.status]}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.title}</span>
-                    {typeof item.durationMs === "number" && <span className="text-xs text-muted-foreground">{item.durationMs} ms</span>}
+          <Panel key={category.id} tone="muted" className="overflow-hidden">
+            <details className="group" open>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                <span className="text-sm font-semibold text-foreground">{category.title}</span>
+                <span className="text-xs text-muted-foreground">{category.items.length || 0} 项</span>
+              </summary>
+              <PanelBody className="grid gap-2 border-t border-border/70 pt-3">
+                {category.items.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">尚未运行。</div>
+                ) : category.items.map((item) => (
+                  <div key={item.id} className="grid gap-1 border-l border-border/80 pl-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className={cn("inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs", statusTone(item.status))}>
+                        {statusIcon(item.status)}
+                        {STATUS_LABELS[item.status]}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.title}</span>
+                      {typeof item.durationMs === "number" && <span className="text-xs text-muted-foreground">{item.durationMs} ms</span>}
+                    </div>
+                    <div className="text-sm leading-6 text-muted-foreground">{item.summary}</div>
+                    {(item.detail || item.safeDebugInfo?.length) && (
+                      <details className="text-xs leading-5 text-muted-foreground">
+                        <summary className="cursor-pointer">详情</summary>
+                        {item.detail && <div className="mt-1">{item.detail}</div>}
+                        {item.safeDebugInfo?.map((info, infoIndex) => (
+                          <div key={`${item.id}:debug:${infoIndex}:${info}`} className="mt-1 font-mono">{info}</div>
+                        ))}
+                      </details>
+                    )}
                   </div>
-                  <div className="text-sm leading-6 text-muted-foreground">{item.summary}</div>
-                  {(item.detail || item.safeDebugInfo?.length) && (
-                    <details className="text-xs leading-5 text-muted-foreground">
-                      <summary className="cursor-pointer">详情</summary>
-                      {item.detail && <div className="mt-1">{item.detail}</div>}
-                      {item.safeDebugInfo?.map((info, infoIndex) => (
-                        <div key={`${item.id}:debug:${infoIndex}:${info}`} className="mt-1 font-mono">{info}</div>
-                      ))}
-                    </details>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
+                ))}
+              </PanelBody>
+            </details>
+          </Panel>
         ))}
       </div>
       </div>
