@@ -1,6 +1,7 @@
 ﻿import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, FileText, Folder, FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { IconButton } from "@/components/ui/icon-button";
 import type { NoteFileInfo } from "@/types/note";
 
 interface FileTreeProps {
@@ -440,10 +441,11 @@ export default function FileTree({
             </button>
 
             <div className="onb-tree-actions">
-              <button
+              <IconButton
                 type="button"
                 title="重命名文件夹"
                 aria-label="重命名文件夹"
+                size="icon-xs"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRenameItem(node.path, true);
@@ -451,11 +453,13 @@ export default function FileTree({
                 className="onb-tree-action"
               >
                 <Pencil />
-              </button>
-              <button
+              </IconButton>
+              <IconButton
                 type="button"
                 title="删除文件夹"
                 aria-label="删除文件夹"
+                variant="danger"
+                size="icon-xs"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteItem(node.path, true);
@@ -463,7 +467,7 @@ export default function FileTree({
                 className="onb-tree-action onb-tree-action-danger"
               >
                 <Trash2 />
-              </button>
+              </IconButton>
             </div>
           </div>
           {isCollapsed ? null : (
@@ -511,10 +515,11 @@ export default function FileTree({
           </button>
 
           <div className="onb-tree-actions">
-            <button
+            <IconButton
               type="button"
               title="重命名"
               aria-label="重命名"
+              size="icon-xs"
               onClick={(e) => {
                 e.stopPropagation();
                 onRenameItem(node.path, false);
@@ -522,11 +527,13 @@ export default function FileTree({
               className="onb-tree-action"
             >
               <Pencil />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               title="删除"
               aria-label="删除"
+              variant="danger"
+              size="icon-xs"
               onClick={(e) => {
                 e.stopPropagation();
                 onDeleteItem(node.path, false);
@@ -534,7 +541,7 @@ export default function FileTree({
               className="onb-tree-action onb-tree-action-danger"
             >
               <Trash2 />
-            </button>
+            </IconButton>
           </div>
         </div>
       </li>
