@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
+import { Panel, PanelBody, PanelHeader, PanelTitle } from "@/components/common/Panel";
 import { SortableItem } from "./SortableItem";
 import type { GroupNode, RootGroup, SortCancelHandler, SortEndHandler, SortStartHandler } from "./types";
 import type { TagSuggestion } from "@/lib/tagTaxonomy";
@@ -52,12 +53,12 @@ export function TagManagerGroupColumn({
   const isSearchMode = Boolean(trimmedSearchQuery);
 
   return (
-    <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-r border-border/70">
-      <div className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2">
-        <div className="text-xs font-medium text-muted-foreground">{isSearchMode ? `搜索结果 ${searchResults.length}` : activeRootGroup ? `${activeRootGroup.root} 标签` : "标签列表"}</div>
+    <Panel tone="muted" className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none border-b-0 border-l-0 border-t-0 border-r border-[var(--ui-border-subtle)]">
+      <PanelHeader className="px-4 py-2">
+        <PanelTitle className="text-xs font-medium text-muted-foreground">{isSearchMode ? `搜索结果 ${searchResults.length}` : activeRootGroup ? `${activeRootGroup.root} 标签` : "标签列表"}</PanelTitle>
         {!isSearchMode && activeRootGroup && <div className="text-[11px] text-muted-foreground">{activeRootSortedGroups.length} 个二级标签</div>}
-      </div>
-      <div
+      </PanelHeader>
+      <PanelBody
         className="tag-manager-scrollbar min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none p-3 [contain:paint]"
         onScroll={(event) => {
           if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0;
@@ -140,7 +141,7 @@ export function TagManagerGroupColumn({
         ) : (
           <div className="py-8 text-sm text-muted-foreground">暂无可浏览的标签。</div>
         )}
-      </div>
-    </main>
+      </PanelBody>
+    </Panel>
   );
 }
