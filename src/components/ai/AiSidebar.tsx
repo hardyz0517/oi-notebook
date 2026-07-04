@@ -29,7 +29,9 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { renderMarkdownForTheme } from "@/lib/markdown";
 import { WebSearchPlanCard } from "@/components/ai/diagnostics/WebSearchPlanCard";
 import { WebSearchSourcesCard } from "@/components/ai/diagnostics/WebSearchSourcesCard";
@@ -3590,21 +3592,22 @@ function StatusPanel({ snapshot, onClose }: { snapshot: AiStatusSnapshot; onClos
   ];
 
   return (
-    <div className="ai-status-panel mb-2 grid min-w-0 gap-2.5 overflow-hidden rounded-lg border border-border/70 bg-background/95 px-3.5 py-3 shadow-xl backdrop-blur dark:border-white/15 dark:bg-[#202124]/96">
+    <Card className="ai-status-panel mb-2 grid min-w-0 gap-2.5 overflow-hidden px-3.5 py-3 shadow-xl backdrop-blur dark:bg-[#202124]/96">
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Info className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />
           <div className="text-[17px] font-semibold leading-6 text-foreground">状态</div>
         </div>
-        <button
+        <IconButton
           type="button"
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          size="icon-sm"
+          className="shrink-0"
           onClick={onClose}
           title="关闭状态面板"
           aria-label="关闭状态面板"
         >
           <X className="h-4 w-4" />
-        </button>
+        </IconButton>
       </div>
       <div className="grid min-w-0 gap-1.5 overflow-x-hidden">
         {rows.map(([label, value, title]) => (
@@ -3616,7 +3619,7 @@ function StatusPanel({ snapshot, onClose }: { snapshot: AiStatusSnapshot; onClos
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -7693,11 +7696,13 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             {isAiConfigured ? selectedProviderLabel : "请先配置 AI 模型"}
           </div>
         </div>
-        <button
+        <Button
           ref={providerPickerTriggerRef}
           type="button"
+          variant="ghost"
+          size="compact"
           className={cn(
-            "notex-config-trigger notex-provider-button inline-flex h-7 min-w-0 max-w-[7.5rem] items-center justify-between gap-1 rounded-md border border-border/45 bg-background/25 px-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "notex-config-trigger notex-provider-button min-w-0 max-w-[7.5rem] justify-between text-left",
             isProviderPickerOpen && "bg-accent/35 text-foreground",
           )}
             onClick={() => {
@@ -7711,21 +7716,23 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
         >
           <span className="truncate">{selectedProviderLabel}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </button>
+        </Button>
         <div className="notex-header-actions flex shrink-0 items-center gap-1">
-          <button
+          <IconButton
             type="button"
-            className="notex-icon-button inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            size="icon-sm"
+            className="notex-icon-button"
             onClick={() => onMaximizedChange?.(!isMaximized)}
             title={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
             aria-label={isMaximized ? "Exit maximized NoteX" : "Maximize NoteX"}
             aria-pressed={isMaximized}
           >
             {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
             type="button"
-            className="notex-icon-button inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            size="icon-sm"
+            className="notex-icon-button"
             onPointerDownCapture={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -7740,7 +7747,7 @@ const buildExplainSelectionPrompt = (targetText: string): string => [
             aria-label="Hide NoteX"
           >
             <X className="h-4 w-4" />
-          </button>
+          </IconButton>
         </div>
 
         </div>
