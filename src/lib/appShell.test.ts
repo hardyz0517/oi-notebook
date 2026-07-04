@@ -8,9 +8,11 @@ import {
   getActiveActivityItem,
   getAiActivityToggleLabel,
   getActivityButtonClassName,
+  getKnowledgeActivityToggleLabel,
   getNotesActivityToggleLabel,
   getSaveStatusActionLabel,
   getSettingsOpenTarget,
+  getTrainingActivityToggleLabel,
   isAiActivitySelected,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
@@ -22,6 +24,7 @@ describe("appShell", () => {
   it("prioritizes modal and transient activity state over the notes sidebar", () => {
     expect(getActiveActivityItem({
       isSettingsCenterOpen: true,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: true,
       isRestartingBlog: true,
       isSearchOpen: true,
@@ -29,6 +32,7 @@ describe("appShell", () => {
     })).toBe("settings");
     expect(getActiveActivityItem({
       isSettingsCenterOpen: false,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: true,
       isRestartingBlog: true,
       isSearchOpen: true,
@@ -36,6 +40,7 @@ describe("appShell", () => {
     })).toBe("luogu");
     expect(getActiveActivityItem({
       isSettingsCenterOpen: false,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: false,
       isRestartingBlog: true,
       isSearchOpen: true,
@@ -43,6 +48,7 @@ describe("appShell", () => {
     })).toBe("blog");
     expect(getActiveActivityItem({
       isSettingsCenterOpen: false,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: true,
@@ -53,6 +59,7 @@ describe("appShell", () => {
   it("falls back to notes or no active activity item", () => {
     expect(getActiveActivityItem({
       isSettingsCenterOpen: false,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: false,
@@ -60,11 +67,31 @@ describe("appShell", () => {
     })).toBe("notes");
     expect(getActiveActivityItem({
       isSettingsCenterOpen: false,
+      activeMainWorkspace: "editor",
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: false,
       isNotesSidebarOpen: false,
     })).toBeNull();
+  });
+
+  it("treats training and knowledge workspaces as active activity items", () => {
+    expect(getActiveActivityItem({
+      isSettingsCenterOpen: false,
+      activeMainWorkspace: "training",
+      isLuoguDialogOpen: false,
+      isRestartingBlog: false,
+      isSearchOpen: false,
+      isNotesSidebarOpen: true,
+    })).toBe("training");
+    expect(getActiveActivityItem({
+      isSettingsCenterOpen: false,
+      activeMainWorkspace: "knowledge",
+      isLuoguDialogOpen: false,
+      isRestartingBlog: false,
+      isSearchOpen: false,
+      isNotesSidebarOpen: true,
+    })).toBe("knowledge");
   });
 
   it("selects AI activity when the sidebar is open or AI settings are active", () => {
@@ -86,6 +113,16 @@ describe("appShell", () => {
   it("derives the AI activity toggle label from sidebar visibility", () => {
     expect(getAiActivityToggleLabel(true)).toBe("关闭 AI 助手");
     expect(getAiActivityToggleLabel(false)).toBe("打开 AI 助手");
+  });
+
+  it("derives the training activity toggle label from workspace visibility", () => {
+    expect(getTrainingActivityToggleLabel(true)).toBe("关闭训练沉淀中心");
+    expect(getTrainingActivityToggleLabel(false)).toBe("打开训练沉淀中心");
+  });
+
+  it("derives the knowledge activity toggle label from workspace visibility", () => {
+    expect(getKnowledgeActivityToggleLabel(true)).toBe("关闭知识库");
+    expect(getKnowledgeActivityToggleLabel(false)).toBe("打开知识库");
   });
 
   it("keeps about-page markdown capabilities stable", () => {

@@ -3,6 +3,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
 import { toApiError } from "@/lib/apiError";
+import type { KnowledgeGraphEdgeSource } from "@/lib/knowledge/knowledgeTypes";
+import type { KnowledgeReviewStateRequest } from "@/lib/knowledge/knowledgeReviewState";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
 
@@ -72,6 +74,25 @@ export interface ReadLuoguProblemContentResult {
   luoguCookieAvailable: boolean;
   permissionRequired: boolean;
   error: string | null;
+}
+
+export interface LuoguSourceProblemResult {
+  problemId: string;
+  problemTitle: string;
+  difficulty: string | null;
+  topics: string[];
+}
+
+export interface ReadLuoguProblemSetResult {
+  problemSetId: string;
+  title: string | null;
+  problems: LuoguSourceProblemResult[];
+}
+
+export interface ReadLuoguContestResult {
+  contestId: string;
+  title: string | null;
+  problems: LuoguSourceProblemResult[];
 }
 
 export interface LuoguConfig {
@@ -505,6 +526,169 @@ export interface SyncLuoguInsightsResult {
   warnings: string[];
 }
 
+export interface KnowledgeGraphNode {
+  id: string;
+  type: "asset" | "problem" | "topic" | "training" | "kind" | "type" | "collection" | "batch";
+  title: string;
+  refs: string[];
+  assetType?: "fragment" | "collection" | "article" | "legacy-note" | "legacy-luogu-solution" | "legacy-problem-note";
+  kind?: string;
+  source?: string;
+  classificationReason?: string;
+  classificationConfidence?: number;
+  topics?: string[];
+  status?: "draft" | "active" | "archived";
+  reviewPriority?: "low" | "medium" | "high" | "none";
+  mastery?: "new" | "learning" | "familiar" | "mastered";
+  masteryStatus?: "unknown" | "learning" | "stable" | "needs-review";
+  createdAt?: string;
+  updatedAt?: string;
+  lastReviewedAt?: string;
+}
+
+export interface KnowledgeGraphEdge {
+  from: string;
+  to: string;
+  type: "links_to" | "mentions" | "contains" | "related_to" | "derived_from";
+  source: KnowledgeGraphEdgeSource;
+  confidence: number;
+  refs: string[];
+}
+
+export interface KnowledgeGraphIndexResult {
+  generatedAt: string;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+  assets: KnowledgeAssetRowResult[];
+  suggestions: KnowledgeRelationshipSuggestionResult[];
+  reviewSlices: KnowledgeReviewSliceResult[];
+  batches: KnowledgeBatchHistoryEntryResult[];
+}
+
+export interface KnowledgeAssetRowResult {
+  id: string;
+  type: "asset";
+  assetType: "fragment" | "collection" | "article" | "legacy-note" | "legacy-luogu-solution" | "legacy-problem-note";
+  kind: string;
+  title: string;
+  date: string;
+  topics: string[];
+  relatedProblems: string[];
+  source: string;
+  createdFrom: string;
+  reviewPriority: "low" | "medium" | "high" | "none" | string;
+  mastery?: "new" | "learning" | "familiar" | "mastered" | string;
+  status: "draft" | "active" | "archived" | string;
+  path: string;
+  refs: string[];
+  lastModified: string;
+  relationCount: number;
+  missingMetadataFlags: string[];
+  classificationReason: string;
+  classificationConfidence: number;
+  inDegree: number;
+  outDegree: number;
+  degree: number;
+  isolated: boolean;
+  componentId: number;
+  lastReviewedAt: string | null;
+}
+
+export interface KnowledgeRelationshipSuggestionResult {
+  id: string;
+  kind: string;
+  source: string;
+  target: string;
+  reason: string;
+  refs: string[];
+  preview: string;
+  score: number;
+}
+
+export interface KnowledgeReviewSliceResult {
+  assetId: string;
+  title: string;
+  path: string;
+  reviewPriority: string;
+  status: string;
+  kind: string;
+  topics: string[];
+  relatedProblems: string[];
+  lastReviewedAt: string | null;
+  score: number;
+  reasons: string[];
+}
+
+export interface KnowledgeBatchAssetRefResult {
+  kind: "collection" | "fragment" | "article" | "unknown" | string;
+  path: string;
+  title: string | null;
+  problemId: string | null;
+}
+
+export interface KnowledgeBatchHistoryEntryResult {
+  batchId: string;
+  sourceType: string;
+  sourceLabel: string;
+  createdAt: string;
+  collectionPath: string;
+  writtenAssets: KnowledgeBatchAssetRefResult[];
+  skippedItems: string[];
+  failedItems: string[];
+  graphRefresh: {
+    nodeCount: number;
+    edgeCount: number;
+    refreshedAt: string;
+  };
+}
+
+export interface TrainingBatchReplayDraftResult {
+  sourceBatchId: string;
+  sourceCollectionPath: string;
+  batch: {
+    id: string;
+    title: string;
+    sourceType: string;
+    sourceLabel: string;
+    createdAt: string;
+    status: string;
+    itemIds: string[];
+  };
+  items: Array<{
+    id: string;
+    batchId: string;
+    problemId: string;
+    problemTitle: string;
+    status: string;
+  }>;
+}
+
+export interface LegacyMigrationDraftResult {
+  sourcePath: string;
+  sourceTitle: string;
+  targetType: "fragment" | "collection" | string;
+  targetPath: string;
+  markdown: string;
+  originalLink: string;
+  requiresConfirmation: boolean;
+  writesOriginal: boolean;
+  complexity: "summary-only" | "simple" | string;
+}
+
+export interface WriteKnowledgeAssetResult {
+  relativePath: string;
+  written: boolean;
+  skipped: boolean;
+  error: string | null;
+}
+
+export interface UpdateKnowledgeReviewStateResult {
+  relativePath: string;
+  reviewPriority: "low" | "medium" | "high" | "none" | string;
+  mastery: "new" | "learning" | "familiar" | "mastered" | string;
+  lastReviewedAt: string;
+}
+
 /**
  * 前端 API 层：封装所有 Tauri IPC invoke 调用。
  *
@@ -705,6 +889,22 @@ export async function readLuoguProblemContent(
   }
 }
 
+export async function readLuoguProblemSet(problemSetId: string): Promise<ReadLuoguProblemSetResult> {
+  try {
+    return await invoke<ReadLuoguProblemSetResult>("read_luogu_problem_set", { problemSetId });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function readLuoguContest(contestId: string): Promise<ReadLuoguContestResult> {
+  try {
+    return await invoke<ReadLuoguContestResult>("read_luogu_contest", { contestId });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
 export async function previewLuoguSubmissions(
   limit = 20,
 ): Promise<PreviewLuoguSubmissionsResult> {
@@ -774,6 +974,128 @@ export async function writeLuoguPreparedNote(
 export async function syncLuoguInsights(): Promise<SyncLuoguInsightsResult> {
   try {
     return await invoke<SyncLuoguInsightsResult>("sync_luogu_insights");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("get_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function rebuildKnowledgeGraph(): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("rebuild_knowledge_graph");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeAssets(): Promise<KnowledgeAssetRowResult[]> {
+  try {
+    return await invoke<KnowledgeAssetRowResult[]>("get_knowledge_assets");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeLocalGraph(
+  nodeId: string,
+  hops = 1,
+  limit = 80,
+): Promise<KnowledgeGraphIndexResult> {
+  try {
+    return await invoke<KnowledgeGraphIndexResult>("get_knowledge_local_graph", {
+      nodeId,
+      hops,
+      limit,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeRelationshipSuggestions(): Promise<KnowledgeRelationshipSuggestionResult[]> {
+  try {
+    return await invoke<KnowledgeRelationshipSuggestionResult[]>("get_knowledge_relationship_suggestions");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeReviewSlices(): Promise<KnowledgeReviewSliceResult[]> {
+  try {
+    return await invoke<KnowledgeReviewSliceResult[]>("get_knowledge_review_slices");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getKnowledgeBatches(): Promise<KnowledgeBatchHistoryEntryResult[]> {
+  try {
+    return await invoke<KnowledgeBatchHistoryEntryResult[]>("get_knowledge_batches");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function duplicateKnowledgeBatchAsDraft(
+  batchId: string,
+  createdAt?: string,
+): Promise<TrainingBatchReplayDraftResult> {
+  try {
+    return await invoke<TrainingBatchReplayDraftResult>("duplicate_knowledge_batch_as_draft", {
+      batchId,
+      createdAt,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function writeKnowledgeAsset(
+  relativePath: string,
+  markdown: string,
+  overwrite = false,
+): Promise<WriteKnowledgeAssetResult> {
+  try {
+    return await invoke<WriteKnowledgeAssetResult>("write_knowledge_asset", {
+      relativePath,
+      markdown,
+      overwrite,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function updateKnowledgeReviewState(
+  request: KnowledgeReviewStateRequest,
+): Promise<UpdateKnowledgeReviewStateResult> {
+  try {
+    return await invoke<UpdateKnowledgeReviewStateResult>("update_knowledge_review_state", {
+      request,
+    });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function buildLegacyMigrationDraft(
+  sourcePath: string,
+  markdown: string,
+  targetType: "fragment" | "collection",
+): Promise<LegacyMigrationDraftResult> {
+  try {
+    return await invoke<LegacyMigrationDraftResult>("build_legacy_migration_draft", {
+      sourcePath,
+      markdown,
+      targetType,
+    });
   } catch (e) {
     throw toApiError(e);
   }

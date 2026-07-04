@@ -1,9 +1,10 @@
 mod ai;
 mod blog_content;
-mod blog_service;
 mod blog_server;
+mod blog_service;
 mod frontmatter;
 mod git;
+mod knowledge;
 mod local_search;
 mod luogu;
 mod luogu_reader;
@@ -60,9 +61,7 @@ fn open_notes_folder() -> Result<(), String> {
 
 #[tauri::command]
 fn hide_main_window(window: tauri::Window) -> Result<(), String> {
-    window
-        .hide()
-        .map_err(|e| format!("隐藏主窗口失败：{e}"))
+    window.hide().map_err(|e| format!("隐藏主窗口失败：{e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -81,6 +80,17 @@ pub fn run() {
             notes::write_external_markdown_file,
             notes::save_note_asset,
             notes::resolve_note_asset_url,
+            knowledge::get_knowledge_graph,
+            knowledge::rebuild_knowledge_graph,
+            knowledge::get_knowledge_assets,
+            knowledge::get_knowledge_local_graph,
+            knowledge::get_knowledge_relationship_suggestions,
+            knowledge::get_knowledge_review_slices,
+            knowledge::get_knowledge_batches,
+            knowledge::duplicate_knowledge_batch_as_draft,
+            knowledge::write_knowledge_asset,
+            knowledge::update_knowledge_review_state,
+            knowledge::build_legacy_migration_draft,
             notes::delete_note,
             notes::rename_note,
             notes::create_note_folder,
@@ -100,6 +110,8 @@ pub fn run() {
             luogu::update_luogu_last_submission_id,
             luogu::test_luogu_connection,
             luogu::read_luogu_problem_content,
+            luogu::read_luogu_problem_set,
+            luogu::read_luogu_contest,
             luogu::preview_luogu_submissions,
             luogu::preview_luogu_submission_page,
             luogu::sync_luogu_insights,

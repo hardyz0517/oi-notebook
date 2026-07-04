@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Bot, Check, ChevronDown, ChevronRight, Columns2, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Columns2, Dumbbell, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, LibraryBig, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -181,11 +181,13 @@ import {
   getActiveActivityItem,
   getAiActivityToggleLabel,
   getActivityButtonClassName,
+  getKnowledgeActivityToggleLabel,
   getNotesActivityToggleLabel,
   getSettingsOpenTarget,
   deriveEditorViewLayout,
   getSaveStatusActionLabel,
   isAiActivitySelected,
+  getTrainingActivityToggleLabel,
   shouldEnsureAiConfigForSettingsPage,
   shouldRefreshAiConfigForSettingsDiagnostics,
   EDITOR_VIEW_MODE_OPTIONS,
@@ -193,6 +195,9 @@ import {
   type ActivityBarItem,
   type EditorViewMode,
 } from "@/lib/appShell";
+import { KnowledgeBaseWorkspace } from "@/components/knowledge/KnowledgeBaseWorkspace";
+import { TrainingCenterWorkspace } from "@/components/training/TrainingCenterWorkspace";
+import type { KnowledgeWorkspaceTabId } from "@/lib/knowledge/knowledgeTypes";
 import { buildBlogConfigSaveDraft, DEFAULT_BLOG_CONFIG, deriveBlogSettingsView, resolveBlogConfigDraft } from "@/lib/blogConfig";
 import {
   addTagNormalizationPlanStats,
@@ -1091,6 +1096,8 @@ export default function App() {
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
+  const [activeMainWorkspace, setActiveMainWorkspace] = useState<"editor" | "training" | "knowledge">("editor");
+  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgeWorkspaceTabId>("overview");
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
   const [aiSidebarWidth, setAiSidebarWidth] = useState(() => getInitialAiSidebarWidth(clampAiSidebarWidth));
   const [editorPreviewRatio, setEditorPreviewRatio] = useState(getInitialEditorPreviewRatio);
@@ -1983,6 +1990,8 @@ export default function App() {
   });
   const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
   const aiActivityToggleLabel = getAiActivityToggleLabel(isAiSidebarOpen);
+  const trainingActivityToggleLabel = getTrainingActivityToggleLabel(activeMainWorkspace === "training");
+  const knowledgeActivityToggleLabel = getKnowledgeActivityToggleLabel(activeMainWorkspace === "knowledge");
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
     isSavingBlogConfig,
@@ -2327,6 +2336,7 @@ export default function App() {
   const editorViewModeLabel = getEditorViewModeLabel(editorViewMode);
   const activeActivityItem: ActivityBarItem | null = getActiveActivityItem({
     isSettingsCenterOpen: isSettingsCenterOpenForRender,
+    activeMainWorkspace,
     isLuoguDialogOpen,
     isRestartingBlog,
     isSearchOpen,
@@ -5611,6 +5621,19 @@ export default function App() {
     void openLuoguDialog();
   };
 
+  const handleActivityTraining = () => {
+    setActiveMainWorkspace((current) => (current === "training" ? "editor" : "training"));
+  };
+
+  const handleActivityKnowledge = () => {
+    setActiveMainWorkspace((current) => (current === "knowledge" ? "editor" : "knowledge"));
+  };
+
+  const handleOpenKnowledgeTab = (tab: KnowledgeWorkspaceTabId) => {
+    setActiveKnowledgeTab(tab);
+    setActiveMainWorkspace("knowledge");
+  };
+
   const handleActivityAi = () => {
     if (APP_RESIZE_PERF_DEBUG) {
       const opening = !isAiSidebarOpen;
@@ -8020,6 +8043,26 @@ export default function App() {
             </ToolbarButton>
             <ToolbarButton
               type="button"
+              className={activityButtonClass("training")}
+              onClick={handleActivityTraining}
+              title={trainingActivityToggleLabel}
+              aria-label={trainingActivityToggleLabel}
+              selected={activeActivityItem === "training"}
+            >
+              <Dumbbell size={24} strokeWidth={2.18} />
+            </ToolbarButton>
+            <ToolbarButton
+              type="button"
+              className={activityButtonClass("knowledge")}
+              onClick={handleActivityKnowledge}
+              title={knowledgeActivityToggleLabel}
+              aria-label={knowledgeActivityToggleLabel}
+              selected={activeActivityItem === "knowledge"}
+            >
+              <LibraryBig size={24} strokeWidth={2.18} />
+            </ToolbarButton>
+            <ToolbarButton
+              type="button"
               className={activityButtonClass("ai")}
               onClick={handleActivityAi}
               title={aiActivityToggleLabel}
@@ -8137,7 +8180,32 @@ export default function App() {
         )}
 
         <div className="relative flex min-w-0 flex-1 overflow-hidden">
-        <section className="app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden">
+          {activeMainWorkspace === "training" ? (
+            <div className="absolute inset-0 z-10">
+              <TrainingCenterWorkspace
+                currentNoteTitle={currentFilePath ?? undefined}
+                onOpenAsset={(path) => {
+                  if (handleOpenLocalNoteFromAi(path)) {
+                    setActiveMainWorkspace("editor");
+                  }
+                }}
+                onOpenKnowledgeTab={handleOpenKnowledgeTab}
+              />
+            </div>
+          ) : activeMainWorkspace === "knowledge" ? (
+            <div className="absolute inset-0 z-10">
+              <KnowledgeBaseWorkspace
+                activeTab={activeKnowledgeTab}
+                onTabChange={setActiveKnowledgeTab}
+                onOpenAsset={(path) => {
+                  if (handleOpenLocalNoteFromAi(path)) {
+                    setActiveMainWorkspace("editor");
+                  }
+                }}
+              />
+            </div>
+          ) : null}
+          <section className={cn("app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden", activeMainWorkspace !== "editor" && "hidden")} aria-hidden={activeMainWorkspace !== "editor"}>
           <OpenTabsBar
             tabs={workspaceTabs}
             activeTabId={activeWorkspaceTabId ?? currentFilePath}
