@@ -95,3 +95,28 @@ Key P3 conclusions from that note:
 - Do not infer that completion in one P4 slice means the others are done.
 - Do not add real runtime/model/Tavily/note IO/patch/code execution into the old sidebar flow.
 - Do not stage/commit/push unless explicitly asked.
+
+## P5 Agent Core Contract Freeze handoff
+
+P5 has frozen the Agent Core protocol boundary for the Workbench, but the runtime remains `preview_one_shot`. This is not a real model loop and must not be described as AI upgrade completion, L5 Agent completion, Codex-style runtime completion, or production-ready behavior.
+
+Current contract truth:
+
+- `AgentLoopContract.mode` is `preview_one_shot`.
+- Mature capabilities are explicitly `reserved` or `unavailable`, including model step, continuation, interruption, compaction, patch generation/apply, and session persistence.
+- The current one-shot runtime can emit contract-shaped events and run preview tool primitives, but it does not own real provider/model request/streaming behavior.
+- Workbench UI consumes `loopContract`, session snapshots, and events only; it does not own agent loop decisions, prompt construction, tool routing, continuation, compaction, patch application, or persistence.
+- No real write/patch/execute/Cookie-backed expansion/persistence capability was introduced by P5.
+
+Verification rerun on 2026-07-05 in `C:\Users\cpp_s\.codex\worktrees\20cf\oi-notebook`:
+
+- `.\node_modules\.bin\vitest.cmd run src/lib/agent-runtime`: PASS, 6 files / 11 tests.
+- `.\node_modules\.bin\vitest.cmd run src/lib/agent-workbench`: PASS, 1 file / 5 tests.
+- `.\node_modules\.bin\vitest.cmd run src/lib/apiBoundary.test.ts`: PASS, 1 file / 7 tests.
+- `.\node_modules\.bin\tsc.cmd --noEmit`: PASS.
+- API boundary audit had no hits:
+  `rg -n "@tauri-apps/api/core|\binvoke\s*\(" src --glob "!src/lib/api.ts" --glob "!src/components/ai/**" --glob "!src/lib/aiWebSearch.ts"`
+- Capability claim audit had no hits:
+  `rg -n "AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true" src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+
+Next-phase rule: any later work that touches Tool/Permission, Workspace, Web Reader/Evidence, UI IA, or Provider Adapter behavior must cite `docs/superpowers/specs/2026-07-05-p5-agent-core-contract-freeze-design.md` and must not reopen P5's forbidden items without a new approved plan.
