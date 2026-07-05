@@ -1125,22 +1125,22 @@ describe("blogViewModel", () => {
   it("builds article toc item classes", () => {
     expect(buildArticleTocView({
       items: [
-        { id: "h1", level: 1, text: "Heading 1" },
         { id: "h2", level: 2, text: "Heading 2" },
+        { id: "h3", level: 3, text: "Heading 3" },
       ],
-      activeId: "h2",
+      activeId: "h3",
     })).toEqual([
       {
-        id: "h1",
-        levelClassName: "article-toc-link article-toc-level-1",
+        id: "h2",
+        levelClassName: "article-toc-link article-toc-level-2",
         isActive: false,
-        text: "Heading 1",
+        text: "Heading 2",
       },
       {
-        id: "h2",
-        levelClassName: "article-toc-link article-toc-level-2 article-toc-link-active",
+        id: "h3",
+        levelClassName: "article-toc-link article-toc-level-3 article-toc-link-active",
         isActive: true,
-        text: "Heading 2",
+        text: "Heading 3",
       },
     ]);
   });

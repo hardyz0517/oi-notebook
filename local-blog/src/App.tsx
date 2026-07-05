@@ -1208,6 +1208,10 @@ function NoteDetailView({ relativePath, notes, siteTitle }: { relativePath: stri
     );
   }
 
+  if (!note) {
+    return null;
+  }
+
   const noteView = buildNoteDetailRouteView({
     note,
     notes,

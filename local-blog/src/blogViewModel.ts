@@ -22,7 +22,8 @@ import {
   type NoteSummary,
   type RawNoteSummary,
 } from "./blogContent";
-import { getCollectionHref, getNoteHref, getTagHref } from "./blogRoutes";
+import type { MarkdownHeading } from "./MarkdownRenderer";
+import { getCollectionHref, getNoteHref, getTagHref, type Route } from "./blogRoutes";
 import {
   findTagTreeNode,
   getTagPathSegments,
