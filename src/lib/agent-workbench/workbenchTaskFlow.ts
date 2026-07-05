@@ -1,6 +1,7 @@
 import { createAgentRuntime } from "@/lib/agent-runtime/agentRuntime";
+import { createPreviewAgentLoopContract } from "@/lib/agent-runtime/agentLoopContract";
 import { createAgentSession } from "@/lib/agent-runtime/agentSession";
-import type { AgentEvent, AgentToolPermission } from "@/lib/agent-runtime/agentTypes";
+import type { AgentEvent, AgentLoopContract, AgentToolPermission } from "@/lib/agent-runtime/agentTypes";
 import { createPermissionManager } from "@/lib/agent-runtime/permissionManager";
 import { createToolRegistry } from "@/lib/agent-runtime/toolRegistry";
 import { createProblemWorkspaceStore } from "@/lib/problem-workspace/problemWorkspaceStore";
@@ -64,6 +65,7 @@ export type ManualWorkbenchTaskResult = {
   evidenceRecords: EvidenceStoreRecord[];
   permissionRequests: WorkbenchTaskPermissionRequest[];
   cacheSnapshot: ReturnType<ResearchCacheManager["snapshot"]>;
+  loopContract: AgentLoopContract;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -312,6 +314,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     evidenceRecords: evidenceStore.list("workspace"),
     permissionRequests: createUnavailablePermissionStates(),
     cacheSnapshot: cacheManager.snapshot(),
+    loopContract: createPreviewAgentLoopContract(),
   };
 }
 

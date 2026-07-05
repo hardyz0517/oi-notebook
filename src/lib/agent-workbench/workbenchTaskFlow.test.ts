@@ -97,4 +97,25 @@ describe("runManualWorkbenchTask", () => {
     expect(result.workspace.title).toBe("Current Research Task");
     expect(result.evidenceRecords).toHaveLength(1);
   });
+
+  it("returns the preview loop contract with unavailable mature capabilities", async () => {
+    const result = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "Two Sum",
+        problemId: "two-sum",
+        problemUrl: "https://example.test/problem",
+      },
+      manualSource: {
+        url: "https://example.test/editorial",
+        title: "Editorial",
+        text: "Use hashing.",
+      },
+    });
+
+    expect(result.loopContract.mode).toBe("preview_one_shot");
+    expect(result.loopContract.modelStep.status).toBe("unavailable");
+    expect(result.loopContract.patchApply.status).toBe("unavailable");
+    expect(result.loopContract.continuation.status).toBe("reserved");
+  });
 });
