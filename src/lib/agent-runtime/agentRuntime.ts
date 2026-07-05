@@ -48,6 +48,8 @@ export function createAgentRuntime(input: {
     },
     events,
     async runTool(toolName: string, inputValue: unknown): Promise<AgentRuntimeRunResult & { output?: unknown }> {
+      pushEvent(createEvent(session.id, "tool.requested", { toolName, input: inputValue }));
+
       const tool = input.toolRegistry.get(toolName);
       if (!tool) {
         pushEvent(createEvent(session.id, "tool.failed", { toolName, reason: "tool_not_registered" }));
@@ -57,6 +59,7 @@ export function createAgentRuntime(input: {
 
       if (!input.permissionManager.canAutoRunTool(toolName, tool.permission)) {
         pushEvent(createEvent(session.id, "permission.required", { toolName, permission: tool.permission }));
+        session = { ...session, status: "blocked" };
         return { status: "blocked", reason: "permission_required" };
       }
 
