@@ -25,7 +25,7 @@ export interface AgentEvent {
   payload: Record<string, unknown>;
 }
 
-export type AgentSessionStatus = "idle" | "running" | "completed" | "failed";
+export type AgentSessionStatus = "idle" | "running" | "blocked" | "completed" | "failed";
 
 export type AgentPlanStep = {
   id: string;

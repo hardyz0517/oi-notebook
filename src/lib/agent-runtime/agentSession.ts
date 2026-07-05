@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSessionState } from "./agentTypes";
+import type { AgentEvent, AgentSessionState, AgentSessionStatus } from "./agentTypes";
 
 let sessionCounter = 0;
 
@@ -22,5 +22,12 @@ export function appendSessionEvent(session: AgentSessionState, event: AgentEvent
   return {
     ...session,
     events: [...session.events, event],
+  };
+}
+
+export function markSessionStatus(session: AgentSessionState, status: AgentSessionStatus): AgentSessionState {
+  return {
+    ...session,
+    status,
   };
 }
