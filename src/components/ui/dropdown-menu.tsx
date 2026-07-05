@@ -3,6 +3,7 @@ import { CheckIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { UI_LAYER_CLASS } from "@/components/ui/layers"
 
 type UiDropdownRegistryGlobal = typeof globalThis & {
   __oiNotebookActiveDropdownClose?: (() => void) | null
@@ -88,7 +89,8 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         className={cn(
-          "ui-dropdown-content z-80 overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-1 text-popover-foreground shadow-lg outline-none",
+          "ui-dropdown-content overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover p-1 text-popover-foreground shadow-lg outline-none",
+          UI_LAYER_CLASS.floatingContent,
           className
         )}
         style={

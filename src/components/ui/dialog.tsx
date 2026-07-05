@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
+import { UI_LAYER_CLASS } from "@/components/ui/layers"
 
 function Dialog({
   ...props
@@ -39,7 +40,8 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/42 duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+        "fixed inset-0 isolate bg-black/42 duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+        UI_LAYER_CLASS.dialogOverlay,
         className
       )}
       {...props}
@@ -63,7 +65,8 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-[91] grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-[var(--ui-radius-dialog)] border border-[var(--ui-border-subtle)] bg-popover p-5 text-xs/relaxed text-popover-foreground shadow-xl shadow-black/24 duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] outline-none sm:max-w-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          "fixed top-1/2 left-1/2 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-[var(--ui-radius-dialog)] border border-[var(--ui-border-subtle)] bg-popover p-5 text-xs/relaxed text-popover-foreground shadow-xl shadow-black/24 duration-[var(--ui-motion-duration-base)] ease-[var(--ui-motion-ease-out)] outline-none sm:max-w-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          UI_LAYER_CLASS.dialogContent,
           className
         )}
         {...props}

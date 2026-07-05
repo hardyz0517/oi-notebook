@@ -3,6 +3,9 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { UI_LAYER_CLASS } from "@/components/ui/layers"
+
+export const SELECT_CONTENT_LAYER_CLASS = UI_LAYER_CLASS.floatingContent
 
 type UiDropdownRegistryGlobal = typeof globalThis & {
   __oiNotebookActiveDropdownClose?: (() => void) | null
@@ -113,7 +116,8 @@ function SelectContent({
         sideOffset={sideOffset}
         align={align}
         className={cn(
-          "ui-select-content z-80 max-h-[min(18rem,var(--radix-select-content-available-height))] overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover text-popover-foreground shadow-lg outline-none",
+          "ui-select-content max-h-[min(18rem,var(--radix-select-content-available-height))] overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--ui-border-subtle)] bg-popover text-popover-foreground shadow-lg outline-none",
+          SELECT_CONTENT_LAYER_CLASS,
           className,
         )}
         style={
