@@ -1,4 +1,10 @@
 export type {
+  ResearchCacheEntry,
+  ResearchCacheManager,
+  ResearchCacheNamespace,
+  ResearchCacheSetInput,
+} from "./cacheManager";
+export type {
   ResearchEngineDeveloperDiagnosticSummary,
   ResearchEngineDeveloperSample,
   ResearchEngineDeveloperSampleId,
@@ -109,6 +115,17 @@ export type {
   PostGenerationViolationKind,
 } from "./evidenceTypes";
 export type {
+  EvidenceStore,
+  EvidenceStoreRecord,
+  EvidenceStoreSaveInput,
+  EvidenceStoreScope,
+} from "./evidenceStore";
+export type {
+  ResearchExtractor,
+  ResearchExtractorContext,
+  ResearchExtractorResult,
+} from "./extractor";
+export type {
   ExcerptBuildInput,
   ExcerptBuildResult,
   ExcerptBudget,
@@ -129,6 +146,15 @@ export type {
   UrlReaderResult,
   UrlReaderStatus,
 } from "./readerTypes";
+export type {
+  LuoguCookieSafetyState,
+  LuoguCookieSafetyStatus,
+  ResearchCookieBoundary,
+  ResearchCookieSafetyMode,
+  ResearchReaderProvider,
+  ResearchReaderProviderContext,
+  ResearchReaderProviderName,
+} from "./readerProvider";
 export type {
   ExpectedSourceType,
   AbortReason,
@@ -194,6 +220,28 @@ export type {
   SourceType,
   StaleGuardState,
 } from "./types";
+export type {
+  ResearchPipelineBoundary,
+} from "./pipelineBoundary";
+export { createResearchPipelineBoundary } from "./pipelineBoundary";
+export type {
+  ManualSearchProviderInput,
+  ManualSearchSource,
+  KeylessBingSearchProviderInput,
+  TavilyReadySearchProviderInput,
+  TavilySearchTransport,
+  ResearchSearchBoundary,
+  ResearchSearchProvider,
+  ResearchSearchProviderContext,
+  ResearchSearchProviderMode,
+  ResearchSearchProviderName,
+  ResearchSearchProviderResult,
+} from "./searchProvider";
+export { createEmptySearchProviderResult, createKeylessBingSearchProvider, createManualSearchProvider, createTavilyReadySearchProvider } from "./searchProvider";
+export { createLuoguCookieSafetyState, createManualReaderProvider, createStrictCookieBoundary } from "./readerProvider";
+export { createInMemoryEvidenceStore } from "./evidenceStore";
+export { createInMemoryResearchCacheManager, deriveResearchCacheKey } from "./cacheManager";
+export { createManualExtractor } from "./extractor";
 export { buildSearchPolicyDecision } from "./searchPolicy";
 export { buildQueryPlan } from "./queryPlanner";
 export {

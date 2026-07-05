@@ -54,6 +54,7 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "rebuildLocalNoteIndex", commandName: "rebuild_local_note_index", argKeys: [] },
   { functionName: "getPromptCitationContractStatus", commandName: "get_prompt_citation_contract_status", argKeys: [] },
   { functionName: "runNotexSearchSelfCheck", commandName: "run_notex_search_self_check", argKeys: [] },
+  { functionName: "getAgentWorkbenchPreview", commandName: "get_agent_workbench_preview", argKeys: [] },
   { functionName: "generateNoteMetadata", commandName: "generate_note_metadata", argKeys: ["relativePath", "markdownContent", "tagTaxonomyContext"] },
   { functionName: "polishNoteBody", commandName: "polish_note_body", argKeys: ["relativePath", "markdownContent"] },
   { functionName: "chatWithCurrentNote", commandName: "chat_with_current_note", argKeys: ["question", "context", "providerId", "modelId"] },

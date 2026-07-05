@@ -1,3 +1,4 @@
+mod agent_workbench;
 mod ai;
 mod blog_content;
 mod blog_service;
@@ -122,6 +123,7 @@ pub fn run() {
             ai::plan_search_queries,
             ai::get_prompt_citation_contract_status,
             ai::run_notex_search_self_check,
+            agent_workbench::get_agent_workbench_preview,
             web_cache::get_web_cache_status,
             local_search::search_local_notes,
             local_search::get_local_note_index_status,

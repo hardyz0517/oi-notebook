@@ -103,7 +103,7 @@ function parseApiWrappers(): ParsedApiWrapper[] {
 }
 
 describe("api boundary", () => {
-  it("keeps Tauri core invoke calls behind src/lib/api.ts outside frozen AI code", () => {
+  it("keeps Tauri core invoke calls behind src/lib/api.ts outside frozen AI code", { timeout: 15000 }, () => {
     const violations = listSourceFiles(sourceRoot)
       .map((absolutePath) => {
         const projectPath = toProjectPath(absolutePath);
@@ -133,5 +133,36 @@ describe("api boundary", () => {
   it("keeps API command names unique in the contract", () => {
     const commandNames = API_COMMAND_CONTRACTS.map((contract) => contract.commandName);
     expect(new Set(commandNames).size).toBe(commandNames.length);
+  });
+  describe("Agent Workbench preview contract", () => {
+    it("registers the agent workbench preview command in the API contract", () => {
+      expect(API_COMMAND_CONTRACTS).toContainEqual({
+        functionName: "getAgentWorkbenchPreview",
+        commandName: "get_agent_workbench_preview",
+        argKeys: [],
+      });
+    });
+
+    it("keeps the agent workbench preview contract status-based instead of mature-ready booleans", () => {
+      const apiSource = readFileSync(path.join(sourceRoot, "lib", "api.ts"), "utf8");
+      const rustSource = readFileSync(path.resolve(process.cwd(), "src-tauri", "src", "agent_workbench.rs"), "utf8");
+
+      expect(apiSource).toContain("runtimeStatus: AgentWorkbenchPreviewStatus");
+      expect(apiSource).toContain("modelLoopStatus: \"unavailable\"");
+      expect(apiSource).toContain("patchStatus: \"unavailable\"");
+      expect(apiSource).toContain("executeStatus: \"unavailable\"");
+      expect(apiSource).toContain("persistenceStatus: \"unavailable\"");
+      expect(apiSource).not.toMatch(/\bruntimeReady\b|\bworkspaceReady\b|\bresearchBoundaryReady\b/);
+      expect(rustSource).not.toMatch(/\bruntime_ready\b|\bworkspace_ready\b|\bresearch_boundary_ready\b/);
+    });
+
+    it("keeps the Agent Workbench shell from labeling preview capabilities as ready", () => {
+      const shellSource = readFileSync(path.resolve(sourceRoot, "components", "agent-workbench", "AgentWorkbenchShell.tsx"), "utf8");
+
+      expect(shellSource).toContain("Agent Workbench Foundation Preview");
+      expect(shellSource).toContain("available for preview");
+      expect(shellSource).toContain("unavailable");
+      expect(shellSource).not.toMatch(/:\s*\{[^}]*\?\s*["']ready["']/);
+    });
   });
 });

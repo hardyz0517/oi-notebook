@@ -416,6 +416,24 @@ export interface PromptCitationContractStatusResult {
   bareIdWarning: boolean;
 }
 
+export type AgentWorkbenchPreviewStatus = "preview" | "unavailable";
+
+export interface AgentWorkbenchPreviewResult {
+  previewName: "Agent Workbench Foundation Preview";
+  runtimeStatus: AgentWorkbenchPreviewStatus;
+  runtimeReason: string;
+  workspaceStatus: AgentWorkbenchPreviewStatus;
+  workspaceReason: string;
+  researchBoundaryStatus: AgentWorkbenchPreviewStatus;
+  researchBoundaryReason: string;
+  modelLoopStatus: "unavailable";
+  patchStatus: "unavailable";
+  executeStatus: "unavailable";
+  persistenceStatus: "unavailable";
+  unavailableReason: string;
+  legacySidebarIsolated: boolean;
+}
+
 export interface NotexSearchSelfCheckCaseResult {
   query: string;
   expectedCategory: string;
@@ -1000,6 +1018,14 @@ export async function getPromptCitationContractStatus(): Promise<PromptCitationC
 export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckResult> {
   try {
     return await invoke<NotexSearchSelfCheckResult>("run_notex_search_self_check");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getAgentWorkbenchPreview(): Promise<AgentWorkbenchPreviewResult> {
+  try {
+    return await invoke<AgentWorkbenchPreviewResult>("get_agent_workbench_preview");
   } catch (e) {
     throw toApiError(e);
   }
