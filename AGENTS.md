@@ -1,48 +1,46 @@
 # AGENTS.md
 
-This file directs all coding agents (Codex, Cursor, etc.) to project entry docs.
+This is the entry point for coding agents in `oi-notebook`.
 
-Always read first:
+## Priority
 
-1. AGENTS.md - agent entry rules
+1. User instructions.
+2. This file.
+3. `PROJECT.md`, `docs/HANDOFF.md`, and `docs/README.md` for longer repo context.
 
-Read these longer docs only when the task actually needs them:
+If instructions conflict, stop and ask instead of guessing.
 
-2. PROJECT.md - project overview, tech stack, commands
-3. docs/HANDOFF.md - current state, conventions, gotchas
-4. docs/README.md - documentation map and archive policy
+## Read Path
 
-PROJECT.md and docs/HANDOFF.md are kept in sync. PROJECT.md is the neutral
-project overview for all coding agents; HANDOFF.md is the operating manual
-updated at the end of each phase.
+- Start with `AGENTS.md`.
+- For ordinary tasks, read only this file, `git status --short -- . ":(exclude)notes/**"`, and the directly relevant source files.
+- Read `PROJECT.md`, `docs/HANDOFF.md`, or `docs/README.md` only when the task needs planning, architecture, release context, or repo-wide conventions that source files do not answer.
+- Do not open `docs/archive/**` by default.
+- Prefer `rg` and other targeted searches over broad reads.
+- If you need a long doc, say why before opening it.
 
-## Context and token discipline
+## Working Boundaries
 
-For small scoped tasks, do not read PROJECT.md, docs/HANDOFF.md,
-docs/archive/**, or other long docs by default.
+- Stay within the requested scope. Do not expand into unrelated files or subsystems unless it is required to finish the task safely.
+- Treat `notes/**` as scratch space. Do not modify, restore, stage, or commit it unless the user explicitly asks.
+- Keep `notes/**` out of routine status output.
+- Frontend to Rust calls go through `src/lib/api.ts`.
+- Do not simplify the two-layer path safety check in `src-tauri/src/notes.rs`.
+- Do not "optimize" the ref-based patterns in `MarkdownEditor` or `MarkdownPreview`.
+- Prefer existing patterns and helpers over new abstractions unless the new shape clearly removes real complexity.
 
-Read long docs only when the task explicitly needs planning, architecture,
-handoff, release, product-requirements context, or when the relevant source
-files are not enough to determine intent safely.
+## Git Hygiene
 
-For ordinary small tasks, read only:
-- AGENTS.md
-- `git status --short -- . ":(exclude)notes/**"`
-- directly relevant source files
+- Use `git status --short -- . ":(exclude)notes/**"` for the main workspace snapshot.
+- Mention `notes/**` separately only when it is relevant or the user asks for it.
+- Never use `git add .`, `git add -A`, or `git commit -a`.
+- Stage exact paths with `git add -- <paths>`.
+- Check `git diff --cached --name-only` before committing.
+- Commit-only is the default. Push or tag only when the user explicitly asks.
 
-Prefer `rg` or other targeted search over full-file reads. If more context is
-needed, explain why before reading large docs.
+## Reporting
 
-Hard rules (excerpted from HANDOFF.md):
-- Print full real file contents after every edit. No folding, no diff-only, no summary.
-- One task at a time. Stop after each task, wait for review.
-- Never simplify the two-layer path safety check in src-tauri/src/notes.rs.
-- Don't "optimize" the ref-based patterns in MarkdownEditor and MarkdownPreview.
-- Frontend -> Rust calls go through src/lib/api.ts, never invoke directly.
-- Do not handle `notes/**` unless the user explicitly asks.
-- Treat `notes/**` as a local test-notes area: do not modify, restore, stage, or commit it.
-- For ordinary work, prefer `git status --short -- . ":(exclude)notes/**"` and keep `notes/**` out of routine status output.
-- If notes state must be mentioned, summarize it briefly instead of printing the full list. Only print full `notes/**` status when the user explicitly asks for it.
-- Do not use `git add .`.
-- Before commit, use exact `git add -- <paths>`.
-- Before commit, check `git diff --cached --name-only`.
+- Keep active-work updates short and operational.
+- State the current phase and subsection, what is running now, what remains in the current slice, what remains overall, and any risks or blockers.
+- If work is delegated or parallelized, name the thread or worktree role.
+- Closeout updates should include verification results and whether anything was staged, committed, or pushed.
