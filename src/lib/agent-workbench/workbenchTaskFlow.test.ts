@@ -24,6 +24,7 @@ describe("runManualWorkbenchTask", () => {
     expect(result.workspace.traceEventIds.length).toBe(result.events.length);
     expect(result.events.map((event) => event.type)).toEqual([
       "agent.started",
+      "tool.requested",
       "tool.started",
       "tool.output",
       "evidence.added",
