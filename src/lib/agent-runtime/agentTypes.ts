@@ -33,12 +33,47 @@ export type AgentPlanStep = {
   status: "pending" | "running" | "completed" | "failed";
 };
 
-export type AgentToolPermission = "read" | "network" | "write" | "execute";
+export type AgentToolSchema = {
+  type: "object" | "string" | "number" | "boolean" | "array" | "unknown";
+  required?: string[];
+  properties?: Record<string, AgentToolSchema>;
+  items?: AgentToolSchema;
+  description?: string;
+};
+
+export type AgentToolPermission =
+  | "read"
+  | "local-note-search"
+  | "public-network"
+  | "cookie-network"
+  | "write"
+  | "patch-apply"
+  | "execute"
+  | "destructive"
+  | "network";
+
+export type AgentToolExposure = "runtime-internal" | "workbench-preview" | "future-adapter" | "unavailable-placeholder";
+
+export type AgentToolLifecycle = {
+  emits: AgentEventType[];
+};
+
+export type AgentToolFailurePolicy = {
+  unsupported: "structured-failure";
+  timeout: "structured-failure";
+  permissionDenied: "blocked-result" | "structured-failure";
+};
 
 export type AgentToolDefinition = {
   name: string;
   description: string;
+  inputSchema?: AgentToolSchema;
+  outputSchema?: AgentToolSchema;
   permission: AgentToolPermission;
+  exposure?: AgentToolExposure;
+  timeoutMs?: number;
+  lifecycle?: AgentToolLifecycle;
+  failurePolicy?: AgentToolFailurePolicy;
   run: (input: unknown) => Promise<unknown | AgentToolRunOutput>;
 };
 
