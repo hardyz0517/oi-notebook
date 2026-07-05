@@ -134,6 +134,7 @@ describe("api boundary", () => {
     const commandNames = API_COMMAND_CONTRACTS.map((contract) => contract.commandName);
     expect(new Set(commandNames).size).toBe(commandNames.length);
   });
+
   describe("Agent Workbench preview contract", () => {
     it("registers the agent workbench preview command in the API contract", () => {
       expect(API_COMMAND_CONTRACTS).toContainEqual({
@@ -163,6 +164,17 @@ describe("api boundary", () => {
       expect(shellSource).toContain("available for preview");
       expect(shellSource).toContain("unavailable");
       expect(shellSource).not.toMatch(/:\s*\{[^}]*\?\s*["']ready["']/);
+    });
+  });
+
+  describe("Luogu article sync contract", () => {
+    it("registers the luogu article sync commands in the API contract", () => {
+      expect(API_COMMAND_CONTRACTS).toEqual(expect.arrayContaining([
+        { functionName: "getLuoguArticle", commandName: "get_luogu_article", argKeys: ["lid"] },
+        { functionName: "prepareLuoguArticlePush", commandName: "prepare_luogu_article_push", argKeys: ["input"] },
+        { functionName: "pushLuoguArticle", commandName: "push_luogu_article", argKeys: ["input"] },
+        { functionName: "pullLuoguArticle", commandName: "pull_luogu_article", argKeys: ["lid"] },
+      ]));
     });
   });
 });

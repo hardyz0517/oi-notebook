@@ -399,7 +399,7 @@ pub(crate) fn write_config(config: &LuoguConfig) -> Result<(), String> {
     write_luogu_config_to_path(&config_path()?, config)
 }
 
-fn require_luogu_config(config: &LuoguConfig) -> Result<(&str, &str), String> {
+pub(crate) fn require_luogu_config(config: &LuoguConfig) -> Result<(&str, &str), String> {
     let uid = config.luogu.uid.trim();
     let client_id = config.luogu.client_id.trim();
 

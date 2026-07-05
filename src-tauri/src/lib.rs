@@ -7,6 +7,7 @@ mod frontmatter;
 mod git;
 mod local_search;
 mod luogu;
+mod luogu_article;
 mod luogu_reader;
 mod notes;
 mod path_safety;
@@ -104,6 +105,10 @@ pub fn run() {
             luogu::preview_luogu_submissions,
             luogu::preview_luogu_submission_page,
             luogu::sync_luogu_insights,
+            luogu_article::get_luogu_article,
+            luogu_article::prepare_luogu_article_push,
+            luogu_article::push_luogu_article,
+            luogu_article::pull_luogu_article,
             ai::get_ai_config,
             ai::save_ai_config,
             ai::test_ai_connection,

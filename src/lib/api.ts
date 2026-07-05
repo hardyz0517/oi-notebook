@@ -190,6 +190,36 @@ export interface PreviewLuoguSubmissionPageResult {
   submissions: PreviewLuoguSubmission[];
 }
 
+export interface LuoguArticleMetadata {
+  lid: string | null;
+  title: string;
+  category: number;
+  status: number;
+  top: number;
+  solutionFor: string;
+}
+
+export interface LuoguArticleSnapshot {
+  metadata: LuoguArticleMetadata;
+  content: string;
+  canEdit: boolean;
+  url: string | null;
+}
+
+export interface PrepareLuoguArticlePushInput {
+  lid: string | null;
+  title: string;
+  category: number;
+  status: number;
+  top: number;
+  solutionFor: string;
+  body: string;
+}
+
+export interface PushLuoguArticleInput extends PrepareLuoguArticlePushInput {
+  expectedRemoteContent?: string;
+}
+
 export interface ImportLuoguSubmissionResult {
   submissionId: string;
   problemId: string;
@@ -738,6 +768,40 @@ export async function previewLuoguSubmissionPage(
 ): Promise<PreviewLuoguSubmissionPageResult> {
   try {
     return await invoke<PreviewLuoguSubmissionPageResult>("preview_luogu_submission_page", { page });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function getLuoguArticle(lid: string): Promise<LuoguArticleSnapshot> {
+  try {
+    return await invoke<LuoguArticleSnapshot>("get_luogu_article", { lid });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function prepareLuoguArticlePush(
+  input: PrepareLuoguArticlePushInput,
+): Promise<LuoguArticleSnapshot> {
+  try {
+    return await invoke<LuoguArticleSnapshot>("prepare_luogu_article_push", { input });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function pushLuoguArticle(input: PushLuoguArticleInput): Promise<LuoguArticleSnapshot> {
+  try {
+    return await invoke<LuoguArticleSnapshot>("push_luogu_article", { input });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function pullLuoguArticle(lid: string): Promise<LuoguArticleSnapshot> {
+  try {
+    return await invoke<LuoguArticleSnapshot>("pull_luogu_article", { lid });
   } catch (e) {
     throw toApiError(e);
   }
