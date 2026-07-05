@@ -12824,6 +12824,7 @@ mod tests {
             ],
             error_keywords: Vec::new(),
             queries: Vec::new(),
+            cache_enabled: Some(false),
         }
     }
 
