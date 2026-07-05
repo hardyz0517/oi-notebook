@@ -1,6 +1,7 @@
 import { Loader2, Play } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import type { AgentEvent } from "@/lib/agent-runtime/agentTypes";
+import { createPreviewAgentLoopContract } from "@/lib/agent-runtime/agentLoopContract";
+import type { AgentEvent, AgentLoopCapabilityStatus, AgentLoopContract } from "@/lib/agent-runtime/agentTypes";
 import { createAgentSession } from "@/lib/agent-runtime/agentSession";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
@@ -37,23 +38,32 @@ const formatPreviewStatus = (status: AgentWorkbenchPreviewResult["runtimeStatus"
   return "unavailable";
 };
 
+const formatCapabilityStatus = (status: AgentLoopCapabilityStatus): string => {
+  if (status === "preview") return "available for preview";
+  if (status === "reserved") return "reserved";
+  return "unavailable";
+};
+
 export function AgentWorkbenchShell({
   workspace = DEFAULT_WORKSPACE,
   events = DEFAULT_EVENTS,
   evidenceRecords = [],
   permissionRequests = [],
+  loopContract = createPreviewAgentLoopContract(),
   preview = null,
 }: {
   workspace?: ProblemWorkspace;
   events?: AgentEvent[];
   evidenceRecords?: EvidenceStoreRecord[];
   permissionRequests?: PermissionRequestPreview[];
+  loopContract?: AgentLoopContract;
   preview?: AgentWorkbenchPreviewResult | null;
 }) {
   const [currentWorkspace, setCurrentWorkspace] = useState(workspace);
   const [currentEvents, setCurrentEvents] = useState(events);
   const [currentEvidenceRecords, setCurrentEvidenceRecords] = useState(evidenceRecords);
   const [currentPermissionRequests, setCurrentPermissionRequests] = useState(permissionRequests);
+  const [currentLoopContract, setCurrentLoopContract] = useState(loopContract);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -83,6 +93,7 @@ export function AgentWorkbenchShell({
       setCurrentEvents(result.events);
       setCurrentEvidenceRecords(result.evidenceRecords);
       setCurrentPermissionRequests(result.permissionRequests);
+      setCurrentLoopContract(result.loopContract);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -106,6 +117,21 @@ export function AgentWorkbenchShell({
             <div title={preview?.unavailableReason}>Patch/execute: {preview?.patchStatus ?? "unavailable"} / {preview?.executeStatus ?? "unavailable"}</div>
             <div title={preview?.unavailableReason}>Persistence: {preview?.persistenceStatus ?? "unavailable"}</div>
             <div>Legacy sidebar: {preview?.legacySidebarIsolated ? "isolated" : "unchanged"}</div>
+          </div>
+          <div className="grid gap-1 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
+            <div className="font-medium text-foreground">Loop contract: {currentLoopContract.mode}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div title={currentLoopContract.modelStep.reason}>Model step: {formatCapabilityStatus(currentLoopContract.modelStep.status)}</div>
+              <div title={currentLoopContract.toolRequest.reason}>Tool request: {formatCapabilityStatus(currentLoopContract.toolRequest.status)}</div>
+              <div title={currentLoopContract.permissionDecision.reason}>Permission decision: {formatCapabilityStatus(currentLoopContract.permissionDecision.status)}</div>
+              <div title={currentLoopContract.toolExecution.reason}>Tool execution: {formatCapabilityStatus(currentLoopContract.toolExecution.status)}</div>
+              <div title={currentLoopContract.observation.reason}>Observation: {formatCapabilityStatus(currentLoopContract.observation.status)}</div>
+              <div title={currentLoopContract.continuation.reason}>Continuation: {formatCapabilityStatus(currentLoopContract.continuation.status)}</div>
+              <div title={currentLoopContract.compaction.reason}>Compaction: {formatCapabilityStatus(currentLoopContract.compaction.status)}</div>
+              <div title={currentLoopContract.patchGeneration.reason}>Patch generation: {formatCapabilityStatus(currentLoopContract.patchGeneration.status)}</div>
+              <div title={currentLoopContract.patchApply.reason}>Patch apply: {formatCapabilityStatus(currentLoopContract.patchApply.status)}</div>
+              <div title={currentLoopContract.sessionPersistence.reason}>Session persistence: {formatCapabilityStatus(currentLoopContract.sessionPersistence.status)}</div>
+            </div>
           </div>
         </div>
         <form className="grid gap-2 border border-border/70 bg-background p-3" onSubmit={runManualTask}>

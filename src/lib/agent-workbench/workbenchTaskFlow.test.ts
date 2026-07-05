@@ -118,4 +118,18 @@ describe("runManualWorkbenchTask", () => {
     expect(result.loopContract.patchApply.status).toBe("unavailable");
     expect(result.loopContract.continuation.status).toBe("reserved");
   });
+
+  it("keeps mature capabilities unavailable in UI-facing results", async () => {
+    const result = await runWorkbenchTask({
+      mode: "current_research",
+      problem: {
+        title: "Current context",
+        problemId: "current-context",
+      },
+    });
+
+    expect(result.loopContract.modelStep.reason).toBe("model_loop_unavailable");
+    expect(result.loopContract.patchGeneration.reason).toBe("patch_generation_unavailable");
+    expect(result.loopContract.sessionPersistence.reason).toBe("session_persistence_unavailable");
+  });
 });
