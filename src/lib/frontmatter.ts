@@ -7,6 +7,13 @@ export interface FrontmatterFields {
   draft: boolean;
   difficulty: string;
   source: string;
+  luogu_article_id: string;
+  luogu_article_title: string;
+  luogu_article_category: string;
+  luogu_article_status: string;
+  luogu_article_top: string;
+  luogu_article_solution_for: string;
+  luogu_article_synced_at: string;
 }
 
 export interface ParsedFrontmatter {
@@ -41,6 +48,13 @@ const EMPTY_FIELDS: FrontmatterFields = {
   draft: false,
   difficulty: "",
   source: "",
+  luogu_article_id: "",
+  luogu_article_title: "",
+  luogu_article_category: "",
+  luogu_article_status: "",
+  luogu_article_top: "",
+  luogu_article_solution_for: "",
+  luogu_article_synced_at: "",
 };
 
 const KNOWN_FIELD_ORDER: Array<keyof FrontmatterFields> = [
@@ -48,6 +62,13 @@ const KNOWN_FIELD_ORDER: Array<keyof FrontmatterFields> = [
   "tags",
   "difficulty",
   "source",
+  "luogu_article_id",
+  "luogu_article_title",
+  "luogu_article_category",
+  "luogu_article_status",
+  "luogu_article_top",
+  "luogu_article_solution_for",
+  "luogu_article_synced_at",
   "collection",
   "summary",
   "draft",
@@ -140,6 +161,13 @@ export function parseFrontmatterFields(markdown: string): ParsedFrontmatter {
     else if (parsed.key === "category") fields.category = parseScalar(parsed.value);
     else if (parsed.key === "difficulty") fields.difficulty = parseScalar(parsed.value);
     else if (parsed.key === "source") fields.source = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_id") fields.luogu_article_id = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_title") fields.luogu_article_title = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_category") fields.luogu_article_category = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_status") fields.luogu_article_status = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_top") fields.luogu_article_top = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_solution_for") fields.luogu_article_solution_for = parseScalar(parsed.value);
+    else if (parsed.key === "luogu_article_synced_at") fields.luogu_article_synced_at = parseScalar(parsed.value);
     else if (parsed.key === "draft") fields.draft = parseBoolean(parsed.value);
   }
 

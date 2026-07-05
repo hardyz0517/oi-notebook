@@ -27,6 +27,13 @@ describe("collectionTags", () => {
       draft: false,
       difficulty: "",
       source: "",
+      luogu_article_id: "",
+      luogu_article_title: "",
+      luogu_article_category: "",
+      luogu_article_status: "",
+      luogu_article_top: "",
+      luogu_article_solution_for: "",
+      luogu_article_synced_at: "",
     })).toEqual(["题解", "技巧", "复盘", "杂谈", "集训日志", "训练", "专题"]);
   });
 });

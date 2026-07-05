@@ -24,6 +24,7 @@ import { AgentWorkbenchShell } from "@/components/agent-workbench/AgentWorkbench
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
+import { ReviewDiffPane } from "@/components/editor/ReviewDiffPane";
 import MarkdownPreview from "@/components/editor/MarkdownPreview";
 import { useEditorPreviewScrollSync } from "@/components/editor/useEditorPreviewScrollSync";
 import FileTree from "@/components/file-tree/FileTree";
@@ -62,6 +63,9 @@ import {
   SettingsInlineSelect,
   type LuoguRuleSettingRow,
 } from "@/components/settings/pages/LuoguSettingsPages";
+import { LuoguArticleInfoDialog } from "@/components/luogu/LuoguArticleInfoDialog";
+import { LuoguArticleSyncConfirmDialog } from "@/components/luogu/LuoguArticleSyncConfirmDialog";
+import { LuoguArticleSyncToolbar } from "@/components/luogu/LuoguArticleSyncToolbar";
 import {
   getLuoguScanRangeLabel,
   getLuoguSubmissionCandidateState,
@@ -148,8 +152,59 @@ import {
   type SettingsCenterRect,
 } from "@/components/settings/settingsGeometry";
 import { cn } from "@/lib/utils";
-import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
-import { getAgentWorkbenchPreview, type AgentWorkbenchPreviewResult } from "@/lib/api";
+import {
+  classifyMarkdownSavePath,
+  listNotes,
+  readNote,
+  writeNote,
+  deleteNote,
+  renameNote,
+  createNoteFolder,
+  renameNoteFolder,
+  deleteNoteFolder,
+  openBlog,
+  restartBlogServer,
+  openNotesFolder,
+  getNotesRootPath,
+  hideMainWindow,
+  saveNoteAsset,
+  importLuoguInsight,
+  prepareLuoguSubmissionNote,
+  writeLuoguPreparedNote,
+  getLuoguConfig,
+  saveLuoguConfig,
+  testLuoguConnection,
+  previewLuoguSubmissionPage,
+  getAiConfig,
+  saveAiConfig,
+  syncAiProviderModelsDraft,
+  testAiProviderDraft,
+  listAiPrompts,
+  readAiPrompt,
+  saveAiPrompt,
+  resetAiPromptToDefault,
+  polishAiPromptTemplate,
+  showSaveMarkdownDialog,
+  testWebSearchConnection,
+  clearWebCache,
+  getLocalNoteIndexStatus,
+  rebuildLocalNoteIndex,
+  getTagTaxonomyConfig,
+  saveTagTaxonomyConfig,
+  writeExternalMarkdownFile,
+  getBlogConfig,
+  saveBlogConfig,
+} from "@/lib/api";
+import {
+  prepareLuoguArticlePush,
+  pushLuoguArticle,
+  pullLuoguArticle,
+  type LuoguArticleSnapshot,
+} from "@/lib/api";
+import {
+  getAgentWorkbenchPreview,
+  type AgentWorkbenchPreviewResult,
+} from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -162,11 +217,12 @@ import {
   markPreviewStaleRender,
 } from "@/lib/previewPerf";
 import { getCommittedMarkdownSyncDelayMs, getPreviewMarkdownSyncDelayMs } from "@/lib/previewSyncTiming";
-import type { AiConfig, AiProvider, LocalNoteIndexStatusResult, LuoguConfig, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
+import type { AiConfig, AiProvider, BlogConfig, LocalNoteIndexStatusResult, LuoguConfig, PreviewLuoguSubmission, PreviewLuoguSubmissionsResult, PromptTemplateSummary, SyncLuoguInsightsResult, TestLuoguConnectionResult } from "@/lib/api";
 import { extractCursorParagraph } from "@/lib/editorContext";
 import { mergeFrontmatterFields, parseFrontmatterFields } from "@/lib/frontmatter";
 import { DEFAULT_WEB_SEARCH_CONFIG, normalizeWebSearchConfig, type WebSearchConfig } from "@/lib/aiWebSearch";
 import { buildLuoguConfigFormState, buildLuoguConfigSavePayload, deriveLuoguAccountSettingsView } from "@/lib/luoguConfigForm";
+import { getLuoguArticleBody, getLuoguArticleSyncState, readLuoguArticleMetadata, writeLuoguArticleMetadata, type LuoguArticleMetadata } from "@/lib/luoguArticleSync";
 import {
   formatZoomLabel,
   getBlogStatusLabel,
@@ -566,10 +622,23 @@ function recordTagManagerDebugEvent(event: string, payload?: unknown): void {
   }
 }
 
-interface PolishReviewTab {
-  id: string;
-  preview: AiPolishPreview;
-}
+type LuoguReviewPreview = {
+  lid: string;
+  title: string;
+  sourcePath: string;
+  oldText: string;
+  newText: string;
+  metadata: LuoguArticleMetadata;
+  statusLabel: string;
+  warning?: string | null;
+  applied?: boolean;
+  ignored?: boolean;
+  error?: string;
+};
+
+type PolishReviewTab =
+  | { id: string; kind: "polish"; preview: AiPolishPreview }
+  | { id: string; kind: "luogu"; preview: LuoguReviewPreview };
 
 function getReviewStatusLabel(preview: AiPolishPreview, currentFilePath: string | null, currentMarkdown: string): string {
   if (preview.applied) return "已应用";
@@ -600,6 +669,18 @@ function getReviewApplyLabel(preview: AiPolishPreview): string {
   return preview.scope === "full-note" ? "应用全文润色" : "应用到选区";
 }
 
+function getLuoguReviewTitle(): string {
+  return "洛谷文章审阅";
+}
+
+function getLuoguReviewApplyLabel(): string {
+  return "应用洛谷正文";
+}
+
+function getReviewTabSourcePath(tab: PolishReviewTab): string {
+  return tab.kind === "luogu" ? tab.preview.sourcePath : tab.preview.notePath;
+}
+
 function PolishReviewPane({
   reviewTab,
   currentFilePath,
@@ -617,6 +698,7 @@ function PolishReviewPane({
   onBackToFile: () => void;
   onClose: () => void;
 }) {
+  if (reviewTab.kind !== "polish") return null;
   const { preview } = reviewTab;
   const title = getReviewTitle(preview);
   const applyLabel = getReviewApplyLabel(preview);
@@ -1501,6 +1583,10 @@ export default function App() {
   const [luoguConfigClientId, setLuoguConfigClientId] = useState("");
   const [luoguConfigLastSubmissionId, setLuoguConfigLastSubmissionId] = useState("");
   const [luoguConfigAiConfigured, setLuoguConfigAiConfigured] = useState(false);
+  const [isLuoguArticleInfoOpen, setIsLuoguArticleInfoOpen] = useState(false);
+  const [isLuoguArticleBusy, setIsLuoguArticleBusy] = useState(false);
+  const [luoguArticleInfoDraft, setLuoguArticleInfoDraft] = useState<LuoguArticleMetadata | null>(null);
+  const [luoguArticleConfirmSnapshot, setLuoguArticleConfirmSnapshot] = useState<LuoguArticleSnapshot | null>(null);
   const resetLuoguPreparationWorkspace = luoguImportWorkflow.resetPreparationWorkspace;
   const applyLuoguConfigFormState = useCallback((config: LuoguConfig) => {
     const formState = buildLuoguConfigFormState(config);
@@ -1817,6 +1903,12 @@ export default function App() {
   );
   const bodyStartLine = 1;
   const frontmatter = useMemo(() => parseFrontmatterFields(deferredFullMarkdown), [deferredFullMarkdown]);
+  const luoguArticleMetadata = useMemo(() => readLuoguArticleMetadata(frontmatter), [frontmatter]);
+  const luoguArticleHasCookie = luoguConfigUid.trim().length > 0 && luoguConfigClientId.trim().length > 0;
+  const luoguArticleSyncState = useMemo(
+    () => getLuoguArticleSyncState(frontmatter, luoguArticleHasCookie),
+    [frontmatter, luoguArticleHasCookie],
+  );
   const frontmatterDisplayTags = useMemo(() => getDisplayTags(frontmatter.fields.tags), [frontmatter.fields.tags]);
   const effectiveCollections = useMemo(() => getEffectiveCollections(frontmatter.fields), [frontmatter.fields]);
   const collectionCandidates = useMemo(
@@ -2435,14 +2527,25 @@ export default function App() {
   );
   const reviewTabs = useMemo<OpenReviewTab[]>(
     () =>
-      openReviewTabs.map(({ id, preview }) => {
+      openReviewTabs.map((tab) => {
+        if (tab.kind === "luogu") {
+          return {
+            kind: "review",
+            id: tab.id,
+            sourcePath: tab.preview.sourcePath,
+            title: getLuoguReviewTitle(),
+            displayName: getLuoguReviewTitle(),
+            status: tab.preview.applied ? "applied" : tab.preview.ignored ? "cancelled" : tab.preview.error ? "stale" : "pending",
+          };
+        }
+        const { id, preview } = tab;
         const isStale = preview.notePath === currentFilePath && preview.scope === "full-note" && markdown !== preview.originalText;
         return {
           kind: "review",
           id,
           sourcePath: preview.notePath,
-          title: preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
-          displayName: preview.scope === "full-note" ? "全文润色审核" : "润色选中审核",
+          title: getReviewTitle(preview),
+          displayName: getReviewTitle(preview),
           status: preview.applied ? "applied" : preview.ignored ? "cancelled" : isStale ? "stale" : "pending",
         };
       }),
@@ -2582,7 +2685,7 @@ export default function App() {
         openTabPaths,
         pendingFileSelection,
         pendingAssetsByFile: {},
-        openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
+        openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: getReviewTabSourcePath(tab) })),
         currentFilePath,
         activeWorkspaceTabId,
         activeWorkingCopyId,
@@ -2619,9 +2722,11 @@ export default function App() {
     rewriteDisplayTitlePaths(rewritePath);
     setOpenReviewTabs((current) =>
       current.map((tab) => {
-        const rewritten = rewritePath(tab.preview.notePath);
-        return rewritten === tab.preview.notePath
-          ? tab
+        const sourcePath = getReviewTabSourcePath(tab);
+        const rewritten = rewritePath(sourcePath);
+        if (rewritten === sourcePath) return tab;
+        return tab.kind === "luogu"
+          ? { ...tab, preview: { ...tab.preview, sourcePath: rewritten } }
           : { ...tab, preview: { ...tab.preview, notePath: rewritten } };
       }),
     );
@@ -2884,7 +2989,7 @@ export default function App() {
           openTabPaths,
           pendingFileSelection,
           pendingAssetsByFile: {},
-          openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: tab.preview.notePath })),
+          openReviewTabs: openReviewTabs.map((tab) => ({ id: tab.id, notePath: getReviewTabSourcePath(tab) })),
           currentFilePath,
           activeWorkspaceTabId,
           activeWorkingCopyId,
@@ -4993,7 +5098,7 @@ export default function App() {
   const handleOpenPolishReview = (preview: AiPolishPreview) => {
     const id = getPolishReviewTabId(preview.previewId);
     setOpenReviewTabs((current) => {
-      const nextTab = { id, preview };
+      const nextTab: PolishReviewTab = { id, kind: "polish", preview };
       const index = current.findIndex((item) => item.id === id);
       if (index === -1) return [...current, nextTab];
       return current.map((item) => (item.id === id ? nextTab : item));
@@ -5004,11 +5109,12 @@ export default function App() {
   const handlePolishReviewChange = (preview: AiPolishPreview) => {
     const id = getPolishReviewTabId(preview.previewId);
     setOpenReviewTabs((current) =>
-      current.map((item) => (item.id === id ? { ...item, preview } : item)),
+      current.map((item) => (item.id === id && item.kind === "polish" ? { ...item, preview } : item)),
     );
   };
 
   const applyPolishReview = async (reviewTab: PolishReviewTab) => {
+    if (reviewTab.kind !== "polish") return;
     const { preview } = reviewTab;
     if (preview.applied || preview.ignored) return;
 
@@ -5045,11 +5151,148 @@ export default function App() {
   };
 
   const ignorePolishReview = (reviewTab: PolishReviewTab) => {
+    if (reviewTab.kind !== "polish") return;
     handlePolishReviewChange({
       ...reviewTab.preview,
       ignored: true,
       error: undefined,
     });
+  };
+
+  const updateLuoguReview = (id: string, patch: Partial<LuoguReviewPreview>) => {
+    setOpenReviewTabs((current) =>
+      current.map((tab) => tab.id === id && tab.kind === "luogu"
+        ? { ...tab, preview: { ...tab.preview, ...patch } }
+        : tab),
+    );
+  };
+
+  const applyLuoguReview = async (reviewTab: PolishReviewTab) => {
+    if (reviewTab.kind !== "luogu" || !currentFilePath || currentFilePath !== reviewTab.preview.sourcePath) return;
+    if (reviewTab.preview.applied || reviewTab.preview.ignored) return;
+
+    try {
+      const nextDirty = isSnapshotDirty(savedSnapshotRef.current, currentFilePath, frontmatterPrefix, reviewTab.preview.newText);
+      replaceEditorDocument(reviewTab.preview.newText, currentFilePath, frontmatterPrefix);
+      if (isDirtyRef.current !== nextDirty) {
+        isDirtyRef.current = nextDirty;
+        setIsDirty(nextDirty);
+      }
+      updateLuoguReview(reviewTab.id, { applied: true, ignored: false, error: undefined });
+      toast.success("已应用洛谷正文，请确认后保存");
+    } catch (error) {
+      const errorText = getErrorMessage(error);
+      updateLuoguReview(reviewTab.id, { error: errorText });
+      toast.error(errorText);
+    }
+  };
+
+  const ignoreLuoguReview = (reviewTab: PolishReviewTab) => {
+    if (reviewTab.kind !== "luogu") return;
+    updateLuoguReview(reviewTab.id, { ignored: true, error: undefined });
+  };
+
+  const getLuoguArticlePushInput = () => ({
+    ...luoguArticleMetadata,
+    body: getLuoguArticleBody(getLiveFullMarkdown()),
+  });
+
+  const handleOpenLuoguArticleInfo = () => {
+    if (!currentFilePath) return;
+    setLuoguArticleInfoDraft(luoguArticleMetadata);
+    setIsLuoguArticleInfoOpen(true);
+  };
+
+  const handleSaveLuoguArticleInfo = () => {
+    if (!luoguArticleInfoDraft) return;
+    const nextFields = writeLuoguArticleMetadata(frontmatter, {
+      ...luoguArticleInfoDraft,
+      syncedAt: frontmatter.fields.luogu_article_synced_at,
+    });
+    updateFrontmatter(nextFields);
+    setIsLuoguArticleInfoOpen(false);
+    setLuoguArticleInfoDraft(null);
+    toast.success("已更新洛谷文章信息");
+  };
+
+  const handlePrepareLuoguArticlePush = async () => {
+    if (!currentFilePath || isLuoguArticleBusy) return;
+    if (!luoguArticleSyncState.canSync) {
+      toast.warning(luoguArticleSyncState.hasCookie ? "当前 frontmatter 暂不能同步" : "请先在洛谷设置中保存 Cookie");
+      return;
+    }
+
+    setIsLuoguArticleBusy(true);
+    try {
+      const snapshot = await prepareLuoguArticlePush(getLuoguArticlePushInput());
+      setLuoguArticleConfirmSnapshot(snapshot);
+    } catch (error) {
+      toast.error(`准备同步失败：${getErrorMessage(error)}`);
+    } finally {
+      setIsLuoguArticleBusy(false);
+    }
+  };
+
+  const handleConfirmLuoguArticlePush = async () => {
+    if (!currentFilePath || !luoguArticleConfirmSnapshot || isLuoguArticleBusy) return;
+
+    const input = getLuoguArticlePushInput();
+    setIsLuoguArticleBusy(true);
+    try {
+      const snapshot = await pushLuoguArticle({
+        ...input,
+        expectedRemoteContent: luoguArticleConfirmSnapshot.metadata.lid ? luoguArticleConfirmSnapshot.content : undefined,
+      });
+      const nextFields = writeLuoguArticleMetadata(frontmatter, {
+        ...snapshot.metadata,
+        syncedAt: new Date().toISOString(),
+      });
+      updateFrontmatter(nextFields);
+      setLuoguArticleConfirmSnapshot(null);
+      toast.success(input.lid ? "已同步到洛谷文章" : "已创建洛谷文章");
+    } catch (error) {
+      toast.error(`同步洛谷失败：${getErrorMessage(error)}`);
+    } finally {
+      setIsLuoguArticleBusy(false);
+    }
+  };
+
+  const handlePullLuoguArticle = async () => {
+    if (!currentFilePath || !luoguArticleMetadata.lid || isLuoguArticleBusy) return;
+    if (!luoguArticleSyncState.canPull) {
+      toast.warning(luoguArticleSyncState.hasCookie ? "当前文章还没有绑定洛谷文章 id" : "请先在洛谷设置中保存 Cookie");
+      return;
+    }
+
+    setIsLuoguArticleBusy(true);
+    try {
+      const snapshot = await pullLuoguArticle(luoguArticleMetadata.lid);
+      const id = `luogu-review:${currentFilePath}:${snapshot.metadata.lid ?? luoguArticleMetadata.lid}`;
+      const nextTab: PolishReviewTab = {
+        id,
+        kind: "luogu",
+        preview: {
+          lid: snapshot.metadata.lid ?? luoguArticleMetadata.lid,
+          title: snapshot.metadata.title || luoguArticleMetadata.title,
+          sourcePath: currentFilePath,
+          oldText: markdownLiveRef.current,
+          newText: snapshot.content,
+          metadata: snapshot.metadata,
+          statusLabel: snapshot.canEdit ? "待应用" : "只读快照",
+          warning: snapshot.canEdit ? null : "当前 Cookie 可能没有编辑这篇文章的权限。",
+        },
+      };
+      setOpenReviewTabs((current) => {
+        const index = current.findIndex((tab) => tab.id === id);
+        if (index === -1) return [...current, nextTab];
+        return current.map((tab) => (tab.id === id ? nextTab : tab));
+      });
+      setActiveWorkspaceTabId(id);
+    } catch (error) {
+      toast.error(`拉取洛谷文章失败：${getErrorMessage(error)}`);
+    } finally {
+      setIsLuoguArticleBusy(false);
+    }
   };
 
   const finishFileSelection = (path: string, closeSearchOnSuccess: boolean) => {
@@ -5829,6 +6072,7 @@ export default function App() {
       console.info("[NoteX Perf] ai sidebar open summary", summary);
     });
   }, [isAiSidebarOpen]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -5844,6 +6088,7 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
   useEffect(() => {
     let resizeFrameId: number | null = null;
 
@@ -6187,7 +6432,34 @@ export default function App() {
         if (!open) closeTagPicker();
       }}
       onConfirm={confirmTagPicker}
-    />    <Dialog open={dialogMode === "create" || dialogMode === "rename"} onOpenChange={(open) => !open && closeDialog()}>
+    />
+    {luoguArticleInfoDraft && (
+      <LuoguArticleInfoDialog
+        open={isLuoguArticleInfoOpen}
+        metadata={luoguArticleInfoDraft}
+        onChange={setLuoguArticleInfoDraft}
+        onSave={handleSaveLuoguArticleInfo}
+        onClose={() => {
+          setIsLuoguArticleInfoOpen(false);
+          setLuoguArticleInfoDraft(null);
+        }}
+      />
+    )}
+    {luoguArticleConfirmSnapshot && (
+      <LuoguArticleSyncConfirmDialog
+        open={Boolean(luoguArticleConfirmSnapshot)}
+        title={luoguArticleConfirmSnapshot.metadata.lid ? "同步到洛谷文章？" : "创建洛谷文章？"}
+        localMetadata={luoguArticleMetadata}
+        remoteMetadata={luoguArticleConfirmSnapshot.metadata}
+        localBody={getLuoguArticleBody(getLiveFullMarkdown())}
+        remoteBody={luoguArticleConfirmSnapshot.metadata.lid ? luoguArticleConfirmSnapshot.content : ""}
+        sourcePath={currentFilePath ?? ""}
+        confirmText={luoguArticleConfirmSnapshot.metadata.lid ? "更新洛谷文章" : "创建洛谷文章"}
+        onConfirm={() => void handleConfirmLuoguArticlePush()}
+        onCancel={() => setLuoguArticleConfirmSnapshot(null)}
+      />
+    )}
+    <Dialog open={dialogMode === "create" || dialogMode === "rename"} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent className="flex max-h-[min(86vh,760px)] w-[min(720px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>
@@ -8181,26 +8453,51 @@ export default function App() {
             onClose={handleCloseOpenTab}
           />
           {activeReviewTab ? (
-            <PolishReviewPane
-              reviewTab={activeReviewTab}
-              currentFilePath={currentFilePath}
-              currentMarkdown={markdown}
-              onApply={() => void applyPolishReview(activeReviewTab)}
-              onIgnore={() => ignorePolishReview(activeReviewTab)}
-              onBackToFile={() => {
-                if (activeReviewTab.preview.notePath) {
-                  handleSelectFile(activeReviewTab.preview.notePath);
-                }
-              }}
-              onClose={() => handleCloseOpenTab({
-                kind: "review",
-                id: activeReviewTab.id,
-                sourcePath: activeReviewTab.preview.notePath,
-                title: getReviewTitle(activeReviewTab.preview),
-                displayName: getReviewTitle(activeReviewTab.preview),
-                status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : "pending",
-              })}
-            />
+            activeReviewTab.kind === "luogu" ? (
+              <ReviewDiffPane
+                title={getLuoguReviewTitle()}
+                statusLabel={activeReviewTab.preview.error ? "已过期" : activeReviewTab.preview.applied ? "已应用" : activeReviewTab.preview.ignored ? "已取消" : activeReviewTab.preview.statusLabel}
+                statusTone={activeReviewTab.preview.error || activeReviewTab.preview.warning ? "warning" : "neutral"}
+                sourcePath={activeReviewTab.preview.sourcePath}
+                oldText={activeReviewTab.preview.oldText}
+                newText={activeReviewTab.preview.newText}
+                applyLabel={activeReviewTab.preview.applied ? "已应用" : getLuoguReviewApplyLabel()}
+                canApply={!activeReviewTab.preview.applied && !activeReviewTab.preview.ignored && !activeReviewTab.preview.error && activeReviewTab.preview.newText.trim().length > 0}
+                warning={activeReviewTab.preview.error ?? activeReviewTab.preview.warning}
+                onApply={() => void applyLuoguReview(activeReviewTab)}
+                onCancel={() => ignoreLuoguReview(activeReviewTab)}
+                onBack={() => handleSelectFile(activeReviewTab.preview.sourcePath)}
+                onClose={() => handleCloseOpenTab({
+                  kind: "review",
+                  id: activeReviewTab.id,
+                  sourcePath: activeReviewTab.preview.sourcePath,
+                  title: getLuoguReviewTitle(),
+                  displayName: getLuoguReviewTitle(),
+                  status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : activeReviewTab.preview.error ? "stale" : "pending",
+                })}
+              />
+            ) : (
+              <PolishReviewPane
+                reviewTab={activeReviewTab}
+                currentFilePath={currentFilePath}
+                currentMarkdown={markdown}
+                onApply={() => void applyPolishReview(activeReviewTab)}
+                onIgnore={() => ignorePolishReview(activeReviewTab)}
+                onBackToFile={() => {
+                  if (activeReviewTab.preview.notePath) {
+                    handleSelectFile(activeReviewTab.preview.notePath);
+                  }
+                }}
+                onClose={() => handleCloseOpenTab({
+                  kind: "review",
+                  id: activeReviewTab.id,
+                  sourcePath: activeReviewTab.preview.notePath,
+                  title: getReviewTitle(activeReviewTab.preview),
+                  displayName: getReviewTitle(activeReviewTab.preview),
+                  status: activeReviewTab.preview.applied ? "applied" : activeReviewTab.preview.ignored ? "cancelled" : "pending",
+                })}
+              />
+            )
           ) : !hasActiveEditorDocument ? (
             <div
               data-app-context-menu="empty-editor"
@@ -8255,7 +8552,20 @@ export default function App() {
               <MarkdownEditorToolbar
                 disabled={!showEditorPane || !markdownToolbarApi?.hasEditor()}
                 zoomLabel={showEditorPane ? contentZoomLabel : undefined}
-                trailingContent={editorViewModeSwitcher}
+                trailingContent={(
+                  <>
+                    <LuoguArticleSyncToolbar
+                      syncDisabled={!hasActiveEditorDocument || !luoguArticleSyncState.canSync || isLuoguArticleBusy}
+                      infoDisabled={!hasActiveEditorDocument || isLuoguArticleBusy}
+                      canPull={luoguArticleSyncState.canPull}
+                      hasBinding={luoguArticleSyncState.hasBinding}
+                      onSync={() => void handlePrepareLuoguArticlePush()}
+                      onPull={() => void handlePullLuoguArticle()}
+                      onEditInfo={handleOpenLuoguArticleInfo}
+                    />
+                    {editorViewModeSwitcher}
+                  </>
+                )}
                 onAction={(actionId) => {
                   markdownToolbarApi?.executeAction(actionId);
                 }}
