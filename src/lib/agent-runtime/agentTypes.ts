@@ -72,3 +72,25 @@ export type AgentRuntimeRunResult =
       status: "failed";
       reason: string;
     };
+
+export type AgentLoopCapabilityStatus = "preview" | "reserved" | "unavailable";
+
+export type AgentLoopCapability = {
+  status: AgentLoopCapabilityStatus;
+  reason: string;
+};
+
+export type AgentLoopContract = {
+  mode: "preview_one_shot" | "reserved_model_loop";
+  modelStep: AgentLoopCapability;
+  toolRequest: AgentLoopCapability;
+  permissionDecision: AgentLoopCapability;
+  toolExecution: AgentLoopCapability;
+  observation: AgentLoopCapability;
+  continuation: AgentLoopCapability;
+  interruption: AgentLoopCapability;
+  compaction: AgentLoopCapability;
+  patchGeneration: AgentLoopCapability;
+  patchApply: AgentLoopCapability;
+  sessionPersistence: AgentLoopCapability;
+};
