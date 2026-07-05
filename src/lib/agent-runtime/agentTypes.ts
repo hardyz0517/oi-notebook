@@ -52,6 +52,23 @@ export type AgentToolPermission =
   | "destructive"
   | "network";
 
+export type AgentPermissionDecisionStatus =
+  | "auto-allowed"
+  | "prompt-required"
+  | "denied"
+  | "blocked-by-configuration"
+  | "unavailable"
+  | "degraded-fallback";
+
+export type AgentPermissionDecision = {
+  toolName: string;
+  permission: AgentToolPermission;
+  status: AgentPermissionDecisionStatus;
+  reason: string;
+  fallbackToolName?: string;
+  fallbackReason?: string;
+};
+
 export type AgentToolExposure = "runtime-internal" | "workbench-preview" | "future-adapter" | "unavailable-placeholder";
 
 export type AgentToolLifecycle = {
