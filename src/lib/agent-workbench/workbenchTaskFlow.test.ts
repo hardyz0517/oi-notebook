@@ -25,6 +25,7 @@ describe("runManualWorkbenchTask", () => {
     expect(result.events.map((event) => event.type)).toEqual([
       "agent.started",
       "tool.requested",
+      "permission.resolved",
       "tool.started",
       "tool.output",
       "evidence.added",
@@ -46,18 +47,22 @@ describe("runManualWorkbenchTask", () => {
     });
     expect(result.permissionRequests).toEqual([
       expect.objectContaining({
-        id: "tavily:unavailable",
-        permission: "network",
-        status: "blocked",
+        id: "tavily_search:prompt-required",
+        toolName: "tavily_search",
+        permission: "public-network",
+        status: "pending",
+        reason: "public_network_requires_user_permission",
       }),
       expect.objectContaining({
-        id: "luogu-cookie:missing",
-        permission: "network",
+        id: "luogu_cookie_reader:unavailable",
+        toolName: "luogu_cookie_reader",
+        permission: "cookie-network",
         status: "blocked",
+        reason: "cookie_network_unavailable_in_preview",
       }),
     ]);
-    expect(result.permissionRequests.map((request) => request.status)).toEqual(["blocked", "blocked"]);
-    expect(result.permissionRequests.map((request) => request.reason).join("\n")).toContain("not configured");
+    expect(result.permissionRequests.map((request) => request.permission)).not.toContain("network");
+    expect(result.permissionRequests.map((request) => request.status)).toEqual(["pending", "blocked"]);
     expect(result.events.map((event) => event.type)).not.toEqual(expect.arrayContaining([
       "model.delta",
       "patch.generated",
@@ -118,6 +123,41 @@ describe("runManualWorkbenchTask", () => {
     expect(result.loopContract.modelStep.status).toBe("unavailable");
     expect(result.loopContract.patchApply.status).toBe("unavailable");
     expect(result.loopContract.continuation.status).toBe("reserved");
+  });
+
+  it("exposes the registered preview read tool with P6 contract metadata", async () => {
+    const result = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "Segment Tree",
+        problemId: "segment-tree",
+        problemUrl: "https://example.test/segment-tree",
+      },
+      manualSource: {
+        url: "https://example.test/segment-tree/editorial",
+        title: "Segment Tree Editorial",
+        text: "Maintain intervals in a tree.",
+      },
+    });
+
+    expect(result.toolDefinitions).toEqual([
+      expect.objectContaining({
+        name: "read_manual_url",
+        permission: "read",
+        inputSchema: { type: "object", required: ["url"] },
+        outputSchema: { type: "object", required: ["evidencePacketId", "sourceUrl"] },
+        exposure: "workbench-preview",
+        timeoutMs: 5000,
+        lifecycle: {
+          emits: ["tool.requested", "permission.resolved", "tool.started", "tool.output"],
+        },
+        failurePolicy: {
+          unsupported: "structured-failure",
+          timeout: "structured-failure",
+          permissionDenied: "blocked-result",
+        },
+      }),
+    ]);
   });
 
   it("keeps mature capabilities unavailable in UI-facing results", async () => {

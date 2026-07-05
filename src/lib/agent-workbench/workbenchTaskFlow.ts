@@ -1,7 +1,13 @@
 import { createAgentRuntime } from "@/lib/agent-runtime/agentRuntime";
 import { createPreviewAgentLoopContract } from "@/lib/agent-runtime/agentLoopContract";
 import { createAgentSession } from "@/lib/agent-runtime/agentSession";
-import type { AgentEvent, AgentLoopContract, AgentToolPermission } from "@/lib/agent-runtime/agentTypes";
+import type {
+  AgentEvent,
+  AgentLoopContract,
+  AgentPermissionDecision,
+  AgentToolDefinition,
+  AgentToolPermission,
+} from "@/lib/agent-runtime/agentTypes";
 import { createPermissionManager } from "@/lib/agent-runtime/permissionManager";
 import { createToolRegistry } from "@/lib/agent-runtime/toolRegistry";
 import { createProblemWorkspaceStore } from "@/lib/problem-workspace/problemWorkspaceStore";
@@ -36,6 +42,8 @@ export type WorkbenchTaskPermissionRequest = {
   reason: string;
 };
 
+export type WorkbenchPreviewToolDefinition = Omit<AgentToolDefinition, "run">;
+
 export type ManualWorkbenchSource = {
   url: string;
   title: string;
@@ -64,6 +72,7 @@ export type ManualWorkbenchTaskResult = {
   events: AgentEvent[];
   evidenceRecords: EvidenceStoreRecord[];
   permissionRequests: WorkbenchTaskPermissionRequest[];
+  toolDefinitions: WorkbenchPreviewToolDefinition[];
   cacheSnapshot: ReturnType<ResearchCacheManager["snapshot"]>;
   loopContract: AgentLoopContract;
 };
@@ -149,22 +158,46 @@ const createCandidate = (input: ManualWorkbenchTaskInput): CandidateSource => ({
   finishedAt: Date.now(),
 });
 
-const createUnavailablePermissionStates = (): WorkbenchTaskPermissionRequest[] => [
-  {
-    id: "tavily:unavailable",
-    toolName: "tavily_search",
-    permission: "network",
-    status: "blocked",
-    reason: "Tavily is not configured; manual/public-safe reading remains available.",
-  },
-  {
-    id: "luogu-cookie:missing",
-    toolName: "luogu_cookie_reader",
-    permission: "network",
-    status: "blocked",
-    reason: "No domain-limited Luogu cookie is available for this task.",
-  },
+const permissionStatusFromDecision = (
+  decision: AgentPermissionDecision,
+): WorkbenchTaskPermissionStatus => {
+  if (decision.status === "auto-allowed") {
+    return "granted";
+  }
+  if (decision.status === "prompt-required" || decision.status === "degraded-fallback") {
+    return "pending";
+  }
+  return "blocked";
+};
+
+const permissionRequestFromDecision = (
+  decision: AgentPermissionDecision,
+): WorkbenchTaskPermissionRequest => ({
+  id: `${decision.toolName}:${decision.status}`,
+  toolName: decision.toolName,
+  permission: decision.permission,
+  status: permissionStatusFromDecision(decision),
+  reason: decision.reason,
+});
+
+const createWorkbenchPermissionRequests = (
+  permissionManager: ReturnType<typeof createPermissionManager>,
+): WorkbenchTaskPermissionRequest[] => [
+  permissionRequestFromDecision(permissionManager.decideToolPermission("tavily_search", "public-network")),
+  permissionRequestFromDecision(permissionManager.decideToolPermission("luogu_cookie_reader", "cookie-network")),
 ];
+
+const previewToolDefinition = (tool: AgentToolDefinition): WorkbenchPreviewToolDefinition => ({
+  name: tool.name,
+  description: tool.description,
+  inputSchema: tool.inputSchema,
+  outputSchema: tool.outputSchema,
+  permission: tool.permission,
+  exposure: tool.exposure,
+  timeoutMs: tool.timeoutMs,
+  lifecycle: tool.lifecycle,
+  failurePolicy: tool.failurePolicy,
+});
 
 export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<WorkbenchTaskResult> {
   const workspaceStore = createProblemWorkspaceStore();
@@ -192,7 +225,19 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
   registry.register({
     name: toolName,
     description: "Read a Workbench source and turn it into citation-ready evidence.",
+    inputSchema: { type: "object", required: ["url"] },
+    outputSchema: { type: "object", required: ["evidencePacketId", "sourceUrl"] },
     permission: "read",
+    exposure: "workbench-preview",
+    timeoutMs: 5000,
+    lifecycle: {
+      emits: ["tool.requested", "permission.resolved", "tool.started", "tool.output"],
+    },
+    failurePolicy: {
+      unsupported: "structured-failure",
+      timeout: "structured-failure",
+      permissionDenied: "blocked-result",
+    },
     run: async () => {
       const searchProvider = createManualSearchProvider({
         sources: [{
@@ -294,10 +339,11 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     },
   });
 
+  const permissionManager = createPermissionManager();
   const runtime = createAgentRuntime({
     session: createAgentSession({ workspaceId: workspace.id }),
     toolRegistry: registry,
-    permissionManager: createPermissionManager(),
+    permissionManager,
   });
 
   await runtime.runTool(toolName, { url: manualSource.url });
@@ -312,7 +358,8 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     workspace: finalWorkspace,
     events,
     evidenceRecords: evidenceStore.list("workspace"),
-    permissionRequests: createUnavailablePermissionStates(),
+    permissionRequests: createWorkbenchPermissionRequests(permissionManager),
+    toolDefinitions: registry.list().map(previewToolDefinition),
     cacheSnapshot: cacheManager.snapshot(),
     loopContract: createPreviewAgentLoopContract(),
   };
