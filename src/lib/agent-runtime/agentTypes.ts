@@ -2,14 +2,18 @@ export type AgentEventType =
   | "agent.started"
   | "agent.plan.created"
   | "model.delta"
+  | "tool.requested"
   | "tool.started"
   | "tool.output"
   | "tool.failed"
   | "permission.required"
+  | "permission.resolved"
+  | "observation.added"
   | "evidence.added"
   | "patch.generated"
   | "patch.applied"
   | "workspace.updated"
+  | "agent.compacted"
   | "agent.completed"
   | "agent.failed";
 
