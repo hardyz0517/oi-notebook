@@ -3,6 +3,7 @@ import { forwardRef, startTransition, type ChangeEvent, type CSSProperties, type
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { Bot, Check, ChevronDown, ChevronRight, Columns2, ExternalLink, Eye, FilePlus, FileText, FolderPlus, FolderOpen, Keyboard, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pause, Play, PlugZap, RefreshCw, Save, Search, Settings, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
+import { Workflow } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -19,6 +20,7 @@ import { mergeConfigWithStoredCustomCollections, writeStoredCustomCollections, t
 import { useCollectionCandidatesFromNotes } from "@/components/tag-manager/useCollectionCandidatesFromNotes";
 import TagPickerDialog from "@/components/TagPickerDialog";
 import AiSidebar from "@/components/ai/AiSidebar";
+import { AgentWorkbenchShell } from "@/components/agent-workbench/AgentWorkbenchShell";
 import { CodexDiffPreview, getDiffStats } from "@/components/ai/DiffPreview";
 import type { AiPolishPreview, AiSidebarNoteContext, ApplyPolishedFullNoteInput, ApplyPolishedSelectionInput } from "@/components/ai/types";
 import MarkdownEditor, { MarkdownEditorToolbar, type MarkdownEditorSelectionRange, type MarkdownEditorToolbarApi } from "@/components/editor/MarkdownEditor";
@@ -147,6 +149,7 @@ import {
 } from "@/components/settings/settingsGeometry";
 import { cn } from "@/lib/utils";
 import { classifyMarkdownSavePath, listNotes, readNote, writeNote, deleteNote, renameNote, createNoteFolder, renameNoteFolder, deleteNoteFolder, openBlog, restartBlogServer, openNotesFolder, getNotesRootPath, hideMainWindow, saveNoteAsset, importLuoguInsight, prepareLuoguSubmissionNote, writeLuoguPreparedNote, getLuoguConfig, saveLuoguConfig, testLuoguConnection, previewLuoguSubmissionPage, getAiConfig, saveAiConfig, syncAiProviderModelsDraft, testAiProviderDraft, listAiPrompts, readAiPrompt, saveAiPrompt, resetAiPromptToDefault, polishAiPromptTemplate, showSaveMarkdownDialog, testWebSearchConnection, clearWebCache, getLocalNoteIndexStatus, rebuildLocalNoteIndex, getTagTaxonomyConfig, saveTagTaxonomyConfig, writeExternalMarkdownFile, getBlogConfig, saveBlogConfig, type BlogConfig } from "@/lib/api";
+import { getAgentWorkbenchPreview, type AgentWorkbenchPreviewResult } from "@/lib/api";
 import {
   getPreviewPerfStats,
   markCommittedMarkdownSchedule,
@@ -182,6 +185,7 @@ import {
   getAiActivityToggleLabel,
   getActivityButtonClassName,
   getNotesActivityToggleLabel,
+  getWorkbenchActivityToggleLabel,
   getSettingsOpenTarget,
   deriveEditorViewLayout,
   getSaveStatusActionLabel,
@@ -1090,6 +1094,8 @@ export default function App() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("split");
   const [isNotesSidebarOpen, setIsNotesSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [isAgentWorkbenchOpen, setIsAgentWorkbenchOpen] = useState(false);
+  const [agentWorkbenchPreview, setAgentWorkbenchPreview] = useState<AgentWorkbenchPreviewResult | null>(null);
   const [isAiSidebarMaximized, setIsAiSidebarMaximized] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(getInitialLeftSidebarWidth);
   const [aiSidebarWidth, setAiSidebarWidth] = useState(() => getInitialAiSidebarWidth(clampAiSidebarWidth));
@@ -1983,6 +1989,7 @@ export default function App() {
   });
   const notesActivityToggleLabel = getNotesActivityToggleLabel(isNotesSidebarOpen);
   const aiActivityToggleLabel = getAiActivityToggleLabel(isAiSidebarOpen);
+  const workbenchActivityToggleLabel = getWorkbenchActivityToggleLabel(isAgentWorkbenchOpen);
   const blogSettingsView = deriveBlogSettingsView({
     isLoadingBlogConfig,
     isSavingBlogConfig,
@@ -2330,6 +2337,7 @@ export default function App() {
     isLuoguDialogOpen,
     isRestartingBlog,
     isSearchOpen,
+    isAgentWorkbenchOpen,
     isNotesSidebarOpen,
   });
   const isAiActivityActive = isAiActivitySelected({
@@ -5631,6 +5639,10 @@ export default function App() {
     });
   };
 
+  const handleActivityWorkbench = () => {
+    setIsAgentWorkbenchOpen((open) => !open);
+  };
+
   const handleActivityBlog = () => {
     void handleOpenBlog();
   };
@@ -5817,7 +5829,21 @@ export default function App() {
       console.info("[NoteX Perf] ai sidebar open summary", summary);
     });
   }, [isAiSidebarOpen]);
+  useEffect(() => {
+    let cancelled = false;
 
+    void getAgentWorkbenchPreview()
+      .then((preview) => {
+        if (!cancelled) setAgentWorkbenchPreview(preview);
+      })
+      .catch((error) => {
+        if (!cancelled) console.info("Agent Workbench preview unavailable:", getErrorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     let resizeFrameId: number | null = null;
 
@@ -8030,6 +8056,16 @@ export default function App() {
             </ToolbarButton>
             <ToolbarButton
               type="button"
+              className={activityButtonClass("workbench")}
+              onClick={handleActivityWorkbench}
+              title={workbenchActivityToggleLabel}
+              aria-label={workbenchActivityToggleLabel}
+              selected={activeActivityItem === "workbench"}
+            >
+              <Workflow size={24} strokeWidth={2.18} />
+            </ToolbarButton>
+            <ToolbarButton
+              type="button"
               className={activityButtonClass("blog")}
               onClick={handleActivityBlog}
               title="打开博客"
@@ -8137,7 +8173,7 @@ export default function App() {
         )}
 
         <div className="relative flex min-w-0 flex-1 overflow-hidden">
-        <section className="app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden">
+        <section className={cn("app-editor-workspace flex min-w-0 flex-1 flex-col overflow-hidden", isAgentWorkbenchOpen && "hidden")}>
           <OpenTabsBar
             tabs={workspaceTabs}
             activeTabId={activeWorkspaceTabId ?? currentFilePath}
@@ -8481,6 +8517,9 @@ export default function App() {
               </div>
             </>
           )}
+        </section>
+        <section className={cn("flex min-w-0 flex-1 overflow-hidden", !isAgentWorkbenchOpen && "hidden")}>
+          <AgentWorkbenchShell preview={agentWorkbenchPreview} />
         </section>
         <AiSidebar
           context={aiSidebarContext}

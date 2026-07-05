@@ -1,6 +1,6 @@
 import type { SettingsCategory, SettingsSection } from "@/components/settings/settingsTypes";
 
-export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "blog" | "settings";
+export type ActivityBarItem = "notes" | "search" | "luogu" | "ai" | "workbench" | "blog" | "settings";
 export type EditorViewMode = "split" | "editor" | "preview";
 
 export const EDITOR_VIEW_MODE_OPTIONS: Array<{ id: EditorViewMode; label: string }> = [
@@ -48,6 +48,7 @@ export interface ActiveActivityItemInput {
   isLuoguDialogOpen: boolean;
   isRestartingBlog: boolean;
   isSearchOpen: boolean;
+  isAgentWorkbenchOpen?: boolean;
   isNotesSidebarOpen: boolean;
 }
 
@@ -56,6 +57,7 @@ export function getActiveActivityItem(input: ActiveActivityItemInput): ActivityB
   if (input.isLuoguDialogOpen) return "luogu";
   if (input.isRestartingBlog) return "blog";
   if (input.isSearchOpen) return "search";
+  if (input.isAgentWorkbenchOpen) return "workbench";
   if (input.isNotesSidebarOpen) return "notes";
   return null;
 }
@@ -80,6 +82,10 @@ export function getNotesActivityToggleLabel(isNotesSidebarOpen: boolean): string
 
 export function getAiActivityToggleLabel(isAiSidebarOpen: boolean): string {
   return isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手";
+}
+
+export function getWorkbenchActivityToggleLabel(isAgentWorkbenchOpen: boolean): string {
+  return isAgentWorkbenchOpen ? "关闭 Agent Workbench" : "打开 Agent Workbench";
 }
 
 export type SettingsOpenTarget =

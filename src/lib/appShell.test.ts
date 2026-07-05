@@ -8,6 +8,7 @@ import {
   getActiveActivityItem,
   getAiActivityToggleLabel,
   getActivityButtonClassName,
+  getWorkbenchActivityToggleLabel,
   getNotesActivityToggleLabel,
   getSaveStatusActionLabel,
   getSettingsOpenTarget,
@@ -46,6 +47,7 @@ describe("appShell", () => {
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: true,
+      isAgentWorkbenchOpen: true,
       isNotesSidebarOpen: true,
     })).toBe("search");
   });
@@ -56,6 +58,7 @@ describe("appShell", () => {
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: false,
+      isAgentWorkbenchOpen: false,
       isNotesSidebarOpen: true,
     })).toBe("notes");
     expect(getActiveActivityItem({
@@ -63,8 +66,20 @@ describe("appShell", () => {
       isLuoguDialogOpen: false,
       isRestartingBlog: false,
       isSearchOpen: false,
+      isAgentWorkbenchOpen: false,
       isNotesSidebarOpen: false,
     })).toBeNull();
+  });
+
+  it("selects workbench activity before notes", () => {
+    expect(getActiveActivityItem({
+      isSettingsCenterOpen: false,
+      isLuoguDialogOpen: false,
+      isRestartingBlog: false,
+      isSearchOpen: false,
+      isAgentWorkbenchOpen: true,
+      isNotesSidebarOpen: true,
+    })).toBe("workbench");
   });
 
   it("selects AI activity when the sidebar is open or AI settings are active", () => {
@@ -86,6 +101,11 @@ describe("appShell", () => {
   it("derives the AI activity toggle label from sidebar visibility", () => {
     expect(getAiActivityToggleLabel(true)).toBe("关闭 AI 助手");
     expect(getAiActivityToggleLabel(false)).toBe("打开 AI 助手");
+  });
+
+  it("derives the workbench activity toggle label from workspace visibility", () => {
+    expect(getWorkbenchActivityToggleLabel(true)).toBe("关闭 Agent Workbench");
+    expect(getWorkbenchActivityToggleLabel(false)).toBe("打开 Agent Workbench");
   });
 
   it("keeps about-page markdown capabilities stable", () => {
@@ -153,6 +173,13 @@ describe("appShell", () => {
 
     expect(appSource).toContain("getAiActivityToggleLabel");
     expect(appSource).not.toContain('isAiSidebarOpen ? "关闭 AI 助手" : "打开 AI 助手"');
+  });
+
+  it("keeps the Agent Workbench shell mounted so toggling does not reset its local state", () => {
+    const appSource = readFileSync(appSourcePath, "utf8");
+
+    expect(appSource).toContain("<AgentWorkbenchShell preview={agentWorkbenchPreview} />");
+    expect(appSource).not.toContain("{isAgentWorkbenchOpen ? (");
   });
 
   it("derives settings open targets from categories and pages", () => {
