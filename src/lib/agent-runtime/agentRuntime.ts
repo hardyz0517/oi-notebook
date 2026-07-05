@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentRuntimeRunResult, AgentSessionState, AgentToolRunOutput } from "./agentTypes";
+import type { AgentEvent, AgentEventType, AgentRuntimeRunResult, AgentSessionState, AgentToolRunOutput } from "./agentTypes";
 import { appendSessionEvent } from "./agentSession";
 import { createEventStream, type EventStream } from "./eventStream";
 import type { PermissionManager } from "./permissionManager";
@@ -27,6 +27,13 @@ const isToolRunOutput = (value: unknown): value is AgentToolRunOutput =>
   typeof value === "object" &&
   "output" in value;
 
+const TOOL_SUPPLIED_EVENT_DENYLIST = new Set<AgentEventType>([
+  "model.delta",
+  "patch.generated",
+  "patch.applied",
+  "agent.compacted",
+]);
+
 export function createAgentRuntime(input: {
   session: AgentSessionState;
   toolRegistry: ToolRegistry;
@@ -50,17 +57,32 @@ export function createAgentRuntime(input: {
     async runTool(toolName: string, inputValue: unknown): Promise<AgentRuntimeRunResult & { output?: unknown }> {
       pushEvent(createEvent(session.id, "tool.requested", { toolName, input: inputValue }));
 
-      const tool = input.toolRegistry.get(toolName);
-      if (!tool) {
-        pushEvent(createEvent(session.id, "tool.failed", { toolName, reason: "tool_not_registered" }));
+      const toolResult = input.toolRegistry.resolve(toolName);
+      if (toolResult.status === "unsupported") {
+        pushEvent(createEvent(session.id, "tool.failed", { toolName, reason: toolResult.reason }));
         session = { ...session, status: "failed" };
-        return { status: "failed", reason: "tool_not_registered" };
+        return { status: "failed", reason: toolResult.reason };
       }
 
-      if (!input.permissionManager.canAutoRunTool(toolName, tool.permission)) {
+      const tool = toolResult.tool;
+      const permissionDecision = input.permissionManager.decideToolPermission(toolName, tool.permission);
+
+      if (permissionDecision.status === "prompt-required" || permissionDecision.status === "degraded-fallback") {
         pushEvent(createEvent(session.id, "permission.required", { toolName, permission: tool.permission }));
+        pushEvent(createEvent(session.id, "permission.resolved", permissionDecision));
         session = { ...session, status: "blocked" };
         return { status: "blocked", reason: "permission_required" };
+      }
+
+      pushEvent(createEvent(session.id, "permission.resolved", permissionDecision));
+
+      if (
+        permissionDecision.status === "denied" ||
+        permissionDecision.status === "unavailable" ||
+        permissionDecision.status === "blocked-by-configuration"
+      ) {
+        session = { ...session, status: "blocked" };
+        return { status: "blocked", reason: permissionDecision.reason };
       }
 
       pushEvent(createEvent(session.id, "tool.started", { toolName, input: inputValue }));
@@ -71,6 +93,12 @@ export function createAgentRuntime(input: {
         pushEvent(createEvent(session.id, "tool.output", { toolName, output }));
         if (isToolRunOutput(rawOutput)) {
           for (const event of rawOutput.events ?? []) {
+            if (TOOL_SUPPLIED_EVENT_DENYLIST.has(event.type)) {
+              const reason = `reserved_agent_event:${event.type}`;
+              pushEvent(createEvent(session.id, "tool.failed", { toolName, reason }));
+              session = { ...session, status: "failed" };
+              return { status: "failed", reason };
+            }
             pushEvent(createEvent(session.id, event.type, event.payload));
           }
         }
