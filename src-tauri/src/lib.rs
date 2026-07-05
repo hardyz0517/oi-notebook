@@ -1,8 +1,8 @@
 mod agent_workbench;
 mod ai;
 mod blog_content;
-mod blog_service;
 mod blog_server;
+mod blog_service;
 mod frontmatter;
 mod git;
 mod local_search;
@@ -62,9 +62,7 @@ fn open_notes_folder() -> Result<(), String> {
 
 #[tauri::command]
 fn hide_main_window(window: tauri::Window) -> Result<(), String> {
-    window
-        .hide()
-        .map_err(|e| format!("隐藏主窗口失败：{e}"))
+    window.hide().map_err(|e| format!("隐藏主窗口失败：{e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
