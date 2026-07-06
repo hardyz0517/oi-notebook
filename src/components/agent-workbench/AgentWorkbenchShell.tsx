@@ -5,9 +5,11 @@ import type { AgentEvent, AgentLoopCapabilityStatus, AgentLoopContract } from "@
 import { createAgentSession } from "@/lib/agent-runtime/agentSession";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
+import type { OiSkillReadModel } from "@/lib/oi-skills";
 import { type ProblemWorkspace } from "@/lib/problem-workspace/problemWorkspaceTypes";
 import type { EvidenceStoreRecord } from "@/lib/research-engine";
 import { EvidencePanel } from "./EvidencePanel";
+import { OiSkillPreviewPanel } from "./OiSkillPreviewPanel";
 import { PermissionSurface, type PermissionRequestPreview } from "./PermissionSurface";
 import { ProblemWorkspacePanel } from "./ProblemWorkspacePanel";
 import { ToolTraceViewer } from "./ToolTraceViewer";
@@ -50,6 +52,7 @@ export function AgentWorkbenchShell({
   evidenceRecords = [],
   permissionRequests = [],
   loopContract = createPreviewAgentLoopContract(),
+  oiSkillPreview = null,
   preview = null,
 }: {
   workspace?: ProblemWorkspace;
@@ -57,6 +60,7 @@ export function AgentWorkbenchShell({
   evidenceRecords?: EvidenceStoreRecord[];
   permissionRequests?: PermissionRequestPreview[];
   loopContract?: AgentLoopContract;
+  oiSkillPreview?: OiSkillReadModel | null;
   preview?: AgentWorkbenchPreviewResult | null;
 }) {
   const [currentWorkspace, setCurrentWorkspace] = useState(workspace);
@@ -64,6 +68,7 @@ export function AgentWorkbenchShell({
   const [currentEvidenceRecords, setCurrentEvidenceRecords] = useState(evidenceRecords);
   const [currentPermissionRequests, setCurrentPermissionRequests] = useState(permissionRequests);
   const [currentLoopContract, setCurrentLoopContract] = useState(loopContract);
+  const [currentOiSkillPreview, setCurrentOiSkillPreview] = useState<OiSkillReadModel | null>(oiSkillPreview);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -94,6 +99,7 @@ export function AgentWorkbenchShell({
       setCurrentEvidenceRecords(result.evidenceRecords);
       setCurrentPermissionRequests(result.permissionRequests);
       setCurrentLoopContract(result.loopContract);
+      setCurrentOiSkillPreview(result.oiSkillPreview);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -194,6 +200,7 @@ export function AgentWorkbenchShell({
       </main>
       <aside className="grid min-h-0 content-start gap-3 overflow-auto">
         <PermissionSurface requests={currentPermissionRequests} />
+        <OiSkillPreviewPanel preview={currentOiSkillPreview} />
         <EvidencePanel records={currentEvidenceRecords} />
       </aside>
     </section>

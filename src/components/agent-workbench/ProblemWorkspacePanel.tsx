@@ -13,6 +13,9 @@ export function ProblemWorkspacePanel({ workspace }: { workspace: ProblemWorkspa
         <div>Samples: {workspace.sampleInputs.length}</div>
         <div>Evidence: {workspace.evidenceIds.length}</div>
         <div>Trace events: {workspace.traceEventIds.length}</div>
+        <div>Sources: {workspace.sourceRoles?.length ?? 0}</div>
+        <div>Constraints: {workspace.statement?.constraints.length ?? 0}</div>
+        <div>Solution outline: {workspace.solutionOutline?.status ?? "unavailable"}</div>
       </div>
     </section>
   );
