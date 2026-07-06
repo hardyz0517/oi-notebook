@@ -1,6 +1,13 @@
 import { createProblemWorkspace } from "./problemWorkspaceDefaults";
 import type { ProblemWorkspace, ProblemWorkspaceCreateInput, ProblemWorkspaceUpdateInput } from "./problemWorkspaceTypes";
 
+function hasPatchField<K extends keyof ProblemWorkspaceUpdateInput>(
+  patch: ProblemWorkspaceUpdateInput,
+  field: K,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, field);
+}
+
 export type ProblemWorkspaceStore = {
   create(input: ProblemWorkspaceCreateInput): ProblemWorkspace;
   get(id: string): ProblemWorkspace | undefined;
@@ -30,6 +37,9 @@ export function createProblemWorkspaceStore(): ProblemWorkspaceStore {
         sampleOutputs: patch.sampleOutputs ?? current.sampleOutputs,
         evidenceIds: patch.evidenceIds ?? current.evidenceIds,
         traceEventIds: patch.traceEventIds ?? current.traceEventIds,
+        statement: hasPatchField(patch, "statement") ? patch.statement : current.statement,
+        sourceRoles: hasPatchField(patch, "sourceRoles") ? (patch.sourceRoles ?? []) : (current.sourceRoles ?? []),
+        solutionOutline: hasPatchField(patch, "solutionOutline") ? patch.solutionOutline : current.solutionOutline,
       };
       workspaces.set(id, next);
       return next;

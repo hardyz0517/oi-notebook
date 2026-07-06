@@ -1,5 +1,27 @@
+import type { OiSolutionOutline, OiSourceRole } from "@/lib/oi-skills";
+
 export type ProblemWorkspaceSource = "luogu" | "manual" | "import";
 export type ProblemWorkspaceEntryMode = "manual" | "luogu" | "current_research";
+
+export type ProblemWorkspaceStatement = {
+  summary: string;
+  inputFormat?: string;
+  outputFormat?: string;
+  constraints: string[];
+  samples?: Array<{
+    input: string;
+    output: string;
+    explanation?: string;
+  }>;
+};
+
+export type ProblemWorkspaceSourceRole = {
+  sourceId: string;
+  role: OiSourceRole;
+  title: string;
+  url?: string;
+  status: "usable" | "degraded" | "unavailable";
+};
 
 export interface ProblemWorkspace {
   id: string;
@@ -12,6 +34,9 @@ export interface ProblemWorkspace {
   sampleOutputs: string[];
   evidenceIds: string[];
   traceEventIds: string[];
+  statement?: ProblemWorkspaceStatement;
+  sourceRoles?: ProblemWorkspaceSourceRole[];
+  solutionOutline?: OiSolutionOutline;
 }
 
 export type ProblemWorkspaceCreateInput = Partial<Pick<ProblemWorkspace, "id" | "source">> &
@@ -24,6 +49,9 @@ export type ProblemWorkspaceCreateInput = Partial<Pick<ProblemWorkspace, "id" | 
     sampleOutputs?: string[];
     evidenceIds?: string[];
     traceEventIds?: string[];
+    statement?: ProblemWorkspaceStatement;
+    sourceRoles?: ProblemWorkspaceSourceRole[];
+    solutionOutline?: OiSolutionOutline;
     entryMode?: ProblemWorkspaceEntryMode;
   };
 

@@ -39,4 +39,65 @@ describe("problem workspace store", () => {
     expect(updated?.traceEventIds).toEqual(["event-1"]);
     expect(updated?.evidenceIds).toEqual(["packet-1"]);
   });
+
+  it("preserves P7 preview fields when updating unrelated workspace data", () => {
+    const store = createProblemWorkspaceStore();
+    const workspace = store.create({
+      problemId: "P3379",
+      title: "LCA",
+      statement: {
+        summary: "Initial summary.",
+        constraints: ["tree"],
+      },
+      sourceRoles: [
+        { sourceId: "S1", role: "algorithm-reference", title: "Binary lifting", status: "usable" },
+      ],
+    });
+
+    const updated = store.update(workspace.id, { title: "LCA updated" });
+
+    expect(updated?.title).toBe("LCA updated");
+    expect(updated?.statement?.summary).toBe("Initial summary.");
+    expect(updated?.sourceRoles).toHaveLength(1);
+  });
+
+  it("updates P7 preview fields when they are explicitly patched", () => {
+    const store = createProblemWorkspaceStore();
+    const workspace = store.create({
+      problemId: "P3379",
+      title: "LCA",
+      statement: {
+        summary: "Initial summary.",
+        constraints: ["tree"],
+      },
+      sourceRoles: [
+        { sourceId: "S1", role: "algorithm-reference", title: "Binary lifting", status: "usable" },
+      ],
+    });
+
+    const updated = store.update(workspace.id, {
+      statement: {
+        summary: "Updated summary.",
+        inputFormat: "edges and queries",
+        constraints: ["tree", "queries"],
+      },
+      sourceRoles: [
+        { sourceId: "S2", role: "problem-statement", title: "Luogu P3379", status: "usable" },
+      ],
+      solutionOutline: {
+        status: "preview",
+        algorithm: "Binary lifting.",
+        proofSketch: "Normalize depth and lift both nodes.",
+        complexity: { time: "O((n + m) log n)", memory: "O(n log n)" },
+        implementationNotes: ["Precompute ancestors."],
+        pitfalls: ["Keep root depth stable."],
+        citationIds: ["E1"],
+        limitations: ["Preview outline only."],
+      },
+    });
+
+    expect(updated?.statement?.summary).toBe("Updated summary.");
+    expect(updated?.sourceRoles?.[0]?.role).toBe("problem-statement");
+    expect(updated?.solutionOutline?.citationIds).toEqual(["E1"]);
+  });
 });

@@ -12,5 +12,8 @@ export function createProblemWorkspace(input: ProblemWorkspaceCreateInput): Prob
     sampleOutputs: input.sampleOutputs ?? [],
     evidenceIds: input.evidenceIds ?? [],
     traceEventIds: input.traceEventIds ?? [],
+    statement: input.statement,
+    sourceRoles: input.sourceRoles ?? [],
+    solutionOutline: input.solutionOutline,
   };
 }

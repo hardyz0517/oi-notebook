@@ -16,6 +16,7 @@ describe("problem workspace types", () => {
     expect(workspace.sampleOutputs).toEqual([]);
     expect(workspace.evidenceIds).toEqual([]);
     expect(workspace.traceEventIds).toEqual([]);
+    expect(workspace.sourceRoles).toEqual([]);
   });
 
   it("creates a Luogu workspace when the entry mode is Luogu", () => {
@@ -28,5 +29,35 @@ describe("problem workspace types", () => {
 
     expect(workspace.source).toBe("luogu");
     expect(workspace.problemUrl).toBe("https://www.luogu.com.cn/problem/P3379");
+  });
+
+  it("stores P7 problem statement and solution outline preview fields", () => {
+    const workspace = createProblemWorkspace({
+      problemId: "P3379",
+      title: "LCA",
+      statement: {
+        summary: "Answer lowest common ancestor queries on a rooted tree.",
+        inputFormat: "n, m, root; edges; queries.",
+        outputFormat: "One LCA per query.",
+        constraints: ["n <= 500000", "m <= 500000"],
+      },
+      sourceRoles: [
+        { sourceId: "S1", role: "problem-statement", title: "Luogu P3379", status: "usable" },
+      ],
+      solutionOutline: {
+        status: "preview",
+        algorithm: "Binary lifting.",
+        proofSketch: "Lift deeper node first, then lift both nodes together.",
+        complexity: { time: "O((n + m) log n)", memory: "O(n log n)" },
+        implementationNotes: ["DFS from root to fill depth and up table."],
+        pitfalls: ["Use iterative DFS or increase stack in languages that need it."],
+        citationIds: ["E1"],
+        limitations: ["Preview outline only."],
+      },
+    });
+
+    expect(workspace.statement?.constraints).toContain("n <= 500000");
+    expect(workspace.sourceRoles?.[0]?.role).toBe("problem-statement");
+    expect(workspace.solutionOutline?.status).toBe("preview");
   });
 });
