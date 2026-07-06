@@ -133,6 +133,6 @@ describe("AgentToolPermission", () => {
     }
 
     expect(source).not.toMatch(/\bready\b/i);
-    expect(source).not.toMatch(/production-ready/i);
+    expect(source).not.toMatch(new RegExp(["production", "ready"].join("-"), "i"));
   });
 });

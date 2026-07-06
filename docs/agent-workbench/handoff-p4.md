@@ -120,3 +120,51 @@ Verification rerun on 2026-07-05 in `C:\Users\cpp_s\.codex\worktrees\20cf\oi-not
   `rg -n "AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true" src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
 
 Next-phase rule: any later work that touches Tool/Permission, Workspace, Web Reader/Evidence, UI IA, or Provider Adapter behavior must cite `docs/superpowers/specs/2026-07-05-p5-agent-core-contract-freeze-design.md` and must not reopen P5's forbidden items without a new approved plan.
+
+## P6 Tool/Permission Contract Freeze handoff
+
+P6 输出状态：**Tool/Permission Contract Preview**。本阶段只冻结 Tool/Permission contract preview 边界，不代表 AI 大升级完成、L5 Agent 完成、Codex-style runtime 完成或 production capability 可用。
+
+P6 已冻结的 contract：
+
+- Tool schema / metadata：工具定义携带 inputSchema、outputSchema、permission、exposure、timeoutMs、lifecycle、failurePolicy。
+- Registry duplicate / unsupported guard：重复注册不再静默覆盖，未注册工具返回结构化 unsupported failure。
+- Permission decision matrix：permission kind 覆盖 read、local-note-search、public-network、cookie-network、write、patch-apply、execute、destructive；decision status 覆盖 auto-allowed、prompt-required、denied、blocked-by-configuration、unavailable、degraded-fallback。
+- Runtime `permission.resolved` lifecycle：runtime 在 permission decision 后输出可审计的 `permission.resolved` path，并保持 `tool.requested`、`permission.required`、`tool.started`、`tool.output`、`tool.failed` 的生命周期边界。
+- Reserved event guard：工具提供的 reserved / unavailable 成熟能力事件会被 guard 拒绝并转为结构化失败，不能伪造 model loop、patch apply、compaction 等成熟能力。
+- Workbench permissionRequests 消费 policy output：Workbench 的 Tavily / Luogu Cookie permissionRequests 来自 permission policy decision，不再手写旧的 unavailable cards 或 `permission: "network"`。
+
+P6 仍禁止 / 未实现：
+
+- 真实 model loop、provider request、streaming。
+- 真实 write、patch apply、execute、code runner、delete、rollback。
+- Cookie-backed reader / Cookie-backed Luogu reading。
+- session persistence、storage、request log 持久化。
+- 旧 `src/components/ai/AiSidebar.tsx` 迁移。
+- 绕过 `src/lib/api.ts` 或修改 `notes/**`。
+
+本次 Task 6 closeout 实际验证记录：
+
+- 启动时 `.\node_modules\.bin\vitest.cmd` 缺失，`node .\node_modules\vitest\vitest.mjs` 也因本地 `node_modules\vitest` 缺失不可用；按 worker 指令执行 `pnpm.cmd fetch --force --ignore-scripts --frozen-lockfile` 和 `pnpm.cmd install --ignore-scripts --frozen-lockfile` 修复本地依赖链接，未改锁文件。
+- `.\node_modules\.bin\vitest.cmd run src/lib/agent-runtime`: PASS, 6 files / 23 tests.
+- `.\node_modules\.bin\vitest.cmd run src/lib/agent-workbench`: PASS, 1 file / 6 tests.
+- `.\node_modules\.bin\vitest.cmd run src/lib/apiBoundary.test.ts`: PASS, 1 file / 7 tests.
+- `.\node_modules\.bin\tsc.cmd --noEmit`: PASS.
+- API boundary audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- Workbench hardcoded permission-card audit 无命中：
+  `rg -n 'createUnavailablePermissionStates|tavily:unavailable|luogu-cookie:missing|permission: "network"' src/lib/agent-workbench/workbenchTaskFlow.ts src/lib/agent-workbench/workbenchTaskFlow.test.ts`
+- 额外 false-positive 清理后验证：
+  `.\node_modules\.bin\vitest.cmd run src/lib/agent-runtime/agentTypes.test.ts`: PASS, 1 file / 5 tests.
+  `.\node_modules\.bin\vitest.cmd run src/lib/agent-runtime`: PASS, 6 files / 23 tests.
+
+下一阶段必须继续参考：
+
+- 总 spec：`docs/superpowers/specs/2026-07-04-ai-agent-workbench-upgrade-design.md`
+- P5 freeze：`docs/superpowers/specs/2026-07-05-p5-agent-core-contract-freeze-design.md`
+- P6 freeze：`docs/superpowers/specs/2026-07-05-p6-tool-permission-contract-freeze-design.md`
+- P6 plan：`docs/superpowers/plans/2026-07-05-p6-tool-permission-contract.md`
+
+后续任何 worker 不得越过 `src/lib/api.ts` 边界，不得把 `notes/**` 纳入 routine engineering work，也不得把 P6 的 preview contract 表述为成熟 Agent 能力。
