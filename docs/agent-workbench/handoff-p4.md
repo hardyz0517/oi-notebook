@@ -168,3 +168,58 @@ P6 仍禁止 / 未实现：
 - P6 plan：`docs/superpowers/plans/2026-07-05-p6-tool-permission-contract.md`
 
 后续任何 worker 不得越过 `src/lib/api.ts` 边界，不得把 `notes/**` 纳入 routine engineering work，也不得把 P6 的 preview contract 表述为成熟 Agent 能力。
+
+## P7 OI Research / Solution Skill Contract Freeze handoff
+
+P7 输出状态：**OI Research/Solution Skill Contract Preview**。本阶段只冻结 OI research / solution skill 的 contract、read model、ProblemWorkspace preview fields 和 Workbench projection，不代表真实 AI 解题、成熟 model loop、provider adapter、patch/write/execute、Cookie-backed reader 或 persistence 可用。
+
+P7 已冻结 / 已合入：
+
+- OI skill contract types：`skillId`、task/source/evidence/solution outline/read-model、preview status、source role、permission request、trace event 等类型已经落在 `src/lib/oi-skills/**`。
+- ProblemWorkspace preview fields：题面 statement、sourceRoles、solutionOutline preview 挂载字段已经合入 `src/lib/problem-workspace/**`。
+- Deterministic `oiSkillPreviewAdapter`：把既有 research evidence 映射成 P7 `research-problem` read model，不接真实 provider/model loop。
+- `runWorkbenchTask.oiSkillPreview` read model：Workbench task flow 返回 P7 preview read model，作为只读投影输入。
+- Workbench projection：`OiSkillPreviewPanel` 和 `ProblemWorkspacePanel` 只展示 P7 read model / workspace projection。
+
+Workbench 边界：
+
+- Workbench 只消费 P7 read model，不拥有 skill decisions，不拼 prompt，不决定 provider/model，不绕过 runtime/policy。
+- `permissionRequests` 继续来自 P6 policy/runtime output；P7 projection 只读取并展示这些请求，不手写新的能力判定。
+
+P7 仍禁止 / 未实现：
+
+- 真实 provider request、prompt construction、model loop、streaming。
+- 真实 write、patch apply、execute、code runner、delete、rollback。
+- Cookie-backed Luogu reading / Cookie-backed reader。
+- session persistence、storage、request log。
+- 旧 `src/components/ai/AiSidebar.tsx` 迁移。
+- 绕过 `src/lib/api.ts`、直接 Tauri invoke、修改 `notes/**`。
+
+本次 Task 5 boundary audit 实际验证记录：
+
+- 启动快照：
+  `git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -10 --decorate` 显示 HEAD 为 `c1aa2b9 feat: project p7 oi skill preview in workbench`，并包含 P7 Task 1-4 commits `56d1617`、`9bc8df5`、`ac5c853`、`c1aa2b9`。
+- 初次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/oi-skills` 因本地 `node_modules\vitest\vitest.mjs` 缺失失败；随后执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile` 恢复依赖链接，lockfile 未修改，filtered status 仍为空。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/oi-skills`: PASS, 1 file / 4 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/problem-workspace`: PASS, 2 files / 7 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`: PASS, 2 files / 9 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`: PASS, 6 files / 23 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/research-engine`: PASS, 4 files / 10 tests.
+- `node .\node_modules\typescript\bin\tsc --noEmit`: PASS.
+- API boundary audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/lib/research-engine src/components/agent-workbench src/lib/problem-workspace src/lib/oi-skills`
+- Workbench hardcoded preview drift audit 无命中：
+  `rg -n 'createUnavailablePermissionStates|tavily:unavailable|luogu-cookie:missing|permission: "network"' src/lib/agent-workbench src/components/agent-workbench`
+- Broad provider/model/streaming audit 有既有命中，不记为全局 no-hit：
+  `src/lib/agent-runtime/**` 命中 reserved event literal `model.delta`；`src/lib/research-engine/**` 命中既有 `providerId` / `modelId` planner and shadow-run fields，以及 OpenAI news fixtures / diagnostics / mock reader / self-check fixtures。这些属于 P7 之前已有的 runtime protocol literal 与 research-engine provider/news fixture surface，不是 P7 changed surface 新增越界。
+- P7 changed-surface scoped provider/model audit 无命中：
+  `rg -n 'providerId|modelId|chat_with_current_note_stream|model\.delta|prompt construction|OpenAI' src/lib/agent-workbench src/components/agent-workbench src/lib/problem-workspace src/lib/oi-skills`
+- P7 changed-surface scoped capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-workbench src/components/agent-workbench src/lib/problem-workspace src/lib/oi-skills`
+
+下一阶段入口：
+
+- 必须新写 freeze spec 和 implementation plan，才能讨论真实 model loop、provider adapter、patch workflow、execute、Cookie-backed reader 或 persistence。
+- 任何后续 worker 不得从 P7 preview contract 推导出真实 AI 解题能力已经可用。
