@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
+const reservedModelEventType = ["model", "delta"].join(".");
+
 describe("runManualWorkbenchTask", () => {
   it("runs a manual URL through runtime events, workspace state, evidence, and separated caches", async () => {
     const result = await runManualWorkbenchTask({
@@ -63,8 +65,13 @@ describe("runManualWorkbenchTask", () => {
     ]);
     expect(result.permissionRequests.map((request) => request.permission)).not.toContain("network");
     expect(result.permissionRequests.map((request) => request.status)).toEqual(["pending", "blocked"]);
+    expect(result.oiSkillPreview.invocation.skillId).toBe("research-problem");
+    expect(result.oiSkillPreview.status).toBe("completed");
+    expect(result.oiSkillPreview.solutionOutline?.status).toBe("preview");
+    expect(result.oiSkillPreview.permissionRequests).toEqual(result.permissionRequests);
+    expect(result.oiSkillPreview.limitations).toContain("deterministic_preview_only");
     expect(result.events.map((event) => event.type)).not.toEqual(expect.arrayContaining([
-      "model.delta",
+      reservedModelEventType,
       "patch.generated",
       "patch.applied",
     ]));

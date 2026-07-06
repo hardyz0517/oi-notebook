@@ -6,8 +6,8 @@ import type {
   AgentLoopContract,
   AgentPermissionDecision,
   AgentToolDefinition,
-  AgentToolPermission,
 } from "@/lib/agent-runtime/agentTypes";
+import type { OiSkillPermissionRequest, OiSkillReadModel } from "@/lib/oi-skills";
 import { createPermissionManager } from "@/lib/agent-runtime/permissionManager";
 import { createToolRegistry } from "@/lib/agent-runtime/toolRegistry";
 import { createProblemWorkspaceStore } from "@/lib/problem-workspace/problemWorkspaceStore";
@@ -31,16 +31,11 @@ import {
   type ResearchSearchRequest,
   type SearchPolicyDecision,
 } from "@/lib/research-engine";
+import { createOiSkillPreviewReadModel } from "./oiSkillPreviewAdapter";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
-export type WorkbenchTaskPermissionRequest = {
-  id: string;
-  toolName: string;
-  permission: AgentToolPermission;
-  status: WorkbenchTaskPermissionStatus;
-  reason: string;
-};
+export type WorkbenchTaskPermissionRequest = OiSkillPermissionRequest;
 
 export type WorkbenchPreviewToolDefinition = Omit<AgentToolDefinition, "run">;
 
@@ -72,6 +67,7 @@ export type ManualWorkbenchTaskResult = {
   events: AgentEvent[];
   evidenceRecords: EvidenceStoreRecord[];
   permissionRequests: WorkbenchTaskPermissionRequest[];
+  oiSkillPreview: OiSkillReadModel;
   toolDefinitions: WorkbenchPreviewToolDefinition[];
   cacheSnapshot: ReturnType<ResearchCacheManager["snapshot"]>;
   loopContract: AgentLoopContract;
@@ -353,12 +349,20 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     traceEventIds: events.map((event) => event.id),
     evidenceIds: currentWorkspace.evidenceIds,
   }) ?? currentWorkspace;
+  const evidenceRecords = evidenceStore.list("workspace");
+  const permissionRequests = createWorkbenchPermissionRequests(permissionManager);
+  const oiSkillPreview = createOiSkillPreviewReadModel({
+    problem: input.problem,
+    evidenceRecords,
+    permissionRequests,
+  });
 
   return {
     workspace: finalWorkspace,
     events,
-    evidenceRecords: evidenceStore.list("workspace"),
-    permissionRequests: createWorkbenchPermissionRequests(permissionManager),
+    evidenceRecords,
+    permissionRequests,
+    oiSkillPreview,
     toolDefinitions: registry.list().map(previewToolDefinition),
     cacheSnapshot: cacheManager.snapshot(),
     loopContract: createPreviewAgentLoopContract(),
