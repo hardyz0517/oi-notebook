@@ -146,3 +146,70 @@ export type AgentLoopContract = {
   patchApply: AgentLoopCapability;
   sessionPersistence: AgentLoopCapability;
 };
+
+export type AgentSessionReplayState =
+  | "idle"
+  | "running"
+  | "blocked"
+  | "interrupted"
+  | "completed"
+  | "failed"
+  | "replayable"
+  | "replay-mismatch";
+
+export type AgentReplayCapabilityStatus = "preview" | "reserved" | "unavailable" | "blocked" | "degraded";
+
+export type AgentReplayCapability = {
+  status: AgentReplayCapabilityStatus;
+  reason: string;
+};
+
+export type AgentReplayCapabilityMatrix = {
+  sessionReplay: AgentReplayCapability;
+  modelLoop: AgentReplayCapability;
+  providerRequest: AgentReplayCapability;
+  patchApply: AgentReplayCapability;
+  execute: AgentReplayCapability;
+  cookieReader: AgentReplayCapability;
+  persistence: AgentReplayCapability;
+};
+
+export type AgentReplaySource = "fixture" | "event-log" | "checkpoint";
+
+export type AgentSessionMetadata = {
+  sessionId: string;
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  phase: "P8 Agent Session / Replay Contract Freeze";
+  inputState: "OI Research/Solution Skill Contract Preview";
+  outputState: "Agent Session/Replay Contract Preview";
+  status: AgentSessionReplayState;
+  privacyPolicyId: string;
+  replaySource: AgentReplaySource;
+  capabilities: AgentReplayCapabilityMatrix;
+};
+
+export type AgentReplayPrivacyClassification =
+  | "public"
+  | "local-note"
+  | "cookie"
+  | "secret"
+  | "user-input"
+  | "derived-evidence"
+  | "runtime-metadata";
+
+export type AgentReplayPrivacyVisibility =
+  | "ui-visible"
+  | "runtime-only"
+  | "redacted"
+  | "forbidden-for-model"
+  | "forbidden-for-third-party";
+
+export type AgentReplayRedaction = {
+  classification: AgentReplayPrivacyClassification;
+  visibility: AgentReplayPrivacyVisibility;
+  redactionStrategy: "none" | "mask" | "drop" | "hash";
+  reason: string;
+  sourceRef?: string;
+};

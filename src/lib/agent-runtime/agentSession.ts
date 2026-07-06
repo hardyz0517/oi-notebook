@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSessionState, AgentSessionStatus } from "./agentTypes";
+import type { AgentEvent, AgentSessionMetadata, AgentSessionState, AgentSessionStatus } from "./agentTypes";
 
 let sessionCounter = 0;
 
@@ -29,5 +29,35 @@ export function markSessionStatus(session: AgentSessionState, status: AgentSessi
   return {
     ...session,
     status,
+  };
+}
+
+export function createAgentSessionMetadata(input: {
+  sessionId: string;
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  privacyPolicyId: string;
+}): AgentSessionMetadata {
+  return {
+    sessionId: input.sessionId,
+    workspaceId: input.workspaceId,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    phase: "P8 Agent Session / Replay Contract Freeze",
+    inputState: "OI Research/Solution Skill Contract Preview",
+    outputState: "Agent Session/Replay Contract Preview",
+    status: "replayable",
+    privacyPolicyId: input.privacyPolicyId,
+    replaySource: "fixture",
+    capabilities: {
+      sessionReplay: { status: "preview", reason: "p8_contract_preview" },
+      modelLoop: { status: "unavailable", reason: "model_loop_not_in_p8" },
+      providerRequest: { status: "unavailable", reason: "provider_request_not_in_p8" },
+      patchApply: { status: "unavailable", reason: "patch_apply_not_in_p8" },
+      execute: { status: "unavailable", reason: "execute_not_in_p8" },
+      cookieReader: { status: "unavailable", reason: "cookie_reader_not_in_p8" },
+      persistence: { status: "unavailable", reason: "persistence_not_in_p8" },
+    },
   };
 }

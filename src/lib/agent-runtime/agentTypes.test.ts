@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { createAgentSession, markSessionStatus } from "./agentSession";
-import type { AgentEventType, AgentToolDefinition, AgentToolPermission } from "./agentTypes";
+import { createAgentSession, createAgentSessionMetadata, markSessionStatus } from "./agentSession";
+import type {
+  AgentEventType,
+  AgentReplayCapabilityStatus,
+  AgentReplayPrivacyClassification,
+  AgentSessionMetadata,
+  AgentToolDefinition,
+  AgentToolPermission,
+} from "./agentTypes";
 
 describe("agent session", () => {
   it("creates a session with stable defaults", () => {
@@ -134,5 +141,82 @@ describe("AgentToolPermission", () => {
 
     expect(source).not.toMatch(/\bready\b/i);
     expect(source).not.toMatch(new RegExp(["production", "ready"].join("-"), "i"));
+  });
+});
+
+describe("P8 agent session contract", () => {
+  it("records P8 input and output states without opening future capabilities", () => {
+    const metadata = createAgentSessionMetadata({
+      sessionId: "session:p8",
+      workspaceId: "workspace:p3379",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      updatedAt: "2026-07-06T00:00:00.000Z",
+      privacyPolicyId: "privacy:p8-preview",
+    });
+
+    expect(metadata.phase).toBe("P8 Agent Session / Replay Contract Freeze");
+    expect(metadata.inputState).toBe("OI Research/Solution Skill Contract Preview");
+    expect(metadata.outputState).toBe("Agent Session/Replay Contract Preview");
+    expect(metadata.status).toBe("replayable");
+    expect(metadata.replaySource).toBe("fixture");
+    expect(metadata.capabilities.sessionReplay.status).toBe("preview");
+    expect(metadata.capabilities.modelLoop.status).toBe("unavailable");
+    expect(metadata.capabilities.providerRequest.status).toBe("unavailable");
+    expect(metadata.capabilities.patchApply.status).toBe("unavailable");
+    expect(metadata.capabilities.execute.status).toBe("unavailable");
+    expect(metadata.capabilities.cookieReader.status).toBe("unavailable");
+    expect(metadata.capabilities.persistence.status).toBe("unavailable");
+  });
+
+  it("keeps replay capability statuses explicit", () => {
+    const statuses: AgentReplayCapabilityStatus[] = ["preview", "reserved", "unavailable", "blocked", "degraded"];
+
+    expect(statuses).toContain("preview");
+    expect(statuses).toContain("reserved");
+    expect(statuses).toContain("unavailable");
+    expect(statuses).toContain("blocked");
+    expect(statuses).toContain("degraded");
+  });
+
+  it("classifies sensitive replay payloads for redaction", () => {
+    const classifications: AgentReplayPrivacyClassification[] = [
+      "public",
+      "local-note",
+      "cookie",
+      "secret",
+      "user-input",
+      "derived-evidence",
+      "runtime-metadata",
+    ];
+
+    expect(classifications).toContain("cookie");
+    expect(classifications).toContain("secret");
+    expect(classifications).toContain("local-note");
+  });
+
+  it("allows metadata to be assembled as a serializable contract", () => {
+    const metadata = {
+      sessionId: "session:p8",
+      workspaceId: "workspace:p3379",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      updatedAt: "2026-07-06T00:00:00.000Z",
+      phase: "P8 Agent Session / Replay Contract Freeze",
+      inputState: "OI Research/Solution Skill Contract Preview",
+      outputState: "Agent Session/Replay Contract Preview",
+      status: "replayable",
+      privacyPolicyId: "privacy:p8-preview",
+      replaySource: "fixture",
+      capabilities: {
+        sessionReplay: { status: "preview", reason: "p8_contract_preview" },
+        modelLoop: { status: "unavailable", reason: "model_loop_not_in_p8" },
+        providerRequest: { status: "unavailable", reason: "provider_request_not_in_p8" },
+        patchApply: { status: "unavailable", reason: "patch_apply_not_in_p8" },
+        execute: { status: "unavailable", reason: "execute_not_in_p8" },
+        cookieReader: { status: "unavailable", reason: "cookie_reader_not_in_p8" },
+        persistence: { status: "unavailable", reason: "persistence_not_in_p8" },
+      },
+    } satisfies AgentSessionMetadata;
+
+    expect(JSON.parse(JSON.stringify(metadata)).sessionId).toBe("session:p8");
   });
 });
