@@ -23,3 +23,12 @@ export function createEventStream(): EventStream {
     },
   };
 }
+
+export function snapshotEventsWithSequence<TEvent extends AgentEvent>(
+  events: readonly TEvent[],
+): Array<TEvent & { sequence: number }> {
+  return events.map((event, index) => ({
+    ...event,
+    sequence: index + 1,
+  }));
+}
