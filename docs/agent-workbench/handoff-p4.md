@@ -267,3 +267,49 @@ P8 仍禁止 / 未实现：
 - filtered status 在测试、审计、依赖恢复和追加本 P8 handoff 前仍为空；暂存区在追加本 P8 handoff 前仍为空。
 
 下一阶段必须新写 freeze spec，才能讨论 provider/model adapter contract、patch workflow contract、tool execution runner contract、Cookie-backed reader contract、session persistence/storage contract 或 Workbench IA replay/detail contract。任何后续 worker 不得从 P8 preview contract 推导出真实 provider/model/patch/execute/Cookie/persistence 已获批。
+
+## P9 Provider / Model Adapter Contract Freeze handoff
+
+P9 输出状态：**Provider/Model Adapter Contract Preview**。本阶段冻结并合入 provider/model request envelope、adapter interface、mock fixture、stream event contract、error taxonomy、capability matrix、cancellation/rate-limit/retry metadata、redaction/permission policy 和 Workbench read-only projection。
+
+P9 已冻结 / 已合入：
+
+- Request envelope：记录 request/session/turn/workspace/provider/model/evidence/privacy/permission/capability metadata，只引用 evidence id 和 workspace id，不携带真实 note 内容。
+- Adapter interface：仅 mock adapter，使用 deterministic fixture events，不使用真实网络、SDK、Tauri、环境变量、API key 或 secrets。
+- Mock fixture：只包含合成文本、固定 id、固定时间和非 secret payload。
+- Stream event contract：`*.preview` 事件仅表示 fixture projection，不表示 live streaming。
+- Error taxonomy：auth/network/rate-limit/quota/timeout/schema/unsupported/cancel/redaction/permission/fixture errors 映射为 safe structured errors，不向 UI 泄漏 raw provider payload。
+- Capability matrix：provider request、streaming、tool calling 等真实能力保持 unavailable/reserved/blocked/degraded，不冒充 live capability。
+- Cancellation/rate-limit/retry metadata：只作为 contract metadata 和 preview event，不执行真实 abort、backoff 或 provider retry。
+- Redaction/permission policy：secret、cookie、真实 note content 和未获批准 payload 不进入 provider/model request；provider request permission 由 runtime policy 表达，P9 不允许 live call。
+- Workbench read-only projection：UI 只读展示 provider/model preview view model，不选择 provider，不拼 prompt，不触发 provider request。
+
+P9 仍禁止 / 未实现：
+
+- 真实 provider request、真实 streaming、prompt construction、model loop。
+- API key handling、secret storage、request log、session storage/persistence。
+- write、patch apply、execute/code runner、delete/rollback。
+- Cookie-backed reader。
+- 旧 `src/components/ai/AiSidebar.tsx` 迁移。
+- 绕过 `src/lib/api.ts`、直接 Tauri invoke、读取或修改真实 `notes/**`。
+
+本次 Task 5 验证记录：
+
+- 初次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：FAIL，`node_modules\vitest\vitest.mjs` 缺失，未进入 Vitest test discovery，无 test file count / test count；随后执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile` 恢复依赖链接，未提交 package/lock 变化。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，10 test files / 43 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，4 test files / 11 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+
+本次 Task 5 boundary audit 记录：
+
+- API boundary audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Network / secret / provider audit 无命中；本轮没有测试里的 `secret` negative-proof 字符串命中，也没有 Authorization、apiKey、OPENAI/ANTHROPIC key、`sk-`、fetch/XMLHttpRequest/EventSource/WebSocket 命中：
+  `rg -n 'fetch\(|XMLHttpRequest|EventSource|WebSocket|Authorization|apiKey|api_key|OPENAI_API_KEY|ANTHROPIC_API_KEY|sk-[A-Za-z0-9]' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- Prompt/request-log/storage/Cookie/patch/execute audit 无命中；未出现真实 prompt construction、request log、session storage、Cookie-backed reader、patch apply 或 execute runner：
+  `rg -n 'chat_with_current_note_stream|prompt construction|request log|session storage|Cookie-backed|patch apply|execute runner' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- Capability audit 无命中；没有把 live provider request 或 live streaming 标为 preview-ready：
+  `rg -n 'providerRequest:\s*\{\s*status:\s*"preview"|streaming:\s*\{\s*status:\s*"preview"' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出，`git diff --cached --name-only` 无输出。
+
+下一阶段必须新写 freeze spec，才能讨论 live provider request、live streaming、prompt construction、model loop、provider settings migration、API key handling、request log persistence、patch workflow、tool execution runner、Cookie-backed reader 或 session persistence/storage。任何后续 worker 不得从 P9 preview contract 推导出真实 provider/model/streaming/prompt/storage/write/patch/execute 能力已经可用。
