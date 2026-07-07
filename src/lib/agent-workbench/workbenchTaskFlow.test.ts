@@ -73,6 +73,9 @@ describe("runManualWorkbenchTask", () => {
     expect(result.sessionReplay.outputState).toBe("Agent Session/Replay Contract Preview");
     expect(result.sessionReplayViewModel.title).toBe("Agent Session/Replay Contract Preview");
     expect(result.sessionReplay.capabilityStatuses.providerRequest.status).toBe("unavailable");
+    expect(result.providerModelPreview.title).toBe("Provider/Model Adapter Contract Preview");
+    expect(result.providerModelPreview.providerRequestStatus.status).toBe("unavailable");
+    expect(result.providerModelPreview.limitations).toContain("no_live_provider_request");
     expect(result.events.map((event) => event.type)).not.toEqual(expect.arrayContaining([
       reservedModelEventType,
       "patch.generated",

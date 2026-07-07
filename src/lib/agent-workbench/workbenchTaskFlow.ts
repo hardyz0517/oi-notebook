@@ -1,5 +1,7 @@
 import { createAgentRuntime } from "@/lib/agent-runtime/agentRuntime";
 import { createPreviewAgentLoopContract } from "@/lib/agent-runtime/agentLoopContract";
+import { createMockProviderModelAdapter } from "@/lib/agent-runtime/providerModelAdapter";
+import type { ProviderModelRequestEnvelope } from "@/lib/agent-runtime/providerModelTypes";
 import { replayAgentSession, type AgentReplayReadModel } from "@/lib/agent-runtime/agentReplay";
 import { createAgentSession, createAgentSessionMetadata } from "@/lib/agent-runtime/agentSession";
 import type {
@@ -34,6 +36,7 @@ import {
   type SearchPolicyDecision,
 } from "@/lib/research-engine";
 import { createOiSkillPreviewReadModel } from "./oiSkillPreviewAdapter";
+import { createProviderModelViewModel, type ProviderModelViewModel } from "./providerModelViewModel";
 import { createSessionReplayViewModel, type SessionReplayViewModel } from "./sessionReplayViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
@@ -76,6 +79,7 @@ export type ManualWorkbenchTaskResult = {
   loopContract: AgentLoopContract;
   sessionReplay: AgentReplayReadModel;
   sessionReplayViewModel: SessionReplayViewModel;
+  providerModelPreview: ProviderModelViewModel;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -388,6 +392,52 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     checkpoints: [],
   });
   const sessionReplayViewModel = createSessionReplayViewModel(sessionReplay);
+  const providerModelRequest: ProviderModelRequestEnvelope = {
+    requestId: `request:${workspace.id}:p9`,
+    sessionId: sessionMetadata.sessionId,
+    turnId: `turn:${workspace.id}:p9`,
+    workspaceId: workspace.id,
+    providerProfileId: "provider:mock",
+    modelProfileId: "model:mock-reasoner",
+    intent: "general",
+    inputParts: [],
+    toolExposure: [],
+    evidenceRefs: evidenceRecords.flatMap((record) => record.packet.evidenceItems.map((item) => ({
+      evidenceId: item.evidenceId,
+      role: "derived-evidence" as const,
+    }))),
+    privacyPolicyId: "privacy:p9-preview",
+    permissionDecision: { status: "unavailable", reason: "provider_request_not_enabled_in_p9" },
+    capabilitySnapshot: {
+      providerRequest: { status: "unavailable", reason: "provider_request_not_enabled_in_p9" },
+      streaming: { status: "unavailable", reason: "streaming_not_enabled_in_p9" },
+      toolCalling: { status: "reserved", reason: "tool_calling_contract_only" },
+    },
+    idempotencyKey: `idem:${workspace.id}:p9`,
+    createdAt: "2026-07-07T00:00:00.000Z",
+  };
+  const providerModelAdapter = createMockProviderModelAdapter({
+    adapterId: "adapter:p9-mock",
+    events: [
+      {
+        type: "model.delta.preview",
+        requestId: providerModelRequest.requestId,
+        sequence: 1,
+        at: "2026-07-07T00:00:01.000Z",
+        text: "Provider/model adapter preview uses deterministic mock events only.",
+      },
+    ],
+  });
+  const providerModelEvents = providerModelAdapter.createMockTurn(providerModelRequest);
+  const providerModelPreview = createProviderModelViewModel({
+    requestId: providerModelRequest.requestId,
+    providerProfileId: providerModelRequest.providerProfileId,
+    modelProfileId: providerModelRequest.modelProfileId,
+    outputState: "Provider/Model Adapter Contract Preview",
+    events: providerModelEvents,
+    capabilities: providerModelAdapter.describeCapabilities(),
+    limitations: ["mock_adapter_only", "no_live_provider_request", "no_prompt_construction"],
+  });
 
   return {
     workspace: finalWorkspace,
@@ -400,6 +450,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     loopContract: createPreviewAgentLoopContract(),
     sessionReplay,
     sessionReplayViewModel,
+    providerModelPreview,
   };
 }
 
