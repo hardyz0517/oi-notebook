@@ -313,3 +313,51 @@ P9 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出，`git diff --cached --name-only` 无输出。
 
 下一阶段必须新写 freeze spec，才能讨论 live provider request、live streaming、prompt construction、model loop、provider settings migration、API key handling、request log persistence、patch workflow、tool execution runner、Cookie-backed reader 或 session persistence/storage。任何后续 worker 不得从 P9 preview contract 推导出真实 provider/model/streaming/prompt/storage/write/patch/execute 能力已经可用。
+
+## P10 Model Loop / Live Provider Request Contract Freeze handoff
+
+P10 输出状态：**Live Provider Request / One-Turn Model Step Contract Preview**。本阶段允许在通过 `src/lib/api.ts` / Tauri 安全边界、runtime permission gate、redaction gate、secret handling、bounded retry、cancellation 和 redacted memory audit snapshot 后进入真实 provider request / live streaming；它仍不是成熟 multi-step model loop、tool continuation、patch workflow、execute/code runner、Cookie-backed reader、session persistence 或 production-ready Agent。
+
+P10 已允许 / 已合入：
+
+- Live request metadata：记录 request/session/turn/workspace/provider/model、contextBuildId、permissionDecisionId、redactionDecisionId、secretRef、streamPolicyId、abortControllerId、retryPolicyId 等 live request boundary 字段。
+- Runtime ContextBuilder / PromptAssembler：provider context 和 payload assembly 由 runtime/provider boundary 负责，Workbench / React component 不拥有 P10 provider prompt assembly。
+- API boundary：frontend-to-Rust provider request 只经 `src/lib/api.ts`；Rust / Tauri 侧负责 secret lookup 和 live request transport。
+- One-turn live model step：冻结并合入单次 live model step、normalized stream projection、usage/completion/safe failure、cancellation、bounded retry 与 audit event contract。
+- Redacted memory audit snapshot：P10 只允许内存态 redacted audit snapshot，不写 durable request log。
+- Workbench read-only live projection：Workbench 只读展示 live request / stream / cancel / retry / error 状态，不选择 provider、不读 secret、不触发工具执行。
+
+P10 仍禁止 / 未实现：
+
+- multi-step autonomous model loop、tool-call continuation、observation 回灌模型、compaction。
+- write、patch generation、patch apply、execute/code runner、delete、rollback。
+- Cookie-backed reader / Cookie-backed Luogu reading。
+- session persistence、database storage、durable request-log storage。
+- 旧 `src/components/ai/AiSidebar.tsx` 迁移。
+- 绕过 `src/lib/api.ts`、frontend 持有 API key / Authorization header / cookie、读取或修改真实 `notes/**`。
+
+本次 Task 7 最终验证记录：
+
+- 初次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：FAIL，`node_modules\vitest\vitest.mjs` 缺失，未进入 Vitest test discovery，无 test file count / test count；随后执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile` 恢复依赖链接，未修改 package / lock metadata，filtered status 和 staged paths 仍为空。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，14 test files / 55 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，4 test files / 13 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/apiBoundary.test.ts`：PASS，1 test file / 9 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+- `cargo check --manifest-path .\src-tauri\Cargo.toml`：FAIL / blocker，Tauri build script 停在 `resource path '..\local-blog\dist' doesn't exist`；本次不声称 Rust check 通过。
+
+本次 Task 7 boundary audit 记录：
+
+- Direct Tauri audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Secret / provider audit 有允许命中，不代表 frontend / Workbench 持有 secret：
+  `src/lib/api.ts:95`、`src/lib/api.ts:109` 命中 Tauri boundary command 参数 `api_key`；`src/lib/api.ts:401` 命中 boundary wrapper option `apiKey?`；`src/lib/agent-runtime/providerModelTypes.test.ts:151` 命中 negative-proof assertion `not.toContain("Authorization")`。
+- Prompt construction audit 有 scoped 命中：
+  `src/lib/agent-runtime/providerContextBuilder.test.ts` 与 `src/lib/agent-runtime/providerPromptAssembler.test.ts` 是 P10 runtime ContextBuilder / PromptAssembler focused tests；
+  `src/components/settings/SearchDiagnosticsPanel.tsx:1235`、`:1561` 是既有搜索诊断面板的 prompt contract static check，只检查关键约束字符串是否存在且不返回提示词全文，不属于 Agent Workbench P10 provider prompt assembly。
+- Forbidden patch / execute / Cookie / storage / AiSidebar audit 无命中：
+  `rg -n 'patch apply|execute runner|Cookie-backed|session storage|request log persistence|AiSidebar' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench src/lib/api.ts src-tauri/src`
+- Forbidden mature capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
+
+下一阶段必须先写新的 freeze spec，才能讨论 multi-step model loop / tool continuation、session persistence / request-log storage、patch workflow、execute runner、Cookie-backed reader 或 old AiSidebar retirement / migration。任何后续 worker 不得从 P10 one-turn live step contract 推导出完整 autonomous Agent loop 或 production-ready Workbench 已经可用。
