@@ -3,7 +3,7 @@ import type { AgentToolPermission } from "@/lib/agent-runtime/agentTypes";
 export type OiSkillId =
   | "research-problem"
   | "find-notes"
-  | `w${"rite"}-solution-outline`
+  | "write-solution-outline"
   | "debug-code-preview"
   | "stress-test-preview";
 
