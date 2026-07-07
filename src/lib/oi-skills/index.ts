@@ -10,6 +10,7 @@ export type {
   OiSkillPermissionRequest,
   OiSkillReadModel,
   OiSkillSchema,
+  OiSkillSessionLinkage,
   OiSkillStatus,
   OiSkillTraceEvent,
   OiSkillTraceEventType,

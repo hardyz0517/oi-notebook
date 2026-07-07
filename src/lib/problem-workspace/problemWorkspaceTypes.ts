@@ -34,6 +34,8 @@ export interface ProblemWorkspace {
   sampleOutputs: string[];
   evidenceIds: string[];
   traceEventIds: string[];
+  sessionIds?: string[];
+  replayCheckpointIds?: string[];
   statement?: ProblemWorkspaceStatement;
   sourceRoles?: ProblemWorkspaceSourceRole[];
   solutionOutline?: OiSolutionOutline;
@@ -49,6 +51,8 @@ export type ProblemWorkspaceCreateInput = Partial<Pick<ProblemWorkspace, "id" | 
     sampleOutputs?: string[];
     evidenceIds?: string[];
     traceEventIds?: string[];
+    sessionIds?: string[];
+    replayCheckpointIds?: string[];
     statement?: ProblemWorkspaceStatement;
     sourceRoles?: ProblemWorkspaceSourceRole[];
     solutionOutline?: OiSolutionOutline;

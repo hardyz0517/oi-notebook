@@ -100,4 +100,27 @@ describe("problem workspace store", () => {
     expect(updated?.sourceRoles?.[0]?.role).toBe("problem-statement");
     expect(updated?.solutionOutline?.citationIds).toEqual(["E1"]);
   });
+
+  it("preserves and updates P8 session replay linkage explicitly", () => {
+    const store = createProblemWorkspaceStore();
+    const workspace = store.create({
+      problemId: "P3379",
+      title: "LCA",
+      sessionIds: ["session:p8"],
+      replayCheckpointIds: ["checkpoint:p8:1"],
+    });
+
+    const preserved = store.update(workspace.id, { title: "LCA updated" });
+
+    expect(preserved?.sessionIds).toEqual(["session:p8"]);
+    expect(preserved?.replayCheckpointIds).toEqual(["checkpoint:p8:1"]);
+
+    const updated = store.update(workspace.id, {
+      sessionIds: ["session:p8:next"],
+      replayCheckpointIds: ["checkpoint:p8:2"],
+    });
+
+    expect(updated?.sessionIds).toEqual(["session:p8:next"]);
+    expect(updated?.replayCheckpointIds).toEqual(["checkpoint:p8:2"]);
+  });
 });

@@ -4,6 +4,7 @@ import type {
   OiSkillDefinition,
   OiSkillInvocation,
   OiSkillReadModel,
+  OiSkillSessionLinkage,
   OiSolutionOutline,
 } from "./oiSkillTypes";
 import * as oiSkillTypesModule from "./oiSkillTypes";
@@ -75,5 +76,38 @@ describe("P7 OI skill contract", () => {
 
     expect(readModel.status).toBe("degraded");
     expect(readModel.limitations).toContain("no_evidence");
+  });
+
+  it("lets P7 skill read models reference P8 sessions without changing skill capability", () => {
+    const sessionLinkage = {
+      sessionId: "session:p8",
+      replayCheckpointIds: ["checkpoint:p8:1"],
+      traceEventIds: ["event:1"],
+    } satisfies OiSkillSessionLinkage;
+
+    const readModel = {
+      invocation: {
+        invocationId: "skill:research-problem:P3379",
+        skillId: "research-problem",
+        problemRef: { platform: "luogu", problemId: "P3379", title: "LCA" },
+        mode: "preview",
+      },
+      status: "completed",
+      problemRef: { platform: "luogu", problemId: "P3379", title: "LCA" },
+      sources: [],
+      evidence: [],
+      solutionOutline: null,
+      permissionRequests: [],
+      traceEvents: [],
+      limitations: ["deterministic_preview_only"],
+      sessionLinkage,
+    } satisfies OiSkillReadModel;
+
+    expect(readModel.sessionLinkage?.sessionId).toBe("session:p8");
+    expect(readModel.sessionLinkage?.replayCheckpointIds).toEqual(["checkpoint:p8:1"]);
+    expect(readModel.sessionLinkage?.traceEventIds).toEqual(["event:1"]);
+    expect(readModel.limitations).toContain("deterministic_preview_only");
+    expect(readModel.invocation.mode).toBe("preview");
+    expect(readModel.status).toBe("completed");
   });
 });

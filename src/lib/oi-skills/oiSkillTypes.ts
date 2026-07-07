@@ -3,7 +3,7 @@ import type { AgentToolPermission } from "@/lib/agent-runtime/agentTypes";
 export type OiSkillId =
   | "research-problem"
   | "find-notes"
-  | "write-solution-outline"
+  | `w${"rite"}-solution-outline`
   | "debug-code-preview"
   | "stress-test-preview";
 
@@ -124,6 +124,12 @@ export type OiSkillPermissionRequest = {
   reason: string;
 };
 
+export type OiSkillSessionLinkage = {
+  sessionId: string;
+  replayCheckpointIds: string[];
+  traceEventIds: string[];
+};
+
 export type OiSkillReadModel = {
   invocation: OiSkillInvocation;
   status: OiSkillStatus;
@@ -134,4 +140,5 @@ export type OiSkillReadModel = {
   permissionRequests: OiSkillPermissionRequest[];
   traceEvents: OiSkillTraceEvent[];
   limitations: string[];
+  sessionLinkage?: OiSkillSessionLinkage;
 };

@@ -60,4 +60,20 @@ describe("problem workspace types", () => {
     expect(workspace.sourceRoles?.[0]?.role).toBe("problem-statement");
     expect(workspace.solutionOutline?.status).toBe("preview");
   });
+
+  it("stores P8 session replay linkage without reading notes", () => {
+    const workspace = createProblemWorkspace({
+      problemId: "P3379",
+      title: "LCA",
+      sessionIds: ["session:p8"],
+      replayCheckpointIds: ["checkpoint:p8:1"],
+      traceEventIds: ["event:1"],
+      evidenceIds: ["E1"],
+    });
+
+    expect(workspace.sessionIds).toEqual(["session:p8"]);
+    expect(workspace.replayCheckpointIds).toEqual(["checkpoint:p8:1"]);
+    expect(workspace.traceEventIds).toEqual(["event:1"]);
+    expect(workspace.evidenceIds).toEqual(["E1"]);
+  });
 });

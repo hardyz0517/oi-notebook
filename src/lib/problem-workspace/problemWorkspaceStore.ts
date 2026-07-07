@@ -37,6 +37,8 @@ export function createProblemWorkspaceStore(): ProblemWorkspaceStore {
         sampleOutputs: patch.sampleOutputs ?? current.sampleOutputs,
         evidenceIds: patch.evidenceIds ?? current.evidenceIds,
         traceEventIds: patch.traceEventIds ?? current.traceEventIds,
+        sessionIds: patch.sessionIds ?? current.sessionIds ?? [],
+        replayCheckpointIds: patch.replayCheckpointIds ?? current.replayCheckpointIds ?? [],
         statement: hasPatchField(patch, "statement") ? patch.statement : current.statement,
         sourceRoles: hasPatchField(patch, "sourceRoles") ? (patch.sourceRoles ?? []) : (current.sourceRoles ?? []),
         solutionOutline: hasPatchField(patch, "solutionOutline") ? patch.solutionOutline : current.solutionOutline,
