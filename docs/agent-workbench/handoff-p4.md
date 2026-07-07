@@ -223,3 +223,47 @@ P7 仍禁止 / 未实现：
 
 - 必须新写 freeze spec 和 implementation plan，才能讨论真实 model loop、provider adapter、patch workflow、execute、Cookie-backed reader 或 persistence。
 - 任何后续 worker 不得从 P7 preview contract 推导出真实 AI 解题能力已经可用。
+
+## P8 Agent Session / Replay Contract Freeze handoff
+
+P8 输出状态：**Agent Session/Replay Contract Preview**。本阶段冻结 session metadata、event log/replay fixture、checkpoint contract、privacy/redaction contract、workspace/evidence/session linkage 和 Workbench read-only replay projection，不代表真实 provider request、prompt construction、model loop、streaming、write、patch apply、execute runner、Cookie-backed reader、session persistence/storage 或 request log 可用。
+
+P8 已冻结 / 已合入：
+
+- Session metadata：记录 P8 input/output state、workspace id、privacy policy id、replay source 和 capability statuses。
+- Event log / replay fixture：按 sequence deterministic replay，ordering、session mismatch、redaction、reserved/unavailable capability 等 failure 有结构化 reason。
+- Checkpoint contract：fixture / in-memory checkpoint 作为恢复边界，不是 storage 或 persistence 实现。
+- Privacy/redaction contract：Cookie、secret、local-note、user-input、derived-evidence 等分类进入 policy type，不进入 fixture 明文、模型 provider、第三方 payload 或 request log。
+- Workspace/evidence/session linkage：ProblemWorkspace、OI skill read model、replay read model 和 Workbench evidence 可以互相定位。
+- Workbench read-only replay projection：UI 只读消费 replay view model，不拥有 replay decision，不拼 prompt，不决定 provider/model，不触发工具执行。
+
+P8 仍禁止 / 未实现：
+
+- 真实 provider request、prompt construction、model loop、streaming。
+- 真实 write、patch apply、execute、code runner、delete、rollback。
+- Cookie-backed reader 或 Cookie-backed capability expansion。
+- session persistence、session storage、request log。
+- 旧 `src/components/ai/AiSidebar.tsx` 迁移。
+- 绕过 `src/lib/api.ts`、直接 Tauri invoke、修改或读取真实 `notes/**` 参与 routine engineering work。
+
+本次 Task 5 boundary audit 实际验证记录：
+
+- 启动快照：`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -12 --decorate` 显示 HEAD 为 `699b8bf chore: keep replay capability keys readable`，并包含 P8 Task 1-4 commits `3da7096`、`6afeff3`、`5c9f1d9`、`94fb390`、`41f8f42`、`699b8bf`。
+- 首次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime` 因本地 `node_modules\vitest\vitest.mjs` 缺失失败，未进入 Vitest test discovery；随后执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile` 恢复依赖链接，lockfile / package 文件未修改，filtered status 仍为空。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`: PASS, 7 files / 33 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`: PASS, 3 files / 10 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/problem-workspace`: PASS, 2 files / 9 tests.
+- `node .\node_modules\vitest\vitest.mjs run src/lib/oi-skills`: PASS, 1 file / 5 tests.
+- `node .\node_modules\typescript\bin\tsc --noEmit`: PASS.
+- API boundary audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Provider/model audit 无命中：
+  `rg -n 'providerId|modelId|chat_with_current_note_stream|model\.delta|prompt construction|OpenAI' src/lib/agent-workbench src/components/agent-workbench src/lib/problem-workspace src/lib/oi-skills`
+- Write/patch/execute/Cookie/storage audit 有允许命中，不记为全局 no-hit：
+  `src/lib/oi-skills/oiSkillTypes.ts:6` 命中既有 P7 `write-solution-outline` skill id，是 OI skill contract literal，不是真实 write 能力。
+  `src/components/agent-workbench/AgentWorkbenchShell.tsx:127` 命中既有 Workbench preview status `Patch/execute: unavailable`，是不具备能力的状态展示。
+  `src/lib/agent-workbench/sessionReplayViewModel.test.ts:13` 命中 P8 `execute: unavailable` fixture，是负证明测试，不是真实 execute 能力。
+  `src/components/agent-workbench/SessionReplayPanel.tsx:37` 和 `src/components/agent-workbench/SessionReplayPanel.tsx:38` 只读展示 execute capability reason/status，状态来自 replay view model，不触发执行。
+- filtered status 在测试、审计、依赖恢复和追加本 P8 handoff 前仍为空；暂存区在追加本 P8 handoff 前仍为空。
+
+下一阶段必须新写 freeze spec，才能讨论 provider/model adapter contract、patch workflow contract、tool execution runner contract、Cookie-backed reader contract、session persistence/storage contract 或 Workbench IA replay/detail contract。任何后续 worker 不得从 P8 preview contract 推导出真实 provider/model/patch/execute/Cookie/persistence 已获批。
