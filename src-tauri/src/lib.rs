@@ -12,6 +12,7 @@ mod luogu_reader;
 mod notes;
 mod path_safety;
 mod paths;
+mod provider_request;
 mod prompts;
 mod tag_taxonomy;
 mod task_status;
@@ -127,6 +128,7 @@ pub fn run() {
             ai::get_prompt_citation_contract_status,
             ai::run_notex_search_self_check,
             agent_workbench::get_agent_workbench_preview,
+            provider_request::request_live_provider,
             web_cache::get_web_cache_status,
             local_search::search_local_notes,
             local_search::get_local_note_index_status,

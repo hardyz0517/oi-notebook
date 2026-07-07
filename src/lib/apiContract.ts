@@ -4,6 +4,30 @@ export interface ApiCommandContract {
   argKeys: string[];
 }
 
+export type LiveProviderRequestInput = {
+  requestId: string;
+  providerProfileId: string;
+  modelProfileId: string;
+  secretRef: string;
+  payload: {
+    providerPayloadShape: "openai-compatible-chat";
+    messagesOrInput: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    stream: boolean;
+    safePromptSummary: string;
+  };
+};
+
+export type LiveProviderRequestOutput = {
+  requestId: string;
+  events: Array<{
+    type: string;
+    sequence: number;
+    at: string;
+    text?: string;
+    safeDetail?: string;
+  }>;
+};
+
 export const API_COMMAND_CONTRACTS = [
   { functionName: "listNotes", commandName: "list_notes", argKeys: [] },
   { functionName: "readNote", commandName: "read_note", argKeys: ["relativePath"] },
@@ -59,6 +83,7 @@ export const API_COMMAND_CONTRACTS = [
   { functionName: "getPromptCitationContractStatus", commandName: "get_prompt_citation_contract_status", argKeys: [] },
   { functionName: "runNotexSearchSelfCheck", commandName: "run_notex_search_self_check", argKeys: [] },
   { functionName: "getAgentWorkbenchPreview", commandName: "get_agent_workbench_preview", argKeys: [] },
+  { functionName: "requestLiveProvider", commandName: "request_live_provider", argKeys: ["input"] },
   { functionName: "generateNoteMetadata", commandName: "generate_note_metadata", argKeys: ["relativePath", "markdownContent", "tagTaxonomyContext"] },
   { functionName: "polishNoteBody", commandName: "polish_note_body", argKeys: ["relativePath", "markdownContent"] },
   { functionName: "chatWithCurrentNote", commandName: "chat_with_current_note", argKeys: ["question", "context", "providerId", "modelId"] },

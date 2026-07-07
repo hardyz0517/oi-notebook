@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AiSearchQueryPlan, SearchDecision, WebSearchConfig, WebSearchMode, WebSearchRequest, WebSearchResult, WebSourceExcerptRequest, WebSourceExcerptResult } from "@/lib/aiWebSearch";
+import type { LiveProviderRequestInput, LiveProviderRequestOutput } from "@/lib/apiContract";
 import { toApiError } from "@/lib/apiError";
 import type { AiTagRecommendationIgnored, UserTagTaxonomyConfig } from "@/lib/tagTaxonomy";
 import type { NoteFileInfo } from "@/types/note";
@@ -1090,6 +1091,14 @@ export async function runNotexSearchSelfCheck(): Promise<NotexSearchSelfCheckRes
 export async function getAgentWorkbenchPreview(): Promise<AgentWorkbenchPreviewResult> {
   try {
     return await invoke<AgentWorkbenchPreviewResult>("get_agent_workbench_preview");
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+export async function requestLiveProvider(input: LiveProviderRequestInput): Promise<LiveProviderRequestOutput> {
+  try {
+    return await invoke<LiveProviderRequestOutput>("request_live_provider", { input });
   } catch (e) {
     throw toApiError(e);
   }

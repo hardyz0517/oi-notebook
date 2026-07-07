@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { API_COMMAND_CONTRACTS } from "./apiContract";
+import type { LiveProviderRequestInput } from "./apiContract";
 
 const sourceRoot = path.resolve(process.cwd(), "src");
 const sourceExtensions = new Set([".ts", ".tsx"]);
@@ -164,6 +165,34 @@ describe("api boundary", () => {
       expect(shellSource).toContain("available for preview");
       expect(shellSource).toContain("unavailable");
       expect(shellSource).not.toMatch(/:\s*\{[^}]*\?\s*["']ready["']/);
+    });
+  });
+
+  describe("live provider API contract", () => {
+    it("uses opaque secret refs and never frontend API keys", () => {
+      const input = {
+        requestId: "request:p10:1",
+        providerProfileId: "provider:openai-compatible",
+        modelProfileId: "model:gated",
+        secretRef: "secret-ref:provider:openai-compatible",
+        payload: {
+          providerPayloadShape: "openai-compatible-chat",
+          messagesOrInput: [{ role: "user", content: "Hello" }],
+          stream: true,
+          safePromptSummary: "1 input parts, 0 blocked parts",
+        },
+      } satisfies LiveProviderRequestInput;
+
+      expect(JSON.stringify(input)).not.toContain("sk-");
+      expect(input.secretRef).toContain("secret-ref:");
+    });
+
+    it("registers the live provider wrapper in the API contract", () => {
+      expect(API_COMMAND_CONTRACTS).toContainEqual({
+        functionName: "requestLiveProvider",
+        commandName: "request_live_provider",
+        argKeys: ["input"],
+      });
     });
   });
 
