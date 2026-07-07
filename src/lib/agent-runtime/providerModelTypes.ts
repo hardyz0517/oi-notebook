@@ -47,6 +47,35 @@ export type ProviderModelRequestEnvelope = {
   createdAt: string;
 };
 
+export type ProviderModelLiveRequestMetadata = {
+  transport: "tauri-provider-request";
+  requestMode: "live-one-turn";
+  contextBuildId: string;
+  redactionDecisionId: string;
+  permissionDecisionId: string;
+  secretRef: string;
+  requestLogPolicyId: string;
+  streamPolicyId: string;
+  abortControllerId: string;
+  retryPolicyId: string;
+};
+
+export type ProviderModelRequestAuditSnapshot = {
+  requestId: string;
+  sessionId: string;
+  turnId: string;
+  workspaceId: string;
+  providerProfileId: string;
+  modelProfileId: string;
+  permissionStatus: ProviderModelPermissionDecision["status"];
+  redactionBlocked: boolean;
+  eventCount: number;
+  retryAttempts: number;
+  cancelled: boolean;
+  safePromptSummary: string;
+  storage: "memory-only";
+};
+
 export type ModelCapabilityMatrix = {
   modelProfileId: string;
   providerProfileId: string;
@@ -66,15 +95,23 @@ export type ModelCapabilityMatrix = {
 
 export type ProviderModelStreamEvent =
   | { type: "provider.request.created"; requestId: string; sequence: number; at: string }
+  | { type: "provider.request.started"; requestId: string; sequence: number; at: string }
+  | { type: "provider.request.failed"; requestId: string; sequence: number; at: string; error: ProviderModelError }
+  | { type: "provider.request.cancelled"; requestId: string; sequence: number; at: string; reason: string }
   | { type: "provider.permission.checked"; requestId: string; sequence: number; at: string; decision: ProviderModelPermissionDecision }
   | { type: "provider.redaction.checked"; requestId: string; sequence: number; at: string; blocked: boolean }
   | { type: "model.turn.started"; requestId: string; sequence: number; at: string }
   | { type: "model.delta.preview"; requestId: string; sequence: number; at: string; text: string }
+  | { type: "model.delta.live"; requestId: string; sequence: number; at: string; text: string }
   | { type: "model.tool-call.requested.preview"; requestId: string; sequence: number; at: string; toolName: string }
   | { type: "model.usage.preview"; requestId: string; sequence: number; at: string; inputTokens: number; outputTokens: number }
+  | { type: "model.usage.live"; requestId: string; sequence: number; at: string; inputTokens: number; outputTokens: number }
   | { type: "model.turn.completed.preview"; requestId: string; sequence: number; at: string }
+  | { type: "model.turn.completed.live"; requestId: string; sequence: number; at: string }
   | { type: "model.turn.failed.preview"; requestId: string; sequence: number; at: string; error: ProviderModelError }
+  | { type: "model.turn.failed.live"; requestId: string; sequence: number; at: string; error: ProviderModelError }
   | { type: "model.turn.cancelled.preview"; requestId: string; sequence: number; at: string; reason: string }
+  | { type: "model.turn.cancelled.live"; requestId: string; sequence: number; at: string; reason: string }
   | { type: "provider.rate-limit.preview"; requestId: string; sequence: number; at: string; retryAfterMs: number }
   | { type: "provider.retry.scheduled.preview"; requestId: string; sequence: number; at: string; attempt: number; delayMs: number };
 
