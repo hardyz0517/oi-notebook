@@ -70,6 +70,9 @@ describe("runManualWorkbenchTask", () => {
     expect(result.oiSkillPreview.solutionOutline?.status).toBe("preview");
     expect(result.oiSkillPreview.permissionRequests).toEqual(result.permissionRequests);
     expect(result.oiSkillPreview.limitations).toContain("deterministic_preview_only");
+    expect(result.sessionReplay.outputState).toBe("Agent Session/Replay Contract Preview");
+    expect(result.sessionReplayViewModel.title).toBe("Agent Session/Replay Contract Preview");
+    expect(result.sessionReplay.capabilityStatuses.providerRequest.status).toBe("unavailable");
     expect(result.events.map((event) => event.type)).not.toEqual(expect.arrayContaining([
       reservedModelEventType,
       "patch.generated",

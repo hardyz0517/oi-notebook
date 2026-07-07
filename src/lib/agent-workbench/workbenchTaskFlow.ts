@@ -1,12 +1,14 @@
 import { createAgentRuntime } from "@/lib/agent-runtime/agentRuntime";
 import { createPreviewAgentLoopContract } from "@/lib/agent-runtime/agentLoopContract";
-import { createAgentSession } from "@/lib/agent-runtime/agentSession";
+import { replayAgentSession, type AgentReplayReadModel } from "@/lib/agent-runtime/agentReplay";
+import { createAgentSession, createAgentSessionMetadata } from "@/lib/agent-runtime/agentSession";
 import type {
   AgentEvent,
   AgentLoopContract,
   AgentPermissionDecision,
   AgentToolDefinition,
 } from "@/lib/agent-runtime/agentTypes";
+import { snapshotEventsWithSequence } from "@/lib/agent-runtime/eventStream";
 import type { OiSkillPermissionRequest, OiSkillReadModel } from "@/lib/oi-skills";
 import { createPermissionManager } from "@/lib/agent-runtime/permissionManager";
 import { createToolRegistry } from "@/lib/agent-runtime/toolRegistry";
@@ -32,6 +34,7 @@ import {
   type SearchPolicyDecision,
 } from "@/lib/research-engine";
 import { createOiSkillPreviewReadModel } from "./oiSkillPreviewAdapter";
+import { createSessionReplayViewModel, type SessionReplayViewModel } from "./sessionReplayViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -71,6 +74,8 @@ export type ManualWorkbenchTaskResult = {
   toolDefinitions: WorkbenchPreviewToolDefinition[];
   cacheSnapshot: ReturnType<ResearchCacheManager["snapshot"]>;
   loopContract: AgentLoopContract;
+  sessionReplay: AgentReplayReadModel;
+  sessionReplayViewModel: SessionReplayViewModel;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -356,6 +361,33 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     evidenceRecords,
     permissionRequests,
   });
+  const sessionMetadata = createAgentSessionMetadata({
+    sessionId: events[0]?.sessionId ?? `session:${workspace.id}:p8`,
+    workspaceId: workspace.id,
+    createdAt: events[0]?.at ?? "2026-07-06T00:00:00.000Z",
+    updatedAt: events[events.length - 1]?.at ?? events[0]?.at ?? "2026-07-06T00:00:00.000Z",
+    privacyPolicyId: "privacy:p8-preview",
+  });
+  const sessionReplay = replayAgentSession({
+    metadata: sessionMetadata,
+    events: snapshotEventsWithSequence(events).map((event) => ({
+      id: event.id,
+      type: event.type,
+      sessionId: event.sessionId,
+      at: event.at,
+      sequence: event.sequence,
+      source: "runtime",
+      payload: event.payload,
+      redaction: {
+        classification: "runtime-metadata",
+        visibility: "ui-visible",
+        redactionStrategy: "none",
+        reason: "workbench_preview_event",
+      },
+    })),
+    checkpoints: [],
+  });
+  const sessionReplayViewModel = createSessionReplayViewModel(sessionReplay);
 
   return {
     workspace: finalWorkspace,
@@ -366,6 +398,8 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     toolDefinitions: registry.list().map(previewToolDefinition),
     cacheSnapshot: cacheManager.snapshot(),
     loopContract: createPreviewAgentLoopContract(),
+    sessionReplay,
+    sessionReplayViewModel,
   };
 }
 
