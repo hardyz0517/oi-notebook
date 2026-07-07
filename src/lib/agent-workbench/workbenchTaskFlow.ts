@@ -36,7 +36,11 @@ import {
   type SearchPolicyDecision,
 } from "@/lib/research-engine";
 import { createOiSkillPreviewReadModel } from "./oiSkillPreviewAdapter";
-import { createProviderModelViewModel, type ProviderModelViewModel } from "./providerModelViewModel";
+import {
+  createProviderModelViewModel,
+  type ProviderModelProjectionInput,
+  type ProviderModelViewModel,
+} from "./providerModelViewModel";
 import { createSessionReplayViewModel, type SessionReplayViewModel } from "./sessionReplayViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
@@ -66,6 +70,7 @@ export type WorkbenchTaskInput = {
   mode: WorkbenchTaskMode;
   problem: ManualWorkbenchTaskInput["problem"];
   manualSource?: ManualWorkbenchSource;
+  providerModelPreview?: ProviderModelProjectionInput;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -429,7 +434,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     ],
   });
   const providerModelEvents = providerModelAdapter.createMockTurn(providerModelRequest);
-  const providerModelPreview = createProviderModelViewModel({
+  const providerModelPreview = createProviderModelViewModel(input.providerModelPreview ?? {
     requestId: providerModelRequest.requestId,
     providerProfileId: providerModelRequest.providerProfileId,
     modelProfileId: providerModelRequest.modelProfileId,

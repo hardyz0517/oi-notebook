@@ -38,4 +38,45 @@ describe("createProviderModelViewModel", () => {
     expect(model.providerRequestStatus.status).toBe("unavailable");
     expect(model.previewText).toBe("Synthetic only.");
   });
+
+  it("projects P10 one-turn live provider state without exposing secrets", () => {
+    const model = createProviderModelViewModel({
+      requestId: "request:p10:1",
+      providerProfileId: "provider:openai-compatible",
+      modelProfileId: "model:gated",
+      outputState: "Live Provider Request / One-Turn Model Step Contract Preview",
+      events: [
+        {
+          type: "provider.request.started",
+          requestId: "request:p10:1",
+          sequence: 1,
+          at: "2026-07-07T00:00:00.000Z",
+        },
+        {
+          type: "model.delta.live",
+          requestId: "request:p10:1",
+          sequence: 2,
+          at: "2026-07-07T00:00:01.000Z",
+          text: "Live text.",
+        },
+        {
+          type: "model.turn.completed.live",
+          requestId: "request:p10:1",
+          sequence: 3,
+          at: "2026-07-07T00:00:02.000Z",
+        },
+      ],
+      capabilities: {
+        providerRequest: { status: "preview", reason: "p10_live_gate" },
+        streaming: { status: "preview", reason: "p10_live_gate" },
+        toolCalling: { status: "reserved", reason: "future_phase" },
+      },
+      limitations: ["one_turn_only", "no_tool_continuation", "no_patch_apply"],
+    });
+
+    expect(model.title).toBe("Live Provider Request / One-Turn Model Step Contract Preview");
+    expect(model.previewText).toBe("Live text.");
+    expect(model.limitations).toContain("no_patch_apply");
+    expect(JSON.stringify(model)).not.toContain("sk-");
+  });
 });

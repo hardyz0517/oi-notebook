@@ -83,6 +83,47 @@ describe("runManualWorkbenchTask", () => {
     ]));
   });
 
+  it("passes through a P10 provider model preview when live read model exists", async () => {
+    const result = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "Live Provider Projection",
+        problemId: "live-provider-projection",
+        problemUrl: "https://example.test/live-provider",
+      },
+      manualSource: {
+        url: "https://example.test/live-provider",
+        title: "Live Provider Projection",
+        text: "Projection fixture.",
+      },
+      providerModelPreview: {
+        requestId: "request:p10:workbench",
+        providerProfileId: "provider:openai-compatible",
+        modelProfileId: "model:gated",
+        outputState: "Live Provider Request / One-Turn Model Step Contract Preview",
+        events: [
+          {
+            type: "model.delta.live",
+            requestId: "request:p10:workbench",
+            sequence: 1,
+            at: "2026-07-07T00:00:01.000Z",
+            text: "Live projection.",
+          },
+        ],
+        capabilities: {
+          providerRequest: { status: "preview", reason: "p10_live_gate" },
+          streaming: { status: "preview", reason: "p10_live_gate" },
+          toolCalling: { status: "reserved", reason: "future_phase" },
+        },
+        limitations: ["one_turn_only", "no_patch_apply"],
+      },
+    });
+
+    expect(result.providerModelPreview.title).toMatch(/Provider Request|Provider\/Model Adapter/);
+    expect(result.providerModelPreview.previewText).toBe("Live projection.");
+    expect(result.providerModelPreview.limitations).toContain("no_patch_apply");
+  });
+
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {
     const result = await runWorkbenchTask({
       mode: "luogu_problem",

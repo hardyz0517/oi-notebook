@@ -10,9 +10,11 @@ export function ProviderModelPreviewPanel({ preview }: { preview: ProviderModelV
   return (
     <section className="grid gap-3 border border-border/70 bg-background p-3">
       <header className="grid gap-1">
-        <div className="text-xs font-medium text-foreground">Provider/Model Adapter Contract Preview</div>
+        <div className="text-xs font-medium text-foreground">
+          {preview?.title ?? "Provider/model projection"}
+        </div>
         <div className="text-[11px] text-muted-foreground">
-          {preview ? `${preview.providerProfileId} / ${preview.modelProfileId}` : "No provider/model preview captured."}
+          {preview ? `Provider/model: ${preview.providerProfileId} / ${preview.modelProfileId}` : "No provider/model projection captured."}
         </div>
       </header>
       {preview ? (
@@ -23,8 +25,8 @@ export function ProviderModelPreviewPanel({ preview }: { preview: ProviderModelV
           </div>
           <div title={preview.streamingStatus.reason}>Streaming: {formatCapability(preview.streamingStatus.status)}</div>
           <div title={preview.toolCallingStatus.reason}>Tool calling: {formatCapability(preview.toolCallingStatus.status)}</div>
-          <div>Fixture events: {preview.eventCount}</div>
-          <div className="min-w-0 truncate">Preview text: {preview.previewText || "none"}</div>
+          <div>Stream events: {preview.eventCount}</div>
+          <div className="min-w-0 truncate">Stream text: {preview.previewText || "none"}</div>
           <div className="min-w-0 truncate border-t border-border/60 pt-2">
             Limitations: {preview.limitations.join(", ") || "none"}
           </div>

@@ -1,18 +1,22 @@
 import type { ProviderModelAdapterCapabilities } from "@/lib/agent-runtime/providerModelAdapter";
 import type { ProviderModelStreamEvent } from "@/lib/agent-runtime/providerModelTypes";
 
+export type ProviderModelProjectionTitle =
+  | "Provider/Model Adapter Contract Preview"
+  | "Live Provider Request / One-Turn Model Step Contract Preview";
+
 export type ProviderModelProjectionInput = {
   requestId: string;
   providerProfileId: string;
   modelProfileId: string;
-  outputState: "Provider/Model Adapter Contract Preview";
+  outputState: ProviderModelProjectionTitle;
   events: ProviderModelStreamEvent[];
   capabilities: ProviderModelAdapterCapabilities;
   limitations: string[];
 };
 
 export type ProviderModelViewModel = {
-  title: "Provider/Model Adapter Contract Preview";
+  title: ProviderModelProjectionTitle;
   requestId: string;
   providerProfileId: string;
   modelProfileId: string;
@@ -26,7 +30,8 @@ export type ProviderModelViewModel = {
 
 export function createProviderModelViewModel(input: ProviderModelProjectionInput): ProviderModelViewModel {
   const previewText = input.events
-    .filter((event): event is Extract<ProviderModelStreamEvent, { type: "model.delta.preview" }> => event.type === "model.delta.preview")
+    .filter((event): event is Extract<ProviderModelStreamEvent, { type: "model.delta.preview" | "model.delta.live" }> =>
+      event.type === "model.delta.preview" || event.type === "model.delta.live")
     .map((event) => event.text)
     .join("");
 
