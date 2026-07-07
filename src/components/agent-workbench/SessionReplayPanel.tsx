@@ -1,7 +1,5 @@
 import type { SessionReplayViewModel } from "@/lib/agent-workbench/sessionReplayViewModel";
 
-const runnerCapability = ["exe", "cute"].join("") as keyof SessionReplayViewModel["capabilities"];
-
 const formatCapability = (status: string): string => {
   if (status === "preview") return "available for preview";
   if (status === "reserved") return "reserved";
@@ -36,8 +34,8 @@ export function SessionReplayPanel({ replay }: { replay: SessionReplayViewModel 
             <div title={replay.capabilities.patchApply.reason}>
               Patch apply: {formatCapability(replay.capabilities.patchApply.status)}
             </div>
-            <div title={replay.capabilities[runnerCapability].reason}>
-              Execute: {formatCapability(replay.capabilities[runnerCapability].status)}
+            <div title={replay.capabilities.execute.reason}>
+              Execute: {formatCapability(replay.capabilities.execute.status)}
             </div>
             <div title={replay.capabilities.cookieReader.reason}>
               Cookie reader: {formatCapability(replay.capabilities.cookieReader.status)}

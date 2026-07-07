@@ -3,9 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { AgentReplayReadModel } from "@/lib/agent-runtime/agentReplay";
 import { createSessionReplayViewModel } from "./sessionReplayViewModel";
 
-const runnerCapability = ["exe", "cute"].join("") as keyof AgentReplayReadModel["capabilityStatuses"];
-const runnerReason = ["exe", "cute_not_in_p8"].join("");
-
 describe("createSessionReplayViewModel", () => {
   it("projects replay read model for read-only Workbench display", () => {
     const capabilityStatuses = {
@@ -13,10 +10,10 @@ describe("createSessionReplayViewModel", () => {
       modelLoop: { status: "unavailable", reason: "model_loop_not_in_p8" },
       providerRequest: { status: "unavailable", reason: "provider_request_not_in_p8" },
       patchApply: { status: "unavailable", reason: "patch_apply_not_in_p8" },
-      [runnerCapability]: { status: "unavailable", reason: runnerReason },
+      execute: { status: "unavailable", reason: "execute_not_in_p8" },
       cookieReader: { status: "unavailable", reason: "cookie_reader_not_in_p8" },
       persistence: { status: "unavailable", reason: "persistence_not_in_p8" },
-    } as AgentReplayReadModel["capabilityStatuses"];
+    } satisfies AgentReplayReadModel["capabilityStatuses"];
 
     const model = createSessionReplayViewModel({
       sessionId: "session:p8",
