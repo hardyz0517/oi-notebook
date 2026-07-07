@@ -1,7 +1,50 @@
 import { describe, expect, it } from "vitest";
+import {
+  runMultiStepModelLoop,
+  type MultiStepModelLoopProvider,
+  type MultiStepToolTransport,
+} from "@/lib/agent-runtime/multiStepModelLoop";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
 const reservedModelEventType = ["model", "delta"].join(".");
+
+async function createP11LoopResult() {
+  const provider: MultiStepModelLoopProvider = async ({ stepNumber }) => {
+    if (stepNumber === 1) {
+      return {
+        status: "tool-call",
+        content: "Need explicit context.",
+        toolCall: {
+          toolCallId: "tool-call:p11:flow",
+          toolName: "read-current-context.preview",
+          argumentsJson: JSON.stringify({ contextRef: "fixture:flow" }),
+          stepId: "step:1",
+          sequence: 1,
+        },
+      };
+    }
+
+    return {
+      status: "completed",
+      content: "P11 continuation finished.",
+    };
+  };
+  const transport: MultiStepToolTransport = async () => ({
+    status: "completed",
+    rawOutput: {
+      summary: "Flow observation.",
+      content: "Read-only projected content.",
+    },
+  });
+
+  return runMultiStepModelLoop({
+    turnId: "turn:p11:flow",
+    maxSteps: 3,
+    providerContinue: provider,
+    toolTransport: transport,
+    now: () => "2026-07-07T00:00:00.000Z",
+  });
+}
 
 describe("runManualWorkbenchTask", () => {
   it("runs a manual URL through runtime events, workspace state, evidence, and separated caches", async () => {
@@ -73,6 +116,7 @@ describe("runManualWorkbenchTask", () => {
     expect(result.sessionReplay.outputState).toBe("Agent Session/Replay Contract Preview");
     expect(result.sessionReplayViewModel.title).toBe("Agent Session/Replay Contract Preview");
     expect(result.sessionReplay.capabilityStatuses.providerRequest.status).toBe("unavailable");
+    expect(result.modelLoopPreview).toBeNull();
     expect(result.providerModelPreview.title).toBe("Provider/Model Adapter Contract Preview");
     expect(result.providerModelPreview.providerRequestStatus.status).toBe("unavailable");
     expect(result.providerModelPreview.limitations).toContain("no_live_provider_request");
@@ -122,6 +166,47 @@ describe("runManualWorkbenchTask", () => {
     expect(result.providerModelPreview.title).toMatch(/Provider Request|Provider\/Model Adapter/);
     expect(result.providerModelPreview.previewText).toBe("Live projection.");
     expect(result.providerModelPreview.limitations).toContain("no_patch_apply");
+    expect(result.modelLoopPreview).toBeNull();
+  });
+
+  it("attaches a P11 model loop projection only when a runtime loop result exists", async () => {
+    const result = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "P11 Loop Projection",
+        problemId: "p11-loop-projection",
+        problemUrl: "https://example.test/p11-loop",
+      },
+      manualSource: {
+        url: "https://example.test/p11-loop",
+        title: "P11 Loop Projection",
+        text: "Projection fixture.",
+      },
+      modelLoopPreview: await createP11LoopResult(),
+      providerModelPreview: {
+        requestId: "request:p10:still-present",
+        providerProfileId: "provider:mock",
+        modelProfileId: "model:mock",
+        outputState: "Live Provider Request / One-Turn Model Step Contract Preview",
+        events: [],
+        capabilities: {
+          providerRequest: { status: "preview", reason: "p10_passthrough" },
+          streaming: { status: "reserved", reason: "p10_passthrough" },
+          toolCalling: { status: "reserved", reason: "future_phase" },
+        },
+        limitations: ["one_turn_only"],
+      },
+    });
+
+    expect(result.modelLoopPreview?.title).toBe("Multi-Step Model Loop / Tool-Call Continuation Contract Preview");
+    expect(result.modelLoopPreview?.timeline.map((item) => item.kind)).toEqual(expect.arrayContaining([
+      "tool-call",
+      "permission",
+      "observation",
+      "terminal",
+    ]));
+    expect(result.providerModelPreview.title).toMatch(/Provider Request|Provider\/Model Adapter/);
+    expect(result.providerModelPreview.limitations).toContain("one_turn_only");
   });
 
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {

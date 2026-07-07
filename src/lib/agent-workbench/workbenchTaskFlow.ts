@@ -10,6 +10,7 @@ import type {
   AgentPermissionDecision,
   AgentToolDefinition,
 } from "@/lib/agent-runtime/agentTypes";
+import type { MultiStepModelLoopResult } from "@/lib/agent-runtime/multiStepModelLoop";
 import { snapshotEventsWithSequence } from "@/lib/agent-runtime/eventStream";
 import type { OiSkillPermissionRequest, OiSkillReadModel } from "@/lib/oi-skills";
 import { createPermissionManager } from "@/lib/agent-runtime/permissionManager";
@@ -42,6 +43,7 @@ import {
   type ProviderModelViewModel,
 } from "./providerModelViewModel";
 import { createSessionReplayViewModel, type SessionReplayViewModel } from "./sessionReplayViewModel";
+import { createModelLoopViewModel, type ModelLoopViewModel } from "./modelLoopViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -71,6 +73,7 @@ export type WorkbenchTaskInput = {
   problem: ManualWorkbenchTaskInput["problem"];
   manualSource?: ManualWorkbenchSource;
   providerModelPreview?: ProviderModelProjectionInput;
+  modelLoopPreview?: MultiStepModelLoopResult;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -85,6 +88,7 @@ export type ManualWorkbenchTaskResult = {
   sessionReplay: AgentReplayReadModel;
   sessionReplayViewModel: SessionReplayViewModel;
   providerModelPreview: ProviderModelViewModel;
+  modelLoopPreview: ModelLoopViewModel | null;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -443,6 +447,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     capabilities: providerModelAdapter.describeCapabilities(),
     limitations: ["mock_adapter_only", "no_live_provider_request", "no_prompt_construction"],
   });
+  const modelLoopPreview = input.modelLoopPreview ? createModelLoopViewModel(input.modelLoopPreview) : null;
 
   return {
     workspace: finalWorkspace,
@@ -456,6 +461,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     sessionReplay,
     sessionReplayViewModel,
     providerModelPreview,
+    modelLoopPreview,
   };
 }
 

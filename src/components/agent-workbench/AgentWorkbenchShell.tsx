@@ -5,12 +5,14 @@ import type { AgentEvent, AgentLoopCapabilityStatus, AgentLoopContract } from "@
 import { createAgentSession } from "@/lib/agent-runtime/agentSession";
 import type { ProviderModelViewModel } from "@/lib/agent-workbench/providerModelViewModel";
 import type { SessionReplayViewModel } from "@/lib/agent-workbench/sessionReplayViewModel";
+import type { ModelLoopViewModel } from "@/lib/agent-workbench/modelLoopViewModel";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
 import type { OiSkillReadModel } from "@/lib/oi-skills";
 import { type ProblemWorkspace } from "@/lib/problem-workspace/problemWorkspaceTypes";
 import type { EvidenceStoreRecord } from "@/lib/research-engine";
 import { EvidencePanel } from "./EvidencePanel";
+import { ModelLoopTimelinePanel } from "./ModelLoopTimelinePanel";
 import { OiSkillPreviewPanel } from "./OiSkillPreviewPanel";
 import { PermissionSurface, type PermissionRequestPreview } from "./PermissionSurface";
 import { ProblemWorkspacePanel } from "./ProblemWorkspacePanel";
@@ -57,6 +59,7 @@ export function AgentWorkbenchShell({
   permissionRequests = [],
   loopContract = createPreviewAgentLoopContract(),
   oiSkillPreview = null,
+  modelLoopPreview = null,
   preview = null,
 }: {
   workspace?: ProblemWorkspace;
@@ -65,6 +68,7 @@ export function AgentWorkbenchShell({
   permissionRequests?: PermissionRequestPreview[];
   loopContract?: AgentLoopContract;
   oiSkillPreview?: OiSkillReadModel | null;
+  modelLoopPreview?: ModelLoopViewModel | null;
   preview?: AgentWorkbenchPreviewResult | null;
 }) {
   const [currentWorkspace, setCurrentWorkspace] = useState(workspace);
@@ -75,6 +79,7 @@ export function AgentWorkbenchShell({
   const [currentOiSkillPreview, setCurrentOiSkillPreview] = useState<OiSkillReadModel | null>(oiSkillPreview);
   const [currentSessionReplay, setCurrentSessionReplay] = useState<SessionReplayViewModel | null>(null);
   const [currentProviderModelPreview, setCurrentProviderModelPreview] = useState<ProviderModelViewModel | null>(null);
+  const [currentModelLoopPreview, setCurrentModelLoopPreview] = useState<ModelLoopViewModel | null>(modelLoopPreview);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -108,6 +113,7 @@ export function AgentWorkbenchShell({
       setCurrentOiSkillPreview(result.oiSkillPreview);
       setCurrentSessionReplay(result.sessionReplayViewModel);
       setCurrentProviderModelPreview(result.providerModelPreview);
+      setCurrentModelLoopPreview(result.modelLoopPreview);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -211,6 +217,7 @@ export function AgentWorkbenchShell({
         <OiSkillPreviewPanel preview={currentOiSkillPreview} />
         <SessionReplayPanel replay={currentSessionReplay} />
         <ProviderModelPreviewPanel preview={currentProviderModelPreview} />
+        <ModelLoopTimelinePanel preview={currentModelLoopPreview} />
         <EvidencePanel records={currentEvidenceRecords} />
       </aside>
     </section>
