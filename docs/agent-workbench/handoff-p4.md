@@ -361,3 +361,68 @@ P10 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
 
 下一阶段必须先写新的 freeze spec，才能讨论 multi-step model loop / tool continuation、session persistence / request-log storage、patch workflow、execute runner、Cookie-backed reader 或 old AiSidebar retirement / migration。任何后续 worker 不得从 P10 one-turn live step contract 推导出完整 autonomous Agent loop 或 production-ready Workbench 已经可用。
+
+## P11 Multi-Step Model Loop / Tool-Call Continuation Contract Freeze handoff
+
+P11 输出状态：**Multi-Step Model Loop / Tool-Call Continuation Contract Preview**。本阶段把 P10 的 one-turn live model step 扩展为受限 multi-step continuation contract preview；它仍不是 production-ready autonomous Agent，也不表示 AI 大升级完成。
+
+P11 已冻结 / 已合入：
+
+- Loop contract / event taxonomy：turn、step、attempt、terminal status、cancellation、failure taxonomy 和 loop event sequence。
+- Tool-call parser / normalizer：provider output 只被解析为 tool-call intent，不直接执行工具或泄漏 raw provider payload。
+- Tool registry / router / lifecycle preview：preview tool definitions、duplicate guard、unsupported tool failure、mock/read-only route 和 lifecycle events。
+- Permission gate：read、local-note-search、public-network、cookie-network、write、patch-apply、execute、delete、rollback、destructive 的决策矩阵。
+- Observation redaction / continuation context：工具结果先进入 observation，经 redaction、summarization、bounding 和 provenance 标记后才允许进入 continuation。
+- Bounded multi-step loop preview：runtime 拥有 continuation decision、maxSteps、permission denial、tool failure、cancellation 和 terminal handling；transport 为 injected mock/read-only preview。
+- Workbench read-only loop projection：Workbench 只读展示 loop timeline、tool-call、permission、observation 和 terminal status，不拥有 loop decisions。
+
+P11 仍禁止 / 未实现：
+
+- production-ready autonomous Agent、AI 大升级完成、L5 Agent 完成、Codex-style runtime 完成等成熟能力声明。
+- real patch / write / delete / rollback。
+- execute / code runner。
+- Cookie-backed reader / Cookie-backed Luogu reading。
+- session storage、database storage、durable session persistence、durable request-log persistence、raw provider payload storage。
+- old `src/components/ai/AiSidebar.tsx` migration。
+- frontend secrets、API key、Authorization header、cookie 或 raw provider payload 持有。
+- direct Tauri bypass outside `src/lib/api.ts`。
+- 读取或修改真实 `notes/**` 参与 routine engineering work。
+
+本次 Task 8 final verification 记录：
+
+- 初次执行四条 GREEN 命令：FAIL / environment blocker，`node_modules\vitest\vitest.mjs` 与 `node_modules\typescript\bin\tsc` 缺失，未进入 Vitest test discovery，无 test file count / test count。
+- 按任务允许命令执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile`：PASS，lockfile already up to date，恢复 763 个本地依赖链接，未修改 package / lock metadata。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，23 test files / 93 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，5 test files / 17 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/apiBoundary.test.ts`：PASS，1 test file / 9 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+
+本次 Task 8 boundary audit 记录：
+
+- Direct Tauri audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Secret / cookie audit 有允许命中，不代表 Workbench frontend 持有 secret 或 Cookie：
+  `src/lib/api.ts:95`、`:109`、`:401` 是 API boundary 参数 / wrapper option；
+  `src/lib/agent-workbench/modelLoopViewModel.ts:71` 是 redaction regex；
+  `src/lib/agent-workbench/modelLoopViewModel.test.ts:36`、`:96`、`:106`、`:107`、`:109`、`:110` 是 negative-proof redaction tests；
+  `src/lib/agent-runtime/multiStepModelLoop.test.ts:181`、`:198`、`:200`、`src/lib/agent-runtime/toolCallParser.test.ts:31`、`:34`、`:43`、`:44`、`src/lib/agent-runtime/toolObservation.test.ts:21`、`:23`、`:25`、`:39`、`:43`、`:44`、`:45`、`:49`、`:59`、`:60`、`:75`、`:76` 是 secret / Authorization / cookie negative-proof tests；
+  `src/lib/agent-runtime/providerModelPolicy.test.ts:36`、`:52`、`:54`、`:56`、`:59`、`:67`、`src/lib/agent-runtime/liveProviderPolicy.test.ts:48`、`:50`、`:52`、`:55`、`src/lib/agent-runtime/providerModelTypes.test.ts:146`、`:151` 是 provider exposure negative-proof tests；
+  `src/lib/agent-runtime/agentReplay.ts:109`、`src/lib/agent-runtime/agentReplay.test.ts:77`、`:81`、`src/lib/agent-runtime/agentSession.ts:59`、`src/lib/agent-runtime/agentTypes.ts:48`、`:173`、`:196`、`src/lib/agent-runtime/agentTypes.test.ts:118`、`:129`、`:167`、`:185`、`:192`、`:215` 是 P8 replay/privacy/capability contract；
+  `src/lib/agent-runtime/agentRuntime.test.ts:135`-`:160`、`src/lib/agent-runtime/permissionManager.ts:37`-`:38`、`src/lib/agent-runtime/permissionManager.test.ts:38`-`:42`、`src/lib/agent-runtime/toolPermissionGate.ts:97`-`:98`、`src/lib/agent-runtime/toolPermissionGate.test.ts:16`、`:58`、`:60`、`src/lib/agent-runtime/toolContinuationRegistry.ts:13`、`:221`、`src/lib/agent-workbench/workbenchTaskFlow.ts:201`、`src/lib/agent-workbench/workbenchTaskFlow.test.ts:102`-`:106`、`src/lib/agent-workbench/sessionReplayViewModel.test.ts:14`、`src/components/agent-workbench/SessionReplayPanel.tsx:40`-`:41` 是 unavailable / preview / policy wording for cookie-network。
+- Prompt / ContextBuilder audit 有允许命中：
+  `src/lib/agent-runtime/providerContextBuilder.test.ts:3` 与 `src/lib/agent-runtime/providerPromptAssembler.test.ts:3` 是 P10 runtime boundary focused tests；
+  `src/components/settings/SearchDiagnosticsPanel.tsx:1235`、`:1561` 是既有搜索诊断 prompt contract 静态检查，不属于 P11 Workbench prompt construction。
+- Forbidden capability audit 有允许或既有边界命中，不代表 P11 开放真实 patch/write/delete/rollback/execute/Cookie/storage：
+  `src/lib/api.ts:937`、`:939`、`:993`、`:995`、`:1258`、`:1262`、`:1264`、`:1313`、`:1315` 是既有 API boundary delete provider/model/note wrappers；
+  `src-tauri/src/ai.rs:3905`、`:3987` 是提示约束文本中的 "Do not delete"；
+  `src-tauri/src/ai.rs:12508`、`:12511`、`:12730`、`:12737`、`:12751`、`src-tauri/src/notes.rs:745`、`:838`、`src-tauri/src/git.rs:306`、`:316`、`:318`、`:319`、`:387`、`:432`、`:436`、`:437`、`src-tauri/src/lib.rs:85`、`:89`、`:92`、`:115`、`:122` 是既有 Rust note/provider delete / git commit_deleted_note API surface，不是 P11 implementation；
+  `src-tauri/src/prompts.rs:255`、`:272` 是既有提示约束文本；
+  `src/lib/agent-runtime/agentRuntime.test.ts:167`、`:179`、`:189`、`src/lib/agent-runtime/permissionManager.test.ts:52`、`:54`、`:66`、`:67`、`:86`、`:91`、`:93`、`src/lib/agent-runtime/permissionManager.ts:41`、`src/lib/agent-runtime/toolRegistry.test.ts:56` 是 P6/P11 negative-proof permission coverage；
+  `src/lib/agent-runtime/multiStepModelLoop.ts:171` 是 P11 reserved tool name guard；
+  `src/lib/agent-runtime/agentTypes.ts:50`、`src/lib/agent-runtime/agentTypes.test.ts:120`、`:131`、`src/lib/agent-runtime/toolContinuationRegistry.ts:15`、`:17`、`:18`、`src/lib/agent-runtime/toolPermissionGate.ts:103`、`:109`、`:110`、`:112`、`:113`、`src/lib/agent-runtime/toolPermissionGate.test.ts:18`、`:20`、`:21`、`:58`、`:62`、`:64`、`:65` 是 patch-apply / delete / rollback contract literals and unavailable / denied policy。
+- Mature capability claim audit 无命中：
+  `rg -n 'AI 澶у崌绾у畬鎴恷L5 Agent 瀹屾垚|Codex-style runtime 瀹屾垚|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+  额外 UTF-8 中文模式 `AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true` 也无命中。
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
+
+下一阶段必须先写新的 freeze spec，才能继续讨论 durable session/replay persistence、real patch workflow、execute runner、Cookie-backed reader、old AiSidebar retirement / migration、真实 approval UI wiring 或任何 production autonomous Agent 能力。任何后续 worker 不得从 P11 contract preview 推导出真实 patch/write/delete/rollback/execute/Cookie/storage 已获批。
