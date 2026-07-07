@@ -4,6 +4,7 @@ import type {
   ProviderModelRequestEnvelope,
   ProviderModelStreamEvent,
 } from "./providerModelTypes";
+import { checkProviderModelPermission, validateProviderModelRedaction } from "./providerModelPolicy";
 
 export type ProviderModelAdapterCapabilities = {
   providerRequest: ProviderModelCapability;
@@ -52,7 +53,15 @@ export function createMockProviderModelAdapter(input: {
     adapterId: input.adapterId,
     providerKind: "mock",
     supports: (request) => request.providerProfileId === "provider:mock",
-    createMockTurn: () => input.events.map((event) => ({ ...event })),
+    createMockTurn: (request) => {
+      const decision = checkProviderModelPermission(request);
+      const redaction = validateProviderModelRedaction(request);
+      return [
+        { type: "provider.permission.checked", requestId: request.requestId, sequence: 1, at: "2026-07-07T00:00:00.000Z", decision },
+        { type: "provider.redaction.checked", requestId: request.requestId, sequence: 2, at: "2026-07-07T00:00:00.000Z", blocked: redaction.blocked },
+        ...input.events.map((event, index) => ({ ...event, sequence: index + 3 })),
+      ];
+    },
     mapProviderEvent: (event) => ({ ...event }),
     mapProviderError: mapProviderModelError,
     cancel: (requestId) => ({

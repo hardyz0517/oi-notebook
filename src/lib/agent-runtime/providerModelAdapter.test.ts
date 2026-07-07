@@ -44,7 +44,10 @@ describe("P9 mock provider/model adapter", () => {
     });
 
     expect(adapter.describeCapabilities().providerRequest.status).toBe("unavailable");
-    expect(adapter.createMockTurn(request)).toHaveLength(3);
+    const events = adapter.createMockTurn(request);
+    expect(events).toHaveLength(5);
+    expect(events[0]?.type).toBe("provider.permission.checked");
+    expect(events[1]?.type).toBe("provider.redaction.checked");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
