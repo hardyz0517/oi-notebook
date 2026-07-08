@@ -78,6 +78,18 @@ export type RunnerTestRunClass =
 
 export type RunnerRiskLevel = "low" | "medium" | "high" | "blocked";
 
+export type RunnerRequestedCapability =
+  | "network"
+  | "cookie"
+  | "secret"
+  | "filesystem-mutation"
+  | "delete"
+  | "rollback-execution"
+  | "patch-apply"
+  | "direct-tauri-bypass"
+  | "true-execution"
+  | "unbounded-output";
+
 export type RunnerIntent = {
   summary: string;
   commandClass: RunnerCommandClass;
