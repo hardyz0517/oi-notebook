@@ -54,6 +54,11 @@ import {
   type PatchWorkflowProjectionInput,
   type PatchWorkflowViewModel,
 } from "./patchWorkflowViewModel";
+import {
+  createRunnerWorkflowViewModel,
+  type RunnerWorkflowProjectionInput,
+  type RunnerWorkflowViewModel,
+} from "./runnerWorkflowViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -86,6 +91,7 @@ export type WorkbenchTaskInput = {
   modelLoopPreview?: MultiStepModelLoopResult;
   sessionHistoryPreview?: SessionHistoryProjectionInput;
   patchWorkflowPreview?: PatchWorkflowProjectionInput;
+  runnerWorkflowPreview?: RunnerWorkflowProjectionInput;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -103,6 +109,7 @@ export type ManualWorkbenchTaskResult = {
   modelLoopPreview: ModelLoopViewModel | null;
   sessionHistoryPreview: SessionHistoryViewModel | null;
   patchWorkflowPreview: PatchWorkflowViewModel | null;
+  runnerWorkflowPreview: RunnerWorkflowViewModel | null;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -468,6 +475,9 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
   const patchWorkflowPreview = input.patchWorkflowPreview
     ? createPatchWorkflowViewModel(input.patchWorkflowPreview)
     : null;
+  const runnerWorkflowPreview = input.runnerWorkflowPreview
+    ? createRunnerWorkflowViewModel(input.runnerWorkflowPreview)
+    : null;
 
   return {
     workspace: finalWorkspace,
@@ -484,6 +494,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     modelLoopPreview,
     sessionHistoryPreview,
     patchWorkflowPreview,
+    runnerWorkflowPreview,
   };
 }
 

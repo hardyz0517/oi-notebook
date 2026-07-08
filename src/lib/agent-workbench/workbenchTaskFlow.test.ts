@@ -17,6 +17,7 @@ import {
   type PatchRiskClassification,
   type PatchTargetRef,
 } from "@/lib/agent-runtime/patchWorkflowTypes";
+import { createRunnerExecutionRequestEnvelope, type RunnerExecutionRequestEnvelope } from "@/lib/agent-runtime/runnerContractTypes";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
 const reservedModelEventType = ["model", "delta"].join(".");
@@ -262,6 +263,189 @@ function createP13PatchWorkflowPreview() {
       createdAt,
       status: "preview" as const,
     }],
+  };
+}
+
+function createP14RunnerWorkflowPreview(): { executionRequests: RunnerExecutionRequestEnvelope[] } {
+  const createdAt = "2026-07-08T00:00:00.000Z";
+  const executionRequestId = "runner-request:p14:flow";
+  const targetRef = {
+    targetRefId: "target:p14:flow",
+    targetKind: "scratch-fixture" as const,
+    displayPath: "fixtures/p14/flow.cpp",
+    workspaceId: "workspace:flow",
+    languageId: "cpp" as const,
+    contentHashBefore: "sha256:p14-flow-before",
+    inputRefs: ["input:p14:flow"],
+    expectedOutputRefs: ["output:p14:flow"],
+    permissionScope: "workspace-preview",
+    pathSafetyStatus: "safe-preview" as const,
+    notesPolicy: "fixture-only" as const,
+    networkPolicy: "none" as const,
+  };
+  const sandboxPlan = {
+    sandboxPlanId: `${executionRequestId}:sandbox`,
+    profile: "read-only-classification" as const,
+    workingDirectoryRef: "workspace-ref:p14-flow",
+    allowedTargetRefs: [targetRef.targetRefId],
+    networkAccess: "none" as const,
+    secretAccess: "none" as const,
+    credentialAccess: "none" as const,
+    writeAccess: "none" as const,
+    maxFilesTouched: 0,
+    timeoutMs: 5000,
+    maxOutputBytes: 4096,
+    maxInputBytes: 2048,
+    environmentPolicy: "p14-metadata-only-no-runtime",
+    cleanupPolicy: "p14-no-op-cleanup-preview",
+    blockedReasons: [],
+    createdAt,
+  };
+  const classification = {
+    classificationId: `${executionRequestId}:classification`,
+    executionRequestId,
+    commandClass: "test" as const,
+    languageClass: "cpp" as const,
+    testRunClass: "sample-test" as const,
+    riskLevel: "medium" as const,
+    riskReasons: ["sample_test_contract_preview_only"],
+    requiresHumanApproval: true,
+    requiresSandbox: true,
+    requiresNetwork: false,
+    requiresSecrets: false,
+    requiresWritableWorkspace: false,
+    blockedReasons: [],
+    createdAt,
+  };
+  const permissionRequest = {
+    permissionRequestId: `${executionRequestId}:permission:execute`,
+    executionRequestId,
+    permissionKind: "execute" as const,
+    decisionStatus: "prompt-required" as const,
+    riskLevel: "medium" as const,
+    reason: "P14 requires future-phase approval only.",
+    requestedByEventId: "event:p14:flow:permission",
+    targetRefs: [targetRef.targetRefId],
+    sandboxPlanId: sandboxPlan.sandboxPlanId,
+    approvalSurface: "workbench-read-only",
+    createdAt,
+  };
+  const mockResult = {
+    mockResultId: `${executionRequestId}:mock:dry-run`,
+    executionRequestId,
+    mode: "dry-run" as const,
+    status: "planned" as const,
+    plannedRunnerKind: "test-run" as const,
+    plannedSandboxProfile: "read-only-classification" as const,
+    safeInputSummary: "Flow input fixture summary.",
+    safeOutputSummary: "Flow output fixture summary.",
+    exitCodePreview: null,
+    durationMsPreview: 0,
+    filesTouchedPreview: 0,
+    networkAccessPreview: "none" as const,
+    resourceLimitPreview: "timeoutMs=5000; maxOutputBytes=4096; maxInputBytes=2048; maxFilesTouched=0; networkAccess=none; trueExecution=unavailable",
+    observationId: `${executionRequestId}:observation:dry-run`,
+    safeErrors: [],
+    createdAt,
+  };
+
+  return {
+    executionRequests: [
+      createRunnerExecutionRequestEnvelope({
+        executionRequestId,
+        sessionId: "session:p14:flow",
+        turnId: "turn:p14:flow",
+        stepId: "step:p14:flow",
+        sourceKind: "fixture",
+        sourceEventIds: ["event:p14:flow:request"],
+        workspaceRefs: ["workspace:flow"],
+        evidenceRefs: ["evidence:flow"],
+        targetRefs: [targetRef],
+        runnerKind: "test-run",
+        runnerIntent: {
+          summary: "Flow runner request preview.",
+          commandClass: "test",
+          languageClass: "cpp",
+          testRunClass: "sample-test",
+        },
+        classification,
+        requestedInputs: [{
+          inputRefId: "input:p14:flow",
+          inputKind: "stdin-fixture",
+          safeSummary: "Flow stdin fixture.",
+        }],
+        expectedOutputs: [{
+          outputRefId: "output:p14:flow",
+          outputKind: "expected-output-fixture",
+          safeSummary: "Flow expected output fixture.",
+        }],
+        sandboxPlan,
+        resourceLimits: {
+          timeoutMs: 5000,
+          maxOutputBytes: 4096,
+          maxInputBytes: 2048,
+          maxFilesTouched: 0,
+          networkAccess: "none",
+          secretAccess: "none",
+          writeAccess: "none",
+          trueExecution: "unavailable",
+        },
+        permissionRequest,
+        approvalDecision: {
+          approvalDecisionId: `${executionRequestId}:approval:execute`,
+          permissionRequestId: permissionRequest.permissionRequestId,
+          executionRequestId,
+          status: "pending",
+          decidedBy: "p14-permission-sandbox-policy",
+          safeReason: "P14 approval read model status is pending; it does not start a process.",
+          visibleConsequences: ["No process is started and no workspace mutation is performed in P14."],
+          blockedCapabilities: ["execute", "true-execution", "workspace-mutation"],
+          eventIds: ["event:p14:flow:approval"],
+          createdAt,
+        },
+        mockResult,
+        observationPolicy: {
+          observationId: mockResult.observationId,
+          executionRequestId,
+          mockResultId: mockResult.mockResultId,
+          sourceEventIds: ["event:p14:flow:mock"],
+          status: "simulated",
+          safeSummary: "Flow observation summary.",
+          boundedStdout: "",
+          boundedStderr: "",
+          exitCodePreview: null,
+          redactionStatus: "not-needed",
+          droppedFields: [],
+          truncated: false,
+          maxOutputBytes: 4096,
+          continuationVisibility: "timeline-visible",
+          createdAt,
+        },
+        rollbackCleanupPlan: {
+          rollbackCleanupPlanId: `${executionRequestId}:rollback-cleanup`,
+          executionRequestId,
+          requiredBeforeExecute: true,
+          preRunContentHashes: [{
+            targetRefId: targetRef.targetRefId,
+            contentHashBefore: targetRef.contentHashBefore,
+          }],
+          affectedTargetRefs: [targetRef.targetRefId],
+          temporaryDirectoryPolicy: "refs only",
+          artifactRetentionPolicy: "no artifacts retained",
+          cleanupStepsPreview: ["future phase cleanup required"],
+          recoveryStrategy: "content hash restore metadata only",
+          unavailableReasons: ["true_execution_unavailable_in_p14"],
+          createdAt,
+        },
+        redactionResult: {
+          redactionStatus: "not-needed",
+          redactedClasses: [],
+          safeSummary: "Flow runner request preview.",
+        },
+        createdAt,
+        capabilityStatus: "preview",
+      }),
+    ],
   };
 }
 
@@ -519,6 +703,50 @@ describe("runManualWorkbenchTask", () => {
     expect(withP13.sessionHistoryPreview?.title).toBe(
       "Durable Session / Request Log / Replay Persistence Contract Preview",
     );
+  });
+
+  it("attaches a P14 runner workflow projection only when runtime preview data exists while preserving P13 projection", async () => {
+    const withoutP14 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "No P14 Projection",
+        problemId: "no-p14-projection",
+        problemUrl: "https://example.test/no-p14",
+      },
+      manualSource: {
+        url: "https://example.test/no-p14",
+        title: "No P14 Projection",
+        text: "Projection fixture.",
+      },
+      patchWorkflowPreview: createP13PatchWorkflowPreview(),
+    });
+    const withP14 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "P14 Runner Workflow Projection",
+        problemId: "p14-runner-workflow-projection",
+        problemUrl: "https://example.test/p14-runner",
+      },
+      manualSource: {
+        url: "https://example.test/p14-runner",
+        title: "P14 Runner Workflow Projection",
+        text: "Projection fixture.",
+      },
+      patchWorkflowPreview: createP13PatchWorkflowPreview(),
+      runnerWorkflowPreview: createP14RunnerWorkflowPreview(),
+    });
+
+    expect(withoutP14.runnerWorkflowPreview).toBeNull();
+    expect(withoutP14.patchWorkflowPreview?.title).toBe("Patch / Write Workflow Contract Preview");
+    expect(withP14.runnerWorkflowPreview?.title).toBe("Execute / Code Runner Contract Preview");
+    expect(withP14.runnerWorkflowPreview?.summary).toMatchObject({
+      executionRequestId: "runner-request:p14:flow",
+      targetCount: 1,
+      auditEventCount: 9,
+    });
+    expect(withP14.runnerWorkflowPreview?.permissionRequest.decisionStatus).toBe("prompt-required");
+    expect(withP14.runnerWorkflowPreview?.mockResult.status).toBe("planned");
+    expect(withP14.patchWorkflowPreview?.title).toBe("Patch / Write Workflow Contract Preview");
   });
 
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {
