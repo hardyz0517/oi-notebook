@@ -426,3 +426,49 @@ P11 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
 
 下一阶段必须先写新的 freeze spec，才能继续讨论 durable session/replay persistence、real patch workflow、execute runner、Cookie-backed reader、old AiSidebar retirement / migration、真实 approval UI wiring 或任何 production autonomous Agent 能力。任何后续 worker 不得从 P11 contract preview 推导出真实 patch/write/delete/rollback/execute/Cookie/storage 已获批。
+
+## P12 Durable Session / Request Log / Replay Persistence Contract Freeze handoff
+
+P12 输出状态：**Durable Session / Request Log / Replay Persistence Contract Preview**。本阶段把 P11 multi-step continuation preview 之后的 durable session metadata、safe request/audit log、in-memory store contract、API/Tauri no-op boundary、deterministic replay projector 和 Workbench 只读 session history projection 冻结为 contract preview；它仍不是 production-ready autonomous Agent，也不表示 AI 大升级完成。
+
+P12 已冻结 / 已合入：
+
+- `79e7610 docs: define p12 durable session request log contract`：冻结 P12 spec / plan、输出状态、storage / redaction / replay / Workbench 只读边界。
+- `4ecdcf2 feat: define p12 durable session contract`：冻结 durable session metadata、event envelope、schema version、sequence ordering、checkpoint refs、capability statuses 和 corruption / migration result types。
+- `dd4f714 feat: redact p12 request audit logs`：冻结 request/audit log safe metadata 与 redaction policy，保留 `secretRef` ids，不保存 raw provider payload / raw tool output / secret / Cookie。
+- `b0dbbdb feat: add p12 in-memory session store contract`：冻结 `AgentSessionStore` / `RequestAuditLogStore` interface 与 in-memory adapter contract，不实现 DB / FS durable storage。
+- `b208496 feat: project p12 durable replay logs`：冻结 deterministic replay projector、schema/corruption/migration read model 和 replay read-only guard；历史中的 `8513b44` 已由 `5dfd211` revert，保留为失败 cherry-pick / 安全撤回记录。
+- `700b116 feat: project p12 session history`：冻结 Workbench read-only session history / audit trail projection 与 `SessionHistoryPanel` 展示，不让 UI 触发 storage mutation、tool execution、provider request、patch、write、delete、rollback 或 Cookie reader。
+
+P12 仍禁止 / 未实现：
+
+- production-ready autonomous Agent、AI 大升级完成、L5 Agent 完成或 Codex-style runtime 完成等成熟能力声明。
+- 真实 DB / FS durable storage、filesystem durable log writer、真实 migration execution、retention/export/delete cleanup job。
+- real patch、write mutation、delete、rollback、execute / code runner、Cookie-backed reader。
+- raw provider payload storage、raw tool output storage、API key / Authorization / Cookie / secret 明文进入 durable log 或 Workbench。
+- 旧 `src/components/ai/AiSidebar.tsx` migration。
+- 绕过 `src/lib/api.ts`、frontend 持有 secret / raw payload、读取或修改真实 `notes/**` 参与 routine engineering work。
+
+本次 Task 7 final verification 记录：
+
+- 启动快照：`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -12 --decorate` 显示 HEAD 为 `700b116 feat: project p12 session history`，并包含 P12 commits `79e7610`、`4ecdcf2`、`dd4f714`、`b0dbbdb`、`b208496`、`700b116`，以及失败 Task 5 cherry-pick `8513b44` 和 revert `5dfd211`。
+- 初次执行三条 Vitest GREEN 命令：FAIL / environment blocker，`node_modules\vitest\vitest.mjs` 缺失，未进入 Vitest test discovery，无 test file count / test count。
+- 按既有 worktree 恢复方式执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile`：PASS，lockfile already up to date，恢复 763 个本地依赖链接，未修改 package / lock metadata，filtered status 和 staged paths 仍为空。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，27 test files / 114 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，6 test files / 21 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/apiBoundary.test.ts`：PASS，1 test file / 9 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+
+本次 Task 7 boundary audit 记录：
+
+- Direct Tauri audit 无命中：
+  `rg -n '@tauri-apps/api/core|\binvoke\s*\(' src --glob '!src/lib/api.ts' --glob '!src/components/ai/**' --glob '!src/lib/aiWebSearch.ts'`
+- Secret / cookie / raw payload audit 有允许命中，不代表 Workbench frontend 或 durable log 持有 secret / Cookie / raw payload：
+  `src/lib/api.ts:95`、`:109`、`:401` 是既有 API boundary 参数 / wrapper option；`src/lib/agent-workbench/modelLoopViewModel.ts:71` 是 redaction regex；`modelLoopViewModel.test.ts`、`multiStepModelLoop.test.ts`、`toolCallParser.test.ts`、`toolObservation.test.ts`、`providerModelPolicy.test.ts`、`liveProviderPolicy.test.ts`、`providerModelTypes.test.ts` 是 P10/P11 negative-proof redaction coverage；`agentReplay*`、`agentSession.ts`、`agentTypes*`、`permissionManager*`、`toolPermissionGate*`、`toolContinuationRegistry.ts`、`workbenchTaskFlow*`、`SessionReplayPanel.tsx` 是 P8/P11 unavailable / preview / privacy contract wording；`inMemorySessionStore.test.ts` 和 `requestLogPolicy.test.ts` 是 P12 negative-proof tests proving raw provider payload, raw tool output, API key, Authorization and Cookie are dropped/redacted.
+- Storage / migration audit 有 scoped P12 命中：
+  `src/lib/agent-runtime/replayPersistenceProjector.ts` and `.test.ts` expose migration strategy as read-only plan metadata and prove migration hooks are not executed. There were no `localStorage`, `indexedDB`, `database storage`, `request log persistence`, `session storage`, `durable log writer`, or `filesystem durable` hits in P12 code.
+- Forbidden patch / execute / Cookie / delete / rollback / AiSidebar audit 有允许或既有边界命中，不代表 P12 开放真实 mutation / execution：
+  `src/lib/api.ts` delete wrappers and `src-tauri/src/**` delete functions are pre-existing provider/note APIs outside P12 implementation; `src-tauri/src/prompts.rs` and `src-tauri/src/ai.rs` prompt text contains "Do not delete"; `agentRuntime.test.ts`、`permissionManager*`、`toolRegistry.test.ts`、`multiStepModelLoop.ts`、`agentTypes*`、`toolContinuationRegistry.ts`、`toolPermissionGate*` are P6/P11 permission, reserved-tool and unavailable/denied contract literals; `replayPersistenceProjector.test.ts` proves replay does not invoke tool transport, provider request, patch apply, write, delete, rollback, execute, or Cookie reader hooks.
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
+
+下一阶段必须先写新的 freeze spec / plan，才能讨论真实 durable DB / FS adapter、真实 migration execution、retention/export/delete controls、real patch/write/delete/rollback/execute/code runner、Cookie-backed reader、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P12 contract preview 推导出真实 durable storage、migration、patch/write/delete/rollback/execute/Cookie/raw-payload retention 已获批。
