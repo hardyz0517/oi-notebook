@@ -4,6 +4,12 @@ import {
   type MultiStepModelLoopProvider,
   type MultiStepToolTransport,
 } from "@/lib/agent-runtime/multiStepModelLoop";
+import {
+  createDurableAgentEventLogEntry,
+  createDurableAgentSessionMetadata,
+} from "@/lib/agent-runtime/durableSessionTypes";
+import type { AgentSessionStoreCheckpoint } from "@/lib/agent-runtime/inMemorySessionStore";
+import { createRequestAuditLogRecord } from "@/lib/agent-runtime/requestLogPolicy";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
 const reservedModelEventType = ["model", "delta"].join(".");
@@ -44,6 +50,85 @@ async function createP11LoopResult() {
     toolTransport: transport,
     now: () => "2026-07-07T00:00:00.000Z",
   });
+}
+
+function createP12SessionHistoryPreview() {
+  const metadata = createDurableAgentSessionMetadata({
+    sessionId: "session:p12:flow",
+    createdAt: "2026-07-07T00:00:00.000Z",
+    updatedAt: "2026-07-07T00:00:03.000Z",
+    runtimeVersion: "agent-runtime:p12-preview",
+    workspaceRefs: ["workspace:flow"],
+    evidenceRefs: ["evidence:flow"],
+    modelRefs: ["model:mock"],
+    providerRefs: ["provider:mock"],
+    toolRefs: ["tool:read-current-context.preview"],
+    permissionDecisionRefs: ["permission:flow"],
+    observationRefs: ["observation:flow"],
+    requestLogRefs: ["request-log:flow"],
+    replayCheckpointRefs: ["checkpoint:flow"],
+    privacyPolicyId: "privacy:p12-preview",
+    redactionPolicyId: "p12-safe-request-log-redaction-v1",
+    storageAdapterKind: "in-memory-preview",
+    capabilityStatuses: {
+      durableSessionMetadata: { status: "preview", reason: "typed_metadata_only" },
+      requestLogPersistence: { status: "preview", reason: "safe_audit_records_only" },
+      replayPersistence: { status: "preview", reason: "fixture_projection_only" },
+      storageAdapter: { status: "unavailable", reason: "real_storage_not_enabled" },
+    },
+  });
+  const checkpoint: AgentSessionStoreCheckpoint = {
+    checkpointId: "checkpoint:flow",
+    sessionId: metadata.sessionId,
+    turnId: "turn:p12:flow",
+    eventSequenceRange: { from: 1, to: 1 },
+    summary: "Flow checkpoint summary.",
+    droppedEventIds: [],
+    retainedRefs: ["workspace:flow"],
+    redactionPolicyId: metadata.redactionPolicyId,
+    schemaVersion: metadata.schemaVersion,
+    createdAt: "2026-07-07T00:00:02.000Z",
+    projectorVersion: "p12-replay-projector-v1",
+    privacyClass: "summary-only",
+  };
+
+  return {
+    metadata,
+    events: [
+      createDurableAgentEventLogEntry({
+        eventId: "event:p12:flow:1",
+        sessionId: metadata.sessionId,
+        turnId: "turn:p12:flow",
+        sequence: 1,
+        eventType: "turn.started",
+        createdAt: "2026-07-07T00:00:01.000Z",
+        redactionClass: "safe-metadata",
+        replayVisibility: "timeline-visible",
+        summary: "Flow session started.",
+        refs: { workspaceRefs: ["workspace:flow"] },
+      }),
+    ],
+    checkpoints: [checkpoint],
+    requestAuditRecords: [
+      createRequestAuditLogRecord({
+        requestLogId: "request-log:flow",
+        sessionId: metadata.sessionId,
+        turnId: "turn:p12:flow",
+        providerId: "provider:mock",
+        modelId: "model:mock",
+        requestKind: "replay-audit",
+        permissionDecisionId: "permission:flow",
+        redactionDecisionId: "redaction:flow",
+        contextBuildId: "context:flow",
+        eventIds: ["event:p12:flow:1"],
+        safeInputSummary: "Flow safe input.",
+        safeOutputSummary: "Flow safe output.",
+        status: "completed",
+        createdAt: "2026-07-07T00:00:03.000Z",
+      }),
+    ],
+    corruptionWarnings: [],
+  };
 }
 
 describe("runManualWorkbenchTask", () => {
@@ -207,6 +292,50 @@ describe("runManualWorkbenchTask", () => {
     ]));
     expect(result.providerModelPreview.title).toMatch(/Provider Request|Provider\/Model Adapter/);
     expect(result.providerModelPreview.limitations).toContain("one_turn_only");
+  });
+
+  it("attaches a P12 session history projection only when runtime preview data exists", async () => {
+    const withoutP12 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "No P12 Projection",
+        problemId: "no-p12-projection",
+        problemUrl: "https://example.test/no-p12",
+      },
+      manualSource: {
+        url: "https://example.test/no-p12",
+        title: "No P12 Projection",
+        text: "Projection fixture.",
+      },
+    });
+    const withP12 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "P12 Session History Projection",
+        problemId: "p12-session-history-projection",
+        problemUrl: "https://example.test/p12-session-history",
+      },
+      manualSource: {
+        url: "https://example.test/p12-session-history",
+        title: "P12 Session History Projection",
+        text: "Projection fixture.",
+      },
+      sessionHistoryPreview: createP12SessionHistoryPreview(),
+      modelLoopPreview: await createP11LoopResult(),
+    });
+
+    expect(withoutP12.sessionHistoryPreview).toBeNull();
+    expect(withP12.sessionHistoryPreview?.title).toBe(
+      "Durable Session / Request Log / Replay Persistence Contract Preview",
+    );
+    expect(withP12.sessionHistoryPreview?.summary).toMatchObject({
+      eventCount: 1,
+      checkpointCount: 1,
+      requestAuditRecordCount: 1,
+      warningCount: 0,
+    });
+    expect(withP12.sessionReplayViewModel.title).toBe("Agent Session/Replay Contract Preview");
+    expect(withP12.modelLoopPreview?.title).toBe("Multi-Step Model Loop / Tool-Call Continuation Contract Preview");
   });
 
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {

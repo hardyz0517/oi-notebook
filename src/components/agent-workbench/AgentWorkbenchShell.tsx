@@ -6,6 +6,7 @@ import { createAgentSession } from "@/lib/agent-runtime/agentSession";
 import type { ProviderModelViewModel } from "@/lib/agent-workbench/providerModelViewModel";
 import type { SessionReplayViewModel } from "@/lib/agent-workbench/sessionReplayViewModel";
 import type { ModelLoopViewModel } from "@/lib/agent-workbench/modelLoopViewModel";
+import type { SessionHistoryViewModel } from "@/lib/agent-workbench/sessionHistoryViewModel";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
 import type { OiSkillReadModel } from "@/lib/oi-skills";
@@ -18,6 +19,7 @@ import { PermissionSurface, type PermissionRequestPreview } from "./PermissionSu
 import { ProblemWorkspacePanel } from "./ProblemWorkspacePanel";
 import { ProviderModelPreviewPanel } from "./ProviderModelPreviewPanel";
 import { SessionReplayPanel } from "./SessionReplayPanel";
+import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { ToolTraceViewer } from "./ToolTraceViewer";
 
 const DEFAULT_WORKSPACE: ProblemWorkspace = {
@@ -80,6 +82,7 @@ export function AgentWorkbenchShell({
   const [currentSessionReplay, setCurrentSessionReplay] = useState<SessionReplayViewModel | null>(null);
   const [currentProviderModelPreview, setCurrentProviderModelPreview] = useState<ProviderModelViewModel | null>(null);
   const [currentModelLoopPreview, setCurrentModelLoopPreview] = useState<ModelLoopViewModel | null>(modelLoopPreview);
+  const [currentSessionHistoryPreview, setCurrentSessionHistoryPreview] = useState<SessionHistoryViewModel | null>(null);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -114,6 +117,7 @@ export function AgentWorkbenchShell({
       setCurrentSessionReplay(result.sessionReplayViewModel);
       setCurrentProviderModelPreview(result.providerModelPreview);
       setCurrentModelLoopPreview(result.modelLoopPreview);
+      setCurrentSessionHistoryPreview(result.sessionHistoryPreview);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -216,6 +220,7 @@ export function AgentWorkbenchShell({
         <PermissionSurface requests={currentPermissionRequests} />
         <OiSkillPreviewPanel preview={currentOiSkillPreview} />
         <SessionReplayPanel replay={currentSessionReplay} />
+        <SessionHistoryPanel history={currentSessionHistoryPreview} />
         <ProviderModelPreviewPanel preview={currentProviderModelPreview} />
         <ModelLoopTimelinePanel preview={currentModelLoopPreview} />
         <EvidencePanel records={currentEvidenceRecords} />

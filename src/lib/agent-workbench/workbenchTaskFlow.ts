@@ -44,6 +44,11 @@ import {
 } from "./providerModelViewModel";
 import { createSessionReplayViewModel, type SessionReplayViewModel } from "./sessionReplayViewModel";
 import { createModelLoopViewModel, type ModelLoopViewModel } from "./modelLoopViewModel";
+import {
+  createSessionHistoryViewModel,
+  type SessionHistoryProjectionInput,
+  type SessionHistoryViewModel,
+} from "./sessionHistoryViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -74,6 +79,7 @@ export type WorkbenchTaskInput = {
   manualSource?: ManualWorkbenchSource;
   providerModelPreview?: ProviderModelProjectionInput;
   modelLoopPreview?: MultiStepModelLoopResult;
+  sessionHistoryPreview?: SessionHistoryProjectionInput;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -89,6 +95,7 @@ export type ManualWorkbenchTaskResult = {
   sessionReplayViewModel: SessionReplayViewModel;
   providerModelPreview: ProviderModelViewModel;
   modelLoopPreview: ModelLoopViewModel | null;
+  sessionHistoryPreview: SessionHistoryViewModel | null;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -448,6 +455,9 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     limitations: ["mock_adapter_only", "no_live_provider_request", "no_prompt_construction"],
   });
   const modelLoopPreview = input.modelLoopPreview ? createModelLoopViewModel(input.modelLoopPreview) : null;
+  const sessionHistoryPreview = input.sessionHistoryPreview
+    ? createSessionHistoryViewModel(input.sessionHistoryPreview)
+    : null;
 
   return {
     workspace: finalWorkspace,
@@ -462,6 +472,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     sessionReplayViewModel,
     providerModelPreview,
     modelLoopPreview,
+    sessionHistoryPreview,
   };
 }
 
