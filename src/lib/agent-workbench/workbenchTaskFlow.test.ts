@@ -10,6 +10,13 @@ import {
 } from "@/lib/agent-runtime/durableSessionTypes";
 import type { AgentSessionStoreCheckpoint } from "@/lib/agent-runtime/inMemorySessionStore";
 import { createRequestAuditLogRecord } from "@/lib/agent-runtime/requestLogPolicy";
+import { createPatchApprovalDecisionReadModel, createPatchPermissionRequests } from "@/lib/agent-runtime/patchRiskPolicy";
+import { createPatchDiffPreview, projectPatchDryRun, projectPatchRollbackPlan } from "@/lib/agent-runtime/patchDiffPreview";
+import {
+  createPatchProposalEnvelope,
+  type PatchRiskClassification,
+  type PatchTargetRef,
+} from "@/lib/agent-runtime/patchWorkflowTypes";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
 const reservedModelEventType = ["model", "delta"].join(".");
@@ -131,6 +138,133 @@ function createP12SessionHistoryPreview() {
   };
 }
 
+function createP13PatchWorkflowPreview() {
+  const createdAt = "2026-07-08T00:00:00.000Z";
+  const targetRef: PatchTargetRef = {
+    targetRefId: "target:p13:flow",
+    targetKind: "scratch-fixture",
+    displayPath: "fixtures/p13/flow.md",
+    workspaceId: "workspace:flow",
+    contentHashBefore: "sha256:flow-before",
+    permissionScope: "workspace-preview",
+    pathSafetyStatus: "safe-preview",
+    notesPolicy: "fixture-only",
+  };
+  const riskClassification: PatchRiskClassification = {
+    riskLevel: "medium",
+    riskReasons: ["medium_single_safe_target_patch"],
+    permissionKinds: ["patch-apply"],
+    requiresHumanApproval: true,
+    requiresFreshRead: true,
+    requiresDryRun: true,
+    requiresRollbackPlan: true,
+  };
+  const permissionRequest = createPatchPermissionRequests({
+    proposalId: "proposal:p13:flow",
+    requestedByEventId: "event:p13:flow:permission",
+    targetRefs: [targetRef],
+    riskClassification,
+    createdAt,
+  })[0];
+  const dryRunResult = projectPatchDryRun({
+    dryRunId: "dry-run:p13:flow",
+    proposalId: "proposal:p13:flow",
+    status: "passed",
+    targetRefs: [targetRef],
+    wouldChangeTargetRefIds: [targetRef.targetRefId],
+    createdAt,
+  });
+  const rollbackPlan = projectPatchRollbackPlan({
+    rollbackPlanId: "rollback:p13:flow",
+    proposalId: "proposal:p13:flow",
+    targetRefs: [targetRef],
+    rollbackKind: "content-hash-restore-plan",
+    createdAt,
+  });
+  const validationResult = {
+    validationId: "validation:p13:flow",
+    proposalId: "proposal:p13:flow",
+    status: "passed" as const,
+    checks: [{
+      checkId: "check:p13:flow",
+      status: "passed" as const,
+      safeSummary: "Flow target is safe for preview.",
+    }],
+    safeErrors: [],
+    warnings: [],
+    redactionStatus: "not-needed" as const,
+    createdAt,
+  };
+  const proposal = createPatchProposalEnvelope({
+    proposalId: "proposal:p13:flow",
+    sessionId: "session:p13:flow",
+    turnId: "turn:p13:flow",
+    stepId: "step:p13:flow",
+    sourceKind: "fixture",
+    sourceEventIds: ["event:p13:flow:proposal"],
+    workspaceRefs: ["workspace:flow"],
+    evidenceRefs: ["evidence:flow"],
+    targetRefs: [targetRef],
+    patchFormat: "unified-diff",
+    proposalSummary: "Flow patch preview summary.",
+    authoringMode: "fixture",
+    riskClassification,
+    permissionRequest,
+    validationResult,
+    dryRunResult,
+    rollbackPlan,
+    redactionResult: {
+      redactionStatus: "not-needed",
+      redactedClasses: [],
+      safeSummary: "Flow patch preview summary.",
+    },
+    createdAt,
+    capabilityStatus: "preview",
+  });
+
+  return {
+    proposals: [proposal],
+    diffPreviews: [
+      createPatchDiffPreview({
+        diffPreviewId: "diff:p13:flow",
+        proposalId: proposal.proposalId,
+        targetRefs: [targetRef],
+        patchFormat: "unified-diff",
+        unifiedDiffText: [
+          "diff --git a/fixtures/p13/flow.md b/fixtures/p13/flow.md",
+          "--- a/fixtures/p13/flow.md",
+          "+++ b/fixtures/p13/flow.md",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+        createdAt,
+      }),
+    ],
+    approvalDecisions: [
+      createPatchApprovalDecisionReadModel({
+        approvalDecisionId: "approval:p13:flow",
+        permissionRequestId: permissionRequest.permissionRequestId,
+        proposalId: proposal.proposalId,
+        status: "pending",
+        decidedBy: "workbench-preview",
+        safeReason: "P13 records approval metadata only.",
+        visibleConsequences: ["Future approved phase may consume this metadata."],
+        eventIds: ["event:p13:flow:approval"],
+        createdAt,
+      }),
+    ],
+    auditEvents: [{
+      eventId: "event:p13:flow:proposal",
+      eventType: "patch.proposal.created" as const,
+      proposalId: proposal.proposalId,
+      summary: "Flow proposal created.",
+      createdAt,
+      status: "preview" as const,
+    }],
+  };
+}
+
 describe("runManualWorkbenchTask", () => {
   it("runs a manual URL through runtime events, workspace state, evidence, and separated caches", async () => {
     const result = await runManualWorkbenchTask({
@@ -205,6 +339,7 @@ describe("runManualWorkbenchTask", () => {
     expect(result.providerModelPreview.title).toBe("Provider/Model Adapter Contract Preview");
     expect(result.providerModelPreview.providerRequestStatus.status).toBe("unavailable");
     expect(result.providerModelPreview.limitations).toContain("no_live_provider_request");
+    expect(result.patchWorkflowPreview).toBeNull();
     expect(result.events.map((event) => event.type)).not.toEqual(expect.arrayContaining([
       reservedModelEventType,
       "patch.generated",
@@ -336,6 +471,54 @@ describe("runManualWorkbenchTask", () => {
     });
     expect(withP12.sessionReplayViewModel.title).toBe("Agent Session/Replay Contract Preview");
     expect(withP12.modelLoopPreview?.title).toBe("Multi-Step Model Loop / Tool-Call Continuation Contract Preview");
+  });
+
+  it("attaches a P13 patch workflow projection only when runtime preview data exists while preserving P12 projection", async () => {
+    const withoutP13 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "No P13 Projection",
+        problemId: "no-p13-projection",
+        problemUrl: "https://example.test/no-p13",
+      },
+      manualSource: {
+        url: "https://example.test/no-p13",
+        title: "No P13 Projection",
+        text: "Projection fixture.",
+      },
+      sessionHistoryPreview: createP12SessionHistoryPreview(),
+    });
+    const withP13 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "P13 Patch Workflow Projection",
+        problemId: "p13-patch-workflow-projection",
+        problemUrl: "https://example.test/p13-patch",
+      },
+      manualSource: {
+        url: "https://example.test/p13-patch",
+        title: "P13 Patch Workflow Projection",
+        text: "Projection fixture.",
+      },
+      sessionHistoryPreview: createP12SessionHistoryPreview(),
+      patchWorkflowPreview: createP13PatchWorkflowPreview(),
+    });
+
+    expect(withoutP13.patchWorkflowPreview).toBeNull();
+    expect(withoutP13.sessionHistoryPreview?.title).toBe(
+      "Durable Session / Request Log / Replay Persistence Contract Preview",
+    );
+    expect(withP13.patchWorkflowPreview?.title).toBe("Patch / Write Workflow Contract Preview");
+    expect(withP13.patchWorkflowPreview?.summary).toMatchObject({
+      proposalCount: 1,
+      targetCount: 1,
+      diffPreviewCount: 1,
+      auditEventCount: 1,
+    });
+    expect(withP13.patchWorkflowPreview?.proposals[0]?.permissionRequest.decisionStatus).toBe("prompt-required");
+    expect(withP13.sessionHistoryPreview?.title).toBe(
+      "Durable Session / Request Log / Replay Persistence Contract Preview",
+    );
   });
 
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {

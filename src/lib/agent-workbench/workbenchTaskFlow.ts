@@ -49,6 +49,11 @@ import {
   type SessionHistoryProjectionInput,
   type SessionHistoryViewModel,
 } from "./sessionHistoryViewModel";
+import {
+  createPatchWorkflowViewModel,
+  type PatchWorkflowProjectionInput,
+  type PatchWorkflowViewModel,
+} from "./patchWorkflowViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -80,6 +85,7 @@ export type WorkbenchTaskInput = {
   providerModelPreview?: ProviderModelProjectionInput;
   modelLoopPreview?: MultiStepModelLoopResult;
   sessionHistoryPreview?: SessionHistoryProjectionInput;
+  patchWorkflowPreview?: PatchWorkflowProjectionInput;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -96,6 +102,7 @@ export type ManualWorkbenchTaskResult = {
   providerModelPreview: ProviderModelViewModel;
   modelLoopPreview: ModelLoopViewModel | null;
   sessionHistoryPreview: SessionHistoryViewModel | null;
+  patchWorkflowPreview: PatchWorkflowViewModel | null;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -458,6 +465,9 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
   const sessionHistoryPreview = input.sessionHistoryPreview
     ? createSessionHistoryViewModel(input.sessionHistoryPreview)
     : null;
+  const patchWorkflowPreview = input.patchWorkflowPreview
+    ? createPatchWorkflowViewModel(input.patchWorkflowPreview)
+    : null;
 
   return {
     workspace: finalWorkspace,
@@ -473,6 +483,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     providerModelPreview,
     modelLoopPreview,
     sessionHistoryPreview,
+    patchWorkflowPreview,
   };
 }
 
