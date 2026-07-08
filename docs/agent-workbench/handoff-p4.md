@@ -519,3 +519,52 @@ P13 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
 
 下一阶段必须先写新的 freeze spec / plan，才能讨论真实 patch apply、write mutation、delete、rollback execution、execute/code runner、Cookie-backed reader、DB/FS durable storage、migration execution、raw payload retention、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P13 contract preview 推导出真实 patch/write/delete/rollback/execute/Cookie/storage/raw-payload behavior 已获批。
+
+## P14 Execute / Code Runner Contract Freeze handoff
+
+P14 输出状态：**Execute / Code Runner Contract Preview**。本阶段把 P13 patch / write workflow preview 之后的 execute / runner workflow 冻结为 contract preview：runner contract types / event taxonomy、request normalization / classification、sandbox policy / permission read model、mock runner dry-run projection、bounded / redacted observation policy、Workbench read-only runner projection，以及 API / Tauri no-op boundary。它仍不是 production-ready autonomous Agent，也不表示 AI 大升级完成。
+
+P14 已冻结 / 已合入：
+
+- `4537249 feat: define p14 runner contract`：冻结 execution request envelope、target refs、runner capability status、event taxonomy，以及 reserved true-execution event guard。
+- `1b21dfa feat: classify p14 runner requests`：冻结 request normalization、safe summary redaction、target / capability validation，以及 deterministic command / language / test-run classification。
+- `502b1e3 feat: gate p14 runner sandbox policy`：冻结 permission request、approval decision read model、sandbox profile metadata、resource limits 和 no network / no Cookie / no secret / no write defaults。
+- `fc6e3c0 feat: project p14 mock runner results`：冻结 mock runner / dry-run result shape、planned sandbox / resource previews，以及 files / network / output preview semantics。
+- `32529c3 feat: redact p14 runner observations`：冻结 bounded stdout / stderr、safe observation summaries、redaction dropped fields，以及 rollback / cleanup / recovery metadata-only contract。
+- `0f7b254 feat: project p14 runner workflow preview`：冻结 Workbench read-only runner projection；Workbench 只展示 execution request / classification / sandbox / permission / mock result / observation / cleanup metadata / audit timeline，不拥有 runner decision。
+- Task 7 API/Tauri No-Op Boundary Audit 为 no-op：未新增 `src/lib/api.ts` wrapper、未新增 Tauri command、未产生主线提交；API/Tauri 在 P14 仍 gated/no-op，不执行 process / command / runner 行为。
+
+P14 仍禁止 / 未实现：
+
+- production-ready autonomous Agent、AI 大升级完成、L5 Agent 完成或 Codex-style runtime 完成等成熟能力声明。
+- real process execution、code runner、stress tester、command execution。
+- real patch apply、write mutation、delete、rollback execution。
+- Cookie-backed reader、Cookie-backed Luogu reading。
+- DB / FS durable storage、filesystem durable writer、真实 migration execution。
+- raw provider payload storage、raw tool output storage、API key / Authorization / Cookie / secret 明文进入 runner observation、request log 或 Workbench。
+- old `src/components/ai/AiSidebar.tsx` migration。
+- 绕过 `src/lib/api.ts`、React / Workbench 直连 Tauri、读取或修改真实 `notes/**` 参与 routine engineering work。
+
+本次 Task 8 final verification 记录：
+
+- 启动快照：`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -12 --decorate` 显示 HEAD 为 `0f7b254 feat: project p14 runner workflow preview`，并包含 P14 commits `4537249`、`1b21dfa`、`502b1e3`、`fc6e3c0`、`32529c3`、`0f7b254`。
+- 初次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：FAIL / environment blocker，`node_modules\vitest\vitest.mjs` 缺失，未进入 Vitest test discovery，无 test file count / test count。
+- 按既有 worktree 恢复方式执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile`：PASS，lockfile already up to date，恢复 763 个本地依赖链接，未修改 package / lock metadata。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，37 test files / 172 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，8 test files / 28 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/apiBoundary.test.ts`：PASS，1 test file / 9 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+
+本次 Task 8 boundary audit 记录：
+
+- Direct Tauri audit 仅有 negative-proof test 命中，不代表 runtime / Workbench 直连 Tauri：
+  `src/lib/agent-workbench/patchWorkflowViewModel.test.ts:271`、`:272`，`src/lib/agent-runtime/patchProposalPolicy.test.ts:144`，`src/lib/agent-runtime/patchWorkflowTypes.test.ts:278`、`:279`，`src/lib/agent-runtime/runnerClassificationPolicy.test.ts:112`，`src/lib/agent-runtime/runnerRequestPolicy.test.ts:177` 命中 `@tauri-apps/api/core` / `invoke(` fixture 或 `not.toContain(...)` assertion。
+- Secret / cookie / raw payload audit 有允许命中，不代表 Workbench frontend、runtime runner projection 或 durable log 持有 secret / Cookie / raw payload：
+  `src/lib/api.ts:95`、`:109`、`:401` 是既有 API boundary 参数 / wrapper option；P10/P11/P12/P13 的 `modelLoopViewModel*`、`toolCallParser.test.ts`、`toolObservation.test.ts`、`providerModelPolicy.test.ts`、`providerModelTypes.test.ts`、`liveProviderPolicy.test.ts`、`multiStepModelLoop.test.ts`、`inMemorySessionStore.test.ts`、`requestLogPolicy.test.ts`、`patchWorkflowViewModel*`、`patchDiffPreview*`、`patchProposalPolicy*`、`patchRiskPolicy*` 命中均为 redaction / unavailable / negative-proof coverage；P14 `runnerRequestPolicy*`、`runnerClassificationPolicy*`、`runnerContractTypes*`、`runnerObservationPolicy*`、`mockRunnerProjection.test.ts`、`runnerPermissionSandboxPolicy*`、`runnerWorkflowViewModel.test.ts` 命中均为 safe redaction, blocked capability, no-cookie/no-secret, no raw payload/output, or negative-proof assertions。
+- Forbidden process / write / delete / rollback / Cookie / storage / migration / AiSidebar audit 有允许或既有边界命中，不代表 P14 开放真实 runner / mutation / storage：
+  `src/lib/api.ts` delete wrappers and `src-tauri/src/**` delete / git / provider commands are pre-existing provider/note APIs outside P14 implementation; `src-tauri/src/ai.rs` and `src-tauri/src/blog_server.rs` thread `spawn` hits are existing non-P14 surfaces; `src-tauri/src/prompts.rs` and `src-tauri/src/ai.rs` prompt text contains "Do not delete"; P13 `PatchWorkflowPanel.tsx` and patch workflow files display / test rollback metadata only; P12 `replayPersistenceProjector*` reports migration strategy as read-only metadata and proves hooks are not executed; P6/P11 permission and continuation files keep Cookie / mutation / execution / delete / rollback unavailable or denied; P14 runner files keep stress-test / execute / delete / rollback / patch / Cookie / secret / write requests blocked, reserved, unavailable, or mock / metadata-only.
+- Mature capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
+
+下一阶段必须先写新的 freeze spec / plan，才能讨论真实 process execution、code runner、stress tester、safe command boundary、sandbox implementation、path safety / resource enforcement、real patch apply、write mutation、delete、rollback execution、Cookie-backed reader、DB / FS durable storage、migration execution、raw payload retention、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P14 contract preview 推导出真实 execute / runner / code-runner / stress-test / mutation / Cookie / storage / raw-payload behavior 已获批。
