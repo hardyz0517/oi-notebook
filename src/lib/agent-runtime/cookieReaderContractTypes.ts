@@ -155,6 +155,11 @@ export type CookieReaderApprovalDecisionReadModel = {
 export type CookieReaderRedactionStatus = "not-needed" | "redacted" | "blocked" | "unavailable";
 
 export type CookieReaderRedactionClass =
+  | "cookie"
+  | "authorization-header"
+  | "api-key"
+  | "session-token"
+  | "private-note-content"
   | "auth-material-ref"
   | "private-content-ref"
   | "provider-payload"
