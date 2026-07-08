@@ -472,3 +472,50 @@ P12 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
 
 下一阶段必须先写新的 freeze spec / plan，才能讨论真实 durable DB / FS adapter、真实 migration execution、retention/export/delete controls、real patch/write/delete/rollback/execute/code runner、Cookie-backed reader、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P12 contract preview 推导出真实 durable storage、migration、patch/write/delete/rollback/execute/Cookie/raw-payload retention 已获批。
+
+## P13 Patch / Write Workflow Contract Freeze handoff
+
+P13 输出状态：**Patch / Write Workflow Contract Preview**。本阶段把 P12 durable session / request log / replay persistence preview 之后的 patch/write workflow 冻结为 contract preview：proposal envelope、target refs、validation、read-only diff preview、risk classification、permission request/read model、approval decision metadata、dry-run result、rollback-plan metadata、audit event taxonomy、Workbench read-only projection 和 API/Tauri no-op boundary。它仍不是 production-ready autonomous Agent，也不表示 AI 大升级完成。
+
+P13 已冻结 / 已合入：
+
+- `59296c5 docs: define p13 patch write workflow contract`：冻结 P13 spec / plan、输出状态、contract preview 边界和 forbidden mutation scope。
+- `10647ed feat: define p13 patch workflow contract`：冻结 proposal envelope、target refs、proposal summary、capability status、reserved event taxonomy 和 mutation-unavailable vocabulary。
+- `ba35cea feat: validate p13 patch proposals`：冻结 proposal normalizer / validator、safe summary redaction、blocked operation handling 和 no direct filesystem/Tauri proof。
+- `ba40680 feat: classify p13 patch proposal risk`：冻结 deterministic risk classification、permission request shape、approval decision metadata 和 write/patch/delete/rollback/destructive policy decisions。
+- `ecfeb15 feat: preview p13 patch diffs`：冻结 read-only diff preview、dry-run result、validation result、bounded/redacted diff projection 和 rollback-plan metadata。
+- `661083f feat: project p13 patch workflow preview`：冻结 Workbench read-only projection 和 existing task-flow preview consumption；Workbench 只展示 proposal / diff / risk / permission / approval / validation / dry-run / rollback metadata / audit timeline，不拥有 mutation decision。
+- Task 6 API/Tauri No-Op Boundary Audit 为 no-op：未新增 `src/lib/api.ts` wrapper、未新增 Tauri command、未产生主线提交；API/Tauri 在 P13 仍 gated/no-op，不执行 mutation。
+
+P13 仍禁止 / 未实现：
+
+- production-ready autonomous Agent、AI 大升级完成、L5 Agent 完成或 Codex-style runtime 完成等成熟能力声明。
+- real patch apply、write mutation、delete、rollback execution、execute / code runner。
+- Cookie-backed reader、Cookie-backed Luogu reading。
+- DB / FS durable storage、filesystem durable writer、真实 migration execution、raw provider payload storage、raw tool output storage。
+- old `src/components/ai/AiSidebar.tsx` migration。
+- 绕过 `src/lib/api.ts`、React / Workbench 持有 API key / Authorization header / Cookie / raw payload、读取或修改真实 `notes/**` 参与 routine engineering work。
+
+本次 Task 7 final verification 记录：
+
+- 启动快照：`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -12 --decorate` 显示 HEAD 为 `661083f feat: project p13 patch workflow preview`，并包含 P13 commits `59296c5`、`10647ed`、`ba35cea`、`ba40680`、`ecfeb15`、`661083f`。
+- 初次执行 `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：FAIL / environment blocker，`node_modules\vitest\vitest.mjs` 缺失，未进入 Vitest test discovery，无 test file count / test count。
+- 按任务允许命令执行 `pnpm.cmd install --ignore-scripts --frozen-lockfile`：PASS，lockfile already up to date，恢复 763 个本地依赖链接，未修改 package / lock metadata。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-runtime`：PASS，31 test files / 136 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/agent-workbench`：PASS，7 test files / 25 tests。
+- `node .\node_modules\vitest\vitest.mjs run src/lib/apiBoundary.test.ts`：PASS，1 test file / 9 tests。
+- `node .\node_modules\typescript\bin\tsc --noEmit`：PASS。
+
+本次 Task 7 boundary audit 记录：
+
+- Direct Tauri audit 仅有 negative-proof test 命中，不代表 runtime / Workbench 直连 Tauri：
+  `src/lib/agent-workbench/patchWorkflowViewModel.test.ts:271`、`:272`，`src/lib/agent-runtime/patchProposalPolicy.test.ts:144`，`src/lib/agent-runtime/patchWorkflowTypes.test.ts:278`、`:279` 命中 `@tauri-apps/api/core` / `invoke(` fixture 或 `not.toContain(...)` assertion。
+- Secret / cookie / raw payload audit 有允许命中，不代表 Workbench frontend、runtime proposal 或 durable log 持有 secret / Cookie / raw payload：
+  `src/lib/api.ts:95`、`:109`、`:401` 是既有 API boundary 参数 / wrapper option；`modelLoopViewModel*`、`toolCallParser.test.ts`、`toolObservation.test.ts`、`providerModelPolicy.test.ts`、`providerModelTypes.test.ts`、`liveProviderPolicy.test.ts`、`multiStepModelLoop.test.ts` 是 P10/P11 redaction / provider exposure negative-proof coverage；`agentReplay*`、`agentSession.ts`、`agentTypes*`、`permissionManager*`、`toolPermissionGate*`、`toolContinuationRegistry.ts`、`workbenchTaskFlow*`、`SessionReplayPanel.tsx` 是 P8/P11 unavailable / preview / privacy contract wording；`inMemorySessionStore.test.ts`、`requestLogPolicy.test.ts` 是 P12 raw provider payload / raw tool output / API key / Authorization / Cookie drop-redaction tests；P13 `patchWorkflowViewModel*`、`patchDiffPreview*`、`patchProposalPolicy*`、`patchRiskPolicy*` 命中均为 safe redaction, no-cookie-reader, no raw payload/output, permission-risk 或 negative-proof assertions。
+- Forbidden patch / write / delete / rollback / execute / Cookie / storage / migration / AiSidebar audit 有允许或既有边界命中，不代表 P13 开放真实 mutation / execution：
+  `src/lib/api.ts` delete wrappers and `src-tauri/src/**` delete functions are pre-existing provider/note APIs outside P13 implementation; `src-tauri/src/prompts.rs` and `src-tauri/src/ai.rs` prompt text contains "Do not delete"; P13 `PatchWorkflowPanel.tsx` and `patchWorkflowViewModel*` display/read rollback metadata and `no_delete` / `no_rollback_execution` statuses only; P13 `patchDiffPreview*` creates dry-run and rollback-plan metadata only; P13 `patchProposalPolicy*` blocks delete / rollback execution / filesystem mutation / direct Tauri; P13 `patchRiskPolicy*` denies or blocks write, patch-apply, delete, rollback and destructive requests; P13 `patchWorkflowTypes*` keeps `file.write.completed`, `file.delete.completed` and `rollback.executed` as reserved/non-success events; P6/P11 `permissionManager*`、`toolPermissionGate*`、`toolContinuationRegistry.ts` and P12 `replayPersistenceProjector*` hits are unavailable/denied policy, read-only guard or migration-plan metadata proof.
+- Mature capability claim audit 无命中：
+  `rg -n 'AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|production-ready|ready: true|isReady: true' src/lib/agent-runtime src/lib/agent-workbench src/components/agent-workbench`
+- 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
+
+下一阶段必须先写新的 freeze spec / plan，才能讨论真实 patch apply、write mutation、delete、rollback execution、execute/code runner、Cookie-backed reader、DB/FS durable storage、migration execution、raw payload retention、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P13 contract preview 推导出真实 patch/write/delete/rollback/execute/Cookie/storage/raw-payload behavior 已获批。
