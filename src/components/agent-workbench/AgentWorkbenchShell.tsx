@@ -8,6 +8,7 @@ import type { SessionReplayViewModel } from "@/lib/agent-workbench/sessionReplay
 import type { ModelLoopViewModel } from "@/lib/agent-workbench/modelLoopViewModel";
 import type { SessionHistoryViewModel } from "@/lib/agent-workbench/sessionHistoryViewModel";
 import type { PatchWorkflowViewModel } from "@/lib/agent-workbench/patchWorkflowViewModel";
+import type { RunnerWorkflowViewModel } from "@/lib/agent-workbench/runnerWorkflowViewModel";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
 import type { OiSkillReadModel } from "@/lib/oi-skills";
@@ -20,6 +21,7 @@ import { PermissionSurface, type PermissionRequestPreview } from "./PermissionSu
 import { ProblemWorkspacePanel } from "./ProblemWorkspacePanel";
 import { ProviderModelPreviewPanel } from "./ProviderModelPreviewPanel";
 import { PatchWorkflowPanel } from "./PatchWorkflowPanel";
+import { RunnerWorkflowPanel } from "./RunnerWorkflowPanel";
 import { SessionReplayPanel } from "./SessionReplayPanel";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { ToolTraceViewer } from "./ToolTraceViewer";
@@ -88,6 +90,7 @@ export function AgentWorkbenchShell({
   const [currentModelLoopPreview, setCurrentModelLoopPreview] = useState<ModelLoopViewModel | null>(modelLoopPreview);
   const [currentSessionHistoryPreview, setCurrentSessionHistoryPreview] = useState<SessionHistoryViewModel | null>(null);
   const [currentPatchWorkflowPreview, setCurrentPatchWorkflowPreview] = useState<PatchWorkflowViewModel | null>(patchWorkflowPreview);
+  const [currentRunnerWorkflowPreview, setCurrentRunnerWorkflowPreview] = useState<RunnerWorkflowViewModel | null>(null);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -124,6 +127,7 @@ export function AgentWorkbenchShell({
       setCurrentModelLoopPreview(result.modelLoopPreview);
       setCurrentSessionHistoryPreview(result.sessionHistoryPreview);
       setCurrentPatchWorkflowPreview(result.patchWorkflowPreview);
+      setCurrentRunnerWorkflowPreview(result.runnerWorkflowPreview);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -228,6 +232,7 @@ export function AgentWorkbenchShell({
         <SessionReplayPanel replay={currentSessionReplay} />
         <SessionHistoryPanel history={currentSessionHistoryPreview} />
         <PatchWorkflowPanel preview={currentPatchWorkflowPreview} />
+        <RunnerWorkflowPanel preview={currentRunnerWorkflowPreview} />
         <ProviderModelPreviewPanel preview={currentProviderModelPreview} />
         <ModelLoopTimelinePanel preview={currentModelLoopPreview} />
         <EvidencePanel records={currentEvidenceRecords} />
