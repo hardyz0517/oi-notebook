@@ -9,6 +9,7 @@ import type { ModelLoopViewModel } from "@/lib/agent-workbench/modelLoopViewMode
 import type { SessionHistoryViewModel } from "@/lib/agent-workbench/sessionHistoryViewModel";
 import type { PatchWorkflowViewModel } from "@/lib/agent-workbench/patchWorkflowViewModel";
 import type { RunnerWorkflowViewModel } from "@/lib/agent-workbench/runnerWorkflowViewModel";
+import type { CookieReaderViewModel } from "@/lib/agent-workbench/cookieReaderViewModel";
 import { runWorkbenchTask, type WorkbenchTaskMode } from "@/lib/agent-workbench/workbenchTaskFlow";
 import type { AgentWorkbenchPreviewResult } from "@/lib/api";
 import type { OiSkillReadModel } from "@/lib/oi-skills";
@@ -22,6 +23,7 @@ import { ProblemWorkspacePanel } from "./ProblemWorkspacePanel";
 import { ProviderModelPreviewPanel } from "./ProviderModelPreviewPanel";
 import { PatchWorkflowPanel } from "./PatchWorkflowPanel";
 import { RunnerWorkflowPanel } from "./RunnerWorkflowPanel";
+import { CookieReaderPanel } from "./CookieReaderPanel";
 import { SessionReplayPanel } from "./SessionReplayPanel";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { ToolTraceViewer } from "./ToolTraceViewer";
@@ -67,6 +69,7 @@ export function AgentWorkbenchShell({
   oiSkillPreview = null,
   modelLoopPreview = null,
   patchWorkflowPreview = null,
+  cookieReaderPreview = null,
   preview = null,
 }: {
   workspace?: ProblemWorkspace;
@@ -77,6 +80,7 @@ export function AgentWorkbenchShell({
   oiSkillPreview?: OiSkillReadModel | null;
   modelLoopPreview?: ModelLoopViewModel | null;
   patchWorkflowPreview?: PatchWorkflowViewModel | null;
+  cookieReaderPreview?: CookieReaderViewModel | null;
   preview?: AgentWorkbenchPreviewResult | null;
 }) {
   const [currentWorkspace, setCurrentWorkspace] = useState(workspace);
@@ -91,6 +95,7 @@ export function AgentWorkbenchShell({
   const [currentSessionHistoryPreview, setCurrentSessionHistoryPreview] = useState<SessionHistoryViewModel | null>(null);
   const [currentPatchWorkflowPreview, setCurrentPatchWorkflowPreview] = useState<PatchWorkflowViewModel | null>(patchWorkflowPreview);
   const [currentRunnerWorkflowPreview, setCurrentRunnerWorkflowPreview] = useState<RunnerWorkflowViewModel | null>(null);
+  const [currentCookieReaderPreview, setCurrentCookieReaderPreview] = useState<CookieReaderViewModel | null>(cookieReaderPreview);
   const [manualUrl, setManualUrl] = useState(workspace.problemUrl ?? "https://example.com/lca");
   const [manualTitle, setManualTitle] = useState(workspace.title === DEFAULT_WORKSPACE.title ? "Lowest Common Ancestor Notes" : workspace.title);
   const [manualText, setManualText] = useState("Lowest common ancestor can be solved with binary lifting after DFS preprocessing.\n\nFor each vertex, up[v][k] stores the 2^k-th ancestor of v.");
@@ -128,6 +133,7 @@ export function AgentWorkbenchShell({
       setCurrentSessionHistoryPreview(result.sessionHistoryPreview);
       setCurrentPatchWorkflowPreview(result.patchWorkflowPreview);
       setCurrentRunnerWorkflowPreview(result.runnerWorkflowPreview);
+      setCurrentCookieReaderPreview(result.cookieReaderPreview);
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "manual_task_failed");
     } finally {
@@ -233,6 +239,7 @@ export function AgentWorkbenchShell({
         <SessionHistoryPanel history={currentSessionHistoryPreview} />
         <PatchWorkflowPanel preview={currentPatchWorkflowPreview} />
         <RunnerWorkflowPanel preview={currentRunnerWorkflowPreview} />
+        <CookieReaderPanel preview={currentCookieReaderPreview} />
         <ProviderModelPreviewPanel preview={currentProviderModelPreview} />
         <ModelLoopTimelinePanel preview={currentModelLoopPreview} />
         <EvidencePanel records={currentEvidenceRecords} />
