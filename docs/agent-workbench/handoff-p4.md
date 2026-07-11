@@ -568,3 +568,39 @@ P14 仍禁止 / 未实现：
 - 追加本 handoff 前，`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出。
 
 下一阶段必须先写新的 freeze spec / plan，才能讨论真实 process execution、code runner、stress tester、safe command boundary、sandbox implementation、path safety / resource enforcement、real patch apply、write mutation、delete、rollback execution、Cookie-backed reader、DB / FS durable storage、migration execution、raw payload retention、old AiSidebar retirement / migration，或任何 production autonomous Agent 能力。任何后续 worker 不得从 P14 contract preview 推导出真实 execute / runner / code-runner / stress-test / mutation / Cookie / storage / raw-payload behavior 已获批。
+
+## P15 Cookie-backed Reader Contract Freeze handoff
+
+P15 输出状态：**Cookie-backed Reader Contract Preview**。本阶段把 P14 execute / code runner preview 之后的 Cookie-backed reader workflow 冻结为 contract preview：Cookie reader contract types / event taxonomy、source-boundary classification、redaction / audit summary policy、fixture-only projection、Workbench read-only reader projection，以及 API / Tauri no-op boundary。它仍不是 production-ready autonomous Agent，也不表示 AI 大升级完成。
+
+P15 已冻结 / 已合入：
+
+- `bcfbab0 docs: define p15 cookie reader contract`：冻结 P15 spec / plan、输出状态、preview-only reader 边界和 forbidden Cookie / network / storage scope。
+- `161f819 feat: define p15 cookie reader contract`：冻结 Cookie reader contract types、capability statuses、source-boundary / permission / approval / redaction / mock / audit / request-envelope types，以及 pure helper contract。
+- `2f55143 feat: gate p15 reader source boundary`：冻结 pure source-boundary classifier；`luogu` / fixture / unsupported / reserved sources 只返回 metadata / capability / permission / blocked reasons，不暴露 fetch target。
+- `24d530f feat: redact p15 reader audit summaries`：冻结 projection-facing redaction / audit summary helpers，丢弃或替换 Cookie、Authorization、API key、session token、private note content、raw provider payload 和 raw tool output。
+- `2990aa9 feat: project p15 cookie reader fixtures`：冻结 fixture-only reader projection；fixture / replay / manual sources 只投影 bounded problem metadata、redacted source refs 和 safe audit fields。
+- `6c89a9d feat: project p15 cookie reader workflow`：冻结 Workbench read-only Cookie reader workflow projection；Workbench 只展示 source boundary、permission、fixture/mock result、redaction/audit timeline 和 unavailable / reserved state，不拥有 reader decision。
+- Task 6 API/Tauri No-op Boundary Audit 为 no-op：无文件改动、无提交；`apiBoundary.test.ts` 1 file / 9 tests passed；`tsc --noEmit` passed；API/Tauri audit hits 仅为既有 `api_key` / provider / search / Rust surfaces、existing thread spawn 和 negative-proof literals；没有新增 P15 API / Tauri Cookie implementation。
+
+P15 仍禁止 / 未实现：
+
+- production-ready autonomous Agent、AI 大升级完成、L5 Agent 完成或 Codex-style runtime 完成等成熟能力声明。
+- real Cookie reading、browser Cookie extraction、Cookie storage、third-party Cookie forwarding、Cookie-backed Luogu reading 或真实 network reader。
+- DB / FS durable storage、filesystem durable writer、migration execution 或 raw payload retention。
+- patch、write、delete、rollback、execute、code runner、stress tester 行为。
+- old `src/components/ai/AiSidebar.tsx` migration。
+- 绕过 `src/lib/api.ts`、React / Workbench 直接连接 Tauri、读取真实 Cookie、把 Cookie / API key / Authorization / raw provider payload / raw tool output 明文带入 provider/search/request-log/evidence/Workbench/storage。
+
+本次 Task 7 final verification 记录：
+
+- 启动快照：`git status --short -- . ":(exclude)notes/**"` 无输出；`git diff --cached --name-only` 无输出；`git log --oneline -12 --decorate` 显示 HEAD 为 `6c89a9d feat: project p15 cookie reader workflow`，并包含 P15 commits `bcfbab0`、`161f819`、`2f55143`、`24d530f`、`2990aa9`、`6c89a9d`。
+- `rg -n 'P15|Cookie-backed Reader Contract Preview|Cookie-backed reader|P14|Execute / Code Runner Contract Preview' docs/agent-workbench/handoff-p4.md`：PASS，命中 P14 与新增 P15 handoff / output-state / boundary wording。
+- `git log --oneline -12 --decorate`：PASS，HEAD 为 `6c89a9d feat: project p15 cookie reader workflow`，最近 12 条包含 Task 1-6 所需 P15 提交与 P14 handoff lineage。
+
+本次 Task 7 boundary audit 记录：
+
+- `rg -n 'production-ready|AI 大升级完成|L5 Agent 完成|Codex-style runtime 完成|ready: true|isReady: true|real Cookie|browser Cookie|Cookie storage|third-party.*Cookie|writeFile|removeFile|unlink|applyPatch\(|spawn\(|child_process|exec\(|execute runner|code runner|stress tester|database storage|filesystem durable|migration execution|AiSidebar' docs/agent-workbench/handoff-p4.md`
+- 命中均为 handoff 中的 forbidden / non-goal / negative-proof language：P11-P14 历史段落和新增 P15 段落明确说明 production-ready / AI 大升级完成 / real Cookie / browser Cookie / Cookie storage / third-party Cookie forwarding / patch-write-delete-rollback-execute-code runner-stress tester / durable storage / migration execution / AiSidebar migration 均未实现或仍需新 spec；未新增任何获批、ready 或实现声明。
+
+后续若要启动真正 Cookie-backed reader work，必须另写单独 safety spec，并由用户明确决定是否允许真实 Cookie 读取、浏览器 Cookie 提取、Cookie 存储 / 转发、真实网络 reader、provider/search/request-log/evidence/Workbench/storage 投影边界，以及对应 API / Tauri / 权限 / 审计策略。任何后续 worker 不得从 P15 contract preview 推导出真实 Cookie / network / storage / forwarding / mutation / execution / raw-payload behavior 已获批。
