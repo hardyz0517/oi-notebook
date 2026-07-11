@@ -18,6 +18,16 @@ import {
   type PatchTargetRef,
 } from "@/lib/agent-runtime/patchWorkflowTypes";
 import { createRunnerExecutionRequestEnvelope, type RunnerExecutionRequestEnvelope } from "@/lib/agent-runtime/runnerContractTypes";
+import {
+  createCookieReaderRequestEnvelope,
+  type CookieReaderRequestEnvelope,
+} from "@/lib/agent-runtime/cookieReaderContractTypes";
+import { buildCookieReaderSourceBoundaryDecision } from "@/lib/agent-runtime/cookieReaderSourceBoundaryPolicy";
+import {
+  buildCookieReaderAuditSummary,
+  buildCookieReaderRedactionPolicy,
+} from "@/lib/agent-runtime/cookieReaderRedactionAuditPolicy";
+import { projectMockCookieReaderFixture } from "@/lib/agent-runtime/mockCookieReaderProjection";
 import { runManualWorkbenchTask, runWorkbenchTask } from "./workbenchTaskFlow";
 
 const reservedModelEventType = ["model", "delta"].join(".");
@@ -449,6 +459,87 @@ function createP14RunnerWorkflowPreview(): { executionRequests: RunnerExecutionR
   };
 }
 
+function createP15CookieReaderPreview(): CookieReaderRequestEnvelope {
+  const createdAt = "2026-07-08T00:00:00.000Z";
+  const readerRequestId = "reader:p15:flow";
+  const boundary = buildCookieReaderSourceBoundaryDecision({
+    readerRequestId,
+    sourceRefId: "source:p15:flow",
+    sourceProfile: "workspace-fixture",
+    displayOrigin: "fixture://workspace/p15-flow",
+    createdAt,
+  });
+  const redactionPolicy = buildCookieReaderRedactionPolicy({
+    redactionPolicyId: `${readerRequestId}:redaction`,
+    readerRequestId,
+    createdAt,
+  });
+  const mockProjection = projectMockCookieReaderFixture({
+    fixtureId: "fixture:p15:flow",
+    readerRequestId,
+    sourceProfile: boundary.sourceRef.sourceProfile,
+    displayOrigin: boundary.sourceRef.displayOrigin,
+    title: "P15 flow fixture",
+    excerpt: "Fixture-only flow observation.",
+    evidenceRefs: ["evidence:p15:flow"],
+    createdAt,
+  });
+
+  return createCookieReaderRequestEnvelope({
+    readerRequestId,
+    sessionId: "session:p15:flow",
+    turnId: "turn:p15:flow",
+    stepId: "step:p15:flow",
+    sourceKind: "fixture",
+    sourceEventIds: ["event:p15:flow"],
+    sourceRefs: [boundary.sourceRef],
+    workspaceRefs: ["workspace:p15:flow"],
+    evidenceRefs: ["evidence:p15:flow"],
+    requestedUrlRef: "url-ref:p15:flow",
+    sourceBoundary: boundary.sourceBoundary,
+    permissionRequest: {
+      permissionRequestId: `${readerRequestId}:permission`,
+      readerRequestId,
+      requestedSourceProfile: boundary.sourceRef.sourceProfile,
+      requestedDisplayOrigin: boundary.sourceRef.displayOrigin,
+      decisionStatus: boundary.permissionStatus,
+      reviewReason: "P15 flow preview metadata only.",
+      requestedSensitiveInput: false,
+      sourceRefs: [boundary.sourceRef.sourceRefId],
+      approvalSurface: "workbench-read-only",
+      requestedByEventId: "event:p15:flow",
+      createdAt,
+    },
+    approvalDecision: {
+      approvalDecisionId: `${readerRequestId}:approval`,
+      permissionRequestId: `${readerRequestId}:permission`,
+      readerRequestId,
+      status: "pending",
+      decidedBy: "p15-preview-policy",
+      safeReason: "No true reader is available in P15.",
+      visibleConsequences: ["Workbench receives fixture projection only."],
+      blockedCapabilities: ["true-cookie-reader"],
+      eventIds: ["event:p15:flow:approval"],
+      createdAt,
+    },
+    redactionPolicy,
+    mockProjection,
+    auditSummary: buildCookieReaderAuditSummary({
+      readerRequestId,
+      sourceProfile: boundary.sourceRef.sourceProfile,
+      displayOrigin: boundary.sourceRef.displayOrigin,
+      capabilityStatus: boundary.capabilityStatus,
+      permissionStatus: boundary.permissionStatus,
+      redactionStatus: redactionPolicy.redactionStatus,
+      blockedReasons: boundary.blockedReasons,
+      fixtureId: mockProjection.fixtureId,
+      createdAt,
+    }),
+    capabilityStatus: boundary.capabilityStatus,
+    createdAt,
+  });
+}
+
 describe("runManualWorkbenchTask", () => {
   it("runs a manual URL through runtime events, workspace state, evidence, and separated caches", async () => {
     const result = await runManualWorkbenchTask({
@@ -747,6 +838,45 @@ describe("runManualWorkbenchTask", () => {
     expect(withP14.runnerWorkflowPreview?.permissionRequest.decisionStatus).toBe("prompt-required");
     expect(withP14.runnerWorkflowPreview?.mockResult.status).toBe("planned");
     expect(withP14.patchWorkflowPreview?.title).toBe("Patch / Write Workflow Contract Preview");
+  });
+
+  it("attaches a P15 cookie reader projection only when runtime preview data exists while preserving P14 projection", async () => {
+    const withoutP15 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "No P15 Projection",
+        problemId: "no-p15-projection",
+        problemUrl: "https://example.test/no-p15",
+      },
+      manualSource: {
+        url: "https://example.test/no-p15",
+        title: "No P15 Projection",
+        text: "Projection fixture.",
+      },
+      runnerWorkflowPreview: createP14RunnerWorkflowPreview(),
+    });
+    const withP15 = await runWorkbenchTask({
+      mode: "manual_url",
+      problem: {
+        title: "P15 Cookie Reader Projection",
+        problemId: "p15-cookie-reader-projection",
+        problemUrl: "https://example.test/p15-cookie-reader",
+      },
+      manualSource: {
+        url: "https://example.test/p15-cookie-reader",
+        title: "P15 Cookie Reader Projection",
+        text: "Projection fixture.",
+      },
+      runnerWorkflowPreview: createP14RunnerWorkflowPreview(),
+      cookieReaderPreview: createP15CookieReaderPreview(),
+    });
+
+    expect(withoutP15.cookieReaderPreview).toBeNull();
+    expect(withoutP15.runnerWorkflowPreview?.title).toBe("Execute / Code Runner Contract Preview");
+    expect(withP15.cookieReaderPreview?.title).toBe("Cookie-backed Reader Contract Preview");
+    expect(withP15.cookieReaderPreview?.source.sourceProfile).toBe("workspace-fixture");
+    expect(withP15.cookieReaderPreview?.fixtureObservation.mode).toBe("fixture-only");
+    expect(withP15.runnerWorkflowPreview?.title).toBe("Execute / Code Runner Contract Preview");
   });
 
   it("initializes a Luogu workspace for the Luogu problem mode", async () => {

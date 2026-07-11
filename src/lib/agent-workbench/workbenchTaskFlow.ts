@@ -59,6 +59,11 @@ import {
   type RunnerWorkflowProjectionInput,
   type RunnerWorkflowViewModel,
 } from "./runnerWorkflowViewModel";
+import {
+  createCookieReaderViewModel,
+  type CookieReaderProjectionInput,
+  type CookieReaderViewModel,
+} from "./cookieReaderViewModel";
 
 export type WorkbenchTaskPermissionStatus = "blocked" | "pending" | "granted";
 
@@ -92,6 +97,7 @@ export type WorkbenchTaskInput = {
   sessionHistoryPreview?: SessionHistoryProjectionInput;
   patchWorkflowPreview?: PatchWorkflowProjectionInput;
   runnerWorkflowPreview?: RunnerWorkflowProjectionInput;
+  cookieReaderPreview?: CookieReaderProjectionInput;
 };
 
 export type ManualWorkbenchTaskResult = {
@@ -110,6 +116,7 @@ export type ManualWorkbenchTaskResult = {
   sessionHistoryPreview: SessionHistoryViewModel | null;
   patchWorkflowPreview: PatchWorkflowViewModel | null;
   runnerWorkflowPreview: RunnerWorkflowViewModel | null;
+  cookieReaderPreview: CookieReaderViewModel | null;
 };
 
 export type WorkbenchTaskResult = ManualWorkbenchTaskResult;
@@ -478,6 +485,9 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
   const runnerWorkflowPreview = input.runnerWorkflowPreview
     ? createRunnerWorkflowViewModel(input.runnerWorkflowPreview)
     : null;
+  const cookieReaderPreview = input.cookieReaderPreview
+    ? createCookieReaderViewModel(input.cookieReaderPreview)
+    : null;
 
   return {
     workspace: finalWorkspace,
@@ -495,6 +505,7 @@ export async function runWorkbenchTask(input: WorkbenchTaskInput): Promise<Workb
     sessionHistoryPreview,
     patchWorkflowPreview,
     runnerWorkflowPreview,
+    cookieReaderPreview,
   };
 }
 
