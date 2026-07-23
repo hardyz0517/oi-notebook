@@ -5,10 +5,10 @@ tags:
 - markdown
 - 渲染测试
 - OI
-- DP
+- 算法/动态规划 DP/动态规划 DP
 source: manual
 summary: 用于测试 OI Notebook 的 Markdown、代码高亮、数学公式、表格、callout、cute-table、表格合并和搜索能力。
-updated: 2026-05-11T16:23:13.681382700+08:00
+updated: 2026-05-24T15:21:36.311545700+08:00
 difficulty: ''
 draft: false
 ---
